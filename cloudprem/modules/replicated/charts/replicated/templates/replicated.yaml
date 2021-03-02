@@ -1,0 +1,259 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: replicated-pv-claim
+  labels:
+    app: replicated
+    tier: master
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: "10Gi"
+  storageClassName: "gp2"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: replicated-premkit-data-volume
+  labels:
+    app: replicated
+    tier: premkit
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: "gp2"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: replicated-statsd-graphite-storage
+  labels:
+    app: replicated
+    tier: statsd
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: "gp2"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: replicated-admin
+  namespace: "default"
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: "default"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: replicated
+  labels:
+    app: replicated
+    tier: master
+spec:
+  selector:
+    matchLabels:
+      app: replicated
+      tier: master
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: replicated
+        tier: master
+    spec:
+      containers:
+        - name: replicated
+          image: "quay.io/replicated/replicated:stable-2.40.4"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SCHEDULER_ENGINE
+              value: kubernetes
+            - name: RELEASE_CHANNEL
+              value: "stable"
+            - name: RELEASE_SEQUENCE
+              value: ""
+            - name: RELEASE_PATCH_SEQUENCE
+              value: ""
+            - name: COMPONENT_IMAGES_REGISTRY_ADDRESS_OVERRIDE
+              value: ""
+            - name: REPLICATED_TMP_PATH
+              value: /var/lib/replicated-tmp
+            - name: SUPPORT_BUNDLES_PATH
+              value: /var/lib/replicated-support-bundles
+            - name: SUPPORT_BUNDLES_HOST_PATH
+              value: /var/lib/replicated/support-bundles
+            - name: LOCAL_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: K8S_MASTER_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: K8S_HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: K8S_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: K8S_STORAGECLASS
+              value: "gp2"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: AIRGAP
+              value: ""
+            - name: MAINTAIN_ROOK_STORAGE_NODES
+              value: "0"
+          ports:
+            - containerPort: 9874
+            - containerPort: 9876
+            - containerPort: 9877
+            - containerPort: 9878
+          volumeMounts:
+            - name: replicated-persistent
+              mountPath: /var/lib/replicated
+            - name: replicated-tmp
+              mountPath: /var/lib/replicated-tmp
+            - name: replicated-support-bundles
+              mountPath: /var/lib/replicated-support-bundles
+            - name: replicated-socket
+              mountPath: /var/run/replicated
+            - name: docker-socket
+              mountPath: /host/var/run/docker.sock
+            - name: replicated-conf
+              mountPath: /host/etc/replicated.conf
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: replicated-license
+              mountPath: /tmp/license.rli
+              subPath: license.rli
+            - name: load-license
+              mountPath: /tmp/load.sh
+              subPath: load.sh
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - /tmp/load.sh
+        - name: replicated-ui
+          image: "quay.io/replicated/replicated-ui:stable-2.40.4"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RELEASE_CHANNEL
+              value: "stable"
+            - name: LOG_LEVEL
+              value: "info"
+          ports:
+            - containerPort: 8800
+          volumeMounts:
+            - name: replicated-socket
+              mountPath: /var/run/replicated
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+          operator: Exists
+      volumes:
+        - name: replicated-persistent
+          persistentVolumeClaim:
+            claimName: replicated-pv-claim
+        - name: replicated-tmp
+          hostPath:
+            path: /var/lib/replicated/tmp
+            type: DirectoryOrCreate
+        - name: replicated-support-bundles
+          hostPath:
+            path: /var/lib/replicated/support-bundles
+            type: DirectoryOrCreate
+        - name: replicated-socket
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+        - name: replicated-conf
+          hostPath:
+            path: /etc/replicated.conf
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: replicated-license
+          secret:
+            secretName: '{{ .Values.license_secret }}'
+        - name: load-license
+          configMap:
+            name: load-license
+            defaultMode: 0777
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: replicated
+  labels:
+    app: replicated
+    tier: master
+spec:
+  selector:
+    app: replicated
+    tier: master
+  ports:
+    - name: replicated-api
+      port: 9876
+      protocol: TCP
+    - name: replicated-iapi
+      port: 9877
+      protocol: TCP
+    - name: replicated-snapshots
+      port: 9878
+      protocol: TCP
+    - name: replicated-support
+      port: 9881
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: replicated-ui
+  labels:
+    app: replicated
+    tier: master
+spec:
+  type: NodePort
+  selector:
+    app: replicated
+    tier: master
+  ports:
+    - name: replicated-ui
+      port: 8800
+      nodePort: 32001
+      protocol: TCP
