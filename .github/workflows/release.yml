@@ -22,7 +22,8 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Changes in this Release
-            - This is a test2
+            Initial Release of new Terraform-Based CloudPrem
+            - CloudFormation for CodePipeline Setup
+            - Terraform for Deployment and Configuration
           draft: false
           prerelease: false
