@@ -22,8 +22,8 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Initial Release of new Terraform-Based CloudPrem
-            - CloudFormation for CodePipeline Setup
-            - Terraform for Deployment and Configuration
+            Bugfix Release
+            - Remove "block public acl/policy" from s3 buckets to allow for public objects.
+            - Update cluster s3 ACL to allow changing assets from public to private and vice versa.
           draft: false
           prerelease: false

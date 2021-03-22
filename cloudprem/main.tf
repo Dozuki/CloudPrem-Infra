@@ -129,8 +129,8 @@ module "guide_images_s3_bucket" {
   force_destroy = !local.protect_resources
 
   # S3 bucket-level Public Access Block configuration
-  block_public_acls   = true
-  block_public_policy = true
+  block_public_acls   = false
+  block_public_policy = false
 
   server_side_encryption_configuration = {
     rule = {
@@ -155,8 +155,8 @@ module "guide_pdfs_s3_bucket" {
   force_destroy = !local.protect_resources
 
   # S3 bucket-level Public Access Block configuration
-  block_public_acls   = true
-  block_public_policy = true
+  block_public_acls   = false
+  block_public_policy = false
 
   server_side_encryption_configuration = {
     rule = {
@@ -181,8 +181,8 @@ module "guide_objects_s3_bucket" {
   force_destroy = !local.protect_resources
 
   # S3 bucket-level Public Access Block configuration
-  block_public_acls   = true
-  block_public_policy = true
+  block_public_acls   = false
+  block_public_policy = false
 
   server_side_encryption_configuration = {
     rule = {
@@ -207,8 +207,8 @@ module "documents_s3_bucket" {
   force_destroy = !local.protect_resources
 
   # S3 bucket-level Public Access Block configuration
-  block_public_acls   = true
-  block_public_policy = true
+  block_public_acls   = false
+  block_public_policy = false
 
   server_side_encryption_configuration = {
     rule = {
