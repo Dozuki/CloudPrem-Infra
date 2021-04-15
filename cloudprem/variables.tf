@@ -1,7 +1,7 @@
 # --- BEGIN Networking Configuration --- #
 
 variable "vpc_id" {
-  description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank)."
+  description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private"
   type        = string
   default     = ""
 }
