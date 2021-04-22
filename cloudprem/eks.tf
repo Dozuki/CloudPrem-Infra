@@ -67,7 +67,8 @@ data "aws_iam_policy_document" "eks_worker" {
       "s3:PutObjectAcl",
       "s3:GetObject",
       "s3:GetObjectAcl",
-      "s3:ListObjects"
+      "s3:ListObjects",
+      "s3:CopyObject"
     ]
 
     resources = [
