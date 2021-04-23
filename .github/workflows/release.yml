@@ -23,7 +23,6 @@ jobs:
           release_name: Release ${{ github.ref }}
           body: |
             Bugfix Release
-            - Remove "block public acl/policy" from s3 buckets to allow for public objects.
-            - Update cluster s3 ACL to allow changing assets from public to private and vice versa.
+            - Update cluster s3 ACL to allow listing a bucket, listing objects in a bucket, and copying objects.
           draft: false
           prerelease: false
