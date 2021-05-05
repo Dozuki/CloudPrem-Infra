@@ -11,4 +11,9 @@ resource "helm_release" "replicated" {
     name  = "license_secret"
     value = kubernetes_secret.replicated_license.metadata.0.name
   }
+
+  set {
+    name = "nlb_hostname"
+    value = var.nlb_hostname
+  }
 }

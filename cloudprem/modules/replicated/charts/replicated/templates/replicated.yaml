@@ -126,6 +126,8 @@ spec:
               value: ""
             - name: MAINTAIN_ROOK_STORAGE_NODES
               value: "0"
+            - name: DOZUKI_HOSTNAME
+              value: '{{ .Values.nlb_hostname }}'
           ports:
             - containerPort: 9874
             - containerPort: 9876
@@ -142,8 +144,9 @@ spec:
               mountPath: /var/run/replicated
             - name: docker-socket
               mountPath: /host/var/run/docker.sock
-            - name: replicated-conf
-              mountPath: /host/etc/replicated.conf
+#            - name: replicated-conf
+#              mountPath: /host/etc/replicated.conf
+#              subPath: replicated.conf
             - name: proc
               mountPath: /host/proc
               readOnly: true
@@ -201,9 +204,9 @@ spec:
         - name: docker-socket
           hostPath:
             path: /var/run/docker.sock
-        - name: replicated-conf
-          hostPath:
-            path: /etc/replicated.conf
+#        - name: replicated-conf
+#          hostPath:
+#            path: /etc/replicated.conf
         - name: proc
           hostPath:
             path: /proc

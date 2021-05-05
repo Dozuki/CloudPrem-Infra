@@ -3,3 +3,6 @@
 
 # Name of a Kubernetes secret containing the replicated license file "license.rli"
 license_secret: replicated-license
+
+# The hostname of the deployed NLB
+nlb_hostname:
