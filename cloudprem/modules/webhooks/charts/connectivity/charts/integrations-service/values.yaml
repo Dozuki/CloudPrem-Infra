@@ -1,0 +1,87 @@
+# Default values for integrations-service.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Provide the amount of pods if HPA is not enabled
+replicaCount: 2
+
+# -- Provide the image docker tag default: latest
+appVersion: latest
+
+# -- Manage docker image properties
+image:
+  # -- Provide docker repository hub
+  repository: frontegg/hybrid-integrations-service
+  # -- Provide image pull policy
+  pullPolicy: Always
+
+# -- Provide secret name for frontegg's repository
+imagePullSecrets:
+  - name: regcred
+
+# -- Provide a name in place of integrations-service for `app:` labels
+nameOverride: ""
+# -- Provide a name in place of {releaseName}-integrations-service
+fullnameOverride: ""
+
+# -- Setup Service properties for integrations-service (open only one port)
+service:
+  # -- Set service type
+  type: ClusterIP
+  # -- Set service port
+  protocol: TCP
+  # -- Set service target port to map
+  port: 80
+  # -- Set port protocol default: TCP
+  targetPort: 3014
+  # -- Set port name
+  name: http
+
+# -- HPA properties for integrations-service
+# -- If autoscaling is enabled it will monitor the service and raise or lower pods amount based upon usage
+# -- If autoscaling is disabled integrations-service will be managed by replicaset with `replicaCount` determine pod amount
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 75
+  targetMemoryUtilizationPercentage: 75
+
+# -- Set integrations-service resources
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 250m
+    memory: 512Mi
+
+nodeSelector:
+  "beta.kubernetes.io/os": linux
+
+# -- Provide deployment tolerations
+tolerations: []
+
+# -- Provide deployment affinity
+affinity: {}
+
+configuration:
+  secrets: {}
+  map: {}
+
+# == Set frontegg properties
+frontegg:
+  slack:
+    # -- Set Slack encryption key provided by Slack
+    encryptionKey: ""
+
+mongo:
+  # -- Set MongoDB connection string
+  connectionString: ""
+
+# -- Set Message Broker (Kafka) properties.
+messageBroker:
+  # -- Set broker list (host)
+  brokerList: ""
+  # -- Set broker list password
+  password: ""

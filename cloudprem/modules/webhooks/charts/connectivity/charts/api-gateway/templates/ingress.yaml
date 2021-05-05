@@ -1,0 +1,35 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "api-gateway.fullname" . -}}
+{{- $name := include "api-gateway.name" . -}}
+{{- $svcPort := .Values.service.port -}}
+{{- if semverCompare ">=1.14-0" .Capabilities.KubeVersion.GitVersion -}}
+apiVersion: networking.k8s.io/v1beta1
+{{- else -}}
+apiVersion: extensions/v1beta1
+{{- end }}
+kind: Ingress
+metadata:
+  name: {{ $fullName }}-ingress
+  labels:
+    {{- include "api-gateway.labels" . | nindent 4 }} # check this in _helper
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+{{- if .Values.ingress.tls.enabled}}
+  tls:
+    - hosts:
+        - {{ include "api-gateway.hostname" . | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+{{- end }}
+  rules:
+    - host: {{ include "api-gateway.hostname" . | quote }}
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: frontegg-{{ $name }}
+              servicePort: {{ $svcPort }}
+  {{- end }}
+

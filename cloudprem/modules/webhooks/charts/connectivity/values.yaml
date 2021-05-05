@@ -1,0 +1,607 @@
+# -- Set frontegg's configurations
+frontegg:
+  apiUrl: "https://api.frontegg.com"
+
+
+  # -- Docker Images registry properties
+  images:
+    # -- Set enabled to create a secret with Frontegg's registry properties
+    enabled: true
+    # -- Set registry name
+    registry: docker.io
+    # -- Set username for docker registry provided by Frontegg
+    username: ""
+    # -- Set password for docker registry provided by Frontegg
+    password: ""
+
+api-gateway:
+  # -- Provide the amount of pods if HPA is not enabled
+  replicaCount: 2
+  # -- Provide the image docker tag default: latest
+  appVersion: "2020.12.14201945"
+  # -- Manage docker image properties
+  image:
+    # -- Provide docker image repository
+    repository: frontegg/hybrid-api-gateway
+    # -- Provide image pull policy
+    pullPolicy: Always
+
+  podAnnotations: {}
+  podLabels: {}
+
+  # -- Provide secret name for Frontegg's docker image repository.
+  imagePullSecrets:
+    - name: regcred
+
+  # -- override application name instead of api-gateway for `app:` labels
+  nameOverride: ""
+  # -- Provide a name instead of {releaseName}-api-gateway
+  fullnameOverride: ""
+
+  # - Setup Service properties for team-management-service (open only one port)
+  service:
+    # -- Set service type
+    type: ClusterIP
+    # -- Set service port
+    protocol: TCP
+    # - Set service target port to map
+    port: 80
+    # -- Set port protocol default: TCP
+    targetPort: 9090
+    # - Set port name
+    name: access-port
+
+  # -- HPA properties for team-management-service
+  # -- If autoscaling is enabled it will monitor the service and raise or lower pods amount based upon usage
+  # -- If autoscaling is disabled team-management-service will be managed by replicaset with `replicaCount` determine pod amount
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 75
+
+  # -- Enable Ingress if access from the internet is needed
+  ingress:
+    enabled: false
+    # -- provide a different name for the host path example: api.acme.com
+
+    hostnameOverride: ""
+    # -- provide the needed ingress annotation
+    # -- example:
+    # --  kubernetes.io/tls-acme: "true"
+    # --  kubernetes.io/ingress.class: "nginx"
+    # --  ingress.kubernetes.io/force-ssl-redirect: "true"
+    # --  nginx.ingress.kubernetes.io/server-snippet: |
+    # --    location ~* ^/(metrics|healthcheck) {
+    # --      deny all;
+    # --      return 403;
+    # --    }
+    annotations: {}
+    # -- If enabled ingress will search for secret to enable TLS
+    tls:
+      enabled: false
+      secretName: ""
+
+  # -- Set api-gateway resources
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+  nodeSelector:
+    "beta.kubernetes.io/os": linux
+
+  # -- Provide deployment tolerations
+  tolerations: []
+
+  # -- Provide deployment affinity
+  affinity: {}
+
+  configuration:
+    secrets: {}
+    map: {}
+
+  # -- Frontegg's services url for inner communications
+  # -- Provide an alternate url for a service if a service name was changed
+  network:
+    adminsServiceUrl: http://frontegg-admins-service
+    auditsServiceUrl: http://frontegg-audits-service
+    authenticationServiceUrl: http://frontegg-authentication-service
+    metadataServiceUrl: http://frontegg-metadata-service
+    notificationServiceUrl: http://frontegg-notification-service
+    reportsEngineUrl: http://frontegg-reporting-engine
+    reportsServiceUrl: http://frontegg-reporting-service
+    teamServiceUrl: http://frontegg-team-management-service
+    vendorsServiceUrl: http://frontegg-vendors-service
+    tenantsServiceUrl: http://frontegg-tenants-service
+    webpushServiceUrl: http://frontegg-webpush-service
+    featureFlagsServiceUrl: http://frontegg-feature-flags-service
+    webhookServiceUrl: http://frontegg-webhook-service
+    eventsServiceUrl: http://frontegg-event-service
+    identityServiceUrl: http://frontegg-identity-service
+    integrationsServiceUrl: http://frontegg-integrations-service
+
+  # - Frontegg configuration properties
+  frontegg:
+    # Frontegg authentication key, provided by frontegg
+    authenticationPublicKey: ""
+    # Frontegg api entry point.
+    apiGatewayUrl: "https://api.frontegg.com"
+    # Frontegg authentication url.
+    authenticationServiceUrl: "https://api.frontegg.com/auth/vendor"
+    # Frontegg configration url.
+    metadataServiceUrl: https://api.frontegg.com/metadata
+    hybridServices: "webhook,event,integrations"
+
+connectors-worker:
+  # Default values for events-service.
+  # This is a YAML-formatted file.
+  # Declare variables to be passed into your templates.
+
+  ## Provide the amount of pods if HPA is not enabled
+  ##
+  replicaCount: 2
+
+  ## Provide the image docker tag default: latest
+  ##
+  appVersion: latest
+
+  ## Manage docker image properties
+  ##
+  image:
+    ## Provide docker repository hub
+    ##
+    repository: frontegg/hybrid-connectors-worker
+    ## Provide image pull policy
+    ##
+    pullPolicy: Always
+
+  ## Provide secret name for frontegg's repository
+  ##
+  imagePullSecrets:
+    - name: regcred
+
+  ## Provide a name in place of connectors-worker for `app:` labels
+  ##
+  nameOverride: ""
+  ## Provide a name in place of {releaseName}-connectors-worker
+  ##
+  fullnameOverride: ""
+
+  ## Setup Service properties for team-management-service (open only one port)
+  ##
+  service:
+    ## Set service type
+    ##
+    type: ClusterIP
+    ## Set service port
+    ##
+    protocol: TCP
+    ## Set service target port to map
+    ##
+    port: 80
+    ## Set port protocol default: TCP
+    ##
+    targetPort: 3015
+    ## Set port name
+    ##
+    name: http
+
+  ## HPA properties for connectors-worker
+  ## If autoscaling is enabled it will monitor the service and raise or lower pods amount based upon usage
+  ## If autoscaling is disabled team-management-service will be managed by replicaset with `replicaCount` determine pod amount
+  ##
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 75
+
+  ## Set connectors-worker resources
+  ##
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+  nodeSelector:
+    "beta.kubernetes.io/os": linux
+
+  ## Provide deployment tolerations
+  ##
+  tolerations: []
+
+  ## Provide deployment affinity
+  ##
+  affinity: {}
+
+  configuration:
+    secrets: {}
+    map: {}
+
+  # -- Set Message Broker (Kafka) properties.
+  messageBroker:
+    # -- Set broker list (host)
+    brokerList: ""
+    # -- Set broker list password
+    password: ""
+
+  # -- Set Redis properties
+  redis:
+    # -- Set redis host
+    host: ""
+    # -- Set redis host
+    port: "6379"
+    # -- Set redis password
+    password: ""
+    # -- Set redis database index, change only if needed
+    index: "7"
+    # -- Set tls value (true|false)
+    tls: "true"
+
+  # -- Set Frontegg's properties
+  frontegg:
+    twilio:
+      # -- Set twilio sender number
+      sender: ""
+      # -- Set twilio token, given buy
+      token: ""
+      # -- Set twilio account Id given by Frontegg
+      accountId: ""
+    # -- Set supported channels
+    # -- Possible values email | sms | slack
+    # -- use comma separated values for example: email,slack,sms
+    channels: ""
+    # -- Set emails properties for the appropriate provider
+    emails:
+      # -- Set the email supported provide [ses | sendgrid] default (sendgrid)
+      provider: ""
+      # -- Set aws SES properties
+      aws:
+        accessKey: ""
+        secretAccess: ""
+        region: ""
+      # -- Set Sendgrid properties
+      sendgrid:
+        apiKey: ""
+
+event-service:
+  # Default values for events-service.
+  # This is a YAML-formatted file.
+  # Declare variables to be passed into your templates.
+
+  ## Provide the amount of pods if HPA is not enabled
+  ##
+  replicaCount: 2
+
+  ## Provide the image docker tag default: latest
+  ##
+  appVersion: latest
+
+  ## Manage docker image properties
+  ##
+  image:
+    ## Provide docker repository hub
+    ##
+    repository: frontegg/hybrid-event-service
+    ## Provide image pull policy
+    ##
+    pullPolicy: Always
+
+  ## Provide secret name for frontegg's repository
+  ##
+  imagePullSecrets:
+    - name: regcred
+
+  ## Provide a name in place of event-service for `app:` labels
+  ##
+  nameOverride: ""
+  ## Provide a name in place of {releaseName}-event-service
+  ##
+  fullnameOverride: ""
+
+  ## Setup Service properties for team-management-service (open only one port)
+  ##
+  service:
+    ## Set service type
+    ##
+    type: ClusterIP
+    ## Set service port
+    ##
+    protocol: TCP
+    ## Set service target port to map
+    ##
+    port: 80
+    ## Set port protocol default: TCP
+    ##
+    targetPort: 3011
+    ## Set port name
+    ##
+    name: http
+
+  ## HPA properties for event-service
+  ## If autoscaling is enabled it will monitor the service and raise or lower pods amount based upon usage
+  ## If autoscaling is disabled team-management-service will be managed by replicaset with `replicaCount` determine pod amount
+  ##
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 75
+
+  ## Set event-service resources
+  ##
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+  nodeSelector:
+    "beta.kubernetes.io/os": linux
+
+  ## Provide deployment tolerations
+  ##
+  tolerations: [ ]
+
+  ## Provide deployment affinity
+  ##
+  affinity: { }
+
+  configuration:
+    secrets: { }
+    map: { }
+
+  # -- Set database properties
+  database:
+    # -- Set database name
+    name: frontegg_events
+    # -- Set database host url
+    host: ""
+    # -- Set database username
+    username: ""
+    # -- Set database password
+    password: ""
+
+  # -- Set Message Broker (Kafka) properties.
+  messageBroker:
+    # -- Set broker list (host)
+    brokerList: ""
+    # -- Set broker list password
+    password: ""
+
+  # -- Set Redis properties
+  redis:
+    # -- Set redis host
+    host: ""
+    # -- Set redis host
+    port: "6379"
+    # -- Set redis password
+    password: ""
+    # -- Set redis database index, change only if needed
+    index: "7"
+    # -- Set tls value (true|false)
+    tls: "true"
+
+  # -- Set frontegg properties
+  frontegg:
+    # -- Set frontegg hybrid synchronization properties
+    sync:
+      # -- Enable or Disable frontegg hybrid with frontegg cloud.
+      # -- By disabling this you might not see the changes on frontegg portal or get updates.
+      enabled: "true"
+      # -- Set sync time interval with frontegg cloud in minutes
+      timeInterval: "15"
+    # -- Set frontegg authentication url. (by not setting value it will use frontegg's cloud url)
+    authenticationUrl: ""
+    # -- Set frontegg evnets Service url. (by not setting value it will use frontegg's cloud url)
+    managedEventServiceUrl: ""
+    # -- Set Your account client Id (provided on the portal administration page)
+    clientId: ""
+    # -- Set Your account Api Key (provided on the portal administration page)
+    apiKey: ""
+    # -- Set authentication failure retry delay in milliseconds
+    authenticationRetryDelayInterval: "5000"
+    # -- Set authentication failure behavior.
+    # -- When authentication fails should the service stop?
+    shutdownOnInitialAuthenticationFailure: "true"
+
+webhook-service:
+  # -- Provide the amount of pods if HPA is not enabled
+  replicaCount: 2
+
+  # -- Provide the image docker tag default: latest
+  appVersion: latest
+
+  # -- Manage docker image properties
+  image:
+    # -- Provide docker repository hub
+    repository: frontegg/hybrid-webhook-service
+    # -- Provide image pull policy
+    pullPolicy: Always
+
+  # -- Provide secret name for frontegg's repository
+  imagePullSecrets:
+    - name: regcred
+
+  # -- Provide a name in place of webhook-service for `app:` labels
+  nameOverride: ""
+  # -- Provide a name in place of {releaseName}-webhook-service
+  fullnameOverride: ""
+
+  podAnnotations: {}
+
+  podSecurityContext: {}
+  # fsGroup: 2000
+
+  # -- Setup Service properties for webhook-service (open only one port)
+  service:
+    # -- Set service type
+    type: ClusterIP
+    # -- Set service port
+    protocol: TCP
+    # -- Set service target port to map
+    port: 80
+    # -- Set port protocol default: TCP
+    targetPort: 3013
+    # -- Set port name
+    name: http
+
+  # -- Set webhook-service resources
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 1024Mi
+
+  # -- HPA properties for webhook-service
+  # -- If autoscaling is enabled it will monitor the service and raise or lower pods amount based upon usage
+  # -- If autoscaling is disabled webhook-service will be managed by replicaset with `replicaCount` determine pod amount
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 75
+
+  nodeSelector:
+    "beta.kubernetes.io/os": linux
+
+  # -- Provide deployment tolerations
+  tolerations: []
+
+  affinity: {}
+
+  configuration:
+    secrets: {}
+    map: {}
+
+  mongo:
+    # -- Set MongoDB connection string
+    connectionString: ""
+    # -- Set MongoDB connection retry attempts
+    retryAttempts: "3"
+    # -- Set MongoDB connection retry attempts delay in milliseconds
+    retryDelay: "1000"
+
+  # -- Set Message Broker (Kafka) properties.
+  messageBroker:
+    # -- Set broker list (host)
+    brokerList: ""
+    # -- Set broker list password
+    password: ""
+    # -- Set broker list topic
+    topic: "events"
+
+  # -- Set mysql properties.
+  mysql:
+    # -- Set mysql schema name.
+    name: "frontegg_webhooks"
+    # -- Set mysql host.
+    host: ""
+    # -- Set mysql user name.
+    username: ""
+    # -- Set mysql password.
+    password: ""
+
+integrations-service:
+  # Default values for integrations-service.
+  # This is a YAML-formatted file.
+  # Declare variables to be passed into your templates.
+
+  # -- Provide the amount of pods if HPA is not enabled
+  replicaCount: 2
+
+  # -- Provide the image docker tag default: latest
+  appVersion: latest
+
+  # -- Manage docker image properties
+  image:
+    # -- Provide docker repository hub
+    repository: frontegg/hybrid-integrations-service
+    # -- Provide image pull policy
+    pullPolicy: Always
+
+  # -- Provide secret name for frontegg's repository
+  imagePullSecrets:
+    - name: regcred
+
+  # -- Provide a name in place of integrations-service for `app:` labels
+  nameOverride: ""
+  # -- Provide a name in place of {releaseName}-integrations-service
+  fullnameOverride: ""
+
+  # -- Setup Service properties for integrations-service (open only one port)
+  service:
+    # -- Set service type
+    type: ClusterIP
+    # -- Set service port
+    protocol: TCP
+    # -- Set service target port to map
+    port: 80
+    # -- Set port protocol default: TCP
+    targetPort: 3014
+    # -- Set port name
+    name: http
+
+  # -- HPA properties for integrations-service
+  # -- If autoscaling is enabled it will monitor the service and raise or lower pods amount based upon usage
+  # -- If autoscaling is disabled integrations-service will be managed by replicaset with `replicaCount` determine pod amount
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 75
+
+  # -- Set integrations-service resources
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+  nodeSelector:
+    "beta.kubernetes.io/os": linux
+
+  # -- Provide deployment tolerations
+  tolerations: [ ]
+
+  # -- Provide deployment affinity
+  affinity: { }
+
+  configuration:
+    secrets: { }
+    map: { }
+
+  # == Set frontegg properties
+  frontegg:
+    slack:
+      # -- Set Slack encryption key provided by Slack
+      encryptionKey: ""
+
+  mongo:
+    # -- Set MongoDB connection string
+    connectionString: ""
+
+  # -- Set Message Broker (Kafka) properties.
+  messageBroker:
+    # -- Set broker list (host)
+    brokerList: ""
+    # -- Set broker list password
+    password: ""
