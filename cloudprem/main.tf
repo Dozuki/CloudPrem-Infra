@@ -1,13 +1,13 @@
 terraform {
   backend "s3" {}
 
-  required_version = "~> 0.14"
+  required_version = "0.14.10"
 
   required_providers {
-    aws        = "3.22.0"
+    aws        = "3.37.0"
     random     = "3.0.0"
     kubernetes = "1.13.3"
-    helm       = "2.0.1"
+    helm       = "2.1.1"
     time       = "0.6.0"
     # null       = "2.1.2"
   }
@@ -244,6 +244,26 @@ module "memcached" {
 
   cluster_size  = 1
   instance_type = var.cache_instance_type
+}
+module "webhooks" {
+  source = "./modules/webhooks"
+
+  depends_on = [module.eks_cluster]
+
+  name = local.identifier
+
+  vpc_id     = local.vpc_id
+  subnet_ids = local.private_subnet_ids
+
+  allowed_cidr_blocks = [local.vpc_cidr]
+
+  cluster_size  = local.azs_count
+  rds_kms_key_id = var.rds_kms_key_id
+
+  rds_address = module.primary_database.this_db_instance_address
+  rds_user = module.primary_database.this_db_instance_username
+  rds_pass = random_password.primary_database.result
+  eks_sg = module.eks_cluster.cluster_primary_security_group_id
 }
 
 module "sns" {

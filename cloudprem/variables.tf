@@ -92,7 +92,7 @@ variable "eks_desired_capacity" {
 
 # --- END EKS & Worker Node Configuration --- #
 
-# --- BEGIN Databsae and storage Options --- #
+# --- BEGIN Database and storage Options --- #
 
 variable "s3_kms_key_id" {
   description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
@@ -175,7 +175,13 @@ variable "cache_instance_type" {
   default     = "cache.t2.small"
 }
 
-# --- END Databsae and storage Options --- #
+variable "enable_webhooks" {
+  description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
+  type        = bool
+  default     = false
+}
+
+# --- END Database and storage Options --- #
 
 # --- BEGIN Bastion --- #
 
