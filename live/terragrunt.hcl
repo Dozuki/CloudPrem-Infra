@@ -4,7 +4,7 @@ remote_state {
     bucket         = "dozuki-terraform-state-${get_aws_account_id()}"
     dynamodb_table = "dozuki-terraform-lock"
     key            = "${path_relative_to_include()}/terraform.tfstate"
-    region         = "us-west-2"
+    region         = "us-east-1"
     encrypt        = true
   }
 }
