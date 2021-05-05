@@ -66,10 +66,7 @@ data "aws_iam_policy_document" "eks_worker" {
       "s3:PutObject",
       "s3:PutObjectAcl",
       "s3:GetObject",
-      "s3:GetObjectAcl",
-      "s3:ListBucket",
-      "s3:ListObjectsV2",
-      "s3:CopyObject"
+      "s3:GetObjectAcl"
     ]
 
     resources = [
@@ -118,7 +115,7 @@ module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
   version = "14.0.0"
 
-  depends_on = [module.vpc]
+  depends_on = [module.vpc, aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
   # EKS cofigurations
   cluster_name    = local.identifier
