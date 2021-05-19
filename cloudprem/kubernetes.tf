@@ -1,3 +1,11 @@
+data "kubernetes_secret" "frontegg" {
+  depends_on = [module.replicated]
+  count = var.enable_webhooks ? 1 : 0
+  metadata {
+    name = "frontegg-credentials"
+    namespace = "default"
+  }
+}
 module "container_insights" {
   source = "./modules/container-insights"
 
@@ -15,6 +23,7 @@ module "replicated" {
 
   dozuki_license_parameter_name = local.dozuki_license_parameter_name
   nlb_hostname = module.nlb.this_lb_dns_name
+  release_sequence = var.replicated_app_sequence_number
 }
 
 resource "kubernetes_config_map" "dozuki_resources" {
@@ -72,10 +81,10 @@ resource "kubernetes_config_map" "dozuki_resources" {
     "buckets.json" = <<-EOF
       {
         "default": {
-          "guide-images": "${module.guide_images_s3_bucket[0].this_s3_bucket_id}",
-          "guide-pdfs": "${module.guide_pdfs_s3_bucket[0].this_s3_bucket_id}",
-          "documents": "${module.documents_s3_bucket[0].this_s3_bucket_id}",
-          "guide-objects": "${module.guide_objects_s3_bucket[0].this_s3_bucket_id}"
+          "guide-images": "${local.guide_images_bucket}",
+          "guide-pdfs": "${local.guide_pdfs_bucket}",
+          "documents": "${local.documents_bucket}",
+          "guide-objects": "${local.guide_objects_bucket}"
         }
       }
     EOF
@@ -109,6 +118,15 @@ resource "kubernetes_config_map" "dozuki_resources" {
       }
     EOF
 
+    "frontegg.json" = <<-EOF
+      {
+        "clientId": "${var.frontegg_client_id}",
+        "apiToken": "${var.frontegg_api_key}",
+        "apiBaseUrl": "http://frontegg-api-gateway.default.svc.cluster.local"
+        "authUrl": "https://api.frontegg.com/auth/vendor"
+      }
+    EOF
+
     "rds-ca.pem" = file(local.is_us_gov ? "vendor/rds-ca-${data.aws_region.current.name}-2017-root.pem" : "vendor/rds-ca-2019-root.pem")
 
     "index.json" = <<-EOF
@@ -131,6 +149,9 @@ resource "kubernetes_config_map" "dozuki_resources" {
           },
           "aws-resources": {
             "filename": "aws-resources.json"
+          },
+          "frontegg": {
+            "filename": "frontegg.json"
           }
         }
       }
