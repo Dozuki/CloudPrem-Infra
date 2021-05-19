@@ -6,3 +6,7 @@ variable "nlb_hostname" {
   description = "The hostname of the deployed network loadbalancer"
   type = string
 }
+variable "release_sequence" {
+  description = "Pin a replicated release sequence on firstboot."
+  default = ""
+}
