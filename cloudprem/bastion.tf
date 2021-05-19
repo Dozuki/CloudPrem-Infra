@@ -61,7 +61,7 @@ module "bastion" {
   associate_public_ip_address  = false
   recreate_asg_when_lc_changes = true
 
-  user_data_base64 = base64encode(templatefile("userdata.yml", {
+  user_data_base64 = base64encode(templatefile("static/userdata.yml", {
     aws_region                     = data.aws_region.current.name
     eks_cluster_name               = module.eks_cluster.cluster_id
     eks_cluster_access_role        = module.cluster_access_role.this_iam_role_arn
