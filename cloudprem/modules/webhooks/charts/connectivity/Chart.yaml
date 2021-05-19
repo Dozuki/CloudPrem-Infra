@@ -2,23 +2,23 @@ apiVersion: v2
 name: connectivity
 description: Frontegg's Connectivity Helm chart for Kubernetes
 type: application
-version: 0.1.0-beta32
+version: 0.2.0
 
 dependencies:
   - name: api-gateway
-    version: "0.4.24"
+    version: "0.4.38"
     repository: "https://frontegg.github.io/helm-charts/"
   - name: connectors-worker
-    version: "0.1.19"
+    version: "0.1.23"
     repository: "https://frontegg.github.io/helm-charts/"
   - name: event-service
-    version: "0.1.12"
+    version: "0.1.16"
     repository: "https://frontegg.github.io/helm-charts/"
   - name: integrations-service
-    version: "0.1.7"
+    version: "0.1.9"
     repository: "https://frontegg.github.io/helm-charts/"
   - name: webhook-service
-    version: "0.2.7"
+    version: "0.2.8"
     repository: "https://frontegg.github.io/helm-charts/"
 
 maintainers:

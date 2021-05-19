@@ -43,10 +43,6 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
-#          volumeMounts:
-#            - name: mongo-tls-ca
-#              mountPath: "/etc/rds-combined-ca-bundle.pem"
-#              subPath: "rds-combined-ca-bundle.pem"
           env:
             {{- range $secret_name, $values := .Values.configuration.secrets }}
             {{- range $key, $value :=  $values}}
@@ -78,10 +74,6 @@ spec:
       nodeSelector:
       {{- toYaml . | nindent 8 }}
       {{- end }}
-#      volumes:
-#        - name: mongo-tls-ca
-#          configMap:
-#            name: mongo-tls
       {{- with .Values.affinity }}
       affinity:
       {{- toYaml . | nindent 8 }}

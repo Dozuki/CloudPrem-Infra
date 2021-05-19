@@ -1,9 +1,10 @@
-# -- Set frontegg's configurations
+# -- Set frontegg's general configurations
+# -- further configuration might be needed within a specific service
 frontegg:
+  ## -- Set frontegg's api url. Change in case Frontegg has provided a different url.
   apiUrl: "https://api.frontegg.com"
 
-
-  # -- Docker Images registry properties
+  # -- Set Docker Images registry properties
   images:
     # -- Set enabled to create a secret with Frontegg's registry properties
     enabled: true
@@ -14,11 +15,13 @@ frontegg:
     # -- Set password for docker registry provided by Frontegg
     password: ""
 
+
+## -- api-gateway service is an entry point to Frontegg's connectivity.
 api-gateway:
   # -- Provide the amount of pods if HPA is not enabled
   replicaCount: 2
   # -- Provide the image docker tag default: latest
-  appVersion: "2020.12.14201945"
+  appVersion: "2021.5.4132030"
   # -- Manage docker image properties
   image:
     # -- Provide docker image repository
@@ -26,7 +29,9 @@ api-gateway:
     # -- Provide image pull policy
     pullPolicy: Always
 
+  ## -- Set pod annotations
   podAnnotations: {}
+  ## -- Set pod label
   podLabels: {}
 
   # -- Provide secret name for Frontegg's docker image repository.
@@ -38,7 +43,7 @@ api-gateway:
   # -- Provide a name instead of {releaseName}-api-gateway
   fullnameOverride: ""
 
-  # - Setup Service properties for team-management-service (open only one port)
+  # - Setup Service properties for api-gateway (open only one port)
   service:
     # -- Set service type
     type: ClusterIP
@@ -64,8 +69,8 @@ api-gateway:
   # -- Enable Ingress if access from the internet is needed
   ingress:
     enabled: false
-    # -- provide a different name for the host path example: api.acme.com
 
+    # -- provide a different name for the host path example: api.acme.com
     hostnameOverride: ""
     # -- provide the needed ingress annotation
     # -- example:
@@ -92,6 +97,7 @@ api-gateway:
       cpu: 250m
       memory: 512Mi
 
+  ## Set nodeSelector, override in case your cluster node are labeled differently
   nodeSelector:
     "beta.kubernetes.io/os": linux
 
@@ -125,18 +131,22 @@ api-gateway:
     identityServiceUrl: http://frontegg-identity-service
     integrationsServiceUrl: http://frontegg-integrations-service
 
-  # - Frontegg configuration properties
+  # - Frontegg's api-gateway configuration properties
   frontegg:
-    # Frontegg authentication key, provided by frontegg
+    # Frontegg's authentication key, provided by Frontegg's integration team
     authenticationPublicKey: ""
-    # Frontegg api entry point.
+    # Set Frontegg's managed api-gateway Url. Override only in case instructed by Frontegg.
     apiGatewayUrl: "https://api.frontegg.com"
-    # Frontegg authentication url.
+    # Set Frontegg's managed authentication Url. Override only in case instructed by Frontegg.
     authenticationServiceUrl: "https://api.frontegg.com/auth/vendor"
-    # Frontegg configration url.
-    metadataServiceUrl: https://api.frontegg.com/metadata
+    # Set Frontegg's managed configuration Url. Override only in case instructed by Frontegg.
+    metadataServiceUrl: "https://api.frontegg.com/metadata"
+    # Enable hybrid services by features, comma separated.
+    # Supported types are: webhooks, event, integrations
+    # Override only in case instructed by Frontegg
     hybridServices: "webhook,event,integrations"
 
+# Connectors Worker service
 connectors-worker:
   # Default values for events-service.
   # This is a YAML-formatted file.
@@ -148,7 +158,7 @@ connectors-worker:
 
   ## Provide the image docker tag default: latest
   ##
-  appVersion: latest
+  appVersion: "2021.5.5162227"
 
   ## Manage docker image properties
   ##
@@ -172,7 +182,7 @@ connectors-worker:
   ##
   fullnameOverride: ""
 
-  ## Setup Service properties for team-management-service (open only one port)
+  ## Setup Service properties for connectors-worker (open only one port)
   ##
   service:
     ## Set service type
@@ -212,6 +222,7 @@ connectors-worker:
       cpu: 250m
       memory: 512Mi
 
+  ## Set nodeSelector, override in case your cluster node are labeled differently
   nodeSelector:
     "beta.kubernetes.io/os": linux
 
@@ -227,52 +238,67 @@ connectors-worker:
     secrets: {}
     map: {}
 
-  # -- Set Message Broker (Kafka) properties.
+  # -- Connectors-worker uses kafka as a messageBroker (eventbus).
+  #    Set Kafka's connections properties
   messageBroker:
-    # -- Set broker list (host)
+    # -- Set kafka broker comma separated host urls
+    #    Example: "acme.kafka1:9092, acme.kafka2:9092"
     brokerList: ""
-    # -- Set broker list password
+    # -- Set kafka broker password if needed.
+    #    Set empty string "" in case password is not needed.
     password: ""
 
-  # -- Set Redis properties
+  # -- Connectors-worker Redis properties
   redis:
-    # -- Set redis host
+    # -- Set Redis host url
+    #    Example: acme.redis.com
     host: ""
-    # -- Set redis host
+    # -- Set Redis port, default is set 6379
     port: "6379"
-    # -- Set redis password
+    # -- Set Redis password
     password: ""
-    # -- Set redis database index, change only if needed
+    # -- Set Redis database index, default value is 7. Alter if default value is already in use.
     index: "7"
-    # -- Set tls value (true|false)
+    # -- Set rather if tls value (true|false) is enabled
     tls: "true"
 
-  # -- Set Frontegg's properties
+  # -- Frontegg's Connectors-worker configuration properties
   frontegg:
-    twilio:
-      # -- Set twilio sender number
-      sender: ""
-      # -- Set twilio token, given buy
-      token: ""
-      # -- Set twilio account Id given by Frontegg
-      accountId: ""
-    # -- Set supported channels
-    # -- Possible values email | sms | slack
+    # -- Frontegg connectivity supports multiple channels.
+    # -- available channels are email | sms | slack integration.
     # -- use comma separated values for example: email,slack,sms
+    # -- Use an empty string "" for no channels selected
     channels: ""
-    # -- Set emails properties for the appropriate provider
+
+    # Frontegg's connectivity uses twilio as a SMS Sender service.
+    # If SMS messages are enabled set twilio configuration provided by Frontegg.
+    twilio:
+      # -- Set the sender phone number from your twilio account.
+      sender: ""
+      # -- Set the token number from your twilio account.
+      token: ""
+      # -- Set the accountId from your twilio account.
+      accountId: ""
+
+    # Frontegg's connectivity uses sendgrid or SES (Amazon) as email Sender service.
+    # If Emails are enabled set configuration provided by Frontegg.
     emails:
-      # -- Set the email supported provide [ses | sendgrid] default (sendgrid)
+      # -- Set the email supported provider [ses | sendgrid] default (sendgrid)
       provider: ""
-      # -- Set aws SES properties
+      # -- Set your AWS SES properties (if enabled)
       aws:
+        # - Set your AWS SES accessKey
         accessKey: ""
+        # - Set your AWS SES secretAccess
         secretAccess: ""
+        # - Set your AWS SES region
         region: ""
-      # -- Set Sendgrid properties
+      # -- Set your Sendgrid properties (if enabled)
       sendgrid:
+        # -- Set your Sendgrid apiKey
         apiKey: ""
 
+# - Frontegg's event-service configuration properties
 event-service:
   # Default values for events-service.
   # This is a YAML-formatted file.
@@ -284,7 +310,7 @@ event-service:
 
   ## Provide the image docker tag default: latest
   ##
-  appVersion: latest
+  appVersion: "2021.5.5183929"
 
   ## Manage docker image properties
   ##
@@ -308,7 +334,7 @@ event-service:
   ##
   fullnameOverride: ""
 
-  ## Setup Service properties for team-management-service (open only one port)
+  ## Setup Service properties for event-service (open only one port)
   ##
   service:
     ## Set service type
@@ -363,43 +389,48 @@ event-service:
     secrets: { }
     map: { }
 
-  # -- Set database properties
+  # -- event-service uses MySql for consistency.
+  #    For security reasons connectivity requires creating the "frontegg_events" schema in advance thus allowing the given database user not to be admin.
   database:
-    # -- Set database name
+    # -- Set the database name, change only if the given name is taken for.
     name: frontegg_events
     # -- Set database host url
     host: ""
     # -- Set database username
     username: ""
-    # -- Set database password
+    # -- Set database username password
     password: ""
 
-  # -- Set Message Broker (Kafka) properties.
+  # -- event-service uses kafka as a messageBroker (eventbus).
+  #    Set Kafka's connections properties
   messageBroker:
-    # -- Set broker list (host)
+    # -- Set kafka broker comma separated host urls
+    #    Example: "acme.kafka1:9092, acme.kafka2:9092"
     brokerList: ""
-    # -- Set broker list password
+    # -- Set kafka broker password if needed.
+    #    Set empty string "" in case password is not needed.
     password: ""
 
-  # -- Set Redis properties
+  # -- event-service Redis properties
   redis:
-    # -- Set redis host
+    # -- Set Redis host url
+    #    Example: acme.redis.com
     host: ""
-    # -- Set redis host
+    # -- Set Redis port, default is set 6379
     port: "6379"
-    # -- Set redis password
+    # -- Set Redis password
     password: ""
-    # -- Set redis database index, change only if needed
+    # -- Set Redis database index, default value is 7. Alter if default value is already in use.
     index: "7"
-    # -- Set tls value (true|false)
+    # -- Set rather if tls value (true|false) is enabled
     tls: "true"
 
-  # -- Set frontegg properties
+  # -- Frontegg's event-service configuration properties
   frontegg:
-    # -- Set frontegg hybrid synchronization properties
+    # -- Set Frontegg's hybrid synchronization properties
     sync:
-      # -- Enable or Disable frontegg hybrid with frontegg cloud.
-      # -- By disabling this you might not see the changes on frontegg portal or get updates.
+      # -- Enable or Disable Frontegg hybrid with Frontegg cloud.
+      # -- By disabling this you might not see the changes on Frontegg portal or get updates.
       enabled: "true"
       # -- Set sync time interval with frontegg cloud in minutes
       timeInterval: "15"
@@ -407,9 +438,9 @@ event-service:
     authenticationUrl: ""
     # -- Set frontegg evnets Service url. (by not setting value it will use frontegg's cloud url)
     managedEventServiceUrl: ""
-    # -- Set Your account client Id (provided on the portal administration page)
+    # -- Set Your account client Id (provided in the portal administration page)
     clientId: ""
-    # -- Set Your account Api Key (provided on the portal administration page)
+    # -- Set Your account Api Key (provided in the portal administration page)
     apiKey: ""
     # -- Set authentication failure retry delay in milliseconds
     authenticationRetryDelayInterval: "5000"
@@ -417,12 +448,13 @@ event-service:
     # -- When authentication fails should the service stop?
     shutdownOnInitialAuthenticationFailure: "true"
 
+# - Frontegg's webhook-service configuration properties
 webhook-service:
   # -- Provide the amount of pods if HPA is not enabled
   replicaCount: 2
 
   # -- Provide the image docker tag default: latest
-  appVersion: latest
+  appVersion: "2021.3.24161215"
 
   # -- Manage docker image properties
   image:
@@ -488,33 +520,38 @@ webhook-service:
   configuration:
     secrets: {}
     map: {}
-
+  # -- Webhook-service uses MongoDB for persistence
+  #
   mongo:
-    # -- Set MongoDB connection string
+    # -- Set MongoDB connection string (mongo://xxx@yyy/webhooks?)
     connectionString: ""
     # -- Set MongoDB connection retry attempts
     retryAttempts: "3"
     # -- Set MongoDB connection retry attempts delay in milliseconds
     retryDelay: "1000"
 
-  # -- Set Message Broker (Kafka) properties.
+  # -- webhook-service uses kafka as a messageBroker (eventbus).
+  #    Set Kafka's connections properties
   messageBroker:
-    # -- Set broker list (host)
+    # -- Set kafka broker comma separated host urls
+    #    Example: "acme.kafka1:9092, acme.kafka2:9092"
     brokerList: ""
-    # -- Set broker list password
+    # -- Set kafka broker password if needed.
+    #    Set empty string "" in case password is not needed.
     password: ""
-    # -- Set broker list topic
+    # -- Set kafka broker topic. Override only in case current name is taken for.
     topic: "events"
 
-  # -- Set mysql properties.
+  # -- webhook-service uses MySql for consistency.
+  #    For security reasons connectivity requires creating the "frontegg_webhooks" schema in advance thus allowing the given database user not to be admin.
   mysql:
-    # -- Set mysql schema name.
-    name: "frontegg_webhooks"
-    # -- Set mysql host.
+    # -- Set the database name, change only if the given name is taken for.
+    name: frontegg_webhooks
+    # -- Set database host url
     host: ""
-    # -- Set mysql user name.
+    # -- Set database username
     username: ""
-    # -- Set mysql password.
+    # -- Set database username password
     password: ""
 
 integrations-service:
@@ -526,7 +563,7 @@ integrations-service:
   replicaCount: 2
 
   # -- Provide the image docker tag default: latest
-  appVersion: latest
+  appVersion: "2021.5.5162332"
 
   # -- Manage docker image properties
   image:
@@ -589,19 +626,26 @@ integrations-service:
     secrets: { }
     map: { }
 
-  # == Set frontegg properties
-  frontegg:
-    slack:
-      # -- Set Slack encryption key provided by Slack
-      encryptionKey: ""
-
+  # -- integrations-service uses MongoDB for persistence
+  #
   mongo:
-    # -- Set MongoDB connection string
+    # -- Set MongoDB connection string (mongo://xxx@yyy/integrations?)
     connectionString: ""
 
-  # -- Set Message Broker (Kafka) properties.
+
+  # -- integrations-service uses kafka as a messageBroker (eventbus).
+  #    Set Kafka's connections properties
   messageBroker:
-    # -- Set broker list (host)
+    # -- Set kafka broker comma separated host urls
+    #    Example: "acme.kafka1:9092, acme.kafka2:9092"
     brokerList: ""
-    # -- Set broker list password
+    # -- Set kafka broker password if needed.
+    #    Set empty string "" in case password is not needed.
     password: ""
+
+  # - Set integrations service Frontegg properties
+  frontegg:
+    # slack integration service requires slack encryption key
+    slack:
+      # -- Set Slack encryption key provided by Frontegg
+      encryptionKey: ""

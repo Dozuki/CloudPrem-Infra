@@ -64,10 +64,6 @@ spec:
                   key: {{ $value }}
           {{- end }}
           {{- end }}
-#          volumeMounts:
-#            - name: mongo-tls-ca
-#              mountPath: "/etc/rds-combined-ca-bundle.pem"
-#              subPath: "rds-combined-ca-bundle.pem"
           envFrom:
             - configMapRef:
                 name: {{ include "integrations-service.fullname" . }}-configmap
@@ -80,10 +76,6 @@ spec:
       nodeSelector:
       {{- toYaml . | nindent 8 }}
       {{- end }}
-#      volumes:
-#        - name: mongo-tls-ca
-#          configMap:
-#            name: mongo-tls
       {{- with .Values.affinity }}
       affinity:
       {{- toYaml . | nindent 8 }}
