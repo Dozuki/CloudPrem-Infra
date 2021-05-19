@@ -222,7 +222,7 @@ resource "aws_dms_replication_instance" "this" {
 
   replication_instance_id    = local.identifier
   replication_instance_class = "dms.r5.large"
-  engine_version             = "3.4.3"
+  engine_version             = "3.4.4"
   allocated_storage          = var.rds_allocated_storage
   # kms_key_arn                = data.aws_kms_key.rds.arn
 
@@ -273,19 +273,9 @@ resource "aws_dms_replication_task" "this" {
   replication_task_id      = local.identifier
   migration_type           = "full-load-and-cdc"
   replication_instance_arn = aws_dms_replication_instance.this[0].replication_instance_arn
-  table_mappings           = "{ \"rules\": [ { \"rule-type\": \"selection\", \"rule-id\": \"1\", \"rule-name\": \"1\", \"object-locator\": { \"schema-name\": \"%\", \"table-name\": \"%\" }, \"rule-action\": \"include\", \"filters\": [] }, { \"rule-type\": \"selection\", \"rule-id\": \"2\", \"rule-name\": \"2\", \"object-locator\": { \"schema-name\": \"mysql\", \"table-name\": \"%\" }, \"rule-action\": \"exclude\", \"filters\": [] }, { \"rule-type\": \"selection\", \"rule-id\": \"3\", \"rule-name\": \"3\", \"object-locator\": { \"schema-name\": \"performance_schema\", \"table-name\": \"%\" }, \"rule-action\": \"exclude\", \"filters\": [] } ] }"
+  table_mappings           = file("static/dms_mapping.json")
 
-  replication_task_settings = <<-EOF
-    {
-      "TargetMetadata": {
-        "SupportLobs": true,
-        "FullLobMode": true,
-        "LobChunkSize": 64,
-        "LimitedSizeLobMode": false,
-        "LobMaxSize": 0
-      }
-    }
-  EOF
+  replication_task_settings = file("static/dms_config.json")
 
   source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn
   target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn
@@ -298,20 +288,23 @@ resource "aws_dms_replication_task" "this" {
 }
 
 # AWS provider issue to replace this https://github.com/hashicorp/terraform-provider-aws/issues/2083
-# resource "null_resource" "start_replicating" {
-#   count = var.enable_bi ? 1 : 0
+ resource "null_resource" "replication_control" {
+   count = var.enable_bi ? 1 : 0
 
-#   triggers = {
-#     dms_task_arn = aws_dms_replication_task.this[0].replication_task_arn
-#   }
+   depends_on = [module.replicated]
 
-#   provisioner "local-exec" {
-#     when    = create
-#     command = "aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${self.triggers["dms_task_arn"]}"
-#   }
+   triggers = {
+     dms_task_arn = aws_dms_replication_task.this[0].replication_task_arn,
+     source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn,
+     target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn
+   }
 
-#   provisioner "local-exec" {
-#     when    = destroy
-#     command = "aws dms stop-replication-task --replication-task-arn ${self.triggers["dms_task_arn"]}"
-#   }
-# }
+   provisioner "local-exec" {
+     when    = create
+     command = "aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${self.triggers["dms_task_arn"]}"
+   }
+   provisioner "local-exec" {
+     when    = destroy
+     command = "aws dms stop-replication-task --replication-task-arn ${self.triggers["dms_task_arn"]}"
+   }
+ }
