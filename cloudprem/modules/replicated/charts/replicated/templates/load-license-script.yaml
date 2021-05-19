@@ -14,4 +14,3 @@ data:
       fi
     done
     cat /tmp/license.rli | replicatedctl license-load
-    replicatedctl app-config set hostname --value "$DOZUKI_HOSTNAME"
