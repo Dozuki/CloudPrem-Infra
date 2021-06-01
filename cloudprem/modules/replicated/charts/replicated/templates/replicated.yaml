@@ -77,9 +77,11 @@ spec:
         app: replicated
         tier: master
     spec:
+      imagePullSecrets:
+        - name: replicateddockerhubkey
       containers:
         - name: replicated
-          image: "quay.io/replicated/replicated:stable-2.40.4"
+          image: "replicated/replicated:stable-2.52.0"
           imagePullPolicy: IfNotPresent
           env:
             - name: SCHEDULER_ENGINE
@@ -142,6 +144,9 @@ spec:
               mountPath: /var/run/replicated
             - name: docker-socket
               mountPath: /host/var/run/docker.sock
+            - name: replicated-conf
+              mountPath: /host/etc/replicated.conf
+              subPath: replicated.conf
             - name: proc
               mountPath: /host/proc
               readOnly: true
@@ -151,9 +156,6 @@ spec:
             - name: load-license
               mountPath: /tmp/load.sh
               subPath: load.sh
-            - name: replicated-conf
-              mountPath: /host/etc/replicated.conf
-              subPath: replicated.conf
           resources:
             requests:
               cpu: 250m
@@ -166,7 +168,7 @@ spec:
                   - -c
                   - /tmp/load.sh
         - name: replicated-ui
-          image: "quay.io/replicated/replicated-ui:stable-2.40.4"
+          image: "replicated/replicated-ui:stable-2.52.0"
           imagePullPolicy: IfNotPresent
           env:
             - name: RELEASE_CHANNEL
