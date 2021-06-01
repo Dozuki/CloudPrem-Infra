@@ -2,3 +2,5 @@
 .terraform/
 terraform.tfstate.d/
 **/.terragrunt*
+*.tfvars
+tfvars
