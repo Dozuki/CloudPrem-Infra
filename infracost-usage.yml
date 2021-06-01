@@ -1,0 +1,289 @@
+version: 0.1
+resource_usage:
+  aws_secretsmanager_secret.primary_database_credentials:
+    monthly_requests: 5
+  aws_secretsmanager_secret.replica_database[0]:
+    monthly_requests: 5
+  module.bastion.aws_autoscaling_group.this[0]:
+    instances: 1
+    monthly_cpu_credit_hrs: 350
+    operating_system: linux
+    reserved_instance_payment_option: ""
+    reserved_instance_term: ""
+    reserved_instance_type: ""
+    vcpu_count: 2
+  module.documents_s3_bucket[0].aws_s3_bucket.this[0]:
+    glacier:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_bulk_select_data_returned_gb: 0
+      monthly_bulk_select_data_scanned_gb: 0
+      monthly_expedited_data_retrieval_gb: 0
+      monthly_expedited_data_retrieval_requests: 0
+      monthly_expedited_select_data_returned_gb: 0
+      monthly_expedited_select_data_scanned_gb: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_standard_select_data_returned_gb: 0
+      monthly_standard_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    glacier_deep_archive:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    intelligent_tiering:
+      early_delete_gb: 0
+      frequent_access_storage_gb: 0
+      infrequent_access_storage_gb: 0
+      monitored_objects: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+    object_tags: 100000
+    one_zone_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    standard:
+      monthly_select_data_returned_gb: 50
+      monthly_select_data_scanned_gb: 5
+      monthly_tier_1_requests: 1000000
+      monthly_tier_2_requests: 100000
+      storage_gb: 100
+    standard_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+  module.eks_cluster.module.node_groups.aws_eks_node_group.workers["workers"]:
+    monthly_cpu_credit_hrs: 350
+    operating_system: linux
+    reserved_instance_payment_option: ""
+    reserved_instance_term: ""
+    reserved_instance_type: ""
+    vcpu_count: 2
+  module.guide_images_s3_bucket[0].aws_s3_bucket.this[0]:
+    glacier:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_bulk_select_data_returned_gb: 0
+      monthly_bulk_select_data_scanned_gb: 0
+      monthly_expedited_data_retrieval_gb: 0
+      monthly_expedited_data_retrieval_requests: 0
+      monthly_expedited_select_data_returned_gb: 0
+      monthly_expedited_select_data_scanned_gb: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_standard_select_data_returned_gb: 0
+      monthly_standard_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    glacier_deep_archive:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    intelligent_tiering:
+      early_delete_gb: 0
+      frequent_access_storage_gb: 0
+      infrequent_access_storage_gb: 0
+      monitored_objects: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+    object_tags: 100000
+    one_zone_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    standard:
+      monthly_select_data_returned_gb: 50
+      monthly_select_data_scanned_gb: 5
+      monthly_tier_1_requests: 1000000
+      monthly_tier_2_requests: 100000
+      storage_gb: 100
+    standard_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+  module.guide_objects_s3_bucket[0].aws_s3_bucket.this[0]:
+    glacier:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_bulk_select_data_returned_gb: 0
+      monthly_bulk_select_data_scanned_gb: 0
+      monthly_expedited_data_retrieval_gb: 0
+      monthly_expedited_data_retrieval_requests: 0
+      monthly_expedited_select_data_returned_gb: 0
+      monthly_expedited_select_data_scanned_gb: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_standard_select_data_returned_gb: 0
+      monthly_standard_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    glacier_deep_archive:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    intelligent_tiering:
+      early_delete_gb: 0
+      frequent_access_storage_gb: 0
+      infrequent_access_storage_gb: 0
+      monitored_objects: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+    object_tags: 100000
+    one_zone_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    standard:
+      monthly_select_data_returned_gb: 150
+      monthly_select_data_scanned_gb: 50
+      monthly_tier_1_requests: 1000000
+      monthly_tier_2_requests: 100000
+      storage_gb: 500
+    standard_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+  module.guide_pdfs_s3_bucket[0].aws_s3_bucket.this[0]:
+    glacier:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_bulk_select_data_returned_gb: 0
+      monthly_bulk_select_data_scanned_gb: 0
+      monthly_expedited_data_retrieval_gb: 0
+      monthly_expedited_data_retrieval_requests: 0
+      monthly_expedited_select_data_returned_gb: 0
+      monthly_expedited_select_data_scanned_gb: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_standard_select_data_returned_gb: 0
+      monthly_standard_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    glacier_deep_archive:
+      early_delete_gb: 0
+      monthly_bulk_data_retrieval_gb: 0
+      monthly_bulk_data_retrieval_requests: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_standard_data_retrieval_gb: 0
+      monthly_standard_data_retrieval_requests: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    intelligent_tiering:
+      early_delete_gb: 0
+      frequent_access_storage_gb: 0
+      infrequent_access_storage_gb: 0
+      monitored_objects: 0
+      monthly_lifecycle_transition_requests: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+    object_tags: 500000
+    one_zone_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+    standard:
+      monthly_select_data_returned_gb: 25
+      monthly_select_data_scanned_gb: 1
+      monthly_tier_1_requests: 1000000
+      monthly_tier_2_requests: 100000
+      storage_gb: 50
+    standard_infrequent_access:
+      monthly_lifecycle_transition_requests: 0
+      monthly_retrieval_gb: 0
+      monthly_select_data_returned_gb: 0
+      monthly_select_data_scanned_gb: 0
+      monthly_tier_1_requests: 0
+      monthly_tier_2_requests: 0
+      storage_gb: 0
+  module.memcached.aws_elasticache_cluster.this:
+    snapshot_storage_size_gb: 1
+  module.nlb.aws_lb.this[0]:
+    active_connections: 50
+    new_connections: 10
+    processed_bytes_gb: 10
+    rule_evaluations: 0
+  module.sns.aws_sns_topic.this[0]:
+    monthly_requests: 0
+    request_size_kb: 0
+  module.vpc[0].aws_nat_gateway.this[0]:
+    monthly_data_processed_gb: 100
+  module.webhooks.aws_docdb_cluster.this:
+    backup_storage_gb: 5
+  module.webhooks.aws_docdb_cluster_instance.cluster_instances[0]:
+    data_storage_gb: 5
+    monthly_cpu_credit_hrs: 150
+    monthly_io_request: 10000
+  module.webhooks.aws_elasticache_cluster.redis:
+    snapshot_storage_size_gb: 1
