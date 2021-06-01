@@ -277,7 +277,7 @@ variable "frontegg_client_id" {
 }
 
 variable "replicated_app_sequence_number" {
-  description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations"
-  default = "latest"
-  type = string
+  description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release."
+  default = 0
+  type = number
 }
