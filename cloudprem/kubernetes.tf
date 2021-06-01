@@ -122,40 +122,12 @@ resource "kubernetes_config_map" "dozuki_resources" {
       {
         "clientId": "${var.frontegg_client_id}",
         "apiToken": "${var.frontegg_api_key}",
-        "apiBaseUrl": "http://frontegg-api-gateway.default.svc.cluster.local"
+        "apiBaseUrl": "http://frontegg-api-gateway.default.svc.cluster.local",
         "authUrl": "https://api.frontegg.com/auth/vendor"
       }
     EOF
 
     "rds-ca.pem" = file(local.is_us_gov ? "vendor/rds-ca-${data.aws_region.current.name}-2017-root.pem" : "vendor/rds-ca-2019-root.pem")
-
-    "index.json" = <<-EOF
-      {
-        "index": {
-          "legacy": {
-            "filename": "legacy.json"
-          },
-          "s3": {
-            "filename": "s3.json"
-          },
-          "buckets": {
-            "filename": "buckets.json"
-          },
-          "db": {
-            "filename": "db.json"
-          },
-          "memcached": {
-            "filename": "memcached.json"
-          },
-          "aws-resources": {
-            "filename": "aws-resources.json"
-          },
-          "frontegg": {
-            "filename": "frontegg.json"
-          }
-        }
-      }
-    EOF
   }
 
 }
