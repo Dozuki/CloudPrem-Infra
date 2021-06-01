@@ -156,15 +156,23 @@ resource "helm_release" "frontegg" {
   // - Frontegg Auth - //
   set_sensitive {
     name = "event-service.frontegg.clientId"
-    value = var.frontegg_client_id
+    value = var.frontegg_secret.data.clientid
   }
   set_sensitive {
     name = "event-service.frontegg.apiKey"
-    value = var.frontegg_api_key
+    value = var.frontegg_secret.data.apikey
   }
   set_sensitive {
     name = "api-gateway.frontegg.authenticationPublicKey"
     value = var.frontegg_secret.data.pubkey
+  }
+  set_sensitive {
+    name = "frontegg.images.username"
+    value = var.frontegg_secret.data.username
+  }
+  set_sensitive {
+    name = "frontegg.images.password"
+    value = var.frontegg_secret.data.password
   }
 
   // - Kafka - //
@@ -209,16 +217,6 @@ resource "helm_release" "frontegg" {
   set_sensitive {
     name = "event-service.database.password"
     value = var.rds_pass
-  }
-
-  // - Frontegg Docker Auth - //
-  set_sensitive {
-    name = "frontegg.images.username"
-    value = var.frontegg_secret.data.username
-  }
-  set_sensitive {
-    name = "frontegg.images.password"
-    value = var.frontegg_secret.data.password
   }
 
 }

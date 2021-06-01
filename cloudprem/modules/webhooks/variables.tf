@@ -47,7 +47,7 @@ variable "rds_address" {}
 variable "rds_user" {}
 variable "rds_pass" {}
 variable "eks_sg" {}
-variable "frontegg_api_key" {}
-variable "frontegg_client_id" {}
+//variable "frontegg_api_key" {}
+//variable "frontegg_client_id" {}
 variable "frontegg_secret" {}
 variable "eks_cluster" {}
