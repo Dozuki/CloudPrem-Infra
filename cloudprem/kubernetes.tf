@@ -1,3 +1,9 @@
+
+locals {
+  frontegg_api_key = var.enable_webhooks ? data.kubernetes_secret.frontegg[0].data.apikey : ""
+  frontegg_client_id = var.enable_webhooks ? data.kubernetes_secret.frontegg[0].data.clientid : ""
+}
+
 data "kubernetes_secret" "frontegg" {
   depends_on = [module.replicated]
   count = var.enable_webhooks ? 1 : 0
@@ -128,8 +134,8 @@ resource "kubernetes_config_map" "dozuki_resources" {
 
     "frontegg.json" = <<-EOF
       {
-        "clientId": "${var.frontegg_client_id}",
-        "apiToken": "${var.frontegg_api_key}",
+        "clientId": "${local.frontegg_client_id}",
+        "apiToken": "${local.frontegg_api_key}",
         "apiBaseUrl": "http://frontegg-api-gateway.default.svc.cluster.local",
         "authUrl": "https://api.frontegg.com/auth/vendor"
       }
