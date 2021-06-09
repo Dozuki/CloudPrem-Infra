@@ -60,10 +60,5 @@ variable "eks_sg" {
   description = "EKS cluster security group"
 }
 variable "frontegg_secret" {
-  type = string
   description = "Kubernetes secret with frontegg authentication data created by replicated"
-}
-variable "eks_cluster" {
-  type = string
-  description = "Name of the deployed EKS cluster"
 }
