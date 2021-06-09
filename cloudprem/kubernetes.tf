@@ -89,6 +89,14 @@ resource "kubernetes_config_map" "dozuki_resources" {
       }
     EOF
 
+    "sentry.json" = <<-EOF
+      {
+        "tags": {
+          "deployment": "CloudPrem",
+        }
+      }
+    EOF
+
     "db.json" = <<-EOF
       {
         "generic": {
