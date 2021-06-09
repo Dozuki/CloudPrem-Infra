@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Bugfix Release
-            - Update cluster s3 ACL to allow listing a bucket, listing objects in a bucket, and copying objects.
+            Sentry Update
+            - Add config file for Sentry to better tag errors.
           draft: false
           prerelease: false
