@@ -147,7 +147,6 @@ resource "helm_release" "frontegg" {
   namespace = "default"
 
   reuse_values = true
-//  wait       = false
 
   values = [
     file("${path.module}/values.yaml")

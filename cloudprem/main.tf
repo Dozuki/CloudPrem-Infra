@@ -319,8 +319,6 @@ module "webhooks" {
   rds_user = module.primary_database.this_db_instance_username
   rds_pass = random_password.primary_database.result
   eks_sg = module.eks_cluster.cluster_primary_security_group_id
-//  frontegg_api_key = var.frontegg_api_key
-//  frontegg_client_id = var.frontegg_client_id
   frontegg_secret = data.kubernetes_secret.frontegg[0]
   eks_cluster = module.eks_cluster
 

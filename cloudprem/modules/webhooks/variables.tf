@@ -43,11 +43,27 @@ variable "tags" {
   description = "Additional tags (_e.g._ map(\"BusinessUnit\",\"ABC\")"
   default     = {}
 }
-variable "rds_address" {}
-variable "rds_user" {}
-variable "rds_pass" {}
-variable "eks_sg" {}
-//variable "frontegg_api_key" {}
-//variable "frontegg_client_id" {}
-variable "frontegg_secret" {}
-variable "eks_cluster" {}
+variable "rds_address" {
+  type = string
+  description = "Primary database hostname"
+}
+variable "rds_user" {
+  type = string
+  description = "Primary database username"
+}
+variable "rds_pass" {
+  type = string
+  description = "Primary database password"
+}
+variable "eks_sg" {
+  type = string
+  description = "EKS cluster security group"
+}
+variable "frontegg_secret" {
+  type = string
+  description = "Kubernetes secret with frontegg authentication data created by replicated"
+}
+variable "eks_cluster" {
+  type = string
+  description = "Name of the deployed EKS cluster"
+}
