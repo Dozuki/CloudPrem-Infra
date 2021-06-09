@@ -62,7 +62,7 @@ PROPERTIES
 resource "aws_msk_cluster" "this" {
   cluster_name           = "${var.name}-kafka"
   kafka_version          = "2.7.0"
-  number_of_broker_nodes = var.cluster_size
+  number_of_broker_nodes = var.kafka_cluster_size
 
   broker_node_group_info {
     instance_type   = var.instance_size

@@ -303,24 +303,23 @@ module "webhooks" {
 
   count = var.enable_webhooks ? 1 : 0
 
-//  depends_on = [module.eks_cluster]
-
   name = local.identifier
+
+  kafka_cluster_size  = local.azs_count
 
   vpc_id     = local.vpc_id
   subnet_ids = local.private_subnet_ids
-
   allowed_cidr_blocks = [local.vpc_cidr]
 
-  cluster_size  = local.azs_count
   rds_kms_key_id = var.rds_kms_key_id
-
   rds_address = module.primary_database.this_db_instance_address
   rds_user = module.primary_database.this_db_instance_username
   rds_pass = random_password.primary_database.result
+
   eks_sg = module.eks_cluster.cluster_primary_security_group_id
-  frontegg_secret = data.kubernetes_secret.frontegg[0]
   eks_cluster = module.eks_cluster
+
+  frontegg_secret = data.kubernetes_secret.frontegg[0]
 
   tags = local.tags
 }

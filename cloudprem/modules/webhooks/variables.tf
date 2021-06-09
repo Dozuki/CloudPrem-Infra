@@ -18,7 +18,7 @@ variable "rds_kms_key_id" {
   default = ""
   description = "KMS Key ID"
 }
-variable "cluster_size" {
+variable "kafka_cluster_size" {
   type = number
   default = 2
   description = "The amount of kafka brokers"
