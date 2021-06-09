@@ -10,3 +10,7 @@ variable "release_sequence" {
   description = "Pin a replicated release sequence on firstboot."
   default = ""
 }
+variable "dashboard_password" {
+  description = "Replicated dashboard password"
+  type = string
+}

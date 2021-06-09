@@ -12,6 +12,12 @@ data "kubernetes_secret" "frontegg" {
     namespace = "default"
   }
 }
+
+resource "random_password" "dashboard_password" {
+  length           = 16
+  special          = true
+}
+
 module "container_insights" {
   source = "./modules/container-insights"
 
@@ -30,6 +36,7 @@ module "replicated" {
   dozuki_license_parameter_name = local.dozuki_license_parameter_name
   nlb_hostname = module.nlb.this_lb_dns_name
   release_sequence = var.replicated_app_sequence_number
+  dashboard_password = random_password.dashboard_password.result
 }
 
 resource "kubernetes_config_map" "dozuki_resources" {

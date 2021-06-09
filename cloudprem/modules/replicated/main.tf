@@ -6,7 +6,8 @@ resource "kubernetes_config_map" "unattended_config" {
   data = {
     "replicated.conf" = templatefile("${path.module}/replicated.json", {
       nlb_hostname = var.nlb_hostname,
-      release_sequence = var.release_sequence
+      release_sequence = var.release_sequence,
+      dashboard_password = var.dashboard_password
     })
   }
 }
