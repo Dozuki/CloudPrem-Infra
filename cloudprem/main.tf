@@ -183,7 +183,6 @@ module "guide_pdfs_s3_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "1.16.0"
 
-  //  count = var.create_s3_buckets ? 1 : 0
   create_bucket = var.create_s3_buckets
 
   bucket_prefix = "dozuki-guide-pdfs"
@@ -215,7 +214,6 @@ module "guide_objects_s3_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "1.16.0"
 
-  //  count = var.create_s3_buckets ? 1 : 0
   create_bucket = var.create_s3_buckets
 
   bucket_prefix = "dozuki-guide-objects"
@@ -247,7 +245,6 @@ module "documents_s3_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "1.16.0"
 
-//  count = var.create_s3_buckets ? 1 : 0
   create_bucket = var.create_s3_buckets
 
   bucket_prefix = "dozuki-documents"
