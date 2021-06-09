@@ -265,16 +265,6 @@ variable "stack_type" {
     error_message = "Stack type should be one of: [dev, production]."
   }
 }
-variable "frontegg_api_key" {
-  description = "If webhooks are enabled, this is the api key for access to Frontegg's servers."
-  default = ""
-  type = string
-}
-variable "frontegg_client_id" {
-  description = "If webhooks are enabled, this is the client_id for access to Frontegg's servers."
-  default = ""
-  type = string
-}
 
 variable "replicated_app_sequence_number" {
   description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release."
