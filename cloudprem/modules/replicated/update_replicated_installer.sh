@@ -2,7 +2,7 @@
 set -eoxu pipefail
 
 GENERATE_SCRIPT='./kubernetes-yml-generate'
-REPLICATED_VERSION='2.40.4'
+REPLICATED_VERSION='2.52.0'
 
 curl -s "https://get.replicated.com/kubernetes-yml-generate?replicated_tag=$REPLICATED_VERSION" -o "$GENERATE_SCRIPT"
 

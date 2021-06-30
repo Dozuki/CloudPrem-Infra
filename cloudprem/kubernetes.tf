@@ -1,3 +1,23 @@
+
+locals {
+  frontegg_api_key = var.enable_webhooks ? data.kubernetes_secret.frontegg[0].data.apikey : ""
+  frontegg_client_id = var.enable_webhooks ? data.kubernetes_secret.frontegg[0].data.clientid : ""
+}
+
+data "kubernetes_secret" "frontegg" {
+  depends_on = [module.replicated]
+  count = var.enable_webhooks ? 1 : 0
+  metadata {
+    name = "frontegg-credentials"
+    namespace = "default"
+  }
+}
+
+resource "random_password" "dashboard_password" {
+  length           = 16
+  special          = true
+}
+
 module "container_insights" {
   source = "./modules/container-insights"
 
@@ -14,6 +34,9 @@ module "replicated" {
   depends_on = [module.eks_cluster]
 
   dozuki_license_parameter_name = local.dozuki_license_parameter_name
+  nlb_hostname = module.nlb.this_lb_dns_name
+  release_sequence = var.replicated_app_sequence_number
+  dashboard_password = random_password.dashboard_password.result
 }
 
 resource "kubernetes_config_map" "dozuki_resources" {
@@ -71,10 +94,10 @@ resource "kubernetes_config_map" "dozuki_resources" {
     "buckets.json" = <<-EOF
       {
         "default": {
-          "guide-images": "${module.guide_images_s3_bucket[0].this_s3_bucket_id}",
-          "guide-pdfs": "${module.guide_pdfs_s3_bucket[0].this_s3_bucket_id}",
-          "documents": "${module.documents_s3_bucket[0].this_s3_bucket_id}",
-          "guide-objects": "${module.guide_objects_s3_bucket[0].this_s3_bucket_id}"
+          "guide-images": "${local.guide_images_bucket}",
+          "guide-pdfs": "${local.guide_pdfs_bucket}",
+          "documents": "${local.documents_bucket}",
+          "guide-objects": "${local.guide_objects_bucket}"
         }
       }
     EOF
@@ -113,6 +136,15 @@ resource "kubernetes_config_map" "dozuki_resources" {
           "password": "${random_password.primary_database.result}",
           "CAFile": "/etc/dozuki/rds-ca.pem"
         }
+      }
+    EOF
+
+    "frontegg.json" = <<-EOF
+      {
+        "clientId": "${local.frontegg_client_id}",
+        "apiToken": "${local.frontegg_api_key}",
+        "apiBaseUrl": "http://frontegg-api-gateway.default.svc.cluster.local",
+        "authUrl": "https://api.frontegg.com/auth/vendor"
       }
     EOF
 

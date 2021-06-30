@@ -118,11 +118,11 @@ module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
   version = "14.0.0"
 
-  depends_on = [module.vpc]
+  depends_on = [module.vpc, aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
   # EKS cofigurations
   cluster_name    = local.identifier
-  cluster_version = "1.18"
+  cluster_version = "1.19"
   enable_irsa     = true
 
   vpc_id  = local.vpc_id
@@ -172,11 +172,11 @@ module "eks_cluster" {
 resource "null_resource" "managed_node_asg_nlb_attach" { # TODO Remove when feature is added https://github.com/aws/containers-roadmap/issues/709
 
   triggers = {
-    asg = module.eks_cluster.node_groups["workers"].resources[0].autoscaling_groups[0].name
+    asg = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
   }
 
   provisioner "local-exec" {
-    command = "aws autoscaling attach-load-balancer-target-groups --auto-scaling-group-name '${module.eks_cluster.node_groups["workers"].resources[0].autoscaling_groups[0].name}' --target-group-arns ${join(" ", module.nlb.target_group_arns)}"
+    command = "aws autoscaling attach-load-balancer-target-groups --auto-scaling-group-name '${lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")}' --target-group-arns ${join(" ", module.nlb.target_group_arns)}"
   }
 }
 

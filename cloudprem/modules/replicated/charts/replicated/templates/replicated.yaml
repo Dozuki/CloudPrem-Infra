@@ -77,9 +77,11 @@ spec:
         app: replicated
         tier: master
     spec:
+      imagePullSecrets:
+        - name: replicateddockerhubkey
       containers:
         - name: replicated
-          image: "quay.io/replicated/replicated:stable-2.40.4"
+          image: "replicated/replicated:stable-2.52.0"
           imagePullPolicy: IfNotPresent
           env:
             - name: SCHEDULER_ENGINE
@@ -144,6 +146,7 @@ spec:
               mountPath: /host/var/run/docker.sock
             - name: replicated-conf
               mountPath: /host/etc/replicated.conf
+              subPath: replicated.conf
             - name: proc
               mountPath: /host/proc
               readOnly: true
@@ -165,7 +168,7 @@ spec:
                   - -c
                   - /tmp/load.sh
         - name: replicated-ui
-          image: "quay.io/replicated/replicated-ui:stable-2.40.4"
+          image: "replicated/replicated-ui:stable-2.52.0"
           imagePullPolicy: IfNotPresent
           env:
             - name: RELEASE_CHANNEL
@@ -201,9 +204,6 @@ spec:
         - name: docker-socket
           hostPath:
             path: /var/run/docker.sock
-        - name: replicated-conf
-          hostPath:
-            path: /etc/replicated.conf
         - name: proc
           hostPath:
             path: /proc
@@ -214,6 +214,9 @@ spec:
           configMap:
             name: load-license
             defaultMode: 0777
+        - name: replicated-conf
+          configMap:
+            name: replicated-unattended-conf
 ---
 apiVersion: v1
 kind: Service

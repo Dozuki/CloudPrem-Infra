@@ -36,7 +36,15 @@ write_files:
 
     aws eks update-kubeconfig --name "${eks_cluster_name}" --role-arn "${eks_cluster_access_role}" --kubeconfig /home/ssm-user/.kube/config --region ${aws_region}
     chown ssm-user:ssm-user /home/ssm-user/.kube -R
+- path: /tmp/create_frontegg_schema.sh
+  permissions: '700'
+  content: |
+#!/bin/bash
+set -exuo pipefail
+
+    mysql --defaults-file=/home/ssm-user/.my.cnf -e "create database frontegg_events; create database frontegg_webhooks"
 
 runcmd:
 - /tmp/populate-mysql-credentials.sh
 - /tmp/setup-k8.sh
+- /tmp/create_frontegg_schema.sh

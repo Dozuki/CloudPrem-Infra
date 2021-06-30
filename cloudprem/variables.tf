@@ -92,12 +92,33 @@ variable "eks_desired_capacity" {
 
 # --- END EKS & Worker Node Configuration --- #
 
-# --- BEGIN Databsae and storage Options --- #
+# --- BEGIN Database and storage Options --- #
 
 variable "s3_kms_key_id" {
   description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
   default     = "alias/aws/s3"
+}
+
+variable "s3_objects_bucket" {
+  description = "Name of the bucket to store guide objects. Use with 'create_s3_buckets' = false."
+  type = string
+  default = ""
+}
+variable "s3_images_bucket" {
+  description = "Name of the bucket to store guide images. Use with 'create_s3_buckets' = false."
+  type = string
+  default = ""
+}
+variable "s3_documents_bucket" {
+  description = "Name of the bucket to store documents. Use with 'create_s3_buckets' = false."
+  type = string
+  default = ""
+}
+variable "s3_pdfs_bucket" {
+  description = "Name of the bucket to store guide pdfs. Use with 'create_s3_buckets' = false."
+  type = string
+  default = ""
 }
 
 variable "rds_kms_key_id" {
@@ -175,7 +196,13 @@ variable "cache_instance_type" {
   default     = "cache.t2.small"
 }
 
-# --- END Databsae and storage Options --- #
+variable "enable_webhooks" {
+  description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
+  type        = bool
+  default     = false
+}
+
+# --- END Database and storage Options --- #
 
 # --- BEGIN Bastion --- #
 
@@ -227,4 +254,20 @@ variable "environment" {
     condition     = length(var.environment) <= 5
     error_message = "The length of the Environment must be less than 6 characters."
   }
+}
+variable "stack_type" {
+  description = "Specify whether this is a production stack or a development stack. Production stacks have data protection settings enabled but will leave resources behind after a terraform delete operation."
+  type = string
+  default = "production"
+
+  validation {
+    condition = var.stack_type == "dev" || var.stack_type == "production"
+    error_message = "Stack type should be one of: [dev, production]."
+  }
+}
+
+variable "replicated_app_sequence_number" {
+  description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release."
+  default = 0
+  type = number
 }
