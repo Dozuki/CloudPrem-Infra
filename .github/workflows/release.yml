@@ -22,7 +22,12 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Sentry Update
-            - Add config file for Sentry to better tag errors.
+            Webhooks & QoL Updates
+            - Added infrastructure required by webhook integration.
+            - Added specify initial Replicated release sequence on fresh installs.
+            - Added specify existing S3 buckets in the config repo.
+            - S3 buckets now use versioning.
+            - Replicated install process has been fully automated. Hostname, password, and self-signed certificate are auto-configured.
+            - Upgraded Replicated k8 scheduler to 2.52
           draft: false
           prerelease: false
