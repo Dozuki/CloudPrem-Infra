@@ -22,12 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Webhooks & QoL Updates
-            - Added infrastructure required by webhook integration.
-            - Added specify initial Replicated release sequence on fresh installs.
-            - Added specify existing S3 buckets in the config repo.
-            - S3 buckets now use versioning.
-            - Replicated install process has been fully automated. Hostname, password, and self-signed certificate are auto-configured.
-            - Upgraded Replicated k8 scheduler to 2.52
+            Bastion Userdata Hotfix
+            - Fixed incorrect spacing in userdata file that prevented utilities from being installed and configured.
           draft: false
           prerelease: false

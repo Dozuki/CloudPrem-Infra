@@ -39,8 +39,8 @@ write_files:
 - path: /tmp/create_frontegg_schema.sh
   permissions: '700'
   content: |
-#!/bin/bash
-set -exuo pipefail
+    #!/bin/bash
+    set -exuo pipefail
 
     mysql --defaults-file=/home/ssm-user/.my.cnf -e "create database frontegg_events; create database frontegg_webhooks"
 
