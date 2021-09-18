@@ -1,0 +1,12 @@
+repos:
+  - repo: https://github.com/terraform-docs/terraform-docs
+    rev: "v0.15.0"
+    hooks:
+      - id: terraform-docs-go
+        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/network"]
+      - id: terraform-docs-go
+        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/compute"]
+      - id: terraform-docs-go
+        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/storage"]
+      - id: terraform-docs-go
+        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/app"]
