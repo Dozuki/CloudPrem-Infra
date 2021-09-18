@@ -70,6 +70,14 @@ resource "kubernetes_config_map" "dozuki_resources" {
               "port": ${module.memcached.port}
             }
           ]
+        },
+        "testCluster": {
+          "servers": [
+            {
+              "hostname": "${module.memcached.cluster_address}",
+              "port": ${module.memcached.port}
+            }
+          ]
         }
       }
     EOF
