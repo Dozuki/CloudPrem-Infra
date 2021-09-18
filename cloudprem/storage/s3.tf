@@ -1,17 +1,17 @@
 data "aws_s3_bucket" "guide_images" {
-  count = var.create_s3_buckets ? 0 : 1
+  count  = var.create_s3_buckets ? 0 : 1
   bucket = var.s3_images_bucket
 }
 data "aws_s3_bucket" "guide_objects" {
-  count = var.create_s3_buckets ? 0 : 1
+  count  = var.create_s3_buckets ? 0 : 1
   bucket = var.s3_objects_bucket
 }
 data "aws_s3_bucket" "guide_pdfs" {
-  count = var.create_s3_buckets ? 0 : 1
+  count  = var.create_s3_buckets ? 0 : 1
   bucket = var.s3_pdfs_bucket
 }
 data "aws_s3_bucket" "documents" {
-  count = var.create_s3_buckets ? 0 : 1
+  count  = var.create_s3_buckets ? 0 : 1
   bucket = var.s3_documents_bucket
 }
 module "guide_images_s3_bucket" {

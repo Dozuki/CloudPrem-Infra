@@ -9,10 +9,10 @@ resource "aws_security_group" "elasticache" {
   }
 
   tags = merge(
-  {
-    "Name" = format("%s", "${local.identifier}-elasticache")
-  },
-  local.tags
+    {
+      "Name" = format("%s", "${local.identifier}-elasticache")
+    },
+    local.tags
   )
 }
 

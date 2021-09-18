@@ -39,11 +39,11 @@ variable "highly_available_nat_gateway" {
 }
 variable "azs_count" {
   description = "The number of availability zones we should use for deployment."
-  type = number
-  default = 3
+  type        = number
+  default     = 3
 
   validation {
-    condition = var.azs_count >= 3 && var.azs_count <= 10
+    condition     = var.azs_count >= 3 && var.azs_count <= 10
     error_message = "AZ count must be between 3 and 10."
   }
 }

@@ -1,7 +1,7 @@
 module "sns" {
   source  = "terraform-aws-modules/sns/aws"
   version = "2.1.0"
-  name = local.identifier
+  name    = local.identifier
 }
 
 module "cpu_alarm" {
@@ -22,7 +22,7 @@ module "cpu_alarm" {
 
   dimensions = {
     AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-//    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    //    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
   }
 
   alarm_actions = [
@@ -81,7 +81,7 @@ module "status_alarm" {
 
   dimensions = {
     AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-//    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    //    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
   }
 
   alarm_actions = [
@@ -94,24 +94,24 @@ module "status_alarm" {
 }
 
 module "nodes_alarm" {
-  source = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "2.1.0"
 
-  alarm_name = "${local.identifier}-nodes-in-service"
+  alarm_name        = "${local.identifier}-nodes-in-service"
   alarm_description = "Nodes in service under desired capacity for ${local.identifier} cluster"
 
-  namespace = "AWS/AutoScaling"
+  namespace   = "AWS/AutoScaling"
   metric_name = "GroupInServiceInstances"
-  statistic = "Sum"
+  statistic   = "Sum"
 
   comparison_operator = "LessThanThreshold"
-  evaluation_periods = 1
-  threshold = var.eks_desired_capacity
-  period = 60
+  evaluation_periods  = 1
+  threshold           = var.eks_desired_capacity
+  period              = 60
 
   dimensions = {
     AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-//    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    //    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
   }
 
   alarm_actions = [

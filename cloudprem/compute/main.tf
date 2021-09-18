@@ -1,6 +1,6 @@
 terraform {
   required_providers {
-    aws        = "3.56.0"
+    aws = "3.56.0"
   }
 }
 
@@ -14,9 +14,9 @@ locals {
   identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
   tags = {
-    Terraform = "true"
-    Project = "Dozuki"
-    Identifier = var.identifier
+    Terraform   = "true"
+    Project     = "Dozuki"
+    Identifier  = var.identifier
     Environment = var.environment
   }
 }
@@ -232,33 +232,33 @@ module "eks_cluster" {
     aws_iam_policy.eks_worker.arn,
   ]
 
-//  workers_group_defaults = {
-//    health_check_type = "ELB"
-//  }
-//  worker_groups_launch_template = [
-//    {
-//      name                 = "workers"
-//      instance_type        = var.eks_instance_type
-//      asg_desired_capacity = var.eks_desired_capacity
-//      asg_min_size         = var.eks_min_size
-//      asg_max_size         = var.eks_max_size
-//      public_ip            = false
-//      target_group_arns = module.nlb.target_group_arns
-////      load_balancers      = [module.nlb.lb_dns_name]
-//      tags = [{
-//        key                 = "Environment"
-//        value               = var.environment
-//        propagate_at_launch = true
-//      }]
-//    }
-//  ]
+  //  workers_group_defaults = {
+  //    health_check_type = "ELB"
+  //  }
+  //  worker_groups_launch_template = [
+  //    {
+  //      name                 = "workers"
+  //      instance_type        = var.eks_instance_type
+  //      asg_desired_capacity = var.eks_desired_capacity
+  //      asg_min_size         = var.eks_min_size
+  //      asg_max_size         = var.eks_max_size
+  //      public_ip            = false
+  //      target_group_arns = module.nlb.target_group_arns
+  ////      load_balancers      = [module.nlb.lb_dns_name]
+  //      tags = [{
+  //        key                 = "Environment"
+  //        value               = var.environment
+  //        propagate_at_launch = true
+  //      }]
+  //    }
+  //  ]
 
   node_groups = {
     workers = {
       desired_capacity = var.eks_desired_capacity
       max_capacity     = var.eks_max_size
       min_capacity     = var.eks_min_size
-      instance_types = [var.eks_instance_type]
+      instance_types   = [var.eks_instance_type]
 
       launch_template_id      = aws_launch_template.eks.id
       launch_template_version = aws_launch_template.eks.default_version
@@ -379,6 +379,6 @@ resource "aws_autoscaling_attachment" "autoscaling_attachment" {
   count = length(module.nlb.target_group_arns)
 
   autoscaling_group_name = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-//  autoscaling_group_name = module.eks_cluster.workers_asg_names[0]
-  alb_target_group_arn   = module.nlb.target_group_arns[count.index]
+  //  autoscaling_group_name = module.eks_cluster.workers_asg_names[0]
+  alb_target_group_arn = module.nlb.target_group_arns[count.index]
 }

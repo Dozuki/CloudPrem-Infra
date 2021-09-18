@@ -83,7 +83,7 @@ resource "aws_secretsmanager_secret" "primary_database_credentials" {
   name = "${local.identifier}-database"
 
   recovery_window_in_days = 0
-  kms_key_id = data.aws_kms_key.rds.arn
+  kms_key_id              = data.aws_kms_key.rds.arn
 }
 
 resource "aws_secretsmanager_secret_version" "primary_database_credentials" {
@@ -291,11 +291,11 @@ resource "null_resource" "replication_control" {
     dms_task_arn        = aws_dms_replication_task.this[0].replication_task_arn,
     source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn,
     target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn,
-    aws_region = data.aws_region.current.name
+    aws_region          = data.aws_region.current.name
   }
 
   provisioner "local-exec" {
-    when    = create
+    when = create
     # The sleep fixes a race condition where the endpoint connection tests haven't fully finished in time.
     command = "aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${self.triggers["dms_task_arn"]} --region ${self.triggers["aws_region"]}"
   }
