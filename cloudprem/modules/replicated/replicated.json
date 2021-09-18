@@ -1,7 +1,0 @@
-{
-  "DaemonAuthenticationType": "password",
-  "ReleaseSequence": ${release_sequence},
-  "DaemonAuthenticationPassword": "${dashboard_password}",
-  "TlsBootstrapType": "self-signed",
-  "TlsBootstrapHostname": "${nlb_hostname}"
-}
