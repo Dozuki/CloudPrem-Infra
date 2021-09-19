@@ -7,5 +7,4 @@ locals {
   rds_multi_az = false
   dozuki_license_parameter_name = "/dozuki/dev/license"
   protect_resources = false
-  replicated_app_sequence_number = 3790
 }
