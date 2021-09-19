@@ -81,6 +81,7 @@ module "primary_database" {
   tags = local.tags
 }
 
+#tfsec:ignore:aws-ssm-secret-use-customer-key
 resource "aws_secretsmanager_secret" "primary_database_credentials" {
   name = "${local.identifier}-database"
 
