@@ -1,6 +1,6 @@
 
 locals {
-  frontegg_api_key   = var.enable_webhooks ? try(data.kubernetes_secret.frontegg[0].data.apikey, "") : ""
+  frontegg_api_key   = var.enable_webhooks ? try(data.kubernetes_secret.frontegg[0].data.apikey, "") : "" #tfsec:ignore:general-secrets-sensitive-in-local
   frontegg_client_id = var.enable_webhooks ? try(data.kubernetes_secret.frontegg[0].data.clientid, "") : ""
 }
 

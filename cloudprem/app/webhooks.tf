@@ -3,7 +3,7 @@ locals {
   frontegg_apikey   = try(data.kubernetes_secret.frontegg[0].data.apikey, "")
   frontegg_pub_key  = try(data.kubernetes_secret.frontegg[0].data.pubkey, "")
   frontegg_username = try(data.kubernetes_secret.frontegg[0].data.username, "")
-  frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "")
+  frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "") #tfsec:ignore:general-secrets-sensitive-in-local
 }
 
 

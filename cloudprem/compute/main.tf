@@ -94,6 +94,7 @@ resource "aws_iam_policy" "cluster_access" {
   policy = data.aws_iam_policy_document.cluster_access.json
 }
 
+#tfsec:ignore:aws-iam-no-policy-wildcards
 data "aws_iam_policy_document" "eks_worker" {
   statement {
     actions = [
@@ -212,6 +213,11 @@ resource "aws_launch_template" "eks" {
   }
 }
 
+#tfsec:ignore:aws-vpc-no-public-egress-sgr
+#tfsec:ignore:aws-eks-no-public-cluster-access-to-cidr
+#tfsec:ignore:aws-eks-no-public-cluster-access
+#tfsec:ignore:aws-eks-encrypt-secrets
+#tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
   version = "17.11.0"
@@ -219,9 +225,11 @@ module "eks_cluster" {
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
   # EKS cofigurations
-  cluster_name    = local.identifier
-  cluster_version = "1.20"
-  enable_irsa     = true
+  cluster_name                    = local.identifier
+  cluster_version                 = "1.20"
+  enable_irsa                     = true
+  cluster_endpoint_public_access  = !var.protect_resources
+  cluster_endpoint_private_access = true
 
   vpc_id  = var.vpc_id
   subnets = data.aws_subnets.private.ids
@@ -231,27 +239,6 @@ module "eks_cluster" {
   workers_additional_policies = [
     aws_iam_policy.eks_worker.arn,
   ]
-
-  //  workers_group_defaults = {
-  //    health_check_type = "ELB"
-  //  }
-  //  worker_groups_launch_template = [
-  //    {
-  //      name                 = "workers"
-  //      instance_type        = var.eks_instance_type
-  //      asg_desired_capacity = var.eks_desired_capacity
-  //      asg_min_size         = var.eks_min_size
-  //      asg_max_size         = var.eks_max_size
-  //      public_ip            = false
-  //      target_group_arns = module.nlb.target_group_arns
-  ////      load_balancers      = [module.nlb.lb_dns_name]
-  //      tags = [{
-  //        key                 = "Environment"
-  //        value               = var.environment
-  //        propagate_at_launch = true
-  //      }]
-  //    }
-  //  ]
 
   node_groups = {
     workers = {
@@ -286,10 +273,6 @@ module "eks_cluster" {
   tags = local.tags
 }
 
-//data "aws_autoscaling_group" "workers" {
-//  name = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-//}
-
 resource "aws_security_group_rule" "replicated_ui_access" {
   type              = "ingress"
   from_port         = 32001
@@ -320,6 +303,7 @@ resource "aws_security_group_rule" "app_access_http" {
   description       = "Access to application"
 }
 
+#tfsec:ignore:aws-elbv2-alb-not-public
 module "nlb" {
   source  = "terraform-aws-modules/alb/aws"
   version = "6.5.0"
@@ -379,6 +363,5 @@ resource "aws_autoscaling_attachment" "autoscaling_attachment" {
   count = length(module.nlb.target_group_arns)
 
   autoscaling_group_name = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-  //  autoscaling_group_name = module.eks_cluster.workers_asg_names[0]
-  alb_target_group_arn = module.nlb.target_group_arns[count.index]
+  alb_target_group_arn   = module.nlb.target_group_arns[count.index]
 }

@@ -1,4 +1,5 @@
 
+#tfsec:ignore:aws-vpc-no-public-egress-sgr
 module "database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "4.3.0"
@@ -21,6 +22,7 @@ resource "random_password" "primary_database" {
   special = false
 }
 
+#tfsec:ignore:general-secrets-sensitive-in-variable
 module "primary_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "3.3.0"
@@ -83,7 +85,7 @@ resource "aws_secretsmanager_secret" "primary_database_credentials" {
   name = "${local.identifier}-database"
 
   recovery_window_in_days = 0
-  kms_key_id              = data.aws_kms_key.rds.arn
+  //  kms_key_id              = data.aws_kms_key.rds.arn
 }
 
 resource "aws_secretsmanager_secret_version" "primary_database_credentials" {
@@ -108,6 +110,7 @@ resource "random_password" "replica_database" {
   special = false
 }
 
+#tfsec:ignore:general-secrets-sensitive-in-variable
 module "replica_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "3.3.0"

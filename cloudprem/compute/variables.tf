@@ -95,3 +95,8 @@ variable "public_access" {
   type        = bool
   default     = true
 }
+variable "protect_resources" {
+  description = "Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled."
+  type        = bool
+  default     = true
+}

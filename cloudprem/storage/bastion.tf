@@ -11,6 +11,7 @@ data "aws_ami" "amazon_linux_2" {
   }
 }
 
+#tfsec:ignore:aws-vpc-no-public-egress-sgr
 module "bastion_sg" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "4.3.0"
@@ -45,6 +46,7 @@ module "bastion_role" {
   tags = local.tags
 }
 
+#tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
   version = "3.8.0"
@@ -58,9 +60,6 @@ module "bastion" {
   security_groups              = [module.bastion_sg.security_group_id]
   associate_public_ip_address  = false
   recreate_asg_when_lc_changes = true
-  root_block_device = {
-    encrypted = true
-  }
 
   user_data_base64 = base64encode(templatefile("${path.module}/static/bastion_userdata.yml", {
     aws_region                     = data.aws_region.current.name
