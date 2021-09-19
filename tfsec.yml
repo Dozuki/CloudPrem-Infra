@@ -1,4 +1,0 @@
----
-exclude:
-  - aws-iam-no-policy-wildcards
-  - general-secrets-sensitive-in-local

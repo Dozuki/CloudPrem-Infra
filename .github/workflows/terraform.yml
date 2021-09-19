@@ -57,7 +57,6 @@ jobs:
         reporter: github-pr-review
         filter_mode: nofilter
         fail_on_error: true
-        tfsec_flags: "--exclude-downloaded-modules --config-file ../../tfsec.yml"
 
 
 
