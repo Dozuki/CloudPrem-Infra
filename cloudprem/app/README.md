@@ -41,7 +41,7 @@ No modules.
 | [kubernetes_config_map.dozuki_resources](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/config_map) | resource |
 | [kubernetes_config_map.unattended_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/config_map) | resource |
 | [kubernetes_job.database_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
-| [kubernetes_secret.replicated_license](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/secret) | resource |
+| [kubernetes_job.replicated_sequence_reset](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
 | [local_file.api_helmignore](https://registry.terraform.io/providers/hashicorp/local/latest/docs/resources/file) | resource |
 | [local_file.connectors_helmignore](https://registry.terraform.io/providers/hashicorp/local/latest/docs/resources/file) | resource |
 | [local_file.default_helmignore](https://registry.terraform.io/providers/hashicorp/local/latest/docs/resources/file) | resource |

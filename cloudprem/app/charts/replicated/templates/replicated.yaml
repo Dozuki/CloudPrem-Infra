@@ -150,23 +150,10 @@ spec:
             - name: proc
               mountPath: /host/proc
               readOnly: true
-            - name: replicated-license
-              mountPath: /tmp/license.rli
-              subPath: license.rli
-            - name: load-license
-              mountPath: /tmp/load.sh
-              subPath: load.sh
           resources:
             requests:
               cpu: 250m
               memory: 256Mi
-          lifecycle:
-            postStart:
-              exec:
-                command:
-                  - /bin/sh
-                  - -c
-                  - /tmp/load.sh
         - name: replicated-ui
           image: "replicated/replicated-ui:stable-2.52.0"
           imagePullPolicy: IfNotPresent
@@ -184,6 +171,16 @@ spec:
             requests:
               cpu: 10m
               memory: 64Mi
+      initContainers:
+        - name: license-load
+          image: busybox:1.33.1
+          command:
+            - /bin/sh
+            - -c
+            - echo "{{ .Values.license }}" > /tmp/license.rli
+          volumeMounts:
+            - name: replicated-license
+              mountPath: /tmp/license.rli
       tolerations:
         - key: node-role.kubernetes.io/master
           effect: NoSchedule
@@ -208,12 +205,9 @@ spec:
           hostPath:
             path: /proc
         - name: replicated-license
-          secret:
-            secretName: '{{ .Values.license_secret }}'
-        - name: load-license
-          configMap:
-            name: load-license
-            defaultMode: 0777
+          hostPath:
+            path: /tmp/license.rli
+            type: FileOrCreate
         - name: replicated-conf
           configMap:
             name: replicated-unattended-conf
