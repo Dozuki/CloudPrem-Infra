@@ -220,7 +220,7 @@ resource "aws_launch_template" "eks" {
 #tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "17.11.0"
+  version = "17.20.0"
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 

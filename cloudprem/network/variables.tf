@@ -35,7 +35,7 @@ variable "vpc_cidr" {
 variable "highly_available_nat_gateway" {
   description = "Should be true if you want to provision a highly available NAT Gateway across all of your private networks"
   type        = bool
-  default     = false
+  default     = true
 }
 variable "azs_count" {
   description = "The number of availability zones we should use for deployment."

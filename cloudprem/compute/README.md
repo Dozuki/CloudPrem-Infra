@@ -17,7 +17,7 @@
 |------|--------|---------|
 | <a name="module_cluster_access_role"></a> [cluster\_access\_role](#module\_cluster\_access\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 4.3.0 |
 | <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
-| <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.11.0 |
+| <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.20.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 6.5.0 |
 | <a name="module_nodes_alarm"></a> [nodes\_alarm](#module\_nodes\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
