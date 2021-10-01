@@ -71,21 +71,3 @@ data "aws_subnets" "private" {
     type = "private"
   }
 }
-
-
-resource "helm_release" "container_insights" {
-  name  = "container-insights"
-  chart = "${path.module}/charts/container_insights"
-
-  namespace = "default"
-
-  set {
-    name  = "cluster_name"
-    value = var.eks_cluster_id
-  }
-
-  set {
-    name  = "region_name"
-    value = data.aws_region.current.name
-  }
-}

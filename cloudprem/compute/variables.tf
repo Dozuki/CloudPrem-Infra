@@ -29,10 +29,10 @@ variable "vpc_id" {
   type        = string
   default     = ""
 }
-variable "eks_instance_type" {
+variable "eks_instance_types" {
   description = "The instance type of each node in the application's EKS worker node group."
-  default     = "t3.medium"
-  type        = string
+  default     = ["m5.large", "m5a.large", "m5d.large", "m5ad.large"]
+  type        = list(string)
 }
 
 variable "eks_volume_size" {
@@ -49,7 +49,7 @@ variable "eks_volume_size" {
 variable "eks_min_size" {
   description = "The minimum amount of nodes we will autoscale to."
   type        = number
-  default     = "4"
+  default     = "2"
 
   validation {
     condition     = var.eks_min_size >= 1
@@ -60,7 +60,7 @@ variable "eks_min_size" {
 variable "eks_max_size" {
   description = "The maximum amount of nodes we will autoscale to."
   type        = number
-  default     = "4"
+  default     = "10"
 
   validation {
     condition     = var.eks_max_size >= 1
@@ -71,7 +71,7 @@ variable "eks_max_size" {
 variable "eks_desired_capacity" {
   description = "This is what the node count will start out as."
   type        = number
-  default     = "4"
+  default     = "3"
 
   validation {
     condition     = var.eks_desired_capacity >= 1

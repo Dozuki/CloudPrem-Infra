@@ -10,6 +10,3 @@ output "nlb_dns_name" {
 output "cluster_primary_sg" {
   value = module.eks_cluster.cluster_primary_security_group_id
 }
-//output "health_check_type" {
-//  value = data.aws_autoscaling_group.workers.health_check_type
-//}

@@ -21,8 +21,8 @@ module "cpu_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-    //    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    //    AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
+    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
   }
 
   alarm_actions = [
@@ -80,8 +80,8 @@ module "status_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-    //    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    //    AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
+    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
   }
 
   alarm_actions = [
@@ -110,8 +110,8 @@ module "nodes_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-    //    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    //    AutoScalingGroupName = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
+    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
   }
 
   alarm_actions = [

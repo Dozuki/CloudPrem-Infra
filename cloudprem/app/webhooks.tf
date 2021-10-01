@@ -10,6 +10,8 @@ locals {
 resource "kubernetes_job" "database_update" {
   count = var.enable_webhooks ? 1 : 0
 
+  depends_on = [helm_release.replicated]
+
   metadata {
     name = "frontegg-db-update"
   }
