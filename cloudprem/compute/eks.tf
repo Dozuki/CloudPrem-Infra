@@ -1,4 +1,25 @@
 
+module "cluster_access_role_assumable" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "4.3.0"
+
+  create_role = true
+
+  role_name         = "${local.identifier}-${data.aws_region.current.name}-cluster-access-assumable"
+  role_requires_mfa = false
+
+  custom_role_policy_arns = [
+    "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
+    aws_iam_policy.cluster_access.arn,
+  ]
+
+  trusted_role_arns = [
+    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root",
+  ]
+
+  tags = local.tags
+}
+
 # IAM role to access the EKS cluster. By default only the user that creates the cluster has access to it
 module "cluster_access_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
@@ -14,8 +35,7 @@ module "cluster_access_role" {
     aws_iam_policy.cluster_autoscaler.arn
   ]
   oidc_fully_qualified_subjects = [
-    "system:serviceaccount:kube-system:cluster-autoscaler-aws-cluster-autoscaler-chart",
-    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
+    "system:serviceaccount:kube-system:cluster-autoscaler-aws-cluster-autoscaler-chart"
   ]
 
   tags = local.tags
@@ -96,66 +116,6 @@ resource "aws_iam_policy" "eks_worker" {
   name   = "${local.identifier}-${data.aws_region.current.name}"
   policy = data.aws_iam_policy_document.eks_worker.json
 }
-//resource "aws_launch_template" "eks" {
-//  name_prefix            = "eks-worker-"
-//  description            = "Default Launch-Template"
-//  update_default_version = true
-//
-//  block_device_mappings {
-//    device_name = "/dev/xvda"
-//
-//    ebs {
-//      volume_size           = var.eks_volume_size
-//      volume_type           = "gp2"
-//      delete_on_termination = true
-//      # encrypted             = true
-//
-//      # Enable this if you want to encrypt your node root volumes with a KMS/CMK. encryption of PVCs is handled via k8s StorageClass tho
-//      # you also need to attach data.aws_iam_policy_document.ebs_decryption.json from the disk_encryption_policy.tf to the KMS/CMK key then !!
-//      # kms_key_id            = var.kms_key_arn
-//    }
-//  }
-//
-//  monitoring {
-//    enabled = true
-//  }
-//
-//  network_interfaces {
-//    associate_public_ip_address = false
-//    delete_on_termination       = true
-//    security_groups             = [module.eks_cluster.worker_security_group_id]
-//  }
-//
-//
-//  # Supplying custom tags to EKS instances is another use-case for LaunchTemplates
-//  tag_specifications {
-//    resource_type = "instance"
-//
-//    tags = local.tags
-//  }
-//
-//  # Supplying custom tags to EKS instances root volumes is another use-case for LaunchTemplates. (doesnt add tags to dynamically provisioned volumes via PVC tho)
-//  tag_specifications {
-//    resource_type = "volume"
-//
-//    tags = local.tags
-//  }
-//
-//  # Supplying custom tags to EKS instances ENI's is another use-case for LaunchTemplates
-//  tag_specifications {
-//    resource_type = "network-interface"
-//
-//    tags = local.tags
-//  }
-//
-//  # Tag the LT itself
-//
-//  tags = local.tags
-//
-//  lifecycle {
-//    create_before_destroy = true
-//  }
-//}
 
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 #tfsec:ignore:aws-eks-no-public-cluster-access-to-cidr
@@ -223,35 +183,17 @@ module "eks_cluster" {
     }
   ]
 
-  //  node_groups = {
-  //    workers = {
-  //      name = "${local.identifier}-workers"
-  //      desired_capacity = var.eks_desired_capacity
-  //      max_capacity     = var.eks_max_size
-  //      min_capacity     = var.eks_min_size
-  //      instance_types   = var.eks_instance_types
-  //      capacity_type  = "SPOT"
-  //
-  //      launch_template_id      = aws_launch_template.eks.id
-  //      launch_template_version = aws_launch_template.eks.default_version
-  //
-  //      k8s_labels = {
-  //        Environment = var.environment
-  //      }
-  //
-  //      additional_tags = {
-  //        Environment = var.environment,
-  //        "k8s.io/cluster-autoscaler/enabled" = true
-  //        "k8s.io/cluster-autoscaler/${local.identifier}" = "owned"
-  //      }
-  //    }
-  //  }
   # Kubernetes configurations
   write_kubeconfig = false
 
   map_roles = [ # aws-auth configmap
     {
       rolearn  = module.cluster_access_role.iam_role_arn
+      username = "admin"
+      groups   = ["system:masters"]
+    },
+    {
+      rolearn  = module.cluster_access_role_assumable.iam_role_arn
       username = "admin"
       groups   = ["system:masters"]
     },
