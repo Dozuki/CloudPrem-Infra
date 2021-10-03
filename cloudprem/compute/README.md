@@ -22,6 +22,7 @@
 | <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 4.3.0 |
 | <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.20.0 |
+| <a name="module_eks_private_sg"></a> [eks\_private\_sg](#module\_eks\_private\_sg) | terraform-aws-modules/security-group/aws | 4.3.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 6.5.0 |
 | <a name="module_nodes_alarm"></a> [nodes\_alarm](#module\_nodes\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
@@ -60,6 +61,7 @@
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/data-sources/region) | data source |
 | [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/data-sources/subnets) | data source |
 | [aws_subnets.public](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/data-sources/subnets) | data source |
+| [aws_vpc.main](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/data-sources/vpc) | data source |
 
 ## Inputs
 

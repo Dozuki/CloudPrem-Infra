@@ -66,3 +66,6 @@ data "aws_subnets" "public" {
 data "aws_kms_key" "s3" {
   key_id = var.kms_key_id
 }
+data "aws_vpc" "main" {
+  id = var.vpc_id
+}

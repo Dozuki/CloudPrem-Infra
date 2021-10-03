@@ -118,6 +118,24 @@ resource "aws_iam_policy" "eks_worker" {
 }
 
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
+module "eks_private_sg" {
+  source  = "terraform-aws-modules/security-group/aws"
+  version = "4.3.0"
+
+  name            = "${local.identifier}-eks-private-access"
+  use_name_prefix = false
+  description     = "Security group for ${local.identifier}. Allows access from within the VPC on port 443"
+  vpc_id          = var.vpc_id
+
+  ingress_cidr_blocks = [data.aws_vpc.main.cidr_block]
+  ingress_rules       = ["https-443-tcp"]
+
+  egress_rules = ["all-tcp"]
+
+  tags = local.tags
+}
+
+#tfsec:ignore:aws-vpc-no-public-egress-sgr
 #tfsec:ignore:aws-eks-no-public-cluster-access-to-cidr
 #tfsec:ignore:aws-eks-no-public-cluster-access
 #tfsec:ignore:aws-eks-encrypt-secrets
@@ -129,11 +147,12 @@ module "eks_cluster" {
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
   # EKS cofigurations
-  cluster_name                    = local.identifier
-  cluster_version                 = "1.21"
-  enable_irsa                     = true
-  cluster_endpoint_public_access  = !var.protect_resources
-  cluster_endpoint_private_access = true
+  cluster_name                       = local.identifier
+  cluster_version                    = "1.21"
+  enable_irsa                        = true
+  cluster_endpoint_public_access     = !var.protect_resources
+  cluster_endpoint_private_access    = true
+  cluster_endpoint_private_access_sg = [module.eks_private_sg.security_group_id]
 
   vpc_id  = var.vpc_id
   subnets = data.aws_subnets.private.ids
