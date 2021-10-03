@@ -154,6 +154,13 @@ module "eks_cluster" {
   cluster_endpoint_private_access    = true
   cluster_endpoint_private_access_sg = [module.eks_private_sg.security_group_id]
 
+  cluster_encryption_config = [
+    {
+      provider_key_arn = data.aws_kms_key.s3.arn
+      resources        = ["secrets"]
+    }
+  ]
+
   vpc_id  = var.vpc_id
   subnets = data.aws_subnets.private.ids
 
