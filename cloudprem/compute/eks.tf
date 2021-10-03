@@ -117,6 +117,10 @@ resource "aws_iam_policy" "eks_worker" {
   policy = data.aws_iam_policy_document.eks_worker.json
 }
 
+resource "aws_kms_key" "eks" {
+  description = "EKS Secret Encryption Key"
+}
+
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 #tfsec:ignore:aws-eks-no-public-cluster-access-to-cidr
 #tfsec:ignore:aws-eks-no-public-cluster-access
@@ -139,7 +143,7 @@ module "eks_cluster" {
 
   cluster_encryption_config = [
     {
-      provider_key_arn = data.aws_kms_key.s3.arn
+      provider_key_arn = aws_kms_key.eks.arn
       resources        = ["secrets"]
     }
   ]
