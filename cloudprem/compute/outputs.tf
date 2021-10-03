@@ -2,7 +2,7 @@ output "eks_cluster_id" {
   value = module.eks_cluster.cluster_id
 }
 output "eks_cluster_access_role_arn" {
-  value = module.cluster_access_role_assumable
+  value = module.cluster_access_role_assumable.iam_role_arn
 }
 output "nlb_dns_name" {
   value = module.nlb.lb_dns_name
