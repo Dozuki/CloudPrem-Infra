@@ -12,7 +12,7 @@ resource "kubernetes_horizontal_pod_autoscaler" "app" {
 
   spec {
     min_replicas = 2
-    max_replicas = 50
+    max_replicas = 10
 
     scale_target_ref {
       kind        = "Deployment"
