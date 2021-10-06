@@ -118,7 +118,8 @@ resource "aws_iam_policy" "eks_worker" {
 }
 
 resource "aws_kms_key" "eks" {
-  description = "EKS Secret Encryption Key"
+  description         = "EKS Secret Encryption Key"
+  enable_key_rotation = true
 }
 
 #tfsec:ignore:aws-vpc-no-public-egress-sgr

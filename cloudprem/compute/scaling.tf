@@ -4,6 +4,7 @@ resource "aws_iam_policy" "cluster_autoscaler" {
   policy      = data.aws_iam_policy_document.cluster_autoscaler.json
 }
 
+#tfsec:ignore:aws-iam-no-policy-wildcards
 data "aws_iam_policy_document" "cluster_autoscaler" {
   statement {
     sid    = "clusterAutoscalerAll"
