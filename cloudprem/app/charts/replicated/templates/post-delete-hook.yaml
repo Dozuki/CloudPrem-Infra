@@ -1,0 +1,49 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: replicated-cleanup
+  namespace: "default"
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "2"
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: "default"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: replicated-cleanup
+  namespace: default
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "3"
+    "helm.sh/hook-delete-policy": hook-succeeded
+  labels:
+    app: replicated-cleanup
+spec:
+  template:
+    metadata:
+      name: replicated-cleanup
+      labels:
+        app: replicated-cleanup
+    spec:
+      containers:
+        - name: kubectl
+          image: "k8s.gcr.io/hyperkube:v1.17.9"
+          imagePullPolicy: "IfNotPresent"
+          command:
+            - /bin/sh
+            - -c
+            - >
+              kubectl delete deployment `kubectl get deployment | grep -E "replicated|retraced" | awk '{print $1}'`;
+              kubectl delete services `kubectl get services | grep -E "replicated|retraced" | awk '{print $1}'`;
+              appNSs=$(kubectl get ns | grep replicated- | awk '{ print $1 }');
+              for appNS in "$appNSs"; do kubectl delete ns "$appNS"; done;
+              kubectl delete pvc `kubectl get pvc | grep -E "replicated|retraced" | awk '{print $1}'`
+      restartPolicy: OnFailure

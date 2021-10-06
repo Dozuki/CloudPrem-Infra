@@ -10,6 +10,9 @@ jobs:
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [network, compute, storage, app]
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
@@ -25,28 +28,35 @@ jobs:
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v1
 
-    # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
-    - name: Terraform Init
-      run: echo terraform init
+    - name: Terraform ${{ matrix.module }} Module Init
+      run: terraform init
+      working-directory: ./cloudprem/${{ matrix.module }}
 
     # Checks that all Terraform configuration files adhere to a canonical format
-    - name: Terraform Format
-      run: echo terraform fmt -check
-    
+    - name: Terraform Format Check
+      run: terraform fmt -check
+      working-directory: ./cloudprem/${{ matrix.module }}
+
     # Performs linting on the Terraform files
-    - name: Terraform Linting
-      run: echo tflint
-    
-    # Performs a security scan with the tfsec tool
-    - name: Terraform Security Scan
-      run: echo tfsec
+    - name: Terraform Linter
+      uses: reviewdog/action-tflint@master
+      with:
+        github_token: ${{ secrets.github_token }}
+        working_directory: "./cloudprem/${{ matrix.module }}" # Optional. Change working directory
+        reporter: github-pr-review # Optional. Change reporter
+        fail_on_error: "true" # Optional. Fail action if errors are found
+        filter_mode: "nofilter" # Optional. Check all files, not just the diff
+        tflint_rulesets: "aws" # Optional. Extra official rulesets to install
 
-#     # Generates an execution plan for Terraform
-#     - name: Terraform Plan
-#       run: terraform plan
+    - name: Terraform Security Review
+      uses: reviewdog/action-tfsec@master
+      with:
+        github_token: ${{ secrets.github_token }}
+        working_directory: ./cloudprem/${{ matrix.module }}
+        level: info
+        reporter: github-pr-review
+        filter_mode: nofilter
+        fail_on_error: true
 
-#       # On push to main, build or change infrastructure according to Terraform configuration files
-#       # Note: It is recommended to set up a required "strict" status check in your repository for "Terraform Cloud". See the documentation on "strict" required status checks for more information: https://help.github.com/en/github/administering-a-repository/types-of-required-status-checks
-#     - name: Terraform Apply
-#       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-#       run: terraform apply -auto-approve
+
+
