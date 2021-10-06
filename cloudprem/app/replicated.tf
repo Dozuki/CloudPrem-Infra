@@ -23,9 +23,6 @@ resource "helm_release" "replicated" {
 
   namespace = "default"
 
-  # There is a PVC that never gets to a Bound state
-  //      wait = false
-
   set {
     name  = "license"
     value = data.aws_ssm_parameter.dozuki_license.value

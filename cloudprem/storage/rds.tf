@@ -1,4 +1,3 @@
-
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 module "database_sg" {
   source  = "terraform-aws-modules/security-group/aws"

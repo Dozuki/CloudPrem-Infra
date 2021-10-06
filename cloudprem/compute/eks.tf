@@ -1,4 +1,4 @@
-
+# IAM role that the bastion host can assume.
 module "cluster_access_role_assumable" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
   version = "4.3.0"
@@ -197,6 +197,8 @@ module "eks_cluster" {
   # Kubernetes configurations
   write_kubeconfig = false
 
+  # Give both roles admin access due to the need for the OIDC assumable role and the basic assumable role. The bastion
+  # host does not seem to support the OIDC role at all so a second one was required.
   map_roles = [ # aws-auth configmap
     {
       rolearn  = module.cluster_access_role.iam_role_arn
@@ -212,5 +214,3 @@ module "eks_cluster" {
 
   tags = local.tags
 }
-
-

@@ -1,4 +1,3 @@
-
 data "aws_iam_policy_document" "aws_node_termination_handler" {
   statement {
     effect = "Allow"

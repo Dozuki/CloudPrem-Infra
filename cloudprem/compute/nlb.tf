@@ -1,6 +1,3 @@
-
-
-
 resource "aws_security_group_rule" "replicated_ui_access" {
   type              = "ingress"
   from_port         = 32001
@@ -85,12 +82,3 @@ module "nlb" {
 
   tags = local.tags
 }
-//
-//resource "aws_autoscaling_attachment" "autoscaling_attachment" {
-//
-//  count = length(module.nlb.target_group_arns)
-//
-////  autoscaling_group_name = lookup(lookup(lookup(module.eks_cluster.node_groups["workers"], "resources")[0], "autoscaling_groups")[0], "name")
-//  autoscaling_group_name = module.eks_cluster.workers_asg_names[0]
-//  alb_target_group_arn   = module.nlb.target_group_arns[count.index]
-//}
