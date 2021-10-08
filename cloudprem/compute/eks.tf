@@ -32,7 +32,7 @@ module "cluster_access_role" {
   role_policy_arns = [
     "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
     aws_iam_policy.cluster_access.arn,
-    aws_iam_policy.cluster_autoscaler.arn
+    aws_iam_policy.cluster_autoscaler_policy.arn
   ]
   oidc_fully_qualified_subjects = [
     "system:serviceaccount:kube-system:cluster-autoscaler-aws-cluster-autoscaler-chart"

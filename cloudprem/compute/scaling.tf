@@ -1,11 +1,11 @@
-resource "aws_iam_policy" "cluster_autoscaler" {
+resource "aws_iam_policy" "cluster_autoscaler_policy" {
   name_prefix = "cluster-autoscaler"
   description = "EKS cluster-autoscaler policy for cluster ${module.eks_cluster.cluster_id}"
-  policy      = data.aws_iam_policy_document.cluster_autoscaler.json
+  policy      = data.aws_iam_policy_document.cluster_autoscaler_pd.json
 }
 
 #tfsec:ignore:aws-iam-no-policy-wildcards
-data "aws_iam_policy_document" "cluster_autoscaler" {
+data "aws_iam_policy_document" "cluster_autoscaler_pd" {
   statement {
     sid    = "clusterAutoscalerAll"
     effect = "Allow"
