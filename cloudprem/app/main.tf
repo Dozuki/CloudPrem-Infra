@@ -25,8 +25,6 @@ provider "helm" {
   }
 }
 
-#  ############# Locals ############
-
 locals {
   identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
@@ -46,21 +44,27 @@ locals {
   db_master_password = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["password"]
 
 }
+
 data "aws_eks_cluster" "main" {
   name = var.eks_cluster_id
 }
+
 data "aws_eks_cluster_auth" "main" {
   name = var.eks_cluster_id
 }
+
 data "aws_partition" "current" {}
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+
 data "aws_kms_key" "s3" {
   key_id = var.s3_kms_key_id
 }
+
 data "aws_vpc" "main" {
   id = var.vpc_id
 }
+
 data "aws_subnets" "private" {
   filter {
     name   = "vpc-id"
@@ -69,23 +73,5 @@ data "aws_subnets" "private" {
 
   tags = {
     type = "private"
-  }
-}
-
-
-resource "helm_release" "container_insights" {
-  name  = "container-insights"
-  chart = "${path.module}/charts/container_insights"
-
-  namespace = "default"
-
-  set {
-    name  = "cluster_name"
-    value = var.eks_cluster_id
-  }
-
-  set {
-    name  = "region_name"
-    value = data.aws_region.current.name
   }
 }

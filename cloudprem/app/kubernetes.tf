@@ -1,4 +1,3 @@
-
 locals {
   frontegg_api_key   = var.enable_webhooks ? try(data.kubernetes_secret.frontegg[0].data.apikey, "") : "" #tfsec:ignore:general-secrets-sensitive-in-local
   frontegg_client_id = var.enable_webhooks ? try(data.kubernetes_secret.frontegg[0].data.clientid, "") : ""
@@ -153,4 +152,21 @@ resource "helm_release" "kubed" {
   version = "v0.12.0"
 
   namespace = "default"
+}
+
+resource "helm_release" "container_insights" {
+  name  = "container-insights"
+  chart = "${path.module}/charts/container_insights"
+
+  namespace = "default"
+
+  set {
+    name  = "cluster_name"
+    value = var.eks_cluster_id
+  }
+
+  set {
+    name  = "region_name"
+    value = data.aws_region.current.name
+  }
 }

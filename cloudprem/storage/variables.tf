@@ -140,5 +140,11 @@ variable "elasticache_cluster_size" {
   default     = 1
   description = "Cluster size"
 }
-variable "eks_cluster_id" {}
-variable "eks_cluster_access_role_arn" {}
+variable "eks_cluster_id" {
+  description = "ID of EKS cluster for app provisioning"
+  type        = string
+}
+variable "eks_cluster_access_role_arn" {
+  description = "ARN for cluster access role for app provisioning"
+  type        = string
+}

@@ -51,7 +51,8 @@ dependency "storage" {
   mock_outputs_allowed_terraform_commands = ["validate"]
 }
 retryable_errors = [
-  "(?s).*frontegg-db-update is in failed state.*"
+  "(?s).*frontegg-db-update is in failed state.*",
+  "(?s).*Failed to create Job! API error: Unauthorized.*"
 ]
 
 inputs = {

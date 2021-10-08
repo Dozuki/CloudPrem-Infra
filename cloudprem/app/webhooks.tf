@@ -6,9 +6,10 @@ locals {
   frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "") #tfsec:ignore:general-secrets-sensitive-in-local
 }
 
-
 resource "kubernetes_job" "database_update" {
   count = var.enable_webhooks ? 1 : 0
+
+  depends_on = [helm_release.replicated]
 
   metadata {
     name = "frontegg-db-update"

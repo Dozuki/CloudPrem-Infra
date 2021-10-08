@@ -16,9 +16,9 @@ terraform {
 include {
   path = find_in_parent_folders()
 }
-retryable_errors = [
-  "(?s).*error waiting for Route in Route Table.*waiting for state to become 'ready'.*"
-]
+//retryable_errors = [
+//  "(?s).*error waiting for Route in Route Table.*waiting for state to become 'ready'.*"
+//]
 
 # These are the variables we have to pass in to use the module specified in the terragrunt configuration above
 inputs = {
