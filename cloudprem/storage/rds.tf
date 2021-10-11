@@ -29,7 +29,7 @@ module "primary_database" {
   identifier = local.identifier
 
   engine                = "mysql"
-  engine_version        = "5.7"
+  engine_version        = "8.0"
   port                  = 3306
   instance_class        = var.rds_instance_type
   allocated_storage     = var.rds_allocated_storage
@@ -62,7 +62,7 @@ module "primary_database" {
   subnet_ids = data.aws_subnets.private.ids
 
   # DB parameter group
-  family               = "mysql5.7"
+  family               = "mysql8.0"
   parameter_group_name = local.identifier
   //  use_parameter_group_name_prefix = false
 
@@ -120,7 +120,7 @@ module "replica_database" {
   identifier = "${local.identifier}-replica"
 
   engine                = "mysql"
-  engine_version        = "5.7"
+  engine_version        = "8.0"
   port                  = 3306
   instance_class        = var.rds_instance_type
   allocated_storage     = var.rds_allocated_storage
@@ -152,7 +152,7 @@ module "replica_database" {
   subnet_ids = data.aws_subnets.private.ids
 
   # DB parameter group
-  family               = "mysql5.7"
+  family               = "mysql8.0"
   parameter_group_name = "${local.identifier}-replica"
   //  use_parameter_group_name_prefix = false
 
