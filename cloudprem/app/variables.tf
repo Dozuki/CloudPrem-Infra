@@ -92,3 +92,8 @@ variable "s3_pdfs_bucket" {
   type        = string
   default     = ""
 }
+variable "google_translate_api_token" {
+  description = "If using machine translation, enter your google translate API token here."
+  type        = string
+  default     = ""
+}
