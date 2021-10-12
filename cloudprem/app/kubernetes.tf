@@ -138,6 +138,12 @@ resource "kubernetes_config_map" "dozuki_resources" {
 
     "rds-ca.pem" = file(local.is_us_gov ? "vendor/rds-ca-${data.aws_region.current.name}-2017-root.pem" : "vendor/rds-ca-2019-root.pem")
 
+    "google-translate.json" = <<-EOF
+      {
+        "apiToken": "${var.google_translate_api_token}"
+      }
+    EOF
+
   }
 
   lifecycle {
