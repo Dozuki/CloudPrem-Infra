@@ -22,7 +22,10 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Bastion Userdata Hotfix
-            - Fixed incorrect spacing in userdata file that prevented utilities from being installed and configured.
+            Major Module Refactor & Scaling
+            - Split Terraform code into 4 separate modules: Network, Compute, Storage, and App
+            - Using Terragrunt to manage configuration, dependencies, and state
+            - Added support for Cluster & Pod autoscaling in Kubernetes
+            - Fixed replicated app sequence targeting to unpin release after initial install
           draft: false
           prerelease: false
