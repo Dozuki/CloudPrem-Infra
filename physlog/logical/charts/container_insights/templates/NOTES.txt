@@ -1,1 +1,0 @@
-Container Insights installed on {{ .Values.cluster_name }}

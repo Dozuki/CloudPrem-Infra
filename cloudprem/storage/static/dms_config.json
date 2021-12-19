@@ -1,9 +1,0 @@
-{
-  "TargetMetadata": {
-    "SupportLobs": true,
-    "FullLobMode": true,
-    "LobChunkSize": 64,
-    "LimitedSizeLobMode": false,
-    "LobMaxSize": 0
-  }
-}
