@@ -1,0 +1,1 @@
+create database if not exists frontegg_events; create database if not exists frontegg_webhooks; update sites.site_config set value = 'true' where name = 'feature-webhooks';

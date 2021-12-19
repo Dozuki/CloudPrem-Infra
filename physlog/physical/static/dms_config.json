@@ -1,0 +1,42 @@
+{
+  "TargetMetadata": {
+    "SupportLobs": true,
+    "FullLobMode": true,
+    "LobChunkSize": 64,
+    "LimitedSizeLobMode": false,
+    "LobMaxSize": 0
+  },
+  "Logging": {
+    "EnableLogging": true
+  },
+  "ValidationSettings": {
+    "EnableValidation": true,
+    "FailureMaxCount": 10000,
+    "HandleCollationDiff": false,
+    "RecordFailureDelayLimitInMinutes": 0,
+    "SkipLobColumns": false,
+    "TableFailureMaxCount": 1000,
+    "ThreadCount": 5,
+    "ValidationOnly": false,
+    "ValidationPartialLobSize": 0
+  },
+  "ErrorBehavior": {
+    "DataErrorPolicy": "LOG_ERROR",
+    "DataTruncationErrorPolicy":"LOG_ERROR",
+    "DataErrorEscalationPolicy":"SUSPEND_TABLE",
+    "DataErrorEscalationCount": 50,
+    "TableErrorPolicy":"SUSPEND_TABLE",
+    "TableErrorEscalationPolicy":"STOP_TASK",
+    "TableErrorEscalationCount": 50,
+    "RecoverableErrorCount": 0,
+    "RecoverableErrorInterval": 5,
+    "RecoverableErrorThrottling": true,
+    "RecoverableErrorThrottlingMax": 1800,
+    "ApplyErrorDeletePolicy":"IGNORE_RECORD",
+    "ApplyErrorInsertPolicy":"LOG_ERROR",
+    "ApplyErrorUpdatePolicy":"LOG_ERROR",
+    "ApplyErrorEscalationPolicy":"LOG_ERROR",
+    "ApplyErrorEscalationCount": 0,
+    "FullLoadIgnoreConflicts": true
+  }
+}
