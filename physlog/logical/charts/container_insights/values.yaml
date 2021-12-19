@@ -1,0 +1,8 @@
+# Default values for container_insights.
+# This is a YAML-formatted file.
+
+# The EKS cluster name where container insights is being installed
+cluster_name: my-cluster
+
+# AWS region where the EKS cluster is running
+region_name: us-west-2

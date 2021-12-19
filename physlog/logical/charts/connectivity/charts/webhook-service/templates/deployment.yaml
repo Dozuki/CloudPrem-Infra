@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "webhook-service.fullname" . }}-deployment
+  labels:
+  {{- include "webhook-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+  {{- include "webhook-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.frontegg.com/appVersion: "{{ .Values.appVersion }}"
+      {{- include "webhook-service.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ (print .Values.secret) | sha256sum }}
+        checksum/config: {{ (print .Values.configmap) | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.appVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }} # change this to 80 in the future
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          env:
+            {{- range $secret_name, $values := .Values.configuration.secrets }}
+            {{- range $key, $value :=  $values}}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret_name }}
+                  key: {{ $value }}
+            {{- end }}
+            {{- end }}
+            {{- range $config_name, $values := .Values.configuration.map }}
+            {{- range $key, $value :=  $values}}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $config_name }}
+                  key: {{ $value }}
+          {{- end }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "webhook-service.fullname" . }}-configmap
+            - secretRef:
+                name: {{ include "webhook-service.fullname" . }}-secret
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+  {{- end }}
