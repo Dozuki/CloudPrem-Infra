@@ -44,15 +44,24 @@ variable "eks_cluster_access_role_arn" {
   description = "ARN for cluster access role for app provisioning"
   type        = string
 }
-variable "eks_oidc_cluster_access_role_name" {}
+variable "eks_oidc_cluster_access_role_name" {
+  description = "ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler"
+  type        = string
+}
 variable "eks_worker_asg_arns" {
-  type = list(string)
+  description = "Autoscaling group ARNS for the EKS cluster"
+  type        = list(string)
 }
 variable "eks_worker_asg_names" {
-  type = list(string)
+  description = "Autoscaling group names for the EKS cluster"
+  type        = list(string)
 }
-variable "termination_handler_role_arn" {}
-variable "termination_handler_sqs_queue_id" {}
+variable "termination_handler_role_arn" {
+  description = "IAM Role for EKS node termination handler"
+}
+variable "termination_handler_sqs_queue_id" {
+  description = "SQS Queue ID for the EKS node termination handler"
+}
 variable "cluster_primary_sg" {
   description = "Primary Security Group for the EKS cluster, used for ingress SG source"
 }
@@ -66,7 +75,7 @@ variable "enable_webhooks" {
   default     = false
 }
 variable "nlb_dns_name" {
-  description = "DNS address of the network load balancer"
+  description = "DNS address of the network load balancer and URL to the deployed application"
 }
 variable "replicated_app_sequence_number" {
   description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release."
@@ -101,7 +110,9 @@ variable "s3_pdfs_bucket" {
   type        = string
   default     = ""
 }
-variable "msk_bootstrap_brokers" {}
+variable "msk_bootstrap_brokers" {
+  description = "Kafka bootstrap broker list"
+}
 #tfsec:ignore:general-secrets-sensitive-in-variable
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
@@ -109,10 +120,14 @@ variable "google_translate_api_token" {
   default     = ""
 }
 variable "enable_bi" {
-  type    = string
-  default = false
+  description = "Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster"
+  type        = string
+  default     = false
 }
-variable "dms_task_arn" {}
+variable "dms_task_arn" {
+  description = "If BI is enabled, the DMS replication task arn."
+}
 variable "aws_profile" {
-  type = string
+  description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
+  type        = string
 }

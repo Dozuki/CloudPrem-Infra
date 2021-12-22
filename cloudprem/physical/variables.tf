@@ -235,5 +235,7 @@ variable "enable_webhooks" {
   default     = false
 }
 variable "aws_profile" {
-  default = "gov"
+  description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
+  type        = string
+  default     = "default"
 }

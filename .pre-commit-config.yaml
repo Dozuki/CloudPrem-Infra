@@ -1,16 +1,12 @@
 repos:
   - repo: https://github.com/terraform-docs/terraform-docs
-    rev: "v0.15.0"
+    rev: "v0.16.0"
     hooks:
       - id: terraform-docs-go
-        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/network"]
+        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/physical"]
       - id: terraform-docs-go
-        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/compute"]
-      - id: terraform-docs-go
-        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/storage"]
-      - id: terraform-docs-go
-        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/app"]
+        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/logical"]
   - repo: git://github.com/antonbabenko/pre-commit-terraform
-    rev: "v1.51.0"
+    rev: "v1.62.2"
     hooks:
       - id: terraform_fmt
