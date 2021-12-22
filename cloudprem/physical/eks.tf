@@ -194,7 +194,8 @@ module "eks_cluster" {
   cluster_name                                   = local.identifier
   cluster_version                                = "1.21"
   enable_irsa                                    = true
-  cluster_endpoint_public_access                 = !var.protect_resources
+  # Need public access even when deploying from AWS due to the occasional inability to access private endpoints.
+  cluster_endpoint_public_access                 = true
   cluster_endpoint_private_access                = true
   cluster_endpoint_private_access_cidrs          = [local.vpc_cidr]
   cluster_create_endpoint_private_access_sg_rule = true
