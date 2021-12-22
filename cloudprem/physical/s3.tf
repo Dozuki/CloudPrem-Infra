@@ -50,16 +50,16 @@ resource "aws_s3_bucket" "logging_bucket" {
 
   }
 }
-#resource "aws_s3_bucket_public_access_block" "guide_images_acl_block" {
-#  count  = var.create_s3_buckets ? 1 : 0
-#
-#  bucket = aws_s3_bucket.guide_images[0].id
-#
-#  block_public_acls   = true
-#  block_public_policy = true
-##  ignore_public_acls = true
-##  restrict_public_buckets = true
-#}
+resource "aws_s3_bucket_public_access_block" "guide_images_acl_block" {
+  count  = var.create_s3_buckets ? 1 : 0
+
+  bucket = aws_s3_bucket.guide_images[0].id
+
+  block_public_acls   = true
+  block_public_policy = true
+  ignore_public_acls = true
+  restrict_public_buckets = true
+}
 resource "aws_s3_bucket" "guide_images" {
   count = var.create_s3_buckets ? 1 : 0
 
