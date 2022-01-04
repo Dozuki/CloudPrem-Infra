@@ -14,6 +14,11 @@ data "aws_s3_bucket" "documents" {
   count  = var.create_s3_buckets ? 0 : 1
   bucket = var.s3_documents_bucket
 }
+data "aws_s3_bucket" "logging" {
+  count  = var.create_s3_buckets ? 0 : 1
+  bucket = var.s3_logging_bucket
+}
+
 resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
   count = var.create_s3_buckets ? 1 : 0
 
@@ -72,7 +77,7 @@ resource "aws_s3_bucket" "guide_images" {
   }
 
   logging {
-    target_bucket = aws_s3_bucket.logging_bucket[0].id
+    target_bucket = local.logging_bucket
     target_prefix = "guide-images"
   }
 
@@ -110,7 +115,7 @@ resource "aws_s3_bucket" "guide_objects" {
   }
 
   logging {
-    target_bucket = aws_s3_bucket.logging_bucket[0].id
+    target_bucket = local.logging_bucket
     target_prefix = "guide-objects"
   }
 
@@ -148,7 +153,7 @@ resource "aws_s3_bucket" "guide_pdfs" {
   }
 
   logging {
-    target_bucket = aws_s3_bucket.logging_bucket[0].id
+    target_bucket = local.logging_bucket
     target_prefix = "guide-pdfs"
   }
 
@@ -186,7 +191,7 @@ resource "aws_s3_bucket" "guide_documents" {
   }
 
   logging {
-    target_bucket = aws_s3_bucket.logging_bucket[0].id
+    target_bucket = local.logging_bucket
     target_prefix = "guide-documents"
   }
 

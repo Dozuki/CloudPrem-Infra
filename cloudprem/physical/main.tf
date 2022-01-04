@@ -52,6 +52,7 @@ locals {
   guide_objects_bucket = var.create_s3_buckets ? aws_s3_bucket.guide_objects[0].bucket : data.aws_s3_bucket.guide_objects[0].bucket
   guide_pdfs_bucket    = var.create_s3_buckets ? aws_s3_bucket.guide_pdfs[0].bucket : data.aws_s3_bucket.guide_pdfs[0].bucket
   documents_bucket     = var.create_s3_buckets ? aws_s3_bucket.guide_documents[0].bucket : data.aws_s3_bucket.documents[0].bucket
+  logging_bucket       = var.create_s3_buckets ? aws_s3_bucket.logging_bucket[0].bucket : data.aws_s3_bucket.logging[0].bucket
 
   # VPC
   azs_count          = var.azs_count

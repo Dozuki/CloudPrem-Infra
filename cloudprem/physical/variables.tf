@@ -52,6 +52,11 @@ variable "s3_kms_key_id" {
   default     = "alias/aws/s3"
 }
 
+variable "create_s3_buckets" {
+  description = "Wheter to create the dozuki S3 buckets or not."
+  type        = bool
+  default     = true
+}
 variable "s3_objects_bucket" {
   description = "Name of the bucket to store guide objects. Use with 'create_s3_buckets' = false."
   type        = string
@@ -72,17 +77,16 @@ variable "s3_pdfs_bucket" {
   type        = string
   default     = ""
 }
+variable "s3_logging_bucket" {
+  description = "Name of the bucket to store bucket object access logs. Use with 'create_s3_buckets' = false."
+  type        = string
+  default     = ""
+}
 
 variable "rds_kms_key_id" {
   description = "AWS KMS key identifier for RDS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
   default     = "alias/aws/rds"
-}
-
-variable "create_s3_buckets" {
-  description = "Wheter to create the dozuki S3 buckets or not."
-  type        = bool
-  default     = true
 }
 
 variable "rds_snapshot_identifier" {

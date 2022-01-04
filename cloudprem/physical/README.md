@@ -109,6 +109,7 @@
 | [aws_s3_bucket.guide_images](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
 | [aws_s3_bucket.guide_objects](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
 | [aws_s3_bucket.guide_pdfs](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
+| [aws_s3_bucket.logging](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
 | [aws_subnet_ids.private](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/subnet_ids) | data source |
 | [aws_subnet_ids.public](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/subnet_ids) | data source |
 | [aws_vpc.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/vpc) | data source |
@@ -147,6 +148,7 @@
 | <a name="input_s3_documents_bucket"></a> [s3\_documents\_bucket](#input\_s3\_documents\_bucket) | Name of the bucket to store documents. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_images_bucket"></a> [s3\_images\_bucket](#input\_s3\_images\_bucket) | Name of the bucket to store guide images. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `"alias/aws/s3"` | no |
+| <a name="input_s3_logging_bucket"></a> [s3\_logging\_bucket](#input\_s3\_logging\_bucket) | Name of the bucket to store bucket object access logs. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_objects_bucket"></a> [s3\_objects\_bucket](#input\_s3\_objects\_bucket) | Name of the bucket to store guide objects. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_pdfs_bucket"></a> [s3\_pdfs\_bucket](#input\_s3\_pdfs\_bucket) | Name of the bucket to store guide pdfs. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | `"172.16.0.0/16"` | no |
