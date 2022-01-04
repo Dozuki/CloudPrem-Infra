@@ -5,6 +5,7 @@ locals {
   enable_webhooks = true
   enable_bi = false
   rds_multi_az = false
-  dozuki_license_parameter_name = "/dozuki/webhooks/license"
+  highly_available_nat_gateway = false
+  dozuki_license_parameter_name = "/dozuki/workstation/alpha/license"
   protect_resources = false
 }
