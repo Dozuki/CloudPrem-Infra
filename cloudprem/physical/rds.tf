@@ -313,8 +313,7 @@ resource "null_resource" "replication_control" {
   }
 
   provisioner "local-exec" {
-    when = destroy
-    # The sleep fixes a race condition where the dms task isn't fully stopped in time.
+    when    = destroy
     command = "/usr/bin/env bash ./util/dms-stop.sh ${self.triggers["dms_task_arn"]} ${self.triggers["aws_region"]} ${self.triggers["aws_profile"]}"
   }
 }
