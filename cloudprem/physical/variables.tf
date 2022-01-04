@@ -159,10 +159,10 @@ variable "elasticache_cluster_size" {
   description = "Cluster size"
 }
 
-variable "kms_key_id" {
+variable "eks_kms_key_id" {
   description = "AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
-  default     = "alias/aws/s3"
+  default     = ""
 }
 variable "vpc_id" {
   description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private"

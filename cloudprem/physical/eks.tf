@@ -175,6 +175,8 @@ resource "aws_iam_policy" "eks_worker" {
 }
 
 resource "aws_kms_key" "eks" {
+  count = local.create_eks_kms ? 1 : 0
+
   description         = "EKS Secret Encryption Key"
   enable_key_rotation = true
 }
@@ -202,7 +204,7 @@ module "eks_cluster" {
 
   cluster_encryption_config = [
     {
-      provider_key_arn = aws_kms_key.eks.arn
+      provider_key_arn = local.eks_kms_key
       resources        = ["secrets"]
     }
   ]
@@ -216,8 +218,8 @@ module "eks_cluster" {
   worker_groups_launch_template = [
     {
       name                                 = "workers"
-      asg_max_size                         = 10
-      asg_desired_capacity                 = 3
+      asg_max_size                         = var.eks_max_size
+      asg_desired_capacity                 = var.eks_desired_capacity
       instance_refresh_enabled             = true
       instance_refresh_instance_warmup     = 60
       public_ip                            = false

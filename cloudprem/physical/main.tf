@@ -13,7 +13,10 @@ provider "kubernetes" {
 locals {
   identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
+  # EKS
   cluster_access_role_name = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
+  create_eks_kms           = var.eks_kms_key_id == "" ? true : false
+  eks_kms_key              = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
 
   tags = {
     Terraform   = "true"
@@ -98,5 +101,10 @@ data "aws_kms_key" "rds" {
   key_id = var.rds_kms_key_id
 }
 data "aws_kms_key" "s3" {
-  key_id = var.kms_key_id
+  key_id = var.s3_kms_key_id
+}
+data "aws_kms_key" "eks" {
+  count = local.create_eks_kms ? 0 : 1
+
+  key_id = var.eks_kms_key_id
 }

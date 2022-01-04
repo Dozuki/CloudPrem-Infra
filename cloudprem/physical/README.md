@@ -100,6 +100,7 @@
 | [aws_iam_policy_document.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cluster_autoscaler_pd](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/kms_key) | data source |
 | [aws_kms_key.rds](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/kms_key) | data source |
 | [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/kms_key) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/partition) | data source |
@@ -122,6 +123,7 @@
 | <a name="input_create_s3_buckets"></a> [create\_s3\_buckets](#input\_create\_s3\_buckets) | Wheter to create the dozuki S3 buckets or not. | `bool` | `true` | no |
 | <a name="input_eks_desired_capacity"></a> [eks\_desired\_capacity](#input\_eks\_desired\_capacity) | This is what the node count will start out as. | `number` | `"3"` | no |
 | <a name="input_eks_instance_types"></a> [eks\_instance\_types](#input\_eks\_instance\_types) | The instance type of each node in the application's EKS worker node group. | `list(string)` | <pre>[<br>  "m5.large",<br>  "m5a.large",<br>  "m5d.large",<br>  "m5ad.large"<br>]</pre> | no |
+| <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_eks_max_size"></a> [eks\_max\_size](#input\_eks\_max\_size) | The maximum amount of nodes we will autoscale to. | `number` | `"10"` | no |
 | <a name="input_eks_min_size"></a> [eks\_min\_size](#input\_eks\_min\_size) | The minimum amount of nodes we will autoscale to. | `number` | `"2"` | no |
 | <a name="input_eks_volume_size"></a> [eks\_volume\_size](#input\_eks\_volume\_size) | The amount of local storage (in gigabytes) to allocate to each kubernetes node. Keep in mind you will be billed for this amount of storage multiplied by how many nodes you spin up (i.e. 50GB * 4 nodes = 200GB on your bill). For production installations 50GB should be the minimum. This local storage is used as a temporary holding area for uploaded and in-process assets like videos and images. | `number` | `50` | no |
@@ -132,7 +134,6 @@
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_identifier"></a> [identifier](#input\_identifier) | A name identifier to use as prefix for all the resources. | `string` | `""` | no |
-| <a name="input_kms_key_id"></a> [kms\_key\_id](#input\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `"alias/aws/s3"` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
 | <a name="input_public_access"></a> [public\_access](#input\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_rds_allocated_storage"></a> [rds\_allocated\_storage](#input\_rds\_allocated\_storage) | The initial size of the database (Gb) | `number` | `100` | no |
