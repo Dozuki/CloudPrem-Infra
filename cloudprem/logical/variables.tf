@@ -130,4 +130,5 @@ variable "dms_task_arn" {
 variable "aws_profile" {
   description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
   type        = string
+  default     = ""
 }
