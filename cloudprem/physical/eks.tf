@@ -256,6 +256,7 @@ module "eks_cluster" {
   ]
 
   # Kubernetes configurations
+  write_kubeconfig = false
   # Give both roles admin access due to the need for the OIDC assumable role and the basic assumable role. The bastion
   # host does not seem to support the OIDC role at all so a second one was required.
   map_roles = [ # aws-auth configmap
