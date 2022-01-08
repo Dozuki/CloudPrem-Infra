@@ -69,7 +69,7 @@ resource "aws_s3_bucket" "guide_images" {
   count = var.create_s3_buckets ? 1 : 0
 
   bucket_prefix = "dozuki-guide-images"
-  acl           = "public-read"
+  acl           = "private"
   force_destroy = !var.protect_resources
 
   versioning {
