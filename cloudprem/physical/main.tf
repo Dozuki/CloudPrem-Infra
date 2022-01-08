@@ -43,8 +43,8 @@ locals {
   create_vpc         = var.vpc_id == "" ? true : false
   vpc_id             = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
-  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnet_ids.public
-  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private
+  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnet_ids.public[0].ids
+  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private[0].ids
 
 }
 data "aws_eks_cluster" "main" {
