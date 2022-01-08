@@ -27,6 +27,8 @@ jobs:
     # Install the latest version of Terraform CLI
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: 1.0.11
 
     - name: Terraform ${{ matrix.module }} Module Init
       run: terraform init
