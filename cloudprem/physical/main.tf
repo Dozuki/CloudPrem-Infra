@@ -28,24 +28,8 @@ locals {
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
   # Database
-  bi_rds_parameters = [
-    {
-      name  = "binlog_format"
-      value = "ROW"
-    },
-    {
-      name  = "binlog_row_image"
-      value = "Full"
-    },
-    {
-      name  = "binlog_checksum"
-      value = "NONE"
-    }
-  ]
-  # We have to specify a value for the false variation of this conditional due to the RDS modules inability to handle
-  # an empty parameter group. So we use a value that is already a default to achieve the same thing.
-  rds_parameters     = var.enable_bi ? local.bi_rds_parameters : [{ name = "binlog_format", value = "MIXED" }]
-  ca_cert_identifier = local.is_us_gov ? "rds-ca-2017" : "rds-ca-2019"
+  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.this[0].name : null
+  ca_cert_identifier       = local.is_us_gov ? "rds-ca-2017" : "rds-ca-2019"
 
   # S3 Buckets
   guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket

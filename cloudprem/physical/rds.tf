@@ -21,6 +21,26 @@ resource "random_password" "primary_database" {
   special = false
 }
 
+resource "aws_db_parameter_group" "this" {
+  count = var.enable_bi ? 1 : 0
+
+  name_prefix = local.identifier
+  family      = "mysql8.0"
+
+  parameter {
+    name  = "binlog_format"
+    value = "ROW"
+  }
+  parameter {
+    name  = "binlog_row_image"
+    value = "Full"
+  }
+  parameter {
+    name  = "binlog_checksum"
+    value = "NONE"
+  }
+}
+
 #tfsec:ignore:general-secrets-sensitive-in-variable
 module "primary_database" {
   source  = "terraform-aws-modules/rds/aws"
@@ -63,10 +83,7 @@ module "primary_database" {
 
   # DB parameter group
   family               = "mysql8.0"
-  parameter_group_name = local.identifier
-  //  use_parameter_group_name_prefix = false
-
-  parameters = local.rds_parameters
+  parameter_group_name = local.rds_parameter_group_name
 
   # DB option group
   option_group_name      = null
@@ -148,10 +165,7 @@ module "replica_database" {
 
   # DB parameter group
   family               = "mysql8.0"
-  parameter_group_name = "${local.identifier}-replica"
-  //  use_parameter_group_name_prefix = false
-
-  parameters = local.rds_parameters
+  parameter_group_name = local.rds_parameter_group_name
 
   # DB option group
   option_group_name      = null

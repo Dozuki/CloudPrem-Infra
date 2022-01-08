@@ -45,6 +45,7 @@
 | [aws_cloudwatch_event_rule.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_target.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/cloudwatch_event_target) | resource |
 | [aws_cloudwatch_event_target.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/cloudwatch_event_target) | resource |
+| [aws_db_parameter_group.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/db_parameter_group) | resource |
 | [aws_dms_certificate.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_certificate) | resource |
 | [aws_dms_endpoint.source](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_endpoint) | resource |
 | [aws_dms_endpoint.target](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_endpoint) | resource |
