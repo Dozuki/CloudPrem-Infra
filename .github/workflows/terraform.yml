@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [network, compute, storage, app]
+        module: [physical, logical]
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
@@ -27,6 +27,8 @@ jobs:
     # Install the latest version of Terraform CLI
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: 1.0.11
 
     - name: Terraform ${{ matrix.module }} Module Init
       run: terraform init

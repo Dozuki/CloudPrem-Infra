@@ -4,7 +4,8 @@ locals {
   environment = "full"
   enable_webhooks = true
   enable_bi = true
-  rds_multi_az = false
-  dozuki_license_parameter_name = "/dozuki/grunt/license"
+  rds_multi_az = true
+  highly_available_nat_gateway = false
+  dozuki_license_parameter_name = "/dozuki/workstation/alpha/license"
   protect_resources = false
 }

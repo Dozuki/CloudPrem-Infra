@@ -36,7 +36,7 @@ account number and will use the specified profile when making aws cli calls. Thi
 your local workstation and will allow you to use different AWS credentials for different accounts without needing
 to set environment variables. 
 
-**Note:** _Be sure not to commit this file to the repo with actual AWS account numbers in it._
+**Note:** _Be sure not to commit this file to the repo with sensitive AWS account numbers in it._
 
 ### Region
 As an example the `us-east-1` region has a config file `region.hcl` inside the `standard/us-east-1` folder 
@@ -77,14 +77,14 @@ locals {
   enable_webhooks = false
   enable_bi = false
   rds_multi_az = false
-  dozuki_license_parameter_name = "/dozuki/dev/license"
+  dozuki_license_parameter_name = "/dozuki/workstation/beta/license"
   protect_resources = false
 }
 ```
 
 ### Module 
 Inside the module there should be no additional configuration required to get it running.
-The `terragrunt.hcl` is sufficient to pull in all necessary config, though if any dependencies,
+The `terragrunt.hcl` is sufficient to pull in all necessary config; though if any dependencies,
 inputs, or error retries are changed these files will need to be updated.
 
 ## Examples
@@ -99,7 +99,7 @@ $ cd live/standard/us-east-1/
 $ terragrunt run-all apply
 ```
 This would spin up 4 stacks: min, bi, webhooks, and full. This is probably not what
-you want to do but it's possible.
+you want to do, but it's possible.
 
 For a more realistic example:
 ```bash
@@ -112,22 +112,31 @@ $ terragrunt run-all apply
 This would give you 1 stack by spinning up the 4 modules inside only.
 
 ### Caveats
-Because we are using a terragrunt multi-module stack with dependencies between them
+Because we are using a terragrunt multimodule stack with dependencies between them,
 we are unable to run traditional `plan` commands with the `run-all` system. The plan is not able to infer information
-about resources that have not been deployed yet so it's kind of a all or nothing scenario if you
-want to stick to the run-all system. However if you are developing a specific module, like lets say
-the app module, you can definitely `cd` into the `app` directory and run single terragrunt commands
+about resources that have not been deployed yet, so it's kind of an all or nothing scenario if you
+want to stick to the run-all system. However, if you are developing a specific module like lets say
+the physical module, you can definitely `cd` into the `physical` directory and run single terragrunt commands
 like `terragrunt plan` or `terragrunt apply` and you'll be able to get a plan for that individual
 module. 
 
 Keep in mind that the dependent modules must already be applied for this to work. If you want
-to work on just the app module then the network, storage, and compute modules must alread be applied. 
+to work on just the logical module then the physical module must already be applied. 
 Terragrunt will automatically query their outputs and include them for you as necessary. See the
 `environment/module/terragrunt.hcl` file for dependency information.
 
+Regarding the Dozuki license file. Since production usage of this infrastructure expects a license file
+to be created out-of-band by CloudFormation, you must specify a pre-existing license from the Parameter Store
+in your env.hcl file. If you don't, the terraform is set up to assume you are using a production configuration and
+will build the license key path based on the identifier and environment variables. I have already created
+two existing license files on our dev account in each region we support: `/dozuki/workstation/alpha/license` and `/dozuki/workstation/beta/license`.
+You'll notice the added keyword "workstation" here: this is to ensure there are no collisions with existing keys from
+other environments. These keys are for the `DDV-Alpha` and `DDV-Beta` customer keys in replicated.
+The main difference between them is alpha has webhooks enabled, and beta does not. 
+
 ### Don'ts
 Don't modify the root `terragrunt.hcl` file in this directory. It uses black magic to build things and is
-fully dynamic so don't touch it unless you know what your doing. The same goes for the `terragrunt.hcl` files
+fully dynamic so don't touch it unless you know what you're doing. The same goes for the `terragrunt.hcl` files
 inside the modules themselves. This system is made so you only ever really have to modify the account, region, and 
 env.hcl files to get things working.
 
@@ -136,10 +145,9 @@ The reason we have so many region directories in this folder structure is to ill
 regions we guarantee support in. If you don't see the region here, we're not sure our software works there.
 It *should* but no guarantees. This counts for the govcloud regions also, you'll notice there's only one
 region in the gov folder, that's because `us-gov-east-1` does not support DMS and some other services that are 
-critial to our full stack so `us-gov-west-1` is the only gov cloud region we support.
+critical to our full stack so `us-gov-west-1` is the only gov cloud region we support.
 
 ### Regional Changes Required
-Our stack is setup to be as region agnostic as possible but AWS in all their wisdom still has
-some weird caveats and compatibility issues from region to region. Here are some concerns to be aware of
-for different regions:
+Our stack is set up to be as region agnostic as possible but AWS in all their wisdom still has
+some weird caveats and compatibility issues from region to region.
 

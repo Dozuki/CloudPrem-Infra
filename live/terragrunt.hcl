@@ -37,6 +37,7 @@ remote_state {
     key            = "${path_relative_to_include()}/terraform.tfstate"
     region         = local.aws_region
     dynamodb_table = "dozuki-terraform-lock"
+    profile = local.aws_profile
   }
   generate = {
     path      = "backend.tf"
