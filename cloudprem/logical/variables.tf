@@ -113,7 +113,7 @@ variable "s3_pdfs_bucket" {
 variable "msk_bootstrap_brokers" {
   description = "Kafka bootstrap broker list"
 }
-#tfsec:ignore:general-secrets-sensitive-in-variable
+#tfsec:ignore:general-secrets-no-plaintext-exposure
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string
