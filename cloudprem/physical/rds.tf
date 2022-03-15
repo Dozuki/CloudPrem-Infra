@@ -21,7 +21,7 @@ resource "random_password" "primary_database" {
   special = false
 }
 
-resource "aws_db_parameter_group" "this" {
+resource "aws_db_parameter_group" "bi" {
   count = var.enable_bi ? 1 : 0
 
   name_prefix = local.identifier
@@ -38,6 +38,22 @@ resource "aws_db_parameter_group" "this" {
   parameter {
     name  = "binlog_checksum"
     value = "NONE"
+  }
+  parameter {
+    name  = "group_concat_max_len"
+    value = "33554432"
+  }
+}
+
+resource "aws_db_parameter_group" "default" {
+  count = var.enable_bi ? 0 : 1
+
+  name_prefix = local.identifier
+  family      = "mysql8.0"
+
+  parameter {
+    name  = "group_concat_max_len"
+    value = "33554432"
   }
 }
 
