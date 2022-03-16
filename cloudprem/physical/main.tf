@@ -28,7 +28,7 @@ locals {
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
   # Database
-  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.this[0].name : null
+  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].name : aws_db_parameter_group.default[0].name
   ca_cert_identifier       = local.is_us_gov ? "rds-ca-2017" : "rds-ca-2019"
 
   # S3 Buckets
