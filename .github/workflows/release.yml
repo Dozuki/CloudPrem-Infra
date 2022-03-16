@@ -22,11 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Dual Module Refactor
-            - Refactored root module splitting into 2 modules instead of 4, one for physical resources, one for logical resources.
-            - No longer using S3 module for buckets, we use raw resources now for increased compatibility and reduced complexity.
-            - Massive BI improvements. Streamlined DMS creation and management, improved database ingest & in-transit SSL.
-            - Encrypting K8 Secrets using KMS.
-            - Upgraded most off-the-shelf terraform module versions.
+            RDS Parameter Fix
+            - Adding group_concat_max_len default parameter to RDS parameter group to facilitate production migrations.
           draft: false
           prerelease: false
