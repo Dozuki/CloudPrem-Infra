@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            RDS Parameter Fix
-            - Adding group_concat_max_len default parameter to RDS parameter group to facilitate production migrations.
+            Backwards Compatibility Fix
+            - Restoring index.json app configuration file to allow older versions of the app to use the new infrastructure.
           draft: false
           prerelease: false
