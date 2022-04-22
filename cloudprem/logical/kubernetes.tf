@@ -124,6 +124,31 @@ resource "kubernetes_config_map" "dozuki_resources" {
       }
     EOF
 
+    "index.json" = <<-EOF
+      {
+        "index": {
+          "legacy": {
+            "filename": "legacy.json"
+          },
+          "s3": {
+            "filename": "s3.json"
+          },
+          "buckets": {
+            "filename": "buckets.json"
+          },
+          "db": {
+            "filename": "db.json"
+          },
+          "memcached": {
+            "filename": "memcached.json"
+          },
+          "aws-resources": {
+            "filename": "aws-resources.json"
+          }
+        }
+      }
+    EOF
+
   }
 
   lifecycle {
