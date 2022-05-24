@@ -59,7 +59,7 @@ jobs:
         reporter: github-pr-review
         filter_mode: nofilter
         fail_on_error: true
-        tfsec_version: 1.15.4
+        tfsec_version: v1.15.4
         tfsec_flags: --exclude-downloaded-modules
 
 
