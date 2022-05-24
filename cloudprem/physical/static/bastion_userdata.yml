@@ -28,7 +28,7 @@ write_files:
     #!/bin/bash -xe
     set -o xtrace
 
-    curl -L curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.23.6/bin/linux/amd64/kubectl \
+    curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.23.6/bin/linux/amd64/kubectl \
     > /usr/local/bin/kubectl
     chmod 755 /usr/local/bin/kubectl
 
