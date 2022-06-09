@@ -1,11 +1,11 @@
 
 
 resource "helm_release" "aws_node_termination_handler" {
+  depends_on = [local_file.aws_node_termination_handler_helmignore]
+
   name             = "aws-node-termination-handler"
   namespace        = "kube-system"
-  repository       = "https://aws.github.io/eks-charts"
-  chart            = "aws-node-termination-handler"
-  version          = "0.15.3"
+  chart            = "charts/aws-node-termination-handler"
   create_namespace = true
 
   set {
@@ -49,4 +49,10 @@ resource "aws_autoscaling_lifecycle_hook" "aws_node_termination_handler" {
   lifecycle_transition   = "autoscaling:EC2_INSTANCE_TERMINATING"
   heartbeat_timeout      = 300
   default_result         = "CONTINUE"
+}
+
+resource "local_file" "aws_node_termination_handler_helmignore" {
+  content         = file("${path.module}/charts/helmignore")
+  filename        = "${path.module}/charts/aws-node-termination-handler/.helmignore"
+  file_permission = "0644"
 }

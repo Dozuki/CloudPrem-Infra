@@ -44,10 +44,10 @@ resource "kubernetes_job" "database_update" {
 resource "helm_release" "mongodb" {
   count = var.enable_webhooks ? 1 : 0
 
-  name       = "frontegg-documents"
-  repository = "https://charts.bitnami.com/bitnami"
-  chart      = "mongodb"
-  version    = "10.15.2"
+  depends_on = [local_file.mongodb_helmignore]
+
+  name  = "frontegg-documents"
+  chart = "charts/mongodb"
 
   set {
     name  = "auth.enabled"
@@ -58,10 +58,10 @@ resource "helm_release" "mongodb" {
 resource "helm_release" "redis" {
   count = var.enable_webhooks ? 1 : 0
 
-  name       = "frontegg-kvstore"
-  repository = "https://charts.bitnami.com/bitnami"
-  chart      = "redis"
-  version    = "14.1.1"
+  depends_on = [local_file.redis_helmignore]
+
+  name  = "frontegg-kvstore"
+  chart = "charts/redis"
 
   set {
     name  = "auth.enabled"
@@ -210,5 +210,19 @@ resource "local_file" "integrations_helmignore" {
 
   content         = file("${path.module}/charts/helmignore")
   filename        = "${path.module}/charts/connectivity/charts/integrations-service/.helmignore"
+  file_permission = "0644"
+}
+resource "local_file" "mongodb_helmignore" {
+  count = var.enable_webhooks ? 1 : 0
+
+  content         = file("${path.module}/charts/helmignore")
+  filename        = "${path.module}/charts/mongodb/.helmignore"
+  file_permission = "0644"
+}
+resource "local_file" "redis_helmignore" {
+  count = var.enable_webhooks ? 1 : 0
+
+  content         = file("${path.module}/charts/helmignore")
+  filename        = "${path.module}/charts/redis/.helmignore"
   file_permission = "0644"
 }
