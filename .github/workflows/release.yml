@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Backwards Compatibility Fix
-            - Restoring index.json app configuration file to allow older versions of the app to use the new infrastructure.
+            Localized Helm Charts
+            - Helm charts are no longer pulled from a remote repository to preserve versioning and prevent errors on network timeouts.
           draft: false
           prerelease: false
