@@ -98,8 +98,8 @@ module "primary_database" {
   subnet_ids = local.private_subnet_ids
 
   # DB parameter group
-  family               = "mysql8.0"
-  parameter_group_name = local.rds_parameter_group_name
+  create_db_parameter_group = false
+  parameter_group_name      = local.rds_parameter_group_name
 
   # DB option group
   option_group_name      = null
@@ -180,24 +180,12 @@ module "replica_database" {
   subnet_ids = local.private_subnet_ids
 
   # DB parameter group
-  family               = "mysql8.0"
-  parameter_group_name = local.rds_parameter_group_name
+  create_db_parameter_group = false
+  parameter_group_name      = local.rds_parameter_group_name
 
   # DB option group
   option_group_name      = null
   create_db_option_group = false # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/188
-
-  # # DB subnet group
-  # create_db_subnet_group = false
-  # db_subnet_group_name = module.primary_database.this_db_subnet_group_id
-
-  # # DB parameter group
-  # create_db_parameter_group = false
-  # parameter_group_name      = module.primary_database.this_db_parameter_group_id
-
-  # # DB option group
-  # create_db_option_group = false
-  # option_group_name = module.primary_database.this_db_option_group_id
 
   tags = local.tags
 }
