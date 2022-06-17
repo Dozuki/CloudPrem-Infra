@@ -266,7 +266,7 @@ resource "aws_dms_certificate" "this" {
   count = var.enable_bi ? 1 : 0
 
   certificate_id  = "${local.identifier}-dms-certificate"
-  certificate_pem = file(local.is_us_gov ? "vendor/rds-ca-${data.aws_region.current.name}-2017-root.pem" : "vendor/rds-ca-2019-root.pem")
+  certificate_pem = file(local.ca_cert_pem_file)
 
   tags = local.tags
 

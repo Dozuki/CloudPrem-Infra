@@ -28,8 +28,9 @@ locals {
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
   # Database
-  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].name : aws_db_parameter_group.default[0].name
-  ca_cert_identifier       = local.is_us_gov ? "rds-ca-2017" : "rds-ca-2019"
+  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default[0].id
+  ca_cert_identifier       = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
+  ca_cert_pem_file         = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
 
   # S3 Buckets
   guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket

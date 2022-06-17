@@ -39,6 +39,8 @@ locals {
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
+  ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
+
   db_master_host     = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["host"]
   db_master_username = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["username"]
   db_master_password = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["password"]
