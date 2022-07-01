@@ -35,7 +35,7 @@ resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
 resource "aws_s3_bucket" "logging_bucket" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket_prefix = "dozuki-bucket-access-logs"
+  bucket        = "dozuki-bucket-access-logs-${local.identifier}-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -68,7 +68,7 @@ resource "aws_s3_bucket_public_access_block" "guide_images_acl_block" {
 resource "aws_s3_bucket" "guide_images" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket_prefix = "dozuki-guide-images"
+  bucket        = "dozuki-guide-images-${local.identifier}-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -106,7 +106,7 @@ resource "aws_s3_bucket_public_access_block" "guide_objects_acl_block" {
 resource "aws_s3_bucket" "guide_objects" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket_prefix = "dozuki-guide-objects"
+  bucket        = "dozuki-guide-objects-${local.identifier}-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -144,7 +144,7 @@ resource "aws_s3_bucket_public_access_block" "guide_pdfs_acl_block" {
 resource "aws_s3_bucket" "guide_pdfs" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket_prefix = "dozuki-guide-pdfs"
+  bucket        = "dozuki-guide-pdfs-${local.identifier}-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -182,7 +182,7 @@ resource "aws_s3_bucket_public_access_block" "guide_documents_acl_block" {
 resource "aws_s3_bucket" "guide_documents" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket_prefix = "dozuki-guide-documents"
+  bucket        = "dozuki-guide-documents-${local.identifier}-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
