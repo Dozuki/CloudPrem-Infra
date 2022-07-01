@@ -47,6 +47,7 @@ locals {
   public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnet_ids.public[0].ids
   private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private[0].ids
 
+  bi_access_cidrs = length(var.bi_access_cidrs) == 0 ? [var.vpc_cidr] : var.bi_access_cidrs
 }
 data "aws_eks_cluster" "main" {
   name = module.eks_cluster.cluster_id

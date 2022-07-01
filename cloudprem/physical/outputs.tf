@@ -68,3 +68,12 @@ output "dms_task_arn" {
   description = "DMS Replication Task ARN for BI"
   value       = try(aws_dms_replication_task.this[0].replication_task_arn, "")
 }
+output "bi_database_credential_secret" {
+  description = "If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database."
+  value       = try(aws_secretsmanager_secret.replica_database_credentials[0].arn, "")
+}
+
+output "bi_vpn_configuration_bucket" {
+  description = "If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet."
+  value       = try(module.vpn[0].aws_vpn_configuration_bucket, "")
+}

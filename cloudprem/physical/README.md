@@ -23,19 +23,21 @@
 | <a name="module_bastion"></a> [bastion](#module\_bastion) | terraform-aws-modules/autoscaling/aws | 3.8.0 |
 | <a name="module_bastion_role"></a> [bastion\_role](#module\_bastion\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 4.7.0 |
 | <a name="module_bastion_sg"></a> [bastion\_sg](#module\_bastion\_sg) | terraform-aws-modules/security-group/aws | 4.7.0 |
+| <a name="module_bi_database_sg"></a> [bi\_database\_sg](#module\_bi\_database\_sg) | terraform-aws-modules/security-group/aws | 4.7.0 |
 | <a name="module_cluster_access_role"></a> [cluster\_access\_role](#module\_cluster\_access\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 4.7.0 |
 | <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 4.7.0 |
 | <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
-| <a name="module_database_sg"></a> [database\_sg](#module\_database\_sg) | terraform-aws-modules/security-group/aws | 4.7.0 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.24.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 6.6.1 |
 | <a name="module_nodes_alarm"></a> [nodes\_alarm](#module\_nodes\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
 | <a name="module_primary_database"></a> [primary\_database](#module\_primary\_database) | terraform-aws-modules/rds/aws | 3.4.1 |
+| <a name="module_primary_database_sg"></a> [primary\_database\_sg](#module\_primary\_database\_sg) | terraform-aws-modules/security-group/aws | 4.7.0 |
 | <a name="module_replica_database"></a> [replica\_database](#module\_replica\_database) | terraform-aws-modules/rds/aws | 3.4.1 |
 | <a name="module_sns"></a> [sns](#module\_sns) | terraform-aws-modules/sns/aws | 2.1.0 |
 | <a name="module_status_alarm"></a> [status\_alarm](#module\_status\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
-| <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 3.11.0 |
+| <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 3.14.1 |
+| <a name="module_vpn"></a> [vpn](#module\_vpn) | ./modules/vpn | n/a |
 
 ## Resources
 
@@ -75,9 +77,9 @@
 | [aws_s3_bucket_public_access_block.guide_pdfs_acl_block](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket_public_access_block) | resource |
 | [aws_s3_bucket_public_access_block.logging_bucket_acl_block](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket_public_access_block) | resource |
 | [aws_secretsmanager_secret.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret) | resource |
-| [aws_secretsmanager_secret.replica_database](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret) | resource |
+| [aws_secretsmanager_secret.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret_version) | resource |
-| [aws_secretsmanager_secret_version.replica_database](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret_version) | resource |
+| [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group) | resource |
 | [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group) | resource |
 | [aws_security_group_rule.app_access_http](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
@@ -121,8 +123,11 @@
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_app_access_cidr"></a> [app\_access\_cidr](#input\_app\_access\_cidr) | This CIDR will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `string` | `"0.0.0.0/0"` | no |
+| <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
 | <a name="input_azs_count"></a> [azs\_count](#input\_azs\_count) | The number of availability zones we should use for deployment. | `number` | `3` | no |
+| <a name="input_bi_access_cidrs"></a> [bi\_access\_cidrs](#input\_bi\_access\_cidrs) | If BI is enabled, these CIDRs will be permitted through the firewall to access it. | `list(string)` | <pre>[<br>  "127.0.0.1/32"<br>]</pre> | no |
+| <a name="input_bi_vpn_access"></a> [bi\_vpn\_access](#input\_bi\_vpn\_access) | If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server. | `bool` | `false` | no |
 | <a name="input_create_s3_buckets"></a> [create\_s3\_buckets](#input\_create\_s3\_buckets) | Wheter to create the dozuki S3 buckets or not. | `bool` | `true` | no |
 | <a name="input_eks_desired_capacity"></a> [eks\_desired\_capacity](#input\_eks\_desired\_capacity) | This is what the node count will start out as. | `number` | `"3"` | no |
 | <a name="input_eks_instance_types"></a> [eks\_instance\_types](#input\_eks\_instance\_types) | The instance type of each node in the application's EKS worker node group. | `list(string)` | <pre>[<br>  "m5.large",<br>  "m5a.large",<br>  "m5d.large",<br>  "m5ad.large"<br>]</pre> | no |
@@ -138,7 +143,6 @@
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_identifier"></a> [identifier](#input\_identifier) | A name identifier to use as prefix for all the resources. | `string` | `""` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
-| <a name="input_public_access"></a> [public\_access](#input\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_rds_allocated_storage"></a> [rds\_allocated\_storage](#input\_rds\_allocated\_storage) | The initial size of the database (Gb) | `number` | `100` | no |
 | <a name="input_rds_backup_retention_period"></a> [rds\_backup\_retention\_period](#input\_rds\_backup\_retention\_period) | The number of days to keep automatic database backups. Setting this value to 0 disables automatic backups. | `number` | `30` | no |
 | <a name="input_rds_instance_type"></a> [rds\_instance\_type](#input\_rds\_instance\_type) | The instance type to use for your database. See this page for a breakdown of the performance and cost differences between the different instance types: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.DBInstanceClass.html | `string` | `"db.m4.large"` | no |
@@ -161,6 +165,8 @@
 | Name | Description |
 |------|-------------|
 | <a name="output_azs_count"></a> [azs\_count](#output\_azs\_count) | n/a |
+| <a name="output_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#output\_bi\_database\_credential\_secret) | If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database. |
+| <a name="output_bi_vpn_configuration_bucket"></a> [bi\_vpn\_configuration\_bucket](#output\_bi\_vpn\_configuration\_bucket) | If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet. |
 | <a name="output_cluster_primary_sg"></a> [cluster\_primary\_sg](#output\_cluster\_primary\_sg) | Primary security group for EKS cluster |
 | <a name="output_dms_task_arn"></a> [dms\_task\_arn](#output\_dms\_task\_arn) | DMS Replication Task ARN for BI |
 | <a name="output_documents_bucket"></a> [documents\_bucket](#output\_documents\_bucket) | n/a |

@@ -1,17 +1,67 @@
-#tfsec:ignore:aws-vpc-no-public-egress-sgr
-module "database_sg" {
+module "primary_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "4.7.0"
 
   name            = "${local.identifier}-database"
   use_name_prefix = false
-  description     = "Security group for ${local.identifier}. Allows access from within the VPC on port 3306"
+  description     = "Security group for ${local.identifier}s primary database. Allows access from worker nodes, bastion, and bi database on port 3306"
   vpc_id          = local.vpc_id
 
-  ingress_cidr_blocks = [local.vpc_cidr]
-  ingress_rules       = ["mysql-tcp"]
+  ingress_with_source_security_group_id = [
+    {
+      rule                     = "mysql-tcp"
+      source_security_group_id = module.eks_cluster.worker_security_group_id
+    },
+    {
+      rule                     = "mysql-tcp"
+      source_security_group_id = module.bastion_sg.security_group_id
+    },
+    {
+      rule                     = "mysql-tcp"
+      source_security_group_id = module.bi_database_sg.security_group_id
+    },
+  ]
 
-  egress_rules = ["all-tcp"]
+  tags = local.tags
+}
+# To make the terraform a bit easier we will always create this security group even if BI is disabled.
+module "bi_database_sg" {
+  source  = "terraform-aws-modules/security-group/aws"
+  version = "4.7.0"
+
+  name            = "${local.identifier}-bi-database"
+  use_name_prefix = false
+  description     = "Security group for bi access on ${local.identifier}. Allows access from specified CIDRs on port 3306"
+  vpc_id          = local.vpc_id
+
+  ingress_rules       = ["mysql-tcp"]
+  ingress_cidr_blocks = local.bi_access_cidrs
+
+  ingress_with_source_security_group_id = [
+    {
+      rule                     = "mysql-tcp"
+      source_security_group_id = module.bastion_sg.security_group_id
+    }
+  ]
+
+  ingress_with_self = [
+    {
+      rule = "all-all"
+    }
+  ]
+
+  egress_with_source_security_group_id = [
+    {
+      rule                     = "mysql-tcp"
+      source_security_group_id = module.primary_database_sg.security_group_id
+    }
+  ]
+
+  egress_with_self = [
+    {
+      rule = "all-all"
+    }
+  ]
 
   tags = local.tags
 }
@@ -84,7 +134,7 @@ module "primary_database" {
   backup_window           = "17:00-19:00"
   backup_retention_period = var.rds_backup_retention_period
 
-  vpc_security_group_ids = [module.database_sg.security_group_id]
+  vpc_security_group_ids = [module.primary_database_sg.security_group_id]
 
   # Snapshot configuration
   deletion_protection       = var.protect_resources
@@ -167,7 +217,7 @@ module "replica_database" {
   backup_window      = "17:00-19:00"
   # backup_retention_period = var.rds_backup_retention_period
 
-  vpc_security_group_ids = [module.database_sg.security_group_id]
+  vpc_security_group_ids = [module.bi_database_sg.security_group_id]
 
   # Snapshot configuration
   deletion_protection       = var.protect_resources
@@ -190,7 +240,7 @@ module "replica_database" {
   tags = local.tags
 }
 
-resource "aws_secretsmanager_secret" "replica_database" {
+resource "aws_secretsmanager_secret" "replica_database_credentials" {
   count = var.enable_bi ? 1 : 0
 
   name = "${local.identifier}-replica-database"
@@ -198,10 +248,10 @@ resource "aws_secretsmanager_secret" "replica_database" {
   recovery_window_in_days = var.protect_resources ? 7 : 0
 }
 
-resource "aws_secretsmanager_secret_version" "replica_database" {
+resource "aws_secretsmanager_secret_version" "replica_database_credentials" {
   count = var.enable_bi ? 1 : 0
 
-  secret_id = aws_secretsmanager_secret.replica_database[0].id
+  secret_id = aws_secretsmanager_secret.replica_database_credentials[0].id
   secret_string = jsonencode({
     dbInstanceIdentifier = module.replica_database[0].db_instance_id
     resourceId           = module.replica_database[0].db_instance_resource_id
@@ -244,7 +294,7 @@ resource "aws_dms_replication_instance" "this" {
   publicly_accessible         = false
   replication_subnet_group_id = aws_dms_replication_subnet_group.this[0].id
 
-  vpc_security_group_ids = [module.database_sg.security_group_id]
+  vpc_security_group_ids = [module.bi_database_sg.security_group_id]
 
   tags = local.tags
 

@@ -145,7 +145,17 @@ variable "enable_bi" {
   type        = bool
   default     = false
 }
-variable "public_access" {
+variable "bi_vpn_access" {
+  description = "If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server."
+  type        = bool
+  default     = false
+}
+variable "bi_access_cidrs" {
+  description = "If BI is enabled, these CIDRs will be permitted through the firewall to access it."
+  type        = list(string)
+  default     = ["127.0.0.1/32"]
+}
+variable "app_public_access" {
   description = "Should the app and dashboard be accessible via a publicly routable IP and domain?"
   type        = bool
   default     = true
