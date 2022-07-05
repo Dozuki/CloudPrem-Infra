@@ -1,7 +1,5 @@
 
 resource "helm_release" "cluster_autoscaler" {
-  depends_on = [local_file.cluster_autoscaler_helmignore]
-
   name      = "cluster-autoscaler"
   chart     = "charts/cluster-autoscaler"
   namespace = "kube-system"
@@ -25,8 +23,6 @@ resource "helm_release" "cluster_autoscaler" {
 }
 
 resource "helm_release" "metrics_server" {
-  depends_on = [local_file.metrics_server_helmignore]
-
   name  = "metrics-server"
   chart = "charts/metrics-server"
 }
@@ -116,15 +112,4 @@ resource "kubernetes_horizontal_pod_autoscaler" "queueworkerd" {
       }
     }
   }
-}
-
-resource "local_file" "cluster_autoscaler_helmignore" {
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/cluster-autoscaler/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "metrics_server_helmignore" {
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/metrics-server/.helmignore"
-  file_permission = "0644"
 }
