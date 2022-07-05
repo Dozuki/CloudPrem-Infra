@@ -32,6 +32,9 @@ function waitforStoppedDMS() {
     STATUS=$(getDMSStatus)
   done
 
+  # Sleep to make sure the DMS task is reported as stopped to the next terraform destroy step which is destroying the task itself.
+  sleep 300
+
   echo -e "DMS Task Stopped Successfully."
 }
 

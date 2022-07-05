@@ -28,9 +28,14 @@ write_files:
     #!/bin/bash -xe
     set -o xtrace
 
-    curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.23.6/bin/linux/amd64/kubectl \
+    curl -L https://storage.googleapis.com/kubernetes-release/release/v1.23.6/bin/linux/amd64/kubectl \
     > /usr/local/bin/kubectl
     chmod 755 /usr/local/bin/kubectl
+    
+    curl -L https://get.helm.sh/helm-v3.8.1-linux-amd64.tar.gz > /tmp/helm.tar.gz
+    tar -xzvf /tmp/helm.tar.gz
+    cp /tmp/linux-amd64/helm /usr/local/bin/helm
+    chmod 755 /usr/local/bin/helm
 
     mkdir -p /home/ssm-user/.kube
 

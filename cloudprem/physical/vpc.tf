@@ -1,6 +1,6 @@
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "3.11.0"
+  version = "3.14.1"
 
   count = local.create_vpc ? 1 : 0
 
@@ -12,6 +12,7 @@ module "vpc" {
   single_nat_gateway   = !var.highly_available_nat_gateway
   enable_dns_hostnames = true
   enable_dns_support   = true
+  enable_vpn_gateway   = var.bi_vpn_access
 
   # VPC Flow Logs (Cloudwatch log group and IAM role will be created)
   enable_flow_log                      = true
@@ -36,4 +37,18 @@ module "vpc" {
   }
 
   tags = local.tags
+}
+module "vpn" {
+  source = "./modules/vpn"
+
+  count = var.bi_vpn_access ? 1 : 0
+
+  environment = var.environment
+  identifier  = var.identifier
+  vpc_id      = local.vpc_id
+
+  subnet_id       = local.private_subnet_ids[0]
+  vpn-client-list = ["root"]
+
+  allowed_ingress_cidrs = local.bi_access_cidrs
 }
