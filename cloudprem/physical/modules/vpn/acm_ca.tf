@@ -1,4 +1,3 @@
-# AWS ACM certificate CA
 resource "tls_private_key" "ca" {
   algorithm = "RSA"
 }
@@ -18,7 +17,6 @@ resource "tls_self_signed_cert" "ca" {
   ]
 }
 
-# AWS ACM certificate
 resource "aws_acm_certificate" "ca" {
   private_key      = tls_private_key.ca.private_key_pem
   certificate_body = tls_self_signed_cert.ca.cert_pem
@@ -32,14 +30,10 @@ resource "aws_ssm_parameter" "vpn_ca_key" {
   description = "VPN CA key"
   type        = "SecureString"
   value       = tls_private_key.ca.private_key_pem
-
-  #  tags = local.tags
 }
 resource "aws_ssm_parameter" "vpn_ca_cert" {
   name        = "${local.ssm_prefix}/acm/vpn/ca_cert"
   description = "VPN CA cert"
   type        = "SecureString"
   value       = tls_self_signed_cert.ca.cert_pem
-
-  #  tags = local.tags
 }

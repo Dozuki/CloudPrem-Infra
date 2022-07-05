@@ -1,4 +1,3 @@
-# AWS ACM certificate
 resource "aws_acm_certificate" "server" {
   private_key       = tls_private_key.server.private_key_pem
   certificate_body  = tls_locally_signed_cert.server.cert_pem
@@ -7,7 +6,6 @@ resource "aws_acm_certificate" "server" {
   tags = local.tags
 }
 
-# TLS certificate and key
 resource "tls_private_key" "server" {
   algorithm = "RSA"
 }
@@ -32,20 +30,15 @@ resource "tls_locally_signed_cert" "server" {
   ]
 }
 
-# AWS SSM records
 resource "aws_ssm_parameter" "vpn_server_key" {
   name        = "${local.ssm_prefix}/acm/vpn/server_key"
   description = "VPN server key"
   type        = "SecureString"
   value       = tls_private_key.server.private_key_pem
-
-  #  tags = local.tags
 }
 resource "aws_ssm_parameter" "vpn_server_cert" {
   name        = "${local.ssm_prefix}/acm/vpn/server_cert"
   description = "VPN server cert"
   type        = "SecureString"
   value       = tls_locally_signed_cert.server.cert_pem
-
-  #  tags = local.tags
 }

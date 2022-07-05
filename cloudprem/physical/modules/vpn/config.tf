@@ -1,4 +1,3 @@
-# TLS certificate and key
 resource "tls_private_key" "client" {
   count     = length(var.vpn-client-list)
   algorithm = "RSA"
@@ -26,7 +25,6 @@ resource "tls_locally_signed_cert" "client" {
   ]
 }
 
-# AWS ACM certificate
 resource "aws_acm_certificate" "client" {
   count             = length(var.vpn-client-list)
   private_key       = tls_private_key.client[count.index].private_key_pem
@@ -43,7 +41,6 @@ resource "aws_acm_certificate" "client" {
   )
 }
 
-# AWS VPN config files generated to s3 bucket *.ovpn
 resource "aws_s3_bucket_object" "vpn-config-file" {
   count                  = length(var.vpn-client-list)
   bucket                 = aws_s3_bucket.vpn-config-files.id
@@ -79,23 +76,12 @@ ${aws_ssm_parameter.vpn_client_key[count.index].value}
   )
 }
 
-# AWS SSM records
 resource "aws_ssm_parameter" "vpn_client_key" {
   count       = length(var.vpn-client-list)
   name        = "${local.ssm_prefix}/acm/vpn/${var.vpn-client-list[count.index]}_client_key"
   description = "VPN ${var.vpn-client-list[count.index]} client key"
   type        = "SecureString"
   value       = tls_private_key.client[count.index].private_key_pem
-
-  #  tags = merge(
-  #    local.tags,
-  #    {
-  #      Name         = "VPN ${var.vpn-client-list[count.index]} client key imported in AWS ACM"
-  #      Tier         = "Private"
-  #      CostType     = "AlwaysCreated"
-  #      BackupPolicy = "n/a"
-  #    }
-  #  )
 }
 resource "aws_ssm_parameter" "vpn_client_cert" {
   count       = length(var.vpn-client-list)
@@ -103,15 +89,4 @@ resource "aws_ssm_parameter" "vpn_client_cert" {
   description = "VPN ${var.vpn-client-list[count.index]} client cert"
   type        = "SecureString"
   value       = tls_locally_signed_cert.client[count.index].cert_pem
-
-  #  tags = local.tags
-  #  tags = merge(
-  #    local.tags,
-  #    {
-  #      Name         = "VPN ${var.vpn-client-list[count.index]} client cert imported in AWS ACM"
-  #      Tier         = "Private"
-  #      CostType     = "AlwaysCreated"
-  #      BackupPolicy = "n/a"
-  #    }
-  #  )
 }

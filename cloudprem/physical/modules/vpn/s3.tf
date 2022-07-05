@@ -1,4 +1,3 @@
-# AWS S3 bucket for VPN config files
 #tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "vpn-config-files" {
   bucket        = "${local.identifier}-${data.aws_region.current.name}-vpn-credentials"

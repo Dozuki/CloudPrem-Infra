@@ -1,4 +1,3 @@
-# AWS cloudwatch log group
 data "aws_iam_policy_document" "vpn-logs-kms" {
   statement {
     sid    = "Enable IAM User Permissions"

@@ -1,4 +1,3 @@
-# AWS security group
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 resource "aws_security_group" "vpn" {
   name        = "${local.identifier}-vpn-security-group"
