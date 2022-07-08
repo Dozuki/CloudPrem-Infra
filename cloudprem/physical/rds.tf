@@ -227,7 +227,7 @@ module "replica_database" {
 
   # DB subnet group
   # db_subnet_group_name = local.identifier # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/42
-  subnet_ids = local.private_subnet_ids
+  subnet_ids = local.bi_subnet_ids
 
   # DB parameter group
   create_db_parameter_group = false

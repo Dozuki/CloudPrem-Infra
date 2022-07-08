@@ -145,13 +145,18 @@ variable "enable_bi" {
   type        = bool
   default     = false
 }
+variable "bi_public_access" {
+  description = "NOTE: This is mutually exclusive with VPN access, both cannot be enabled at the same time. If BI is enabled and you need access to the BI database server from outside the amazon network, set this to true."
+  type        = bool
+  default     = false
+}
 variable "bi_vpn_access" {
-  description = "If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server."
+  description = "NOTE: This is mutually exclusive with public BI access, both cannot be enabled at the same time. If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server."
   type        = bool
   default     = false
 }
 variable "bi_access_cidrs" {
-  description = "If BI is enabled, these CIDRs will be permitted through the firewall to access it."
+  description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server."
   type        = list(string)
   default     = ["127.0.0.1/32"]
 }
