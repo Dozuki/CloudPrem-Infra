@@ -34,7 +34,7 @@ remote_state {
   config = {
     encrypt        = true
     bucket         = "${get_env("TG_BUCKET_PREFIX", "")}dozuki-terraform-state-${local.aws_region}-${local.account_id}"
-    key            = "${path_relative_to_include()}/terraform.tfstate"
+    key            = "${get_env("TG_STATE_PREFIX", "")}${path_relative_to_include()}/terraform.tfstate"
     region         = local.aws_region
     dynamodb_table = "dozuki-terraform-lock"
     profile = local.aws_profile

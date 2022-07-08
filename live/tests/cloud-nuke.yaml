@@ -1,0 +1,9 @@
+s3:
+  exclude:
+    names_regex:
+      - ^dozuki-terraform
+
+IAMUsers:
+  exclude:
+    names_regex:
+      - ^TestUser
