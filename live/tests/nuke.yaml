@@ -1,0 +1,118 @@
+aws_instance:
+  - tags:
+      Terraform: true
+aws_autoscaling_group:
+  - tags:
+      Terraform: true
+aws_cloudwatch_log_group:
+  - tags:
+      Terraform: true
+aws_dms_certificate:
+  - tags:
+      Terraform: true
+aws_dms_endpoint:
+  - tags:
+      Terraform: true
+aws_dms_replication_subnet_group:
+  - tags:
+      Terraform: true
+aws_dms_replication_task:
+  - tags:
+      Terraform: true
+aws_eip:
+  - tags:
+      Terraform: true
+aws_internet_gateway:
+  - tags:
+      Terraform: true
+aws_launch_template:
+  - tags:
+      Terraform: true
+aws_nat_gateway:
+  - tags:
+      Terraform: true
+aws_network_interface:
+#aws_ec2_client_vpn_endpoint:
+aws_acm_certificate:
+  - tags:
+      Terraform: true
+aws_security_group:
+  - tags:
+      Name: (.*dozuki.*)
+aws_subnet:
+  - tags:
+      Terraform: true
+aws_route_table:
+  - tags:
+      Terraform: true
+aws_vpc:
+  - tags:
+      Terraform: true
+aws_vpc_endpoint:
+  - tags:
+      Terraform: true
+aws_vpn_gateway:
+  - tags:
+      Terraform: true
+aws_eks_cluster:
+  - tags:
+      Terraform: true
+aws_elasticache_replication_group:
+  - tags:
+      Terraform: true
+aws_elb:
+  - tags:
+      Terraform: true
+aws_alb_target_group:
+  - tags:
+      Terraform: true
+aws_lb:
+  - tags:
+      Terraform: true
+aws_lb_target_group:
+  - tags:
+      Terraform: true
+aws_iam_instance_profile:
+  - id: (.*dozuki.*)
+aws_iam_policy:
+  - id: (.*dozuki.*|cluster\-autoscaler.*)
+aws_iam_role:
+  - id: (.*dozuki.*)
+aws_iam_user:
+  - id: (.*dozuki.*)
+aws_msk_configuration:
+  - id: (.*dozuki.*)
+aws_msk_cluster:
+  - tags:
+      Terraform: true
+aws_db_instance:
+  - tags:
+      Terraform: true
+aws_db_parameter_group:
+  - tags:
+      Terraform: true
+aws_db_security_group:
+  - tags:
+      Terraform: true
+aws_db_snapshot:
+  - tags:
+      Terraform: true
+aws_db_subnet_group:
+  - tags:
+      Terraform: true
+#aws_s3_bucket:
+#  - id: NOT(^dozuki\-terraform.*)
+#  - tags:
+#      Terraform: true
+aws_secretsmanager_secret:
+  - tags:
+      Terraform: true
+aws_sns_topic:
+  - tags:
+      Terraform: true
+aws_sqs_queue:
+  - tags:
+      Terraform: true
+aws_ssm_parameter:
+  - tags:
+      Terraform: true

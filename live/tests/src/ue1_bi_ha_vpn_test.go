@@ -1,35 +1,37 @@
 package src
 
 import (
+	tc "dozuki.com/tests/common"
+	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"testing"
-
-	testCommon "dozuki.com/tests/common"
 )
 
 func Test_UsEast1_BI_HA_VPN(t *testing.T) {
 	t.Parallel()
 
-	var terraformPath = "../../../"
-	var partition = "standard"
-	var region = "us-east-1"
-	var environment = "bi"
-	var physConfig = testCommon.BIHAVPNPhysConfig
-	var logiConfig = testCommon.BIHAVPNLogiConfig
-	var prefixConfig = testCommon.HAVPNPrefixConfig
+	var cfg = tc.ReadConfig()
 
-	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, terraformPath, "")
+	var testConfig = tc.InfraTest{
+		Partition:   tc.StandardPartitionDir,
+		Region:      endpoints.UsEast1RegionID,
+		Profile:     tc.AWSTestDefaultProfile,
+		Environment: cfg.BIHAVPN,
+	}
 
-	physicalFolder, logicalFolder := testCommon.BootstrapFolders(partition, region, environment, terraformFolder)
+	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
-	terragruntPhysicalOptions, terragruntLogicalOptions := testCommon.BootstrapTerraform(t, physicalFolder, physConfig, logicalFolder, logiConfig, prefixConfig)
+	physicalFolder, logicalFolder := tc.BootstrapFolders(testConfig, terraformFolder)
+
+	terragruntPhysicalOptions, terragruntLogicalOptions := tc.BootstrapTerraform(t, physicalFolder, logicalFolder, testConfig.Environment)
 
 	defer terraform.TgDestroyAll(t, terragruntPhysicalOptions)
 	defer terraform.TgDestroyAll(t, terragruntLogicalOptions)
 
 	terraform.TgApplyAll(t, terragruntPhysicalOptions)
+
 	terraform.TgApplyAll(t, terragruntLogicalOptions)
 
-	testCommon.BasicAssertion(t, terragruntLogicalOptions)
+	tc.BasicAssertion(t, terragruntLogicalOptions)
 }

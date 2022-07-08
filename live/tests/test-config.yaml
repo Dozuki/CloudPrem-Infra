@@ -1,0 +1,75 @@
+min_default:
+  prefix: "test/default/"
+  identifier: "default"
+  environment: "min"
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  create_s3_buckets: true
+min_ha:
+  prefix: "test/ha/"
+  identifier: "ha"
+  environment: "min"
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  highly_available_nat_gateway: true
+  rds_multi_az: true
+  create_s3_buckets: true
+bi_default:
+  prefix: "test/default/"
+  identifier: "default"
+  environment: "bi"
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  enable_bi: true
+  create_s3_buckets: true
+bi_ha:
+  prefix: "test/ha/"
+  identifier: "ha"
+  environment: "bi"
+  highly_available_nat_gateway: true
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  rds_multi_az: true
+  enable_bi: true
+  create_s3_buckets: true
+bi_vpn:
+  prefix: "test/vpn/"
+  identifier: "vpn"
+  environment: "bi"
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  enable_bi: true
+  bi_vpn_access: true
+  create_s3_buckets: true
+bi_ha_vpn:
+  prefix: "test/havpn/"
+  identifier: "havpn"
+  environment: "bi"
+  highly_available_nat_gateway: true
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  rds_multi_az: true
+  enable_bi: true
+  bi_vpn_access: true
+  create_s3_buckets: true
+webhooks:
+  prefix: "test/default/"
+  identifier: "default"
+  environment: "hooks"
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/alpha/license"
+  enable_webhooks: true
+  create_s3_buckets: true
+full:
+  prefix: "test/default/"
+  identifier: "full"
+  environment: "full"
+  app_public_access: true
+  enable_webhooks: true
+  highly_available_nat_gateway: true
+  dozuki_license_parameter_name: "/dozuki/workstation/alpha/license"
+  rds_multi_az: true
+  enable_bi: true
+  bi_vpn_access: true
+  bi_access_cidrs: "[\"0.0.0.0/0\"]"
+  create_s3_buckets: true
