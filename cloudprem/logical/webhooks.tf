@@ -12,8 +12,6 @@ data "kubernetes_secret" "frontegg" {
 resource "kubernetes_job" "database_update" {
   count = var.enable_webhooks ? 1 : 0
 
-  depends_on = [helm_release.replicated]
-
   metadata {
     name = "frontegg-db-update"
   }
@@ -44,8 +42,6 @@ resource "kubernetes_job" "database_update" {
 resource "helm_release" "mongodb" {
   count = var.enable_webhooks ? 1 : 0
 
-  depends_on = [local_file.mongodb_helmignore]
-
   name  = "frontegg-documents"
   chart = "charts/mongodb"
 
@@ -57,8 +53,6 @@ resource "helm_release" "mongodb" {
 
 resource "helm_release" "redis" {
   count = var.enable_webhooks ? 1 : 0
-
-  depends_on = [local_file.redis_helmignore]
 
   name  = "frontegg-kvstore"
   chart = "charts/redis"
@@ -82,10 +76,6 @@ resource "helm_release" "frontegg" {
   count = var.enable_webhooks ? 1 : 0
 
   depends_on = [
-    local_file.default_helmignore,
-    local_file.api_helmignore,
-    local_file.event_helmignore,
-    local_file.webhook_helmignore,
     helm_release.mongodb,
     helm_release.redis,
     kubernetes_job.database_update
@@ -168,61 +158,4 @@ resource "helm_release" "frontegg" {
     value = local.db_master_password
   }
 
-}
-# Necessary hackery to prevent generated terraform/terragrunt files from being included by helm and blowing up the deploy.
-resource "local_file" "default_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/connectivity/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "event_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/connectivity/charts/event-service/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "api_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/connectivity/charts/api-gateway/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "webhook_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/connectivity/charts/webhook-service/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "connectors_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/connectivity/charts/connectors-worker/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "integrations_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/connectivity/charts/integrations-service/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "mongodb_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/mongodb/.helmignore"
-  file_permission = "0644"
-}
-resource "local_file" "redis_helmignore" {
-  count = var.enable_webhooks ? 1 : 0
-
-  content         = file("${path.module}/charts/helmignore")
-  filename        = "${path.module}/charts/redis/.helmignore"
-  file_permission = "0644"
 }
