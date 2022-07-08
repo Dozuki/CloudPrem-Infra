@@ -155,6 +155,11 @@ variable "bi_vpn_access" {
   type        = bool
   default     = false
 }
+variable "bi_vpn_user_list" {
+  description = "List of users to create OpenVPN configurations for usint mutual authentication."
+  type        = list(string)
+  default     = ["root"]
+}
 variable "bi_access_cidrs" {
   description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server."
   type        = list(string)

@@ -48,7 +48,7 @@ module "vpn" {
   vpc_id      = local.vpc_id
 
   subnet_id       = local.private_subnet_ids[0]
-  vpn-client-list = ["root"]
+  vpn-client-list = var.bi_vpn_user_list
 
   allowed_ingress_cidrs = local.bi_access_cidrs
 }
