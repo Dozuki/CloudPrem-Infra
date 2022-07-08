@@ -26,7 +26,7 @@ resource "aws_kms_key" "vpn-logs" {
   policy = data.aws_iam_policy_document.vpn-logs-kms.json
 }
 resource "aws_cloudwatch_log_group" "vpn-logs" {
-  name              = "${local.identifier}-vpn/logs/"
+  name_prefix       = "${local.identifier}-vpn"
   retention_in_days = 30
   kms_key_id        = aws_kms_key.vpn-logs.arn
 }
