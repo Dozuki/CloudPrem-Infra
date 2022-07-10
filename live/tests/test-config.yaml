@@ -52,6 +52,16 @@ bi_ha_vpn:
   enable_bi: true
   bi_vpn_access: true
   create_s3_buckets: true
+bi_public:
+  prefix: "test/public/"
+  identifier: "public"
+  environment: "bi"
+  app_public_access: true
+  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  enable_bi: true
+  bi_public_access: true
+  bi_access_cidrs: "[\"0.0.0.0/0\"]"
+  create_s3_buckets: true
 webhooks:
   prefix: "test/default/"
   identifier: "default"
