@@ -206,6 +206,7 @@ module "replica_database" {
   storage_encrypted     = true
   kms_key_id            = data.aws_kms_key.rds.arn
   apply_immediately     = !var.protect_resources
+  publicly_accessible   = var.bi_public_access
 
   username = "dozuki"
   password = random_password.replica_database[0].result
