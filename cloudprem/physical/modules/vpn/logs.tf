@@ -3,7 +3,7 @@ data "aws_iam_policy_document" "vpn-logs-kms" {
     sid    = "Enable IAM User Permissions"
     effect = "Allow"
     principals {
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
       type        = "AWS"
     }
     actions   = ["kms:*"]
