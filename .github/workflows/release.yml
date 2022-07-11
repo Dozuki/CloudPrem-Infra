@@ -22,8 +22,20 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            RDS Configuration Fixes
-            - Updating RDS CA Pem file for GovCloud.
-            - Fixing RDS parameter group selection to correctly assign custom MySQL parameters.
+            BI Connectivity Feature Additions
+            - We can now provision a VPN connection for secure access to the BI RDS database.
+            - We can now configure the BI RDS database to be accessible publicly if VPN is not an option.
+            - The above features are mutually exclusive and require configuration of `bi_access_cidrs` value to control ingress.
+            
+            Live Environment Refactor
+            - `webhooks` environment now named `hooks` to match the environment variable to better support the test suite.
+            - DRYed up the logical module terragrunt config to use a common include.
+            - We now control terragrunt-related `.helmignore` files from the terragrunt config itself instead of inside the terraform.
+            - Added `awsweeper` config file as an option to completely clear an account of our infra if necessary.
+            
+            Test Suite
+            - Added a terratest test suite, moving forward all infra changes with be programmatically tested
+            - Currently we test for a 200 response from the application on all test cases (environments)
+            - We also verify public access to the BI RDS database if configured thusly.
           draft: false
           prerelease: false
