@@ -65,7 +65,6 @@ type Environment struct {
 }
 
 type TestConfig struct {
-	mu         *sync.Mutex
 	MinDefault Environment `yaml:"min_default"`
 	MinHA      Environment `yaml:"min_ha"`
 	BIDefault  Environment `yaml:"bi_default"`
@@ -92,8 +91,6 @@ var RetryableErrors = map[string]string{
 
 func ReadConfig() TestConfig {
 	var cfg TestConfig
-	cfg.mu.Lock()
-	defer cfg.mu.Unlock()
 
 	f, err := os.Open(TestConfigFile)
 	if err != nil {
@@ -123,6 +120,7 @@ func getField(v *Environment, field string) interface{} {
 func ConvertToTFConfig(cfg Environment, module string) map[string]interface{} {
 	t := reflect.TypeOf(cfg)
 	tfConfig := make(map[string]interface{})
+	tfConfigMutex := sync.RWMutex{}
 	for i := 0; i < t.NumField(); i++ {
 		// We are using the yaml struct tag to double as the terraform variable key. We loop through the configuration
 		// struct checking each value for the "yaml" tag and pulling the value for that key in the struct instance and
@@ -145,7 +143,9 @@ func ConvertToTFConfig(cfg Environment, module string) map[string]interface{} {
 				}
 			}
 			if convertedValue != "" {
+				tfConfigMutex.Lock()
 				tfConfig[tfKey] = convertedValue
+				tfConfigMutex.Unlock()
 			}
 		}
 	}

@@ -3,7 +3,7 @@ data "aws_iam_policy_document" "vpn-logs-kms" {
     sid    = "Enable IAM User Permissions"
     effect = "Allow"
     principals {
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
       type        = "AWS"
     }
     actions   = ["kms:*"]
@@ -26,7 +26,7 @@ resource "aws_kms_key" "vpn-logs" {
   policy = data.aws_iam_policy_document.vpn-logs-kms.json
 }
 resource "aws_cloudwatch_log_group" "vpn-logs" {
-  name              = "${local.identifier}-vpn/logs/"
+  name_prefix       = "${local.identifier}-vpn"
   retention_in_days = 30
   kms_key_id        = aws_kms_key.vpn-logs.arn
 }
