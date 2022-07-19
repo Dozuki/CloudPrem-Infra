@@ -18,10 +18,9 @@ locals {
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
   # Database
-  ca_cert_identifier       = local.is_us_gov ? "rds-ca-2017" : "rds-ca-2019"
-  bi_subnet_ids            = var.bi_public_access ? data.aws_subnets.public.ids : data.aws_subnets.private.ids
-  bi_access_cidrs          = length(var.bi_access_cidrs) == 0 ? [data.aws_vpc.main.cidr_block] : var.bi_access_cidrs
-  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default[0].id
+  ca_cert_identifier = local.is_us_gov ? "rds-ca-2017" : "rds-ca-2019"
+  bi_subnet_ids      = var.bi_public_access ? data.aws_subnets.public.ids : data.aws_subnets.private.ids
+  bi_access_cidrs    = length(var.bi_access_cidrs) == 0 ? [data.aws_vpc.main.cidr_block] : var.bi_access_cidrs
 
   # S3 Buckets
   guide_images_bucket  = var.create_s3_buckets ? module.guide_images_s3_bucket.s3_bucket_id : data.aws_s3_bucket.guide_images[0].bucket
