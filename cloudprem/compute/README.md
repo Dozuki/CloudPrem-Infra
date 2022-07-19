@@ -4,13 +4,16 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | 3.56.0 |
+| <a name="requirement_helm"></a> [helm](#requirement\_helm) | 2.3.0 |
+| <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | 2.4.1 |
+| <a name="requirement_null"></a> [null](#requirement\_null) | 3.1.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 3.56.0 |
-| <a name="provider_helm"></a> [helm](#provider\_helm) | n/a |
+| <a name="provider_helm"></a> [helm](#provider\_helm) | 2.3.0 |
 
 ## Modules
 
@@ -45,9 +48,9 @@
 | [aws_security_group_rule.app_access_http](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.app_access_https](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.replicated_ui_access](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/resources/security_group_rule) | resource |
-| [helm_release.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
-| [helm_release.cluster_autoscaler](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
-| [helm_release.metrics_server](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
+| [helm_release.cluster_autoscaler](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
+| [helm_release.metrics_server](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/data-sources/caller_identity) | data source |
 | [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/data-sources/eks_cluster) | data source |
 | [aws_eks_cluster_auth.main](https://registry.terraform.io/providers/hashicorp/aws/3.56.0/docs/data-sources/eks_cluster_auth) | data source |
