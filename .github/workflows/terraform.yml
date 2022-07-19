@@ -56,7 +56,8 @@ jobs:
         level: info
         reporter: github-pr-review
         filter_mode: nofilter
-        fail_on_error: true
+        tfsec_version: v1.21.2
+        tfsec_flags: --exclude-downloaded-modules
 
 
 
