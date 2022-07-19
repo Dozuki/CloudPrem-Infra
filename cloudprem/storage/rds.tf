@@ -8,7 +8,7 @@ module "database_sg" {
   description     = "Security group for ${local.identifier}. Allows access from within the VPC on port 3306"
   vpc_id          = var.vpc_id
 
-  ingress_cidr_blocks = [data.aws_vpc.main.cidr_block]
+  ingress_cidr_blocks = concat([data.aws_vpc.main.cidr_block], var.bi_access_cidrs)
   ingress_rules       = ["mysql-tcp"]
 
   egress_rules = ["all-tcp"]
@@ -85,7 +85,6 @@ resource "aws_secretsmanager_secret" "primary_database_credentials" {
   name = "${local.identifier}-database"
 
   recovery_window_in_days = 0
-  //  kms_key_id              = data.aws_kms_key.rds.arn
 }
 
 resource "aws_secretsmanager_secret_version" "primary_database_credentials" {
@@ -128,6 +127,7 @@ module "replica_database" {
   storage_encrypted     = true
   kms_key_id            = data.aws_kms_key.rds.arn
   apply_immediately     = !var.protect_resources
+  publicly_accessible   = var.bi_public_access
 
   username = "dozuki"
   password = random_password.replica_database[0].result
@@ -149,7 +149,7 @@ module "replica_database" {
 
   # DB subnet group
   # db_subnet_group_name = local.identifier # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/42
-  subnet_ids = data.aws_subnets.private.ids
+  subnet_ids = local.bi_subnet_ids
 
   # DB parameter group
   family               = "mysql8.0"

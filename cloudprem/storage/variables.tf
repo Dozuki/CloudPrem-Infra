@@ -148,3 +148,13 @@ variable "eks_cluster_access_role_arn" {
   description = "ARN for cluster access role for app provisioning"
   type        = string
 }
+variable "bi_public_access" {
+  description = "NOTE: This is mutually exclusive with VPN access, both cannot be enabled at the same time. If BI is enabled and you need access to the BI database server from outside the amazon network, set this to true."
+  type        = bool
+  default     = false
+}
+variable "bi_access_cidrs" {
+  description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server."
+  type        = list(string)
+  default     = ["127.0.0.1/32"]
+}
