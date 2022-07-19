@@ -70,6 +70,10 @@ module "primary_database" {
     {
       name  = "binlog_format"
       value = "ROW"
+    },
+    {
+      name  = "group_concat_max_len"
+      value = "33554432"
     }
   ]
 
@@ -160,6 +164,10 @@ module "replica_database" {
     {
       name  = "binlog_format"
       value = "ROW"
+    },
+    {
+      name  = "group_concat_max_len"
+      value = "33554432"
     }
   ]
 
