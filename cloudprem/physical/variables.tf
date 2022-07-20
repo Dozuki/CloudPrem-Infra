@@ -248,10 +248,10 @@ variable "replicated_ui_access_cidr" {
   default     = "0.0.0.0/0"
 }
 
-variable "app_access_cidr" {
-  description = "This CIDR will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR."
-  type        = string
-  default     = "0.0.0.0/0"
+variable "app_access_cidrs" {
+  description = "These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
