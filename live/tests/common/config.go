@@ -38,8 +38,8 @@ type Environment struct {
 	EKSClusterMinSize          string `yaml:"eks_min_size" physical:"true"`
 	EKSClusterMaxSize          string `yaml:"eks_max_size" physical:"true"`
 	EKSClusterDesiredCapacity  string `yaml:"eks_desired_capacity" physical:"true"`
-	AppAccessCIDR              string `yaml:"app_access_cidr" physical:"true"`
-	ReplicatedAccessCIDR       string `yaml:"replicated_ui_access_cidr" physical:"true"`
+	AppAccessCIDRs             string `yaml:"app_access_cidrs" physical:"true"`
+	ReplicatedAccessCIDRs      string `yaml:"replicated_ui_access_cidrs" physical:"true"`
 	LicenseParameter           string `yaml:"dozuki_license_parameter_name" logical:"true"`
 	BootstrapAppSequenceNumber int    `yaml:"replicated_app_sequence_number" logical:"true"`
 	GoogleTranslateAPIToken    string `yaml:"google_translate_api_token" logical:"true"`
