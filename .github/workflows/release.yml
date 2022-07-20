@@ -22,10 +22,9 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Major Module Refactor & Scaling
-            - Split Terraform code into 4 separate modules: Network, Compute, Storage, and App
-            - Using Terragrunt to manage configuration, dependencies, and state
-            - Added support for Cluster & Pod autoscaling in Kubernetes
-            - Fixed replicated app sequence targeting to unpin release after initial install
+            Legacy Module BI Backports & Hotfixes
+            - Backport Public BI feature
+            - Backport RDS group_concat_max_len parameter fix
+            - Add terraform provider version constraints to prevent deprecation
           draft: false
           prerelease: false
