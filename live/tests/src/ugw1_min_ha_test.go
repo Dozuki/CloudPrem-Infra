@@ -35,5 +35,5 @@ func Test_UsGovWest1_Min_HA(t *testing.T) {
 
 	terraform.TgApplyAll(t, terragruntLogicalOptions)
 
-	tc.BasicAssertion(t, terragruntLogicalOptions)
+	tc.Assertions(t, terragruntPhysicalOptions, terragruntLogicalOptions, &testConfig)
 }

@@ -1,13 +1,11 @@
 package src
 
 import (
+	tc "dozuki.com/tests/common"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"testing"
-	"time"
-
-	tc "dozuki.com/tests/common"
 )
 
 func Test_UsEast1_BI_Public(t *testing.T) {
@@ -35,6 +33,6 @@ func Test_UsEast1_BI_Public(t *testing.T) {
 
 	terraform.TgApplyAll(t, terragruntLogicalOptions)
 
-	tc.BasicAssertion(t, terragruntLogicalOptions, 0*time.Second)
-	tc.PublicBIDMSAssertion(t, terragruntPhysicalOptions, testConfig)
+	tc.PublicBIDMSAssertion(t, terragruntPhysicalOptions, &testConfig)
+	tc.Assertions(t, terragruntPhysicalOptions, terragruntLogicalOptions, &testConfig)
 }

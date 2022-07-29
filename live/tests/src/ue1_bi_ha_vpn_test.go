@@ -33,5 +33,5 @@ func Test_UsEast1_BI_HA_VPN(t *testing.T) {
 
 	terraform.TgApplyAll(t, terragruntLogicalOptions)
 
-	tc.BasicAssertion(t, terragruntLogicalOptions)
+	tc.Assertions(t, terragruntPhysicalOptions, terragruntLogicalOptions, &testConfig)
 }
