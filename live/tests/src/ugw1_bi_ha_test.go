@@ -20,6 +20,8 @@ func Test_UsGovWest1_BI_HA(t *testing.T) {
 		Environment: cfg.BIHA,
 	}
 
+	tc.GovInstanceOverrides(&testConfig)
+
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
 	physicalFolder, logicalFolder := tc.BootstrapFolders(testConfig, terraformFolder)

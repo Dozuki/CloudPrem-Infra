@@ -20,6 +20,8 @@ func Test_UsGovWest1_BI_VPN(t *testing.T) {
 		Environment: cfg.BIVPN,
 	}
 
+	tc.GovInstanceOverrides(&testConfig)
+
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
 	physicalFolder, logicalFolder := tc.BootstrapFolders(testConfig, terraformFolder)

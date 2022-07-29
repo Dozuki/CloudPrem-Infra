@@ -22,6 +22,8 @@ func Test_UsGovWest1_BI_Public(t *testing.T) {
 		Environment: cfg.BIPublic,
 	}
 
+	tc.GovInstanceOverrides(&testConfig)
+
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
 	physicalFolder, logicalFolder := tc.BootstrapFolders(testConfig, terraformFolder)
