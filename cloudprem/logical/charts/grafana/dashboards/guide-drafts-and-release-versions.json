@@ -933,8 +933,8 @@
       {
         "allValue": null,
         "current": {
-          "text": "<sitename>",
-          "value": "<sitename>"
+          "text": "onprem",
+          "value": "onprem"
         },
         "hide": 2,
         "includeAll": false,
@@ -944,11 +944,11 @@
         "options": [
           {
             "selected": true,
-            "text": "<sitename>",
-            "value": "<sitename>"
+            "text": "onprem",
+            "value": "onprem"
           }
         ],
-        "query": "<sitename>",
+        "query": "onprem",
         "skipUrlSync": false,
         "type": "custom"
       }

@@ -834,8 +834,8 @@
       {
         "current": {
           "selected": true,
-          "text": "<sitename>",
-          "value": "<sitename>"
+          "text": "onprem",
+          "value": "onprem"
         },
         "hide": 2,
         "label": "Site Name",
@@ -843,11 +843,11 @@
         "options": [
           {
             "selected": true,
-            "text": "<sitename>",
-            "value": "<sitename>"
+            "text": "onprem",
+            "value": "onprem"
           }
         ],
-        "query": "<sitename>",
+        "query": "onprem",
         "skipUrlSync": false,
         "type": "constant"
       },
