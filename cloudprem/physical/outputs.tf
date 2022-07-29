@@ -77,3 +77,6 @@ output "bi_vpn_configuration_bucket" {
   description = "If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet."
   value       = try(module.vpn[0].aws_vpn_configuration_bucket, "")
 }
+output "bastion_asg_name" {
+  value = module.bastion.this_autoscaling_group_name
+}

@@ -11,7 +11,7 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 3.70.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.1.1 |
+| <a name="provider_null"></a> [null](#provider\_null) | n/a |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.1.0 |
 
 ## Modules
@@ -90,6 +90,10 @@
 | [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.replicated_ui_access](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
+| [aws_ssm_association.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_association) | resource |
+| [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_association) | resource |
+| [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_document) | resource |
+| [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_document) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [random_password.primary_database](https://registry.terraform.io/providers/hashicorp/random/3.1.0/docs/resources/password) | resource |
@@ -122,7 +126,7 @@
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_app_access_cidr"></a> [app\_access\_cidr](#input\_app\_access\_cidr) | This CIDR will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `string` | `"0.0.0.0/0"` | no |
+| <a name="input_app_access_cidrs"></a> [app\_access\_cidrs](#input\_app\_access\_cidrs) | These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
 | <a name="input_azs_count"></a> [azs\_count](#input\_azs\_count) | The number of availability zones we should use for deployment. | `number` | `3` | no |
@@ -152,7 +156,7 @@
 | <a name="input_rds_max_allocated_storage"></a> [rds\_max\_allocated\_storage](#input\_rds\_max\_allocated\_storage) | The maximum size to which AWS will scale the database (Gb) | `number` | `500` | no |
 | <a name="input_rds_multi_az"></a> [rds\_multi\_az](#input\_rds\_multi\_az) | If true we will tell RDS to automatically deploy and manage a highly available standby instance of your database. Enabling this doubles the cost of the RDS instance but without it you are susceptible to downtime if the AWS availability zone your RDS instance is in becomes unavailable. | `bool` | `true` | no |
 | <a name="input_rds_snapshot_identifier"></a> [rds\_snapshot\_identifier](#input\_rds\_snapshot\_identifier) | We can seed the database from an existing RDS snapshot in this region. Type the snapshot identifier in this field or leave blank to start with a fresh database. Note: If you do use a snapshot it's critical that during stack updates you continue to include the snapshot identifier in this parameter. Clearing this parameter after using it will cause AWS to spin up a new fresh DB and delete your old one. | `string` | `""` | no |
-| <a name="input_replicated_ui_access_cidr"></a> [replicated\_ui\_access\_cidr](#input\_replicated\_ui\_access\_cidr) | This CIDR will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access. | `string` | `"0.0.0.0/0"` | no |
+| <a name="input_replicated_ui_access_cidrs"></a> [replicated\_ui\_access\_cidrs](#input\_replicated\_ui\_access\_cidrs) | These CIDRs will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_s3_documents_bucket"></a> [s3\_documents\_bucket](#input\_s3\_documents\_bucket) | Name of the bucket to store documents. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_images_bucket"></a> [s3\_images\_bucket](#input\_s3\_images\_bucket) | Name of the bucket to store guide images. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `"alias/aws/s3"` | no |
@@ -167,6 +171,7 @@
 | Name | Description |
 |------|-------------|
 | <a name="output_azs_count"></a> [azs\_count](#output\_azs\_count) | n/a |
+| <a name="output_bastion_asg_name"></a> [bastion\_asg\_name](#output\_bastion\_asg\_name) | n/a |
 | <a name="output_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#output\_bi\_database\_credential\_secret) | If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database. |
 | <a name="output_bi_vpn_configuration_bucket"></a> [bi\_vpn\_configuration\_bucket](#output\_bi\_vpn\_configuration\_bucket) | If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet. |
 | <a name="output_cluster_primary_sg"></a> [cluster\_primary\_sg](#output\_cluster\_primary\_sg) | Primary security group for EKS cluster |
