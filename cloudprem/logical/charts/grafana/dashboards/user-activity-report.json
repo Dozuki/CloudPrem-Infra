@@ -1,0 +1,2213 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "default",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "A snapshot of user activity",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": 1376,
+  "iteration": 1628867444559,
+  "links": [],
+  "panels": [
+    {
+      "content": "# Site Usage Monitor\nA snapshot of user activity",
+      "datasource": null,
+      "description": "User View History is required for any view statistics on these panels. To enable User View History for your account, contact your Customer Success Manager.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "links": [],
+      "mode": "markdown",
+      "options": {
+        "content": "# User Activity Report\nA snapshot of user activity",
+        "mode": "markdown"
+      },
+      "pluginVersion": "7.1.0",
+      "title": " ",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 3
+      },
+      "id": 6,
+      "panels": [],
+      "title": "",
+      "type": "row"
+    },
+    {
+      "content": "<h1> Key Metrics\n<hr>",
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 40,
+      "links": [],
+      "mode": "html",
+      "options": {
+        "content": "<h1> User Distribution\n<hr>",
+        "mode": "html"
+      },
+      "pluginVersion": "7.1.0",
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "aliasColors": {
+        "Administrator": "#756588",
+        "Author": "#51b7c2",
+        "Author & Mod": "#fac069",
+        "Standard User": "#6990ad"
+      },
+      "breakPoint": "50%",
+      "cacheTimeout": null,
+      "combine": {
+        "label": "Others",
+        "threshold": 0
+      },
+      "datasource": "$GUIDE_DB",
+      "decimals": 0,
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fontSize": "80%",
+      "format": "none",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 7
+      },
+      "id": 8,
+      "interval": null,
+      "legend": {
+        "header": "Number of Users",
+        "percentage": true,
+        "show": true,
+        "sideWidth": 0,
+        "sortDesc": false,
+        "values": true
+      },
+      "legendType": "Right side",
+      "links": [],
+      "maxDataPoints": 3,
+      "nullPointMode": "connected",
+      "pieType": "donut",
+      "strokeWidth": "0",
+      "targets": [
+        {
+          "alias": "",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT \r\nCASE p.description \r\n\tWHEN \"Administrator\"\r\n\tTHEN p.description \r\n\tWHEN \"Expert\"\r\n\tTHEN p.description \r\n\tWHEN \"Answers Moderator\"\r\n\tTHEN \"Moderator\"\r\n\tWHEN \"Guide Moderator\"\r\n\tTHEN \"Author\" \r\n\tWHEN \"Full Moderator\"\r\n\tTHEN \"Author & Mod\"\r\n\tWHEN \"Basic Moderator\"\r\n\tTHEN p.description \r\n\tWHEN \"Contributor\"\r\n\tTHEN p.description \r\nEND as \"User Type\", \r\nu.join_date*1000 as time_sec,\r\ncount(*) as \"# of Users\"\r\nFROM global_users u\r\nLEFT JOIN user_privileges up on u.userid = up.userid\r\nLEFT JOIN privileges p on up.privilegeid = p.privilegeid\r\nWHERE up.privilegeid is not null\r\nAND u.enabled = 1\r\nand u.login not like \"%@ifixit.com\"\r\nand u.login not like \"%@dozuki.com\"\r\nand ($TEAM = 'All Teams' OR u.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\r\nand ($USERID = 'All Users' OR u.userid = $USERID)\r\nGROUP BY p.description\r\n\r\nunion all\r\n\r\nSELECT \"Standard User\" as \"User Type\",\r\nu.join_date*1000 as time_sec,\r\ncount(*) as \"# of Users\"\r\nFROM global_users u\r\nLEFT JOIN user_privileges up on u.userid = up.userid\r\nLEFT JOIN privileges p on up.privilegeid = p.privilegeid\r\nWHERE up.privilegeid is null\r\nAND u.enabled = 1\r\nand u.login not like \"%@ifixit.com\"\r\nand u.login not like \"%@dozuki.com\"\r\nand ($TEAM = 'All Teams' OR u.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\r\nand ($USERID = 'All Users' OR u.userid = $USERID)\r\n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": "Number of Users",
+      "transparent": true,
+      "type": "grafana-piechart-panel",
+      "valueName": "total"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "#299c46",
+        "rgba(237, 129, 40, 0.89)",
+        "#d44a3a"
+      ],
+      "datasource": "$GUIDE_DB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 7,
+        "x": 8,
+        "y": 7
+      },
+      "id": 10,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": " Registered Users",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "100%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)\nFROM global_users u\nLEFT JOIN user_privileges up on u.userid = up.userid\nLEFT JOIN privileges p on up.privilegeid = p.privilegeid\nWHERE  u.enabled =1\nand ($TEAM = 'All Teams' OR u.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR u.userid = $USERID)\nand u.login not like \"%@ifixit.com\"\nand u.login not like \"%@dozuki.com\"",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "120%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "aliasColors": {
+        "New Users": "rgb(92, 128, 158)"
+      },
+      "bars": true,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$GUIDE_DB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 15,
+        "y": 7
+      },
+      "hiddenSeries": false,
+      "id": 13,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": false,
+      "linewidth": 1,
+      "links": [],
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.0",
+      "pointradius": 5,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "alias": "",
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT u.join_date as time_sec, count(*) as \"New Users\"\nFROM global_users u\nWHERE u.enabled = 1\nand u.login not like \"%@ifixit.com\"\nand u.login not like \"%@dozuki.com\"\nand ($TEAM = 'All Teams' OR u.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR u.userid = $USERID)\nGROUP BY date_format(from_unixtime(u.join_date), \"%m-%y\")\norder by from_unixtime(u.join_date) asc",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "New Users",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "transparent": true,
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "#299c46",
+        "rgba(237, 129, 40, 0.89)",
+        "#d44a3a"
+      ],
+      "datasource": "$GUIDE_DB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 2,
+        "w": 7,
+        "x": 8,
+        "y": 10
+      },
+      "id": 11,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": " Disabled Users",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "100%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*)\nFROM global_users u\nLEFT JOIN user_privileges up on u.userid = up.userid\nLEFT JOIN privileges p on up.privilegeid = p.privilegeid\nWHERE  u.enabled =0\nand ($TEAM = 'All Teams' OR u.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR u.userid = $USERID)\nand u.login not like \"%@ifixit.com\"\nand u.login not like \"%@dozuki.com\"",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "120%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "#299c46",
+        "rgba(237, 129, 40, 0.89)",
+        "#d44a3a"
+      ],
+      "datasource": "$GUIDE_DB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 7,
+        "x": 8,
+        "y": 12
+      },
+      "id": 27,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": " Pending Invites",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "100%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "Select count(distinct inviteid) from user_invites\nwhere user_invites.email not like \"%dozuki.com%\"\nand user_invites.email not like \"%ifixit.com%\"\n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "120%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 35,
+      "panels": [],
+      "title": "",
+      "type": "row"
+    },
+    {
+      "content": "<h1> Recent Activity\n<hr>",
+      "datasource": null,
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 39,
+      "links": [],
+      "mode": "html",
+      "options": {
+        "content": "<h1> Recent Activity\n<hr>",
+        "mode": "html"
+      },
+      "pluginVersion": "7.1.0",
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": true,
+      "colors": [
+        "#20a7a3",
+        "#20a7a3",
+        "#20a7a3"
+      ],
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams, users, categories, and guides.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 0,
+        "y": 20
+      },
+      "id": 21,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT count(historyid)\nFROM user_history\nleft join (SELECT guideid, revisionid, device, created_date from guide_meta where created_date between (UNIX_TIMESTAMP() - 2629743) and UNIX_TIMESTAMP() ) gm on user_history.docid=gm.revisionid\n\n\nwhere user_history.event = 'new_guide'\nand created_date between (UNIX_TIMESTAMP() - 2629743) and UNIX_TIMESTAMP()\nand ($TEAM = 'All Teams' OR user_history.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR user_history.userid = $USERID)\nand ($CATEGORYID = 'All Categories' OR gm.device = $CATEGORYID)\nand ($GUIDE_ID = 'All Guides' or gm.guideid = $GUIDE_ID)",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "New Guides Last 30 Days",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "100%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": true,
+      "colors": [
+        "#20a7a3",
+        "#20a7a3",
+        "#20a7a3"
+      ],
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams, users, categories, and guides.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 5,
+        "y": 20
+      },
+      "id": 25,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT count(historyid)\nFROM user_view_history\nleft join guide_current on guide_current.guideid=user_view_history.docid\nleft join guide_revisions using(guide_revisionid)\nleft join guide_meta on guide_revisions.gtr_revisionid=guide_meta.revisionid\n\n\nwhere \nuser_view_history.doc_type = 'GUIDE'\nand user_view_history.date between (UNIX_TIMESTAMP() - 2629743) and UNIX_TIMESTAMP()\n\nand ($TEAM = 'All Teams' OR user_view_history.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR user_view_history.userid = $USERID)\nand ($CATEGORYID = 'All Categories' OR guide_meta.device = $CATEGORYID) \nand ($GUIDE_ID = 'All Guides' OR guide_meta.guideid = $GUIDE_ID) ",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "Guide Views Last 30 Days",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "100%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": true,
+      "colors": [
+        "#20a7a3",
+        "#20a7a3",
+        "#20a7a3"
+      ],
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams, users, and categories.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 9,
+        "y": 20
+      },
+      "id": 22,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT count(historyid)\nFROM (select * from user_view_history \nwhere doc_type = 'WIKI'\nand date between (UNIX_TIMESTAMP() - 2629743) and UNIX_TIMESTAMP()\nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR userid = $USERID)\n) uvh\nINNER join (select wikiid as docid, title, namespace from wikis where namespace=\"TOPIC\") w using(docid)\n\n\n\n\nwhere ($CATEGORYID = 'All Categories' OR w.title = $CATEGORYID) \n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "Category Views Last 30 Days",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "100%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": true,
+      "colors": [
+        "#20a7a3",
+        "#20a7a3",
+        "#20a7a3"
+      ],
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams, users, and categories.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 13,
+        "y": 20
+      },
+      "id": 24,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT count(historyid)\nFROM (select * from user_view_history \nwhere doc_type = 'WIKI'  \nand ($USERID = 'All Users' OR userid = $USERID)\nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand date between (UNIX_TIMESTAMP() - 2629743) and UNIX_TIMESTAMP()\n) uvh\n\nINNER join (select wikiid as docid, namespace from wikis where namespace=\"WIKI\") w using(docid)\n\n\nleft join (select wikiid, related_wikiid as docid from wiki_related) wr using(docid)\nleft join (select wikiid, title from wikis where namespace=\"TOPIC\") wt using(wikiid)\n\n\n\nwhere ($CATEGORYID = 'All Categories' OR wt.title = $CATEGORYID)",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "Wiki Views Last 30 Days",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "100%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "#20a7a3",
+        "#20a7a3",
+        "#20a7a3"
+      ],
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams and users.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 17,
+        "y": 20
+      },
+      "id": 31,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "Select count(distinct a.userid)\n-- ,a.userid, a.username, a.login, from_unixtime(edit_date) \n\nfrom\n\n(select user_history.userid, global_users.username, max(date) as edit_date, global_users.login from user_history  left join global_users on user_history.userid = global_users.userid group by user_history.userid ) a\n\nwhere edit_date BETWEEN '${__from:date:seconds}' AND '${__to:date:seconds}'\n\nand a.login not like \"%dozuki.com%\"\nand a.login not like \"%ifixit.com%\"\nand ($TEAM = 'All Teams' OR a.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR a.userid = $USERID)\n-- group by userid\norder by userid asc",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "Users Editing Content",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "100%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "#299c46",
+        "rgba(237, 129, 40, 0.89)",
+        "#d44a3a"
+      ],
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams and users.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 20,
+        "y": 20
+      },
+      "id": 26,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "Select count(distinct a.userid)\n-- ,a.userid, from_unixtime(view_date) \n\nfrom\n\n(select user_view_history.userid, max(user_view_history.date) as view_date, global_users.login from user_view_history \n\nleft join global_users on user_view_history.userid = global_users.userid \n\nwhere user_view_history.date BETWEEN '${__from:date:seconds}' AND '${__to:date:seconds}'\n\n\ngroup by user_view_history.userid\n\n\n) a\n\nwhere  view_date BETWEEN '${__from:date:seconds}' AND '${__to:date:seconds}'\n\nand a.login not like \"%dozuki.com%\"\nand a.login not like \"%ifixit.com%\"\nand ($TEAM = 'All Teams' OR a.userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR a.userid = $USERID)\n-- group by userid",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": "",
+      "title": "Users Viewing Content",
+      "transparent": true,
+      "type": "singlestat",
+      "valueFontSize": "100%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "avg"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 15,
+      "panels": [],
+      "title": "",
+      "type": "row"
+    },
+    {
+      "content": "# User Login History",
+      "datasource": null,
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 46,
+      "links": [],
+      "mode": "markdown",
+      "options": {
+        "content": "# User Views and Activity",
+        "mode": "markdown"
+      },
+      "pluginVersion": "7.1.0",
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "aliasColors": {
+        "Activity": "dark-red",
+        "User Views": "blue"
+      },
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams, users, category, and date range.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 6,
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "hiddenSeries": false,
+      "id": 48,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 2,
+      "links": [],
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.0",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "alias": "",
+          "format": "time_series",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select uvh.date*1000 as time_sec, \"Guide Views\" as metric, count(uvh.historyid) as value\n\n\nfrom (select * from user_view_history \nwhere ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR userid = $USERID)\nand doc_type=\"GUIDE\" \nand date BETWEEN '${__from:date:seconds}' AND '${__to:date:seconds}'\ngroup by userid, docid, date\n) uvh\n\ninner join \n(select userid, login, username \nfrom global_users \n\nwhere \n($USERID='All Users' or $USERID=userid) \nand login not like \"%dozuki.com%\"\nand login not like \"%ifixit.com%\" \nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\n) gu using (`userid`)\nleft join (select guideid as docid, max(revisionid) as maxrev from guide_meta group by guideid) mr using(docid)\nleft join (select guideid as docid, revisionid as maxrev, device from guide_meta group by revisionid) gm using(maxrev)\n\nwhere \n\n\n($CATEGORYID = 'All Categories' OR gm.device = $CATEGORYID)\n\ngroup by date_format(from_unixtime(uvh.date), \"%m-%y\")\n\norder by uvh.date asc\n\n-- left join (select userid, historyid, date from user_view_history group by historyid) uvh on uvh.userid = u.userid",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        },
+        {
+          "format": "time_series",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select uvh.date*1000 as time_sec, \"Wiki Views\" as metric, count(uvh.historyid) as value\n\n\nfrom (select * from user_view_history \nwhere ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR userid = $USERID)\nand doc_type=\"WIKI\" \nand date BETWEEN '${__from:date:seconds}' AND '${__to:date:seconds}'\ngroup by userid, docid, date\n) uvh\n\ninner join \n(select userid, login, username \nfrom global_users \n\nwhere \n($USERID='All Users' or $USERID=userid) \nand login not like \"%dozuki.com%\"\nand login not like \"%ifixit.com%\" \nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\n) gu using (`userid`)\n\nINNER join (select wikiid as docid, namespace from wikis where namespace=\"WIKI\") w using(docid)\nleft join (select wikiid, related_wikiid as docid from wiki_related) wr using(docid)\nleft join (select wikiid, title from wikis where namespace=\"TOPIC\") wt using(wikiid)\n\nwhere ($CATEGORYID = 'All Categories' OR wt.title = $CATEGORYID)\n\ngroup by date_format(from_unixtime(uvh.date), \"%m-%y\")\n\norder by uvh.date asc\n\n-- left join (select userid, historyid, date from user_view_history group by historyid) uvh on uvh.userid = u.userid",
+          "refId": "B",
+          "select": [
+            [
+              {
+                "params": [
+                  "process_id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "data_capture_log",
+          "timeColumn": "process_start",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        },
+        {
+          "format": "time_series",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select uvh.date*1000 as time_sec, \"Category Views\" as metric, count(uvh.historyid) as value\n\n\nfrom (select * from user_view_history \nwhere ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR userid = $USERID)\nand doc_type=\"WIKI\" \nand date BETWEEN '${__from:date:seconds}' AND '${__to:date:seconds}'\ngroup by userid, docid, date\n) uvh\n\ninner join \n(select userid, login, username \nfrom global_users \n\nwhere \n($USERID='All Users' or $USERID=userid) \n-- and login not like \"%dozuki.com%\"\n-- and login not like \"%ifixit.com%\" \nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\n) gu using (`userid`)\n\nINNER join (select wikiid as docid, title, namespace from wikis where namespace=\"TOPIC\") w using(docid)\n\nwhere ($CATEGORYID = 'All Categories' OR w.title = $CATEGORYID) \n\ngroup by date_format(from_unixtime(uvh.date), \"%m-%y\")\n\norder by uvh.date asc\n",
+          "refId": "C",
+          "select": [
+            [
+              {
+                "params": [
+                  "process_id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "data_capture_log",
+          "timeColumn": "process_start",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        },
+        {
+          "format": "time_series",
+          "group": [],
+          "hide": true,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select uh.date*1000 as time, \"Activity\" as metric, count(uh.historyid) as value\n\n\nfrom (select * from user_history where ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR userid = $USERID)) uh\n\n\n\ngroup by date_format(from_unixtime(uh.date), \"%m-%y\")\n\norder by uh.date asc",
+          "refId": "D",
+          "select": [
+            [
+              {
+                "params": [
+                  "process_id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "data_capture_log",
+          "timeColumn": "process_start",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "User Views Over Time",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "transparent": true,
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {
+        "April 2017": "#6990ad",
+        "April 2018": "#6990ad",
+        "August 2017": "#6990ad",
+        "August 2018": "#6990ad",
+        "December 2016": "#6990ad",
+        "December 2017": "#6990ad",
+        "February 2017": "#6990ad",
+        "February 2018": "#6990ad",
+        "January 2017": "#6990ad",
+        "January 2018": "#6990ad",
+        "July 2017": "#6990ad",
+        "July 2018": "#6990ad",
+        "June 2017": "#6990ad",
+        "June 2018": "#6990ad",
+        "March 2017": "#6990ad",
+        "March 2018": "#6990ad",
+        "May 2017": "#6990ad",
+        "May 2018": "#6990ad",
+        "November 2016": "#6990ad",
+        "November 2017": "#6990ad",
+        "October 2016": "#6990ad",
+        "October 2017": "#6990ad",
+        "September 2016": "#6990ad",
+        "September 2017": "#6990ad",
+        "September 2018": "#6990ad"
+      },
+      "bars": true,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams, users, and date range.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 15,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "hiddenSeries": false,
+      "hideTimeOverride": false,
+      "id": 37,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": false,
+        "total": false,
+        "values": false
+      },
+      "lines": false,
+      "linewidth": 1,
+      "links": [],
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.0",
+      "pointradius": 5,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [
+        {
+          "alias": "/20/",
+          "color": "#6990ad"
+        }
+      ],
+      "spaceLength": 10,
+      "stack": true,
+      "steppedLine": false,
+      "targets": [
+        {
+          "alias": "",
+          "format": "time_series",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "Select view_date*1000 as time_sec, count(distinct userid) as value, \n\nconcat(monthname(from_unixtime(view_date)),\" \",year(from_unixtime(view_date)))  as metric\n\n-- \"Users Viewing Content\" as metric\n\n\n\nfrom (select user_view_history.historyid, user_view_history.userid, user_view_history.date as view_date from user_view_history \n where ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR userid = $USERID)  group by historyid\n) uvh\n\nleft join global_users gu using(userid)\n\n\n\nwhere\nview_date BETWEEN '${__from:date:seconds}' AND '${__to:date:seconds}'\n\nand gu.login not like \"%dozuki.com%\"\nand gu.login not like \"%ifixit.com%\"\n\n-- group by year(from_unixtime(view_date)), month(from_unixtime(view_date)) order by year(from_unixtime(view_date)), month(from_unixtime(view_date))\n\ngroup by date_format(from_unixtime(uvh.view_date), \"%m-%y\")\norder by view_date asc",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Users Viewing Content",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "transparent": true,
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "series",
+        "name": null,
+        "show": true,
+        "values": [
+          "total"
+        ]
+      },
+      "yaxes": [
+        {
+          "decimals": 0,
+          "format": "none",
+          "label": "Users Viewing Content",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {
+        "Activity": "dark-red",
+        "User Views": "blue"
+      },
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams, users, and date range.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 6,
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "hiddenSeries": false,
+      "id": 49,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 2,
+      "links": [],
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.2.0",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "format": "time_series",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select uh.date*1000 as time, \"Activity\" as metric, count(uh.historyid) as value\n\n\nfrom (select * from user_history where ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($USERID = 'All Users' OR userid = $USERID)) uh\n\n\n\ngroup by date_format(from_unixtime(uh.date), \"%m-%y\")\n\norder by uh.date asc",
+          "refId": "D",
+          "select": [
+            [
+              {
+                "params": [
+                  "process_id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "data_capture_log",
+          "timeColumn": "process_start",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "User Activity Over Time",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "transparent": true,
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "columns": [],
+      "datasource": "$GUIDE_DB",
+      "description": "Filtered by teams and users.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "fontSize": "100%",
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 73
+      },
+      "id": 17,
+      "links": [],
+      "pageSize": null,
+      "scroll": false,
+      "showHeader": true,
+      "sort": {
+        "col": 7,
+        "desc": true
+      },
+      "styles": [
+        {
+          "alias": "Time",
+          "align": "auto",
+          "dateFormat": "YYYY-MM-DD HH:mm:ss",
+          "pattern": "Time",
+          "type": "date"
+        },
+        {
+          "alias": "User ID",
+          "align": "auto",
+          "colorMode": null,
+          "colors": [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "dateFormat": "YYYY-MM-DD HH:mm:ss",
+          "decimals": 0,
+          "mappingType": 1,
+          "pattern": "userid",
+          "thresholds": [],
+          "type": "number",
+          "unit": "none"
+        },
+        {
+          "alias": "",
+          "align": "auto",
+          "colorMode": null,
+          "colors": [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "dateFormat": "YYYY-MM-DD hh:mm a",
+          "decimals": 2,
+          "mappingType": 1,
+          "pattern": "Account Created On",
+          "thresholds": [],
+          "type": "date",
+          "unit": "short"
+        },
+        {
+          "alias": "",
+          "align": "auto",
+          "colorMode": null,
+          "colors": [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "dateFormat": "YYYY-MM-DD hh:mm a",
+          "decimals": 2,
+          "mappingType": 1,
+          "pattern": "Last Activity",
+          "thresholds": [],
+          "type": "date",
+          "unit": "short"
+        },
+        {
+          "alias": "",
+          "align": "auto",
+          "colorMode": null,
+          "colors": [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "dateFormat": "YYYY-MM-DD hh:mm a",
+          "decimals": 2,
+          "mappingType": 1,
+          "pattern": "Last View",
+          "thresholds": [],
+          "type": "date",
+          "unit": "short"
+        },
+        {
+          "alias": "",
+          "align": "auto",
+          "colorMode": null,
+          "colors": [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "dateFormat": "YYYY-MM-DD hh:mm a",
+          "decimals": 2,
+          "mappingType": 1,
+          "pattern": "Last Login",
+          "thresholds": [],
+          "type": "date",
+          "unit": "short"
+        },
+        {
+          "alias": "",
+          "align": "auto",
+          "colorMode": null,
+          "colors": [
+            "rgba(245, 54, 54, 0.9)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(50, 172, 45, 0.97)"
+          ],
+          "decimals": 2,
+          "pattern": "/.*/",
+          "thresholds": [],
+          "type": "number",
+          "unit": "short"
+        }
+      ],
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "hide": false,
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "Select * from (select u.username as \"Username\", u.userid, u.login as \"Email\",\n\nCASE up.privilegeid\n\tWHEN 1 THEN \"Admin\"\n\tWHEN 7 THEN \"Author\"\n\tELSE \"Standard\"\nEND as \"Role\", \n\nu.join_date*1000 as \"Account Created On\", \n-- ses.status, \n\ncase\nwhen u.enabled=1\nthen \"Active\"\nWhen u.enabled=0\nThen \"Disabled\" \nend as \"Status\",  \n\nuh.date*1000 as \"Last Activity\",\nuvh.date*1000 as \"Last View\"\n-- ses.ip, \n\n\n\n\nfrom global_users u\n\n\n\nleft join sessions ses on ses.userid = u.userid and ses.status=\"ACTIVE\"  \n\nleft join user_privileges up on up.userid = u.userid\nleft join (select userid, max(date) as date from user_history group by userid) uh on uh.userid = u.userid\nleft join (select userid, max(date) as date from user_view_history group by userid) uvh on uvh.userid = u.userid\n-- left join user_invites on user_invites.userid\n\n\n\n\n\n\n\n\n\n\n\nunion all\n\nselect \"N/A\" as \"Username\",  \"N/A\" as userid, email as \"Email\", \nCASE privilege\n\tWHEN 1 THEN \"Admin\"\n\tWHEN 7 THEN \"Author\"\n\tELSE \"Standard\"\nEND as \"Role\", \n\"Pending Invite\" as \"Account Created On\", \"Invited\" as \"Status\", \"N/A\" as \"Last Activity\",\n\"N/A\" as \"Last View\"  \nfrom user_invites) t\n\nwhere \n\n\n ( t.`Last Activity` >= '${__from:date:seconds}' or t.`Last View`  >= '${__from:date:seconds}'  or t.`Account Created On` >= '${__from:date:seconds}' )\n\nand \n\n (t.`Last Activity` <= '${__to:date:seconds}' or t.`Last View`  <= '${__to:date:seconds}'  or t.`Account Created On` <= '${__to:date:seconds}' )\nand ($USERID = 'All Users' OR userid = $USERID)\nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand t.`Email` not like \"%dozuki.com%\"\nand t.`Email` not like \"%ifixit.com%\"",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": " User Details",
+      "transform": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "userid": false
+            },
+            "indexByName": {},
+            "renameByName": {
+              "Email": "",
+              "userid": "User ID"
+            }
+          }
+        }
+      ],
+      "transparent": true,
+      "type": "table-old"
+    }
+  ],
+  "refresh": false,
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [
+    "User Activity",
+    "Site Usage"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Dozuki",
+          "value": "Dozuki"
+        },
+        "hide": 2,
+        "includeAll": false,
+        "label": "Guide Database",
+        "multi": false,
+        "name": "GUIDE_DB",
+        "options": [],
+        "query": "mysql",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "allValue": "'All Teams'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": " select CONCAT(name, \" — \", \"Team ID:\", teamid) AS __text, teamid AS __value FROM teams",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Team",
+        "multi": false,
+        "name": "TEAM",
+        "options": [],
+        "query": " select CONCAT(name, \" — \", \"Team ID:\", teamid) AS __text, teamid AS __value FROM teams",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 5,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "'All Users'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "select  CONCAT(global_users.username, \" — \", \"User ID:\", global_users.userid) AS __text, global_users.userid AS __value from global_users where userid in (select userid from user_teams where ($TEAM=teamid or $TEAM='All Teams'))",
+        "hide": 0,
+        "includeAll": true,
+        "label": "User",
+        "multi": false,
+        "name": "USERID",
+        "options": [],
+        "query": "select  CONCAT(global_users.username, \" — \", \"User ID:\", global_users.userid) AS __text, global_users.userid AS __value from global_users where userid in (select userid from user_teams where ($TEAM=teamid or $TEAM='All Teams'))",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "'All Categories'",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "select  \"All Categories\", list.title as \"Category\" from (select distinct title from wikis where wikis.namespace=\"TOPIC\") list order by 'All Categories', title ASC",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Category",
+        "multi": false,
+        "name": "CATEGORYID",
+        "options": [],
+        "query": "select  \"All Categories\", list.title as \"Category\" from (select distinct title from wikis where wikis.namespace=\"TOPIC\") list order by 'All Categories', title ASC",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 5,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "'All Guides'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "select guide_text.guideid AS __value,   CONCAT(guide_text.title, \" — \", \"Guide ID:\",  guide_text.guideid) AS __text    from guide_current \nleft join guide_revisions using(guide_revisionid)\nleft join guide_text using(gt_revisionid)\nleft JOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\n\nwhere device in (select device from guide_meta where ($CATEGORYID=device or $CATEGORYID='All Categories'))\n\n\n",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Guide",
+        "multi": false,
+        "name": "GUIDE_ID",
+        "options": [],
+        "query": "select guide_text.guideid AS __value,   CONCAT(guide_text.title, \" — \", \"Guide ID:\",  guide_text.guideid) AS __text    from guide_current \nleft join guide_revisions using(guide_revisionid)\nleft join guide_text using(gt_revisionid)\nleft JOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\n\nwhere device in (select device from guide_meta where ($CATEGORYID=device or $CATEGORYID='All Categories'))\n\n\n",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 5,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-2y",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
+  },
+  "timezone": "browser",
+  "title": "User Activity",
+  "uid": null,
+  "version": 81
+}

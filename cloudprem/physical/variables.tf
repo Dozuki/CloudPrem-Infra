@@ -161,9 +161,9 @@ variable "bi_vpn_user_list" {
   default     = ["root"]
 }
 variable "bi_access_cidrs" {
-  description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server."
+  description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. If left empty it will default to your VPC CIDR"
   type        = list(string)
-  default     = ["127.0.0.1/32"]
+  default     = []
 }
 variable "app_public_access" {
   description = "Should the app and dashboard be accessible via a publicly routable IP and domain?"
@@ -252,6 +252,11 @@ variable "app_access_cidrs" {
   description = "These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+variable "grafana_access_cidrs" {
+  description = "If BI is enabled these CIDRs will be allowed to connect to Grafana. If left empty it will default to your VPC CIDR which will only allow access via VPN or Transit Gateway."
+  type        = list(string)
+  default     = []
 }
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."

@@ -85,6 +85,7 @@
 | [aws_security_group_rule.app_access_http](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.app_access_https](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.grafana_access_http](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
@@ -130,7 +131,7 @@
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
 | <a name="input_azs_count"></a> [azs\_count](#input\_azs\_count) | The number of availability zones we should use for deployment. | `number` | `3` | no |
-| <a name="input_bi_access_cidrs"></a> [bi\_access\_cidrs](#input\_bi\_access\_cidrs) | If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. | `list(string)` | <pre>[<br>  "127.0.0.1/32"<br>]</pre> | no |
+| <a name="input_bi_access_cidrs"></a> [bi\_access\_cidrs](#input\_bi\_access\_cidrs) | If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. If left empty it will default to your VPC CIDR | `list(string)` | `[]` | no |
 | <a name="input_bi_public_access"></a> [bi\_public\_access](#input\_bi\_public\_access) | NOTE: This is mutually exclusive with VPN access, both cannot be enabled at the same time. If BI is enabled and you need access to the BI database server from outside the amazon network, set this to true. | `bool` | `false` | no |
 | <a name="input_bi_vpn_access"></a> [bi\_vpn\_access](#input\_bi\_vpn\_access) | NOTE: This is mutually exclusive with public BI access, both cannot be enabled at the same time. If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server. | `bool` | `false` | no |
 | <a name="input_bi_vpn_user_list"></a> [bi\_vpn\_user\_list](#input\_bi\_vpn\_user\_list) | List of users to create OpenVPN configurations for usint mutual authentication. | `list(string)` | <pre>[<br>  "root"<br>]</pre> | no |
@@ -146,6 +147,7 @@
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users). | `bool` | `false` | no |
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
+| <a name="input_grafana_access_cidrs"></a> [grafana\_access\_cidrs](#input\_grafana\_access\_cidrs) | If BI is enabled these CIDRs will be allowed to connect to Grafana. If left empty it will default to your VPC CIDR which will only allow access via VPN or Transit Gateway. | `list(string)` | `[]` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_identifier"></a> [identifier](#input\_identifier) | A name identifier to use as prefix for all the resources. | `string` | `""` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |

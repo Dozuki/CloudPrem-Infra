@@ -31,3 +31,33 @@ resource "kubernetes_job" "dms_start" {
     create = "20m"
   }
 }
+
+resource "random_password" "grafana_admin" {
+  count = var.enable_bi ? 1 : 0
+
+  length  = 16
+  special = true
+}
+
+resource "helm_release" "grafana" {
+  count = var.enable_bi ? 1 : 0
+
+  name  = "grafana"
+  chart = "${path.module}/charts/grafana"
+
+  namespace = "default"
+
+  reuse_values = true
+
+  values = [
+    templatefile("${path.module}/static/grafana_values.yml", {
+      database_hostname = local.db_bi_host
+      database_password = local.db_bi_password
+    })
+  ]
+
+  set_sensitive {
+    name  = "adminPassword"
+    value = random_password.grafana_admin[0].result
+  }
+}

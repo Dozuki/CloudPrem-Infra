@@ -79,7 +79,7 @@ resource "aws_ssm_association" "bastion_mysql_config" {
   }
   targets {
     key    = "tag:Identifier"
-    values = [var.identifier]
+    values = [local.identifier_tag]
   }
   targets {
     key    = "tag:Environment"
@@ -103,7 +103,7 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
   }
   targets {
     key    = "tag:Identifier"
-    values = [var.identifier]
+    values = [local.identifier_tag]
   }
   targets {
     key    = "tag:Environment"

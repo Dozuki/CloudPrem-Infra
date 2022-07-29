@@ -1,0 +1,990 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "default",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1609890257685,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 13,
+      "panels": [],
+      "title": "",
+      "type": "row"
+    },
+    {
+      "content": "<h3>Guide Release Versions\n<hr>",
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 10,
+      "links": [],
+      "mode": "html",
+      "options": {
+        "content": "<h3>Guide Release Versions\n<hr>",
+        "mode": "html"
+      },
+      "pluginVersion": "7.1.0",
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "datasource": "$GUIDE_DB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "filterable": false
+          },
+          "decimals": 0,
+          "mappings": [],
+          "noValue": "-",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Guide Title"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "",
+                    "url": "https://$SITE_NAME.dozuki.com/guide/${__data.fields[\"Guide Title\"]}/${__data.fields[\"Guide ID\"]}"
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 247
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Approval Status"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": -1
+                    },
+                    {
+                      "color": "red",
+                      "value": 0
+                    },
+                    {
+                      "color": "#EAB839",
+                      "value": 1
+                    },
+                    {
+                      "color": "green",
+                      "value": 2
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "from": "",
+                    "id": 0,
+                    "text": "Approved",
+                    "to": "",
+                    "type": 1,
+                    "value": "2"
+                  },
+                  {
+                    "from": "",
+                    "id": 1,
+                    "text": "None Required",
+                    "to": "",
+                    "type": 1,
+                    "value": "3"
+                  },
+                  {
+                    "from": "",
+                    "id": 2,
+                    "text": "Pending",
+                    "to": "",
+                    "type": 1,
+                    "value": "1"
+                  },
+                  {
+                    "from": "",
+                    "id": 3,
+                    "text": "Rejected",
+                    "to": "",
+                    "type": 1,
+                    "value": "0"
+                  },
+                  {
+                    "from": "",
+                    "id": 4,
+                    "text": "Cancelled",
+                    "to": "",
+                    "type": 1,
+                    "value": "-1"
+                  }
+                ]
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "custom.width",
+                "value": 139
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Guide ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Release Type"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 103
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Release Version"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 125
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Author"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 139
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current Approval Stage"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 166
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Publish Date"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Request Date"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Release #"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 83
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current Stage"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 122
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Approval Process"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 15,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 11,
+      "links": [],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Approval Status"
+          }
+        ]
+      },
+      "pluginVersion": "7.2.0",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select \ngt.title as \"Guide Title\",\n\nconcat(\"https://\",\"$SITE_NAME.dozuki.com/guide/title/\",r.docid) as \"URL\",\n\nCase\nwhen ar.status=\"cancelled\"\nThen \"-1\"\nwhen ar.status=\"rejected\"\nThen \"0\"\nwhen ar.status=\"pending\"\nThen \"1\"\nwhen ar.status=\"approved\"\nThen \"2\"\nwhen ar.status is null\nThen \"3\"\nEND\nas \"Approval Status\",\n\n\ncase\nwhen teams.name is not null\nTHEN\nteams.name\nELSE\nindividual_approver.username\nEND\nas \"Approvers for Current Stage\",\n\n\n-- concat('https://','$SITE_NAME','.dozuki.com/guide/x/',r.docid) as \"Guide URL\",\nr.docid as \"Guide ID\",\ngm.device as \"Category\",\ngu.username as \"Author\",\n-- r.releaseid as \"Release ID\", \nr.version as \"Release Version\",\nr.title as \"Release Title\",\nr.type as \"Release Type\",\n\n-- ars.approval_process_stageid as \"Request Stage ID\",\n-- aps.approval_process_stageid as \"Stage ID\",\nap.name as \"Approval Process\",\n\n\nconcat (aps.orderby,\" of \", x.max_approval_steps) as \"Current Approval Stage\",\n\n\nCONVERT_TZ(from_unixtime(r.init_date), @@session.time_zone, '+00:00') as \"Publish Date\",\nCONVERT_TZ(from_unixtime(ars.init_date), @@session.time_zone, '+00:00') as \"Request Date\"\n\nfrom \nguide_current gc\n\nleft JOIN releases r on r.docid=gc.guideid and r.doctype='GUIDE'\n\n\nINNER JOIN (\n    SELECT releaseid, docid AS guideid, MAX(revisionid) AS maxrevision FROM releases WHERE doctype='GUIDE' GROUP BY guideid\n  ) maxrev ON maxrev.maxrevision = r.revisionid \n\n\n\nleft join global_users gu on gu.userid=r.userid\nleft join guide_revisions gr on gr.guide_revisionid=r.revisionid\nleft join guide_meta gm on gr.gtr_revisionid=gm.revisionid\nleft join guide_text gt on gt.gt_revisionid=gr.gt_revisionid\nleft join guide_approval_processes gap on gap.gtr_revisionid=gr.gtr_revisionid\n\n\nleft join approval_requests ar on ar.releaseid=r.releaseid\nleft join approval_processes ap on ap.approval_process_revisionid=ar.approval_process_revisionid\n\nleft JOIN (\n    SELECT approval_requestid, MAX(approval_request_stageid) AS maxstageid FROM approval_request_stages GROUP BY approval_requestid\n  ) maxstage ON maxstage.approval_requestid = ar.approval_requestid \n\nleft join approval_request_stages ars on ars.approval_request_stageid=maxstage.maxstageid\n\n\nleft join approval_process_stages aps on aps.approval_process_stageid=ars.approval_process_stageid \n\nleft join (select approval_process_revisionid, max(orderby) as max_approval_steps from approval_process_stages group by approval_process_revisionid) x on x.approval_process_revisionid=aps.approval_process_revisionid\n\n\nleft join teams on teams.teamid=aps.teamid\nleft join (select userid, username from global_users\n) individual_approver on aps.userid=individual_approver.userid\n\nWHERE \n\nCASE\n\tWHEN $APPROVAL_STATUS = 'All Status'\n\tTHEN 1 = 1\n\tWHEN $APPROVAL_STATUS = 'None Required' and ar.status is null\n\tTHEN 1 = 1\n\tELSE ar.status = $APPROVAL_STATUS\nEND\n\nand\n\n\n\nCASE\n\tWHEN $USERID = 'All Users'\n\tTHEN 1 = 1\n\tELSE gu.userid = $USERID\nEND\n\nand \n\nCASE\n\tWHEN \n\tindividual_approver.userid = $APPROVER\n\tTHEN 1 = 1\n\tWHEN teams.teamid = $APPROVER\n\tTHEN 1 = 1\n\tELSE $APPROVER = 'All Approvers'\nEND\n\nand \n\n\nCASE\n\tWHEN $GUIDE_ID = 'All Guides'\n\tTHEN 1 = 1\n\tELSE r.docid = $GUIDE_ID\nEND\n\nand \n\nCASE\n\tWHEN $CATEGORYID = 'All Categories'\n\tTHEN 1 = 1\n\tELSE gm.device = $CATEGORYID\nEND\n\n-- AND b.login not like \"%@dozuki.com\"\n-- AND b.login not like \"%@ifixit.com\n\ngroup by r.docid, ar.approval_requestid\n\n\n\n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": " ",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "URL": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "Approvers for Current Stage": "Current Approvers",
+              "Author": "",
+              "Current Approval Stage": "Current Stage",
+              "Guide ID": "",
+              "Release Type": "",
+              "Release Version": ""
+            }
+          }
+        }
+      ],
+      "transparent": true,
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 15,
+      "panels": [],
+      "title": "",
+      "type": "row"
+    },
+    {
+      "content": "<h3>Guide Drafts\n<hr>",
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 6,
+      "links": [],
+      "mode": "html",
+      "options": {
+        "content": "<h3>Guide Drafts\n<hr>",
+        "mode": "html"
+      },
+      "pluginVersion": "7.1.0",
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "datasource": "$GUIDE_DB",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "filterable": false
+          },
+          "mappings": [],
+          "noValue": "-",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Guide Title"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "",
+                    "url": "https://$SITE_NAME.dozuki.com/guide/${__data.fields[\"Guide Title\"]}/${__data.fields[\"Guide ID\"]}"
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 266
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Guide ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Guide Creation Date"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last Edit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last Release #"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 107
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Category"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 182
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Author"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 185
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 9,
+      "links": [],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Guide Title"
+          }
+        ]
+      },
+      "pluginVersion": "7.2.0",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "SELECT  \nguide_text.title as \"Guide Title\",\nconcat(\"https://\",\"$SITE_NAME.dozuki.com/guide/title/\",guide_meta.guideid) as \"URL\",\nguide_meta.guideid as \"Guide ID\",\nguide_meta.device as \"Category\",\nglobal_users.username as \"Author\",\n-- maxrev.max_guide_revision,\nr.version as \"Last Release Version\",\nr.title as \"Last Release Title\",\nap.name as \"Approval Process\",\nCONVERT_TZ(FROM_UNIXTIME(guide_meta.created_date), @@session.time_zone, '+00:00') as \"Guide Creation Date\",\nCONVERT_TZ(FROM_UNIXTIME(guide_revisions.date), @@session.time_zone, '+00:00') as \"Last Edit\"\n      -- distinct guide_meta.guideid, CURDATE(), guide_meta.created_date\nFROM guide_current\nleft join guide_revisions on guide_revisions.guide_revisionid=guide_current.guide_revisionid\nleft join guide_meta on guide_revisions.gtr_revisionid=guide_meta.revisionid\nleft join global_users on global_users.userid=guide_meta.author\nleft join guide_text on guide_text.gt_revisionid=guide_revisions.gt_revisionid\nleft join guide_approval_processes gap on gap.gtr_revisionid=guide_revisions.gtr_revisionid\nleft join approval_processes ap on ap.approval_process_revisionid=gap.major_release_approval_process_revisionid\n\nleft JOIN (\n    SELECT releaseid, docid AS guideid, MAX(revisionid) AS max_guide_revision FROM releases WHERE doctype='GUIDE' GROUP BY guideid\n  ) maxrev ON maxrev.guideid = guide_current.guideid\n\nleft join releases r on r.revisionid=maxrev.max_guide_revision and r.doctype='GUIDE'\n\n\nwhere \n\nCASE\nWHEN $USERID != 'All Users'\nTHEN guide_meta.author = $USERID\nelse 1=1\nend\n\nand \n\nCASE\n\tWHEN $GUIDE_ID = 'All Guides'\n\tTHEN 1 = 1\n\tELSE guide_current.guideid = $GUIDE_ID\nEND\n\n\nand \n\nCASE\n\tWHEN $CATEGORYID = 'All Categories'\n\tTHEN 1 = 1\n\tELSE guide_meta.device = $CATEGORYID\nEND\n\nand guide_current.guide_revisionid NOT IN (SELECT revisionid FROM releases WHERE doctype='GUIDE')\n\n-- and FROM_UNIXTIME(guide_meta.created_date) >= date_sub(CURDATE(),interval 1 month)\nand FROM_UNIXTIME(guide_meta.created_date) >= $__timeFrom()\nand FROM_UNIXTIME(guide_meta.created_date) <= $__timeTo()\n\n-- \ngroup by guide_meta.guideid",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": " ",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "URL": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ],
+      "transparent": true,
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "id": 17,
+      "panels": [],
+      "title": "",
+      "type": "row"
+    },
+    {
+      "content": "<h2>Releases Awaiting Approval\n<hr>",
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "id": 7,
+      "links": [],
+      "mode": "html",
+      "options": {
+        "content": "<h2>Releases Awaiting Approval\n<hr>",
+        "mode": "html"
+      },
+      "pluginVersion": "7.1.0",
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "datasource": "$GUIDE_DB",
+      "description": "Unfiltered list of approvers with releases waiting for approval.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 4,
+      "links": [],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "Approvers"
+          }
+        ]
+      },
+      "pluginVersion": "7.2.0",
+      "targets": [
+        {
+          "alias": "",
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select \n\ncase\nwhen teams.name is not null\nTHEN\nteams.name\nELSE\nindividual_approver.username\nEND\nas approvers,\n\ncount(r.docid) as pending_approvals\n\nfrom \nguide_current gc\n\nleft JOIN releases r on r.docid=gc.guideid and r.doctype='GUIDE'\n\nINNER JOIN (\n    SELECT releaseid, docid AS guideid, MAX(revisionid) AS maxrevision FROM releases WHERE doctype='GUIDE' GROUP BY guideid\n  ) maxrev ON maxrev.maxrevision = r.revisionid\n\n\n\nleft join global_users gu on gu.userid=r.userid\nleft join guide_revisions gr on gr.guide_revisionid=r.revisionid\nleft join guide_meta gm on gr.gtr_revisionid=gm.revisionid\nleft join guide_text gt on gt.gt_revisionid=gr.gt_revisionid\nleft join guide_approval_processes gap on gap.gtr_revisionid=gr.gtr_revisionid\n\n\nleft join approval_requests ar on ar.releaseid=r.releaseid\nleft join approval_processes ap on ap.approval_process_revisionid=ar.approval_process_revisionid\n\nleft JOIN (\n    SELECT approval_requestid, MAX(approval_request_stageid) AS maxstageid FROM approval_request_stages GROUP BY approval_requestid\n  ) maxstage ON maxstage.approval_requestid = ar.approval_requestid \n\nleft join approval_request_stages ars on ars.approval_request_stageid=maxstage.maxstageid\n\n\nleft join approval_process_stages aps on aps.approval_process_stageid=ars.approval_process_stageid \n\nleft join (select approval_process_revisionid, max(orderby) as max_approval_steps from approval_process_stages group by approval_process_revisionid) x on x.approval_process_revisionid=aps.approval_process_revisionid\n\n\nleft join teams on teams.teamid=aps.teamid\nleft join (select userid, username from global_users\n) individual_approver on aps.userid=individual_approver.userid\n\nWHERE \n\nar.status=\"pending\"\n\n\n-- AND b.login not like \"%@dozuki.com\"\n-- AND b.login not like \"%@ifixit.com\n\ngroup by approvers\n\n\n\n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "value"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "timeColumn": "time",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "title": " ",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "approvers": "Approvers",
+              "pending_approvals": " Number of Pending Releases Awaiting Approval"
+            }
+          }
+        }
+      ],
+      "transparent": true,
+      "type": "table"
+    }
+  ],
+  "refresh": false,
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [
+    "Content",
+    "Guide Release Versions"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Dozuki",
+          "value": "Dozuki"
+        },
+        "hide": 2,
+        "includeAll": false,
+        "label": "Guide Database",
+        "multi": false,
+        "name": "GUIDE_DB",
+        "options": [],
+        "query": "mysql",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "allValue": "'All Users'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "select  CONCAT(global_users.username, \" — \", \"User ID:\", global_users.userid) AS __text, global_users.userid AS __value from global_users",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Author",
+        "multi": false,
+        "name": "USERID",
+        "options": [],
+        "query": "select  CONCAT(global_users.username, \" — \", \"User ID:\", global_users.userid) AS __text, global_users.userid AS __value from global_users",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "'All Approvers'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "select       case  when teams.name is not null THEN teams.name  ELSE  CONCAT(individual_approver.username, \" — \", \"User ID:\", individual_approver.userid)  END  AS __text,  case  when teams.name is not null THEN teams.teamid  ELSE  individual_approver.userid END  AS __value      from releases r   INNER JOIN (     SELECT releaseid, docid AS guideid, MAX(revisionid) AS maxrevision FROM releases WHERE doctype='GUIDE' GROUP BY guideid   ) maxrev ON maxrev.maxrevision = r.revisionid     left join global_users gu on gu.userid=r.userid left join guide_revisions gr on gr.guide_revisionid=r.revisionid left join guide_meta gm on gr.gtr_revisionid=gm.revisionid left join guide_text gt on gt.gt_revisionid=gr.gt_revisionid left join guide_approval_processes gap on gap.gtr_revisionid=gr.gtr_revisionid   left join approval_requests ar on ar.releaseid=r.releaseid left join approval_processes ap on ap.approval_process_revisionid=ar.approval_process_revisionid  left JOIN (     SELECT approval_requestid, MAX(approval_request_stageid) AS maxstageid FROM approval_request_stages GROUP BY approval_requestid   ) maxstage ON maxstage.approval_requestid = ar.approval_requestid   left join approval_request_stages ars on ars.approval_request_stageid=maxstage.maxstageid   left join approval_process_stages aps on aps.approval_process_stageid=ars.approval_process_stageid   left join (select approval_process_revisionid, max(orderby) as max_approval_steps from approval_process_stages group by approval_process_revisionid) x on x.approval_process_revisionid=aps.approval_process_revisionid   left join teams on teams.teamid=aps.teamid left join (select userid, username from global_users ) individual_approver on aps.userid=individual_approver.userid WHERE r.doctype='GUIDE'",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Approvers",
+        "multi": false,
+        "name": "APPROVER",
+        "options": [],
+        "query": "select       case  when teams.name is not null THEN teams.name  ELSE  CONCAT(individual_approver.username, \" — \", \"User ID:\", individual_approver.userid)  END  AS __text,  case  when teams.name is not null THEN teams.teamid  ELSE  individual_approver.userid END  AS __value      from releases r   INNER JOIN (     SELECT releaseid, docid AS guideid, MAX(revisionid) AS maxrevision FROM releases WHERE doctype='GUIDE' GROUP BY guideid   ) maxrev ON maxrev.maxrevision = r.revisionid     left join global_users gu on gu.userid=r.userid left join guide_revisions gr on gr.guide_revisionid=r.revisionid left join guide_meta gm on gr.gtr_revisionid=gm.revisionid left join guide_text gt on gt.gt_revisionid=gr.gt_revisionid left join guide_approval_processes gap on gap.gtr_revisionid=gr.gtr_revisionid   left join approval_requests ar on ar.releaseid=r.releaseid left join approval_processes ap on ap.approval_process_revisionid=ar.approval_process_revisionid  left JOIN (     SELECT approval_requestid, MAX(approval_request_stageid) AS maxstageid FROM approval_request_stages GROUP BY approval_requestid   ) maxstage ON maxstage.approval_requestid = ar.approval_requestid   left join approval_request_stages ars on ars.approval_request_stageid=maxstage.maxstageid   left join approval_process_stages aps on aps.approval_process_stageid=ars.approval_process_stageid   left join (select approval_process_revisionid, max(orderby) as max_approval_steps from approval_process_stages group by approval_process_revisionid) x on x.approval_process_revisionid=aps.approval_process_revisionid   left join teams on teams.teamid=aps.teamid left join (select userid, username from global_users ) individual_approver on aps.userid=individual_approver.userid WHERE r.doctype='GUIDE'",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "'All Guides'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "select guide_text.guideid AS __value,   CONCAT(guide_text.title, \" — \", \"Guide ID:\",  guide_text.guideid) AS __text    from guide_current left join guide_revisions on guide_current.guide_revisionid=guide_revisions.guide_revisionid left join guide_text on guide_text.gt_revisionid=guide_revisions.gt_revisionid",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Guide",
+        "multi": false,
+        "name": "GUIDE_ID",
+        "options": [],
+        "query": "select guide_text.guideid AS __value,   CONCAT(guide_text.title, \" — \", \"Guide ID:\",  guide_text.guideid) AS __text    from guide_current left join guide_revisions on guide_current.guide_revisionid=guide_revisions.guide_revisionid left join guide_text on guide_text.gt_revisionid=guide_revisions.gt_revisionid",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "'All Categories'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Category",
+        "multi": false,
+        "name": "CATEGORYID",
+        "options": [],
+        "query": "select  \"All Categories\", list.title as \"Category\" from (select distinct title from wikis where wikis.namespace=\"TOPIC\") list order by 'All Categories', title ASC",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "'All Status'",
+        "current": {
+          "selected": true,
+          "tags": [],
+          "text": "All",
+          "value": "$__all"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "label": "Approval Status",
+        "multi": false,
+        "name": "APPROVAL_STATUS",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": "$__all"
+          },
+          {
+            "selected": false,
+            "text": "Approved",
+            "value": "Approved"
+          },
+          {
+            "selected": false,
+            "text": "Cancelled",
+            "value": "Cancelled"
+          },
+          {
+            "selected": false,
+            "text": "Rejected",
+            "value": "Rejected"
+          },
+          {
+            "selected": false,
+            "text": "Pending",
+            "value": "Pending"
+          },
+          {
+            "selected": false,
+            "text": "None Required",
+            "value": "None Required"
+          }
+        ],
+        "query": "Approved,Cancelled,Rejected,Pending,None Required",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "allValue": null,
+        "current": {
+          "text": "<sitename>",
+          "value": "<sitename>"
+        },
+        "hide": 2,
+        "includeAll": false,
+        "label": "Site Name",
+        "multi": false,
+        "name": "SITE_NAME",
+        "options": [
+          {
+            "selected": true,
+            "text": "<sitename>",
+            "value": "<sitename>"
+          }
+        ],
+        "query": "<sitename>",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
+  },
+  "timezone": "browser",
+  "title": "Guide Drafts and Release Versions",
+  "uid": null,
+  "version": 5
+}

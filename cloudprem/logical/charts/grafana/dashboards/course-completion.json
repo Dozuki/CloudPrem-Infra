@@ -1,0 +1,597 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "default",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1621618862388,
+  "links": [],
+  "panels": [
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 10,
+      "options": {
+        "content": "<h1>Course Completion</h1>\nView employee progress in assigned courses.\n<hr>\n\n\n",
+        "mode": "html"
+      },
+      "pluginVersion": "7.1.0",
+      "targets": [
+        {
+          "format": "time_series",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": false,
+          "rawSql": "SELECT\n  process_start AS \"time\",\n  process_id\nFROM data_capture_log\nWHERE\n  $__timeFilter(process_start)\nORDER BY process_start",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "process_id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "data_capture_log",
+          "timeColumn": "process_start",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": " ",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "panels": [],
+      "title": "Course Completion",
+      "type": "row"
+    },
+    {
+      "datasource": "$GUIDE_DB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "User ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "wikiid"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 71
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last Stage Completion"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Course Title"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 218
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Course ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 86
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Percent Completed"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "rgba(100, 104, 99, 0.32)",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 100
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Course Stages"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 198
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 8,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "pluginVersion": "7.2.0",
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select username , userid , login, title , wikiid ,  \n-- course_stageid, \ncompleted_stage_count , total_stage_count , \n(completed_stage_count/total_stage_count)*100 as \"Percent Completed\", last_course_stage_completion*1000 as last_completion \n\n-- , CONVERT_TZ(from_unixtime(last_course_stage_completion), @@session.time_zone, '-06:00') as \"Last Completion Central\"\n\nfrom \n\n( select userid, wikiid, course_stageid, sum(is_completed) as completed_stage_count, max(last_stage_completion) as last_course_stage_completion from\n\n\n\n(select userid, wikiid, course_stageid, is_completed  from course_stage_completions \nwhere is_completed=1   \nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($COURSEID='All Courses' or $COURSEID=wikiid )\ngroup by userid, course_stageid) csc \n \nleft join \n\n(select course_stageid, docid, doctype from course_stages ) cs using (course_stageid)\n\nleft join \n\n(select assignee_userid, docid, max(end_date) as last_stage_completion  from course_doc_completions group by assignee_userid, docid) cdc on (cdc.assignee_userid=csc.userid and cdc.docid=cs.docid)\n\n\nwhere is_completed=1 group by userid, wikiid ) completion_details\n\n\n\n\nleft join (select userid, wikiid, count(is_completed) as total_stage_count from course_stage_completions \nwhere ($COURSEID='All Courses' or $COURSEID=wikiid )\n\ngroup by userid, wikiid) tsc USING (userid, wikiid)\nleft join (select wikiid, title from wikis \nwhere namespace=\"COURSE\"\nand ($COURSEID='All Courses' or $COURSEID=wikiid )\n) wc using (wikiid)\n\nleft join (select userid, username, login from global_users) gu using (userid)\n\nWhere ($COURSEID='All Courses' or $COURSEID=wikiid )",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "process_id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "data_capture_log",
+          "timeColumn": "process_start",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Overall Course Completion",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "wikiid": false
+            },
+            "indexByName": {},
+            "renameByName": {
+              "Percent Completed": "",
+              "completed_stage_count": "Completed Course Stages",
+              "course_stageid": "",
+              "last_completion": "Last Stage Completion",
+              "login": "Email",
+              "title": "Course Title",
+              "total_stage_count": "Total Course Stages",
+              "userid": "User ID",
+              "username": "User Name",
+              "wikiid": "Course ID"
+            }
+          }
+        }
+      ],
+      "transparent": true,
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 7,
+      "panels": [],
+      "title": "Course Stage Completion",
+      "type": "row"
+    },
+    {
+      "datasource": "$GUIDE_DB",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": null,
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage Started Local"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage Completed Local"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "User ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Course ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 88
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Guide ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 86
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Guide Title"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 215
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Stage Completed UTC"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Min. Req. Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 111
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max. Req. Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 118
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 19,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 3,
+      "options": {
+        "showHeader": true,
+        "sortBy": []
+      },
+      "pluginVersion": "7.2.0",
+      "targets": [
+        {
+          "format": "table",
+          "group": [],
+          "metricColumn": "none",
+          "rawQuery": true,
+          "rawSql": "select username as \"User\", userid as \"User ID\", title as \"Course Title\", wikiid as \"Course ID\",  course_stageid, docid as \"Guide ID\", guide_title as \"Guide Title\", (time_required_min/60) as \"Min. Time Required in Minutes\", (time_required_max/60) as \"Max. Time Required in Minutes\" , init_date*1000 as \"Stage Started UTC\", init_date*1000 as \"Stage Started Local\", \n\nend_date*1000 as \"Stage Completed UTC\", \nend_date*1000 as \"Stage Completed Local\",\n\n((end_date-init_date)/60) as 'Stage Duration in Minutes'\n-- , completed_stage_count as \"Completed Stages\", \n-- total_stage_count as \"Total Stages\", (completed_stage_count/total_stage_count)*100 as \"Percent Completed\" \n-- , last_course_completion as \"Last Completion UTC\", \n\n-- CONVERT_TZ(from_unixtime(last_course_completion), @@session.time_zone, '-06:00') as \"Last Completion Central\"\n\nfrom \n\n( select userid, wikiid, course_stageid, cs.docid, gt.title as guide_title, time_required_min, time_required_max, init_date, end_date,\n-- sum(is_completed) as completed_stage_count, \nmax(last_stage_completion) as last_course_completion from\n\n\n\n(select userid, wikiid, course_stageid, is_completed  from course_stage_completions \nwhere is_completed=1 \nand ($TEAM = 'All Teams' OR userid in (select userid from user_teams where user_teams.teamid=$TEAM))\nand ($COURSEID='All Courses' or $COURSEID=wikiid )\ngroup by userid, course_stageid) csc \n \nleft join \n\n(select course_stageid, docid, doctype from course_stages ) cs using (course_stageid)\n\nleft join \n\n(select assignee_userid, docid, max(end_date) as last_stage_completion, init_date, end_date  from course_doc_completions\n\nwhere end_date is not null\ngroup by \ncourse_assignment_stage_completionid\n-- assignee_userid, docid\n) cdc on (cdc.assignee_userid=csc.userid and cdc.docid=cs.docid)\n\nleft join guide_current gc on gc.guideid=cs.docid\nleft join (select guide_revisionid, gt_revisionid, gtr_revisionid from guide_revisions) gr using(guide_revisionid) \nleft join (select gt_revisionid, title from guide_text) gt using(gt_revisionid)\nleft join (select revisionid as gtr_revisionid, time_required_min, time_required_max from guide_meta) gm using(gtr_revisionid)\n\nwhere is_completed=1 group by userid, wikiid, \ncourse_stageid ) completion_details\n\nleft join (select userid, wikiid, count(is_completed) as total_stage_count from course_stage_completions group by userid, wikiid) tsc USING (userid, wikiid)\n\nleft join (select wikiid, title from wikis where namespace=\"COURSE\") wc using (wikiid)\nleft join (select userid, username from global_users) gu using (userid)\n\nWhere ($COURSEID='All Courses' or $COURSEID=wikiid )\norder by userid, wikiid, docid asc\n",
+          "refId": "A",
+          "select": [
+            [
+              {
+                "params": [
+                  "process_id"
+                ],
+                "type": "column"
+              }
+            ]
+          ],
+          "table": "data_capture_log",
+          "timeColumn": "process_start",
+          "timeColumnType": "timestamp",
+          "where": [
+            {
+              "name": "$__timeFilter",
+              "params": [],
+              "type": "macro"
+            }
+          ]
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Stage Completion",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "course_stageid": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "Guide Title": "",
+              "Max Time Required in Minutes": "Max. Req. Time",
+              "Max. Time Required in Minutes": "Max. Req. Time",
+              "Min. Time Required in Minutes": "Min. Req. Time"
+            }
+          }
+        }
+      ],
+      "transparent": true,
+      "type": "table"
+    }
+  ],
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Dozuki",
+          "value": "Dozuki"
+        },
+        "hide": 2,
+        "includeAll": false,
+        "label": "Guide Database",
+        "multi": false,
+        "name": "GUIDE_DB",
+        "options": [],
+        "query": "mysql",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "allValue": "'All Courses'",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": "Select wikiid  AS __value, title AS __text from (select wikiid, max(revisionid) from courses where enabled=1 group by wikiid) c \nleft join (select wikiid, title from wikis where namespace=\"COURSE\") w using(wikiid)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Course",
+        "multi": false,
+        "name": "COURSEID",
+        "options": [],
+        "query": "Select wikiid  AS __value, title AS __text from (select wikiid, max(revisionid) from courses where enabled=1 group by wikiid) c \nleft join (select wikiid, title from wikis where namespace=\"COURSE\") w using(wikiid)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": "\"All Teams\"",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "$GUIDE_DB",
+        "definition": " select CONCAT(name, \" — \", \"Team ID:\", teamid) AS __text, teamid AS __value FROM teams",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Team",
+        "multi": false,
+        "name": "TEAM",
+        "options": [],
+        "query": " select CONCAT(name, \" — \", \"Team ID:\", teamid) AS __text, teamid AS __value FROM teams",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Course Completion",
+  "uid": null,
+  "version": 3
+}

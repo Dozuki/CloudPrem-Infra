@@ -45,6 +45,9 @@ locals {
   db_master_username = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["username"]
   db_master_password = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["password"]
 
+  db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
+  db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
+
   frontegg_clientid = try(data.kubernetes_secret.frontegg[0].data.clientid, "")
   frontegg_apikey   = try(data.kubernetes_secret.frontegg[0].data.apikey, "")
   frontegg_pub_key  = try(data.kubernetes_secret.frontegg[0].data.pubkey, "")
@@ -86,4 +89,8 @@ data "aws_subnets" "private" {
 
 data "aws_secretsmanager_secret_version" "db_master" {
   secret_id = var.primary_db_secret
+}
+data "aws_secretsmanager_secret_version" "db_bi" {
+  count     = var.enable_bi ? 1 : 0
+  secret_id = var.bi_database_credential_secret
 }
