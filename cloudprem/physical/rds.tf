@@ -286,7 +286,7 @@ resource "aws_dms_replication_instance" "this" {
 
   replication_instance_id    = local.identifier
   replication_instance_class = "dms.r5.large"
-  engine_version             = "3.4.5"
+  engine_version             = "3.4.6"
   allocated_storage          = var.rds_allocated_storage
   kms_key_arn                = aws_kms_key.bi[0].arn
   auto_minor_version_upgrade = true
