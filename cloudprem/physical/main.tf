@@ -28,7 +28,7 @@ locals {
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
   # Database
-  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default[0].id
+  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default.id
   ca_cert_identifier       = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
   ca_cert_pem_file         = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
   bi_subnet_ids            = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids

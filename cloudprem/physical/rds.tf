@@ -96,7 +96,6 @@ resource "aws_db_parameter_group" "bi" {
 }
 
 resource "aws_db_parameter_group" "default" {
-  count = var.enable_bi ? 0 : 1
 
   name_prefix = local.identifier
   family      = "mysql8.0"
