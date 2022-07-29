@@ -21,17 +21,18 @@ locals {
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier
+    Identifier  = var.identifier == "" ? "-" : var.identifier
     Environment = var.environment
   }
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
   # Database
-  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default[0].id
+  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default.id
   ca_cert_identifier       = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
   ca_cert_pem_file         = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
   bi_subnet_ids            = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
+  bi_access_cidrs          = length(var.bi_access_cidrs) == 0 ? [var.vpc_cidr] : var.bi_access_cidrs
 
   # S3 Buckets
   guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket
@@ -47,8 +48,6 @@ locals {
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
   public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnet_ids.public[0].ids
   private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private[0].ids
-
-  bi_access_cidrs = length(var.bi_access_cidrs) == 0 ? [var.vpc_cidr] : var.bi_access_cidrs
 }
 data "aws_eks_cluster" "main" {
   name = module.eks_cluster.cluster_id

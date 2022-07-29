@@ -20,6 +20,8 @@ func Test_UsGovWest1_Webhooks(t *testing.T) {
 		Environment: cfg.Webhooks,
 	}
 
+	tc.GovInstanceOverrides(&testConfig)
+
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
 	physicalFolder, logicalFolder := tc.BootstrapFolders(testConfig, terraformFolder)
@@ -33,5 +35,5 @@ func Test_UsGovWest1_Webhooks(t *testing.T) {
 
 	terraform.TgApplyAll(t, terragruntLogicalOptions)
 
-	tc.BasicAssertion(t, terragruntLogicalOptions)
+	tc.Assertions(t, terragruntPhysicalOptions, terragruntLogicalOptions, &testConfig)
 }

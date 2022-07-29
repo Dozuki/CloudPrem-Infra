@@ -1,0 +1,61 @@
+---
+description: |
+  Downloads and configures correct versions of kubectl and helm as well
+  as bootstrapping the ssm-user account.
+
+schemaVersion: '2.2'
+parameters:
+  EKSClusterName:
+    type: "String"
+    description: "EKS Cluster Name"
+  EKSClusterRole:
+    type: "String"
+    description: "EKS Cluster Access Role ARN"
+  Region:
+    type: "String"
+    description: "AWS Region"
+mainSteps:
+  - action: aws:downloadContent
+    name: downloadKubectl
+    inputs:
+      sourceType: "HTTP"
+      sourceInfo:
+        url: "https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubectl"
+      destinationPath: "/usr/bin/kubectl"
+  - action: aws:downloadContent
+    name: downloadHelm
+    inputs:
+      sourceType: "HTTP"
+      sourceInfo:
+        url: "https://get.helm.sh/helm-v3.8.1-linux-amd64.tar.gz"
+      destinationPath: "/tmp/helm.tar.gz"
+  - action: aws:runShellScript
+    name: installHelm
+    inputs:
+      runCommand:
+        - tar -xzf /tmp/helm.tar.gz
+        - cp linux-amd64/helm /usr/bin/helm
+  - action: aws:runShellScript
+    name: addSSMUser
+    inputs:
+      runCommand:
+        - |
+          useradd ssm-user
+          cat << EOF > /etc/sudoers.d/ssm-agent-users
+          # User rules for ssm-user
+          ssm-user ALL=(ALL) NOPASSWD:ALL
+          EOF
+  - action: aws:runShellScript
+    name: configureEKS
+    inputs:
+      runCommand:
+        - mkdir -p /home/ssm-user/.kube
+        - aws eks update-kubeconfig --name "{{ EKSClusterName }}" --role-arn "{{ EKSClusterRole }}" --kubeconfig /home/ssm-user/.kube/config --region {{ Region }}
+  - action: aws:runShellScript
+    name: updatePermissions
+    inputs:
+      runCommand:
+        - chmod 755 /usr/bin/kubectl
+        - chmod 755 /usr/bin/helm
+        - chown -R ssm-user:ssm-user /home/ssm-user/.kube
+        - chmod -R 700 /home/ssm-user/.kube

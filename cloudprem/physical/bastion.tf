@@ -45,6 +45,72 @@ module "bastion_role" {
 
   tags = local.tags
 }
+resource "aws_ssm_document" "bastion_mysql_config" {
+  name            = "BastionMySQLConfig-${local.identifier}"
+  document_type   = "Command"
+  document_format = "YAML"
+  content         = file("${path.module}/static/bastion_mysql_config.yaml")
+
+  tags = local.tags
+}
+
+resource "aws_ssm_document" "bastion_kubernetes_config" {
+  name            = "BastionKubernetesConfig-${local.identifier}"
+  document_type   = "Command"
+  document_format = "YAML"
+  content         = file("${path.module}/static/bastion_kubernetes_config.yaml")
+
+  tags = local.tags
+}
+
+resource "aws_ssm_association" "bastion_mysql_config" {
+  name             = aws_ssm_document.bastion_mysql_config.name
+  document_version = aws_ssm_document.bastion_mysql_config.latest_version
+
+  parameters = {
+    RDSEndpoint : module.primary_database.db_instance_address
+    RDSCredentialSecret : aws_secretsmanager_secret.primary_database_credentials.id
+    Region : data.aws_region.current.name
+  }
+
+  targets {
+    key    = "tag:Role"
+    values = ["Bastion"]
+  }
+  targets {
+    key    = "tag:Identifier"
+    values = [var.identifier]
+  }
+  targets {
+    key    = "tag:Environment"
+    values = [var.environment]
+  }
+}
+
+resource "aws_ssm_association" "bastion_kubernetes_config" {
+  name             = aws_ssm_document.bastion_kubernetes_config.name
+  document_version = aws_ssm_document.bastion_kubernetes_config.latest_version
+
+  parameters = {
+    EKSClusterName : module.eks_cluster.cluster_id
+    EKSClusterRole : module.cluster_access_role_assumable.iam_role_arn
+    Region : data.aws_region.current.name
+  }
+
+  targets {
+    key    = "tag:Role"
+    values = ["Bastion"]
+  }
+  targets {
+    key    = "tag:Identifier"
+    values = [var.identifier]
+  }
+  targets {
+    key    = "tag:Environment"
+    values = [var.environment]
+  }
+}
+
 
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
@@ -61,13 +127,8 @@ module "bastion" {
   associate_public_ip_address  = false
   recreate_asg_when_lc_changes = true
 
-  user_data_base64 = base64encode(templatefile("${path.module}/static/bastion_userdata.yml", {
-    aws_region                     = data.aws_region.current.name
-    eks_cluster_name               = module.eks_cluster.cluster_id
-    eks_cluster_access_role        = module.cluster_access_role_assumable.iam_role_arn
-    database_hostname              = module.primary_database.db_instance_address
-    database_credentials_secret_id = aws_secretsmanager_secret.primary_database_credentials.id
-  }))
+  # Leave it blank because it is a required variable but we don't use userdata anymore
+  user_data_base64 = ""
 
   # Auto scaling group
   vpc_zone_identifier = local.private_subnet_ids
@@ -76,5 +137,7 @@ module "bastion" {
   max_size            = 1
   desired_capacity    = 1
 
-  tags_as_map = local.tags
+  tags_as_map = merge(local.tags, {
+    Role = "Bastion"
+  })
 }

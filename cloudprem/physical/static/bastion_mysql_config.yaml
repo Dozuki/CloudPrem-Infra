@@ -1,0 +1,39 @@
+---
+description: |
+  Configures the bastion to connect to the primary RDS instance without
+  a password
+
+schemaVersion: '2.2'
+parameters:
+  RDSEndpoint:
+    type: "String"
+    description: "Database Hostname"
+  RDSCredentialSecret:
+    type: "String"
+    description: "Secret ID to Primary RDS credentials"
+  Region:
+    type: "String"
+    description: "AWS Region"
+mainSteps:
+  - action: aws:runShellScript
+    name: installDeps
+    inputs:
+      runCommand:
+        - sudo yum install -y jq mariadb
+  - action: aws:runShellScript
+    name: configMySQL
+    inputs:
+      runCommand:
+        - |
+          CREDENTIALS=$(aws secretsmanager get-secret-value --region "{{ Region }}" \
+          --secret-id "{{ RDSCredentialSecret }}" | \
+          jq -r .SecretString | \
+          jq --raw-output '"user=\(.username)\npassword=\(.password)"')
+
+          mkdir -p /home/ssm-user
+
+          cat << EOF > /home/ssm-user/.my.cnf
+          [client]
+          host={{ RDSEndpoint }}
+          $CREDENTIALS
+          EOF

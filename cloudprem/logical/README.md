@@ -15,7 +15,7 @@
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 3.70.0 |
 | <a name="provider_helm"></a> [helm](#provider\_helm) | 2.3.0 |
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.4.1 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.1.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | n/a |
 
 ## Modules
 

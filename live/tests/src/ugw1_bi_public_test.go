@@ -1,13 +1,11 @@
 package src
 
 import (
+	tc "dozuki.com/tests/common"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"testing"
-	"time"
-
-	tc "dozuki.com/tests/common"
 )
 
 func Test_UsGovWest1_BI_Public(t *testing.T) {
@@ -22,6 +20,8 @@ func Test_UsGovWest1_BI_Public(t *testing.T) {
 		Environment: cfg.BIPublic,
 	}
 
+	tc.GovInstanceOverrides(&testConfig)
+
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
 	physicalFolder, logicalFolder := tc.BootstrapFolders(testConfig, terraformFolder)
@@ -35,6 +35,6 @@ func Test_UsGovWest1_BI_Public(t *testing.T) {
 
 	terraform.TgApplyAll(t, terragruntLogicalOptions)
 
-	tc.BasicAssertion(t, terragruntLogicalOptions, 0*time.Second)
-	tc.PublicBIDMSAssertion(t, terragruntPhysicalOptions, testConfig)
+	tc.PublicBIDMSAssertion(t, terragruntPhysicalOptions, &testConfig)
+	tc.Assertions(t, terragruntPhysicalOptions, terragruntLogicalOptions, &testConfig)
 }
