@@ -21,7 +21,7 @@ locals {
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier
+    Identifier  = var.identifier == "" ? "-" : var.identifier
     Environment = var.environment
   }
 
