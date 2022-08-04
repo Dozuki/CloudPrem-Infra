@@ -1,7 +1,7 @@
-s3:
-  exclude:
-    names_regex:
-      - ^dozuki-terraform
+#s3:
+#  exclude:
+#    names_regex:
+#      - ^dozuki-terraform
 
 IAMUsers:
   exclude:

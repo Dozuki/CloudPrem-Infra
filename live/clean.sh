@@ -28,11 +28,12 @@ cleanPrefixes() {
     done
 }
 # echo "Cleaning standard"
-# cd standard
+# pushd standard
 # cleanPrefixes
-# cd ../gov
+# popd
+# pushd gov
 # cleanPrefixes
-# cd ..
+# popd
 
 for region in $(ls standard/); do
  if [[ $region != "account.hcl" ]]; then
@@ -46,3 +47,4 @@ echo "Cleaning Gov"
 awsweeper --region us-gov-west-1 --profile gov --force tests/nuke.yaml
 
 cloud-nuke aws --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type iam-role --force --config tests/cloud-nuke.yaml
+# AWS_PROFILE=gov cloud-nuke aws --region us-gov-west-1 --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type iam-role --force --config tests/cloud-nuke.yaml
