@@ -10,6 +10,7 @@ jobs:
   test:
     name: 'Run tests'
     runs-on: ubuntu-latest
+    concurrency: test-suite
     strategy:
       matrix:
         testcase: [ec1_full, ew1_full, ew2_full, ew3_full, ue1_bi_default, ue1_bi_ha, ue1_bi_ha_vpn, ue1_bi_public, ue1_bi_vpn, ue1_min_default, ue1_min_ha, ue1_webhooks_default, ue2_full, uw2_full, ugw1_bi_default, ugw1_bi_ha, ugw1_bi_ha_vpn, ugw1_bi_public, ugw1_bi_vpn, ugw1_min_default, ugw1_min_ha, ugw1_webhooks]
@@ -34,6 +35,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
+          terraform_wrapper: false
           terraform_version: 1.1.8
       - name: Setup Terragrunt
         uses: autero1/action-terragrunt@v1.1.0
