@@ -49,7 +49,7 @@ jobs:
 #        run: go install github.com/gruntwork-io/terratest/cmd/terratest_log_parser@latest
       - name: Run Tests
         working-directory: live/tests/src
-        run: go test -v -count 1 -timeout 3000m  |tee testoutput.log
+        run: go test -v -count 1 -timeout 3000m ${{ matrix.testcase }}_test.go
 #      - name: Parse Test Output
 #        working-directory: live/tests/src
 #        run: terratest_log_parser -testlog testoutput.log -outputdir test_output
