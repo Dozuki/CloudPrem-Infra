@@ -35,6 +35,7 @@ cleanPrefixes() {
 # cleanPrefixes
 # popd
 
+
 for region in $(ls standard/); do
  if [[ $region != "account.hcl" ]]; then
     echo "Cleaning $region"
