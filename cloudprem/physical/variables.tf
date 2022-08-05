@@ -1,7 +1,7 @@
 variable "identifier" {
   description = "A name identifier to use as prefix for all the resources."
   type        = string
-  default     = ""
+  default     = "-"
 
   validation {
     condition     = length(var.identifier) <= 10
@@ -57,26 +57,31 @@ variable "create_s3_buckets" {
   type        = bool
   default     = true
 }
-variable "s3_objects_bucket" {
-  description = "Name of the bucket to store guide objects. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
+variable "s3_bucket_names" {
+  description = "List of the existing Dozuki buckets to use. Only used if `create_s3_buckets` = false."
+  type        = list(string)
+  default     = []
 }
-variable "s3_images_bucket" {
-  description = "Name of the bucket to store guide images. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
-}
-variable "s3_documents_bucket" {
-  description = "Name of the bucket to store documents. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
-}
-variable "s3_pdfs_bucket" {
-  description = "Name of the bucket to store guide pdfs. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
-}
+#variable "s3_objects_bucket" {
+#  description = "Name of the bucket to store guide objects. Use with 'create_s3_buckets' = false."
+#  type        = string
+#  default     = ""
+#}
+#variable "s3_images_bucket" {
+#  description = "Name of the bucket to store guide images. Use with 'create_s3_buckets' = false."
+#  type        = string
+#  default     = ""
+#}
+#variable "s3_documents_bucket" {
+#  description = "Name of the bucket to store documents. Use with 'create_s3_buckets' = false."
+#  type        = string
+#  default     = ""
+#}
+#variable "s3_pdfs_bucket" {
+#  description = "Name of the bucket to store guide pdfs. Use with 'create_s3_buckets' = false."
+#  type        = string
+#  default     = ""
+#}
 variable "s3_logging_bucket" {
   description = "Name of the bucket to store bucket object access logs. Use with 'create_s3_buckets' = false."
   type        = string

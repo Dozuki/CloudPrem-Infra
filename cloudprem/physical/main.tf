@@ -1,6 +1,6 @@
 terraform {
   required_providers {
-    aws    = "3.70.0"
+    aws    = "4.25.0"
     random = "3.1.0"
   }
 }
@@ -11,7 +11,7 @@ provider "kubernetes" {
 }
 
 locals {
-  identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
+  identifier = var.identifier == "" || var.identifier == "-" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
   # EKS
   cluster_access_role_name = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
@@ -21,7 +21,7 @@ locals {
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier == "" ? "-" : var.identifier
+    Identifier  = var.identifier
     Environment = var.environment
   }
 
@@ -35,19 +35,23 @@ locals {
   bi_access_cidrs          = length(var.bi_access_cidrs) == 0 ? [var.vpc_cidr] : var.bi_access_cidrs
 
   # S3 Buckets
-  guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket
-  guide_objects_bucket = var.create_s3_buckets ? aws_s3_bucket.guide_objects[0].bucket : data.aws_s3_bucket.guide_objects[0].bucket
-  guide_pdfs_bucket    = var.create_s3_buckets ? aws_s3_bucket.guide_pdfs[0].bucket : data.aws_s3_bucket.guide_pdfs[0].bucket
-  documents_bucket     = var.create_s3_buckets ? aws_s3_bucket.guide_documents[0].bucket : data.aws_s3_bucket.documents[0].bucket
-  logging_bucket       = var.create_s3_buckets ? aws_s3_bucket.logging_bucket[0].bucket : data.aws_s3_bucket.logging[0].bucket
+  #  guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket
+  #  guide_objects_bucket = var.create_s3_buckets ? aws_s3_bucket.guide_objects[0].bucket : data.aws_s3_bucket.guide_objects[0].bucket
+  #  guide_pdfs_bucket    = var.create_s3_buckets ? aws_s3_bucket.guide_pdfs[0].bucket : data.aws_s3_bucket.guide_pdfs[0].bucket
+  #  guide_documents_bucket     = var.create_s3_buckets ? aws_s3_bucket.guide_documents[0].bucket : data.aws_s3_bucket.guide_documents[0].bucket
+  guide_buckets  = var.create_s3_buckets ? aws_s3_bucket.guide_buckets : data.aws_s3_bucket.guide_buckets
+  logging_bucket = var.create_s3_buckets ? aws_s3_bucket.logging_bucket[0].bucket : data.aws_s3_bucket.logging[0].bucket
+
+  create_s3_bucket_names   = var.create_s3_buckets ? ["dozuki-guide-images", "dozuki-guide-objects", "dozuki-guide-pdfs", "dozuki-guide-documents"] : []
+  existing_s3_bucket_names = !var.create_s3_buckets ? var.s3_bucket_names : []
 
   # VPC
   azs_count          = var.azs_count
   create_vpc         = var.vpc_id == "" ? true : false
   vpc_id             = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
-  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnet_ids.public[0].ids
-  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private[0].ids
+  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnets.public[0].ids
+  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnets.private[0].ids
 }
 data "aws_eks_cluster" "main" {
   name = module.eks_cluster.cluster_id
@@ -65,19 +69,25 @@ data "aws_vpc" "this" {
   count = local.create_vpc ? 0 : 1
   id    = var.vpc_id
 }
-data "aws_subnet_ids" "public" {
+data "aws_subnets" "public" {
   count = local.create_vpc ? 0 : 1
 
-  vpc_id = var.vpc_id
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
 
   tags = {
     type = "public"
   }
 }
-data "aws_subnet_ids" "private" {
+data "aws_subnets" "private" {
   count = local.create_vpc ? 0 : 1
 
-  vpc_id = var.vpc_id
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
 
   tags = {
     type = "private"

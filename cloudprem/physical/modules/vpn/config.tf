@@ -41,7 +41,7 @@ resource "aws_acm_certificate" "client" {
   )
 }
 
-resource "aws_s3_bucket_object" "vpn-config-file" {
+resource "aws_s3_object" "vpn-config-file" {
   count                  = length(var.vpn-client-list)
   bucket                 = aws_s3_bucket.vpn-config-files.id
   server_side_encryption = "aws:kms"

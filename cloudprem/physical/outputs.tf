@@ -42,17 +42,29 @@ output "primary_db_secret" {
   description = "Secretmanager ARN to MySQL credential storage"
   value       = aws_secretsmanager_secret.primary_database_credentials.arn
 }
+#output "guide_images_bucket" {
+#  value = local.guide_images_bucket
+#}
+#output "guide_objects_bucket" {
+#  value = local.guide_objects_bucket
+#}
+#output "guide_pdfs_bucket" {
+#  value = local.guide_pdfs_bucket
+#}
+#output "documents_bucket" {
+#  value = local.documents_bucket
+#}
 output "guide_images_bucket" {
-  value = local.guide_images_bucket
+  value = lookup(local.guide_buckets["dozuki-guide-images"], "bucket", null)
 }
 output "guide_objects_bucket" {
-  value = local.guide_objects_bucket
+  value = lookup(local.guide_buckets["dozuki-guide-objects"], "bucket", null)
 }
 output "guide_pdfs_bucket" {
-  value = local.guide_pdfs_bucket
+  value = lookup(local.guide_buckets["dozuki-guide-pdfs"], "bucket", null)
 }
 output "documents_bucket" {
-  value = local.documents_bucket
+  value = lookup(local.guide_buckets["dozuki-guide-documents"], "bucket", null)
 }
 output "memcached_cluster_address" {
   value = aws_elasticache_cluster.this.cluster_address

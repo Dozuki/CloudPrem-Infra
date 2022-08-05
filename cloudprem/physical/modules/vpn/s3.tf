@@ -2,23 +2,28 @@
 resource "aws_s3_bucket" "vpn-config-files" {
   bucket        = "${local.identifier}-${data.aws_region.current.name}-vpn-credentials"
   force_destroy = true
+}
+resource "aws_s3_bucket_versioning" "vpn-config-files" {
 
-  versioning {
-    enabled = true
-  }
+  bucket = aws_s3_bucket.vpn-config-files.id
 
-  server_side_encryption_configuration {
-
-    rule {
-      bucket_key_enabled = true
-      apply_server_side_encryption_by_default {
-        kms_master_key_id = var.s3_kms_key_id
-        sse_algorithm     = "aws:kms"
-      }
-    }
-
+  versioning_configuration {
+    status = "Enabled"
   }
 }
+resource "aws_s3_bucket_server_side_encryption_configuration" "vpn-config-files" {
+
+  bucket = aws_s3_bucket.vpn-config-files.id
+
+  rule {
+    bucket_key_enabled = true
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = var.s3_kms_key_id
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
 
 resource "aws_s3_bucket_public_access_block" "vpn-config-files" {
   bucket                  = aws_s3_bucket.vpn-config-files.id

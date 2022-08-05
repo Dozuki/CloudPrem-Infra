@@ -5,6 +5,7 @@ on:
     branches:
     - main
     - terratest-github
+    - aws-provider-upgrade
 
 concurrency: test-suite
 jobs:
@@ -63,6 +64,7 @@ jobs:
 
   get_test_list:
     runs-on: ubuntu-latest
+    name: "List test cases for dynamic matrix"
     needs: static
     steps:
       - uses: actions/checkout@v2

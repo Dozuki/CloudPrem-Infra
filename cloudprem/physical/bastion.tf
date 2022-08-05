@@ -14,7 +14,7 @@ data "aws_ami" "amazon_linux_2" {
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 module "bastion_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.7.0"
+  version = "4.9.0"
 
   name            = "${local.identifier}-bastion"
   use_name_prefix = false
@@ -26,7 +26,7 @@ module "bastion_sg" {
 
 module "bastion_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
-  version = "4.7.0"
+  version = "5.2.0"
 
   create_role = true
 

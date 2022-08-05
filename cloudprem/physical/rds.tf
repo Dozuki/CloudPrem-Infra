@@ -1,6 +1,6 @@
 module "primary_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.7.0"
+  version = "4.9.0"
 
   name            = "${local.identifier}-database"
   use_name_prefix = false
@@ -27,7 +27,7 @@ module "primary_database_sg" {
 # To make the terraform a bit easier we will always create this security group even if BI is disabled.
 module "bi_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.7.0"
+  version = "4.9.0"
 
   name            = "${local.identifier}-bi-database"
   use_name_prefix = false
@@ -109,7 +109,7 @@ resource "aws_db_parameter_group" "default" {
 #tfsec:ignore:general-secrets-sensitive-in-variable
 module "primary_database" {
   source  = "terraform-aws-modules/rds/aws"
-  version = "3.4.1"
+  version = "5.0.1"
 
   identifier = local.identifier
 
@@ -136,15 +136,17 @@ module "primary_database" {
   vpc_security_group_ids = [module.primary_database_sg.security_group_id]
 
   # Snapshot configuration
-  deletion_protection       = var.protect_resources
-  snapshot_identifier       = var.rds_snapshot_identifier # Restore from snapshot
-  skip_final_snapshot       = !var.protect_resources
-  final_snapshot_identifier = local.identifier # Snapshot name upon DB deletion
-  copy_tags_to_snapshot     = true
+  deletion_protection              = var.protect_resources
+  snapshot_identifier              = var.rds_snapshot_identifier # Restore from snapshot
+  skip_final_snapshot              = !var.protect_resources
+  final_snapshot_identifier_prefix = local.identifier # Snapshot name upon DB deletion
+  copy_tags_to_snapshot            = true
+  create_random_password           = false
 
   # DB subnet group
   # db_subnet_group_name = local.identifier # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/42
-  subnet_ids = local.private_subnet_ids
+  subnet_ids             = local.private_subnet_ids
+  create_db_subnet_group = true
 
   # DB parameter group
   create_db_parameter_group = false
@@ -190,7 +192,7 @@ resource "random_password" "replica_database" {
 #tfsec:ignore:general-secrets-sensitive-in-variable
 module "replica_database" {
   source  = "terraform-aws-modules/rds/aws"
-  version = "3.4.1"
+  version = "5.0.1"
 
   count = var.enable_bi ? 1 : 0
 
@@ -220,11 +222,11 @@ module "replica_database" {
   vpc_security_group_ids = [module.bi_database_sg.security_group_id]
 
   # Snapshot configuration
-  deletion_protection       = var.protect_resources
-  skip_final_snapshot       = !var.protect_resources
-  final_snapshot_identifier = "${local.identifier}-replica" # Snapshot name upon DB deletion
-  copy_tags_to_snapshot     = true
-
+  deletion_protection              = var.protect_resources
+  skip_final_snapshot              = !var.protect_resources
+  final_snapshot_identifier_prefix = "${local.identifier}-replica" # Snapshot name upon DB deletion
+  copy_tags_to_snapshot            = true
+  create_random_password           = false
   # DB subnet group
   # db_subnet_group_name = local.identifier # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/42
   subnet_ids = local.bi_subnet_ids
