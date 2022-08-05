@@ -92,8 +92,8 @@ jobs:
         run: curl -sSfL https://raw.githubusercontent.com/jckuester/awsweeper/master/install.sh | sh -s v0.12.0
       - name: Setup Cloud-Nuke
         run: |
-          sudo curl -L https://github.com/gruntwork-io/cloud-nuke/releases/download/v0.16.2/cloud-nuke_linux_amd64 > /usr/bin/cloud-nuke
-          sudo chmod 755 /usr/bin/cloud-nuke
+          curl -L https://github.com/gruntwork-io/cloud-nuke/releases/download/v0.16.2/cloud-nuke_linux_amd64 > /usr/local/bin/cloud-nuke
+          chmod 755 /usr/local/bin/cloud-nuke
       - name: Remove resources created during tests
         working-directory: live/
         run: ./clean.sh
