@@ -48,4 +48,4 @@ echo "Cleaning Gov"
 awsweeper --region us-gov-west-1 --profile gov --force tests/nuke.yaml
 
 cloud-nuke aws --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type iam-role --force --config tests/cloud-nuke.yaml
-# AWS_PROFILE=gov cloud-nuke aws --region us-gov-west-1 --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type iam-role --force --config tests/cloud-nuke.yaml
+AWS_PROFILE=gov cloud-nuke aws --region us-gov-west-1 --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type macie-member --force --config tests/cloud-nuke.yaml

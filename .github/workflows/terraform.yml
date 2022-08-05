@@ -19,52 +19,52 @@ jobs:
         run: echo "::set-output name=matrix::$(ls -d * |grep -v go. | jq --raw-input --slurp --compact-output 'split("\n")[:-1]')"
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
-  test:
-    needs: get_test_list
-    name: 'Run tests'
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    strategy:
-      matrix:
-        testcase: ${{ fromJson(needs.get_test_list.outputs.matrix) }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      # Checkout the repository to the GitHub Actions runner
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: install-aws-cli-action
-        uses: unfor19/install-aws-cli-action@v1.0.3
-      - uses: actions/setup-go@v3
-        with:
-          go-version: '~1.18.5'
-      - name: Add profile credentials to ~/.aws/credentials
-        run: |
-            aws configure set aws_access_key_id ${{ secrets.TEST_STANDARD_AWS_ACCESS_KEY_ID }} --profile default
-            aws configure set aws_secret_access_key ${{ secrets.TEST_STANDARD_AWS_SECRET_ACCESS_KEY }} --profile default
-            aws configure set aws_access_key_id ${{ secrets.TEST_GOV_AWS_ACCESS_KEY_ID }} --profile gov
-            aws configure set aws_secret_access_key ${{ secrets.TEST_GOV_AWS_SECRET_ACCESS_KEY }} --profile gov
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_wrapper: false
-          terraform_version: 1.1.8
-      - name: Setup Terragrunt
-        uses: autero1/action-terragrunt@v1.1.0
-        with:
-          terragrunt_version: 0.37.1
-      - name: Download common Go Modules
-        working-directory: live/tests/common
-        run: go mod download
-      - name: Download src Go Modules
-        working-directory: live/tests/src
-        run: go mod download
-#      - name: Install log parser
-#        run: go install github.com/gruntwork-io/terratest/cmd/terratest_log_parser@latest
-      - name: Run Tests
-        working-directory: live/tests/src
-        run: go test -v -count 1 -timeout 300m ${{ matrix.testcase }}
+#  test:
+#    needs: get_test_list
+#    name: 'Run tests'
+#    runs-on: ubuntu-latest
+#    continue-on-error: true
+#    strategy:
+#      matrix:
+#        testcase: ${{ fromJson(needs.get_test_list.outputs.matrix) }}
+#    defaults:
+#      run:
+#        shell: bash
+#    steps:
+#      # Checkout the repository to the GitHub Actions runner
+#      - name: Checkout
+#        uses: actions/checkout@v3
+#      - name: install-aws-cli-action
+#        uses: unfor19/install-aws-cli-action@v1.0.3
+#      - uses: actions/setup-go@v3
+#        with:
+#          go-version: '~1.18.5'
+#      - name: Add profile credentials to ~/.aws/credentials
+#        run: |
+#            aws configure set aws_access_key_id ${{ secrets.TEST_STANDARD_AWS_ACCESS_KEY_ID }} --profile default
+#            aws configure set aws_secret_access_key ${{ secrets.TEST_STANDARD_AWS_SECRET_ACCESS_KEY }} --profile default
+#            aws configure set aws_access_key_id ${{ secrets.TEST_GOV_AWS_ACCESS_KEY_ID }} --profile gov
+#            aws configure set aws_secret_access_key ${{ secrets.TEST_GOV_AWS_SECRET_ACCESS_KEY }} --profile gov
+#      - name: Setup Terraform
+#        uses: hashicorp/setup-terraform@v2
+#        with:
+#          terraform_wrapper: false
+#          terraform_version: 1.1.8
+#      - name: Setup Terragrunt
+#        uses: autero1/action-terragrunt@v1.1.0
+#        with:
+#          terragrunt_version: 0.37.1
+#      - name: Download common Go Modules
+#        working-directory: live/tests/common
+#        run: go mod download
+#      - name: Download src Go Modules
+#        working-directory: live/tests/src
+#        run: go mod download
+##      - name: Install log parser
+##        run: go install github.com/gruntwork-io/terratest/cmd/terratest_log_parser@latest
+#      - name: Run Tests
+#        working-directory: live/tests/src
+#        run: go test -v -count 1 -timeout 300m ${{ matrix.testcase }}
   clean:
     needs: test
     runs-on: ubuntu-latest
@@ -91,7 +91,9 @@ jobs:
       - name: Setup AWSweeper
         run: curl -sSfL https://raw.githubusercontent.com/jckuester/awsweeper/master/install.sh | sh -s v0.12.0
       - name: Setup Cloud-Nuke
-        run: curl -sSfL https://github.com/gruntwork-io/cloud-nuke/releases/download/v0.16.2/cloud-nuke_linux_amd64 && mv cloud-nuke_linux_amd64 /usr/bin/cloud-nuke
+        run: |
+          curl -L https://github.com/gruntwork-io/cloud-nuke/releases/download/v0.16.2/cloud-nuke_linux_amd64 > /usr/bin/cloud-nuke
+          chmod 755 /usr/bin/cloud-nuke
       - name: Remove resources created during tests
         working-directory: live/
         run: ./clean.sh
