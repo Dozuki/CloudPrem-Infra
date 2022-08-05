@@ -229,7 +229,8 @@ module "replica_database" {
   create_random_password           = false
   # DB subnet group
   # db_subnet_group_name = local.identifier # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/42
-  subnet_ids = local.bi_subnet_ids
+  subnet_ids             = local.bi_subnet_ids
+  create_db_subnet_group = true
 
   # DB parameter group
   create_db_parameter_group = false

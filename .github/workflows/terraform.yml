@@ -121,6 +121,7 @@ jobs:
   clean:
     needs: test
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -152,6 +153,18 @@ jobs:
       - name: Remove resources created during tests
         working-directory: live/
         run: ./clean.sh
+  fail-on-tests:
+    # Without this step workflow remains "green" if testing does fail.
+    name: Test Status -> Workflow Status
+    needs:
+      - clean
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: technote-space/workflow-conclusion-action@v2
+      - name: Check Job Status status and fail if they are red
+        if: env.WORKFLOW_CONCLUSION == 'failure'
+        run: exit 1
 
 
 
