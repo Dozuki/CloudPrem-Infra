@@ -85,12 +85,6 @@ type InfraTest struct {
 	Environment Environment
 }
 
-var RetryableErrors = map[string]string{
-	"(?s).*DependencyViolation": "Retrying due to dependency violation",
-	"(?s).*sites-config-update": "Retrying due to k8 job failure",
-	"(?s).*replicated":          "Retrying due to a helm deploy failure",
-}
-
 func ReadConfig() TestConfig {
 	var cfg TestConfig
 

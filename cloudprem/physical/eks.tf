@@ -228,6 +228,7 @@ module "eks_cluster" {
       update_default_version               = true
       instance_refresh_triggers            = ["tag"]
       kubelet_extra_args                   = "--node-labels=node.kubernetes.io/lifecycle=spot"
+      instance_type                        = "m5.large"
       override_instance_types              = var.eks_instance_types
       target_group_arns                    = module.nlb.target_group_arns
       tags = [
