@@ -66,7 +66,7 @@ jobs:
 #        working-directory: live/tests/src
 #        run: go test -v -count 1 -timeout 300m ${{ matrix.testcase }}
   clean:
-    needs: test
+#    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
