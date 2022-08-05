@@ -97,7 +97,6 @@
 | [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/resources/ssm_document) | resource |
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/resources/ssm_document) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
-| [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [random_password.primary_database](https://registry.terraform.io/providers/hashicorp/random/3.1.0/docs/resources/password) | resource |
 | [random_password.replica_database](https://registry.terraform.io/providers/hashicorp/random/3.1.0/docs/resources/password) | resource |
 | [aws_ami.amazon_linux_2](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/ami) | data source |

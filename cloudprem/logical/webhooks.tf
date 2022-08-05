@@ -9,7 +9,7 @@ data "kubernetes_secret" "frontegg" {
     namespace = "default"
   }
 }
-resource "kubernetes_job" "database_update" {
+resource "kubernetes_job" "frontegg_database_create" {
   count = var.enable_webhooks ? 1 : 0
 
   metadata {
@@ -33,8 +33,37 @@ resource "kubernetes_job" "database_update" {
         restart_policy = "Never"
       }
     }
-    backoff_limit = 5
-    completions   = 1
+    backoff_limit = 10
+  }
+  wait_for_completion = true
+}
+resource "kubernetes_job" "sites_config_update" {
+  count = var.enable_webhooks ? 1 : 0
+
+  depends_on = [helm_release.frontegg]
+
+  metadata {
+    name = "sites-config-update"
+  }
+  spec {
+    template {
+      metadata {}
+      spec {
+        container {
+          name  = "sites-config-update"
+          image = "imega/mysql-client"
+          command = [
+            "mysql",
+            "--host=${local.db_master_host}",
+            "--user=${local.db_master_username}",
+            "--password=${local.db_master_password}",
+            "--execute=${file("static/sites-db.sql")}"
+          ]
+        }
+        restart_policy = "OnFailure"
+      }
+    }
+    backoff_limit = 50
   }
   wait_for_completion = true
 }
@@ -78,7 +107,7 @@ resource "helm_release" "frontegg" {
   depends_on = [
     helm_release.mongodb,
     helm_release.redis,
-    kubernetes_job.database_update
+    kubernetes_job.frontegg_database_create
   ]
 
   name  = "frontegg"
