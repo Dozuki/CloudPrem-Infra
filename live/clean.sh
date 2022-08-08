@@ -27,13 +27,13 @@ cleanPrefixes() {
         SKIP_LOGICAL=true TG_STATE_PREFIX="test/$p/" terragrunt run-all destroy --terragrunt-non-interactive
     done
 }
-# echo "Cleaning standard"
-# pushd standard
-# cleanPrefixes
-# popd
-# pushd gov
-# cleanPrefixes
-# popd
+echo "Cleaning standard"
+pushd standard
+cleanPrefixes
+popd
+pushd gov
+cleanPrefixes
+popd
 
 
 for region in $(ls standard/); do
