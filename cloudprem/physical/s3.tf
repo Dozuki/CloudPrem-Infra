@@ -1,5 +1,7 @@
 // We use "moved" blocks to allow for upgrading from older version of the infra that used an older AWS provider as well
-// as individual S3 bucket blocks. (don't be alarmed if your IDE marks these resources as errors, they should be)
+// as individual S3 bucket blocks. (don't be alarmed if your IDE marks these "old" resources as errors, they should be)
+//
+// Maintaining backwards compatibility to 2.6
 moved {
   from = data.aws_s3_bucket.guide_images[0]
   to   = data.aws_s3_bucket.guide_buckets["dozuki-guide-images"]
@@ -48,6 +50,7 @@ moved {
   from = aws_s3_bucket_public_access_block.guide_pdfs_acl_block[0]
   to   = aws_s3_bucket_public_access_block.guide_buckets_acl_block["dozuki-guide-pdfs"]
 }
+// End 2.6 backwards compat blocks
 
 // If using existing buckets
 data "aws_s3_bucket" "guide_buckets" {
