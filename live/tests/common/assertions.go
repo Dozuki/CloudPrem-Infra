@@ -112,7 +112,6 @@ func PublicBIDMSAssertion(t *testing.T, terragruntPhysicalOptions *terraform.Opt
 		i++
 	}
 	logger.Log(t, "Testing for app database existence in replication instance.")
-	time.Sleep(120 * time.Second)
 	schemaExists := terratest_aws.GetWhetherSchemaExistsInRdsMySqlInstance(t, dbHost, BIDBPort, BIDBUser, dbPass, BIDBName)
 
 	assert.NotNil(t, dbHost)
