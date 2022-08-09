@@ -358,6 +358,7 @@ resource "aws_dms_replication_task" "this" {
   migration_type           = "full-load-and-cdc"
   replication_instance_arn = aws_dms_replication_instance.this[0].replication_instance_arn
   table_mappings           = file("static/dms_mapping.json")
+  start_replication_task   = false
 
   replication_task_settings = file("static/dms_config.json")
 
