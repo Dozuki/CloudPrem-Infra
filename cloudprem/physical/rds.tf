@@ -161,7 +161,7 @@ module "primary_database" {
 
 #tfsec:ignore:aws-ssm-secret-use-customer-key
 resource "aws_secretsmanager_secret" "primary_database_credentials" {
-  name = "${local.identifier}-database"
+  name_prefix = "${local.identifier}-database"
 
   recovery_window_in_days = 0
   //  kms_key_id              = data.aws_kms_key.rds.arn
@@ -246,7 +246,7 @@ module "replica_database" {
 resource "aws_secretsmanager_secret" "replica_database_credentials" {
   count = var.enable_bi ? 1 : 0
 
-  name = "${local.identifier}-replica-database"
+  name_prefix = "${local.identifier}-replica-database"
 
   recovery_window_in_days = var.protect_resources ? 7 : 0
 }
