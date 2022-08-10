@@ -374,19 +374,19 @@ resource "aws_dms_replication_task" "this" {
 
 # The DMS task block above is now capable of starting and stopping itself but due to the async nature of our app
 # deployment we need to tightly control when it starts so we can't use it; we have to control start and stop manually.
-resource "null_resource" "replication_control" {
-  count = var.enable_bi ? 1 : 0
-
-  triggers = {
-    dms_task_arn        = aws_dms_replication_task.this[0].replication_task_arn,
-    source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn,
-    target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn,
-    aws_region          = data.aws_region.current.name,
-    aws_profile         = var.aws_profile
-  }
-
-  provisioner "local-exec" {
-    when    = destroy
-    command = "/usr/bin/env bash ./util/dms-stop.sh ${self.triggers["dms_task_arn"]} ${self.triggers["aws_region"]} ${self.triggers["aws_profile"]}"
-  }
-}
+#resource "null_resource" "replication_control" {
+#  count = var.enable_bi ? 1 : 0
+#
+#  triggers = {
+#    dms_task_arn        = aws_dms_replication_task.this[0].replication_task_arn,
+#    source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn,
+#    target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn,
+#    aws_region          = data.aws_region.current.name,
+#    aws_profile         = var.aws_profile
+#  }
+#
+#  provisioner "local-exec" {
+#    when    = destroy
+#    command = "/usr/bin/env bash ./util/dms-stop.sh ${self.triggers["dms_task_arn"]} ${self.triggers["aws_region"]} ${self.triggers["aws_profile"]}"
+#  }
+#}

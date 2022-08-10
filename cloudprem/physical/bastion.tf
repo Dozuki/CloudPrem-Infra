@@ -77,13 +77,13 @@ resource "aws_ssm_association" "bastion_mysql_config" {
     key    = "tag:Role"
     values = ["Bastion"]
   }
-  targets {
-    key    = "tag:Identifier"
-    values = [var.identifier]
-  }
-  targets {
-    key    = "tag:Environment"
-    values = [var.environment]
+
+  dynamic "targets" {
+    for_each = local.tags
+    content {
+      key    = "tag:${targets.key}"
+      values = [targets.value]
+    }
   }
 }
 
@@ -103,7 +103,7 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
   }
   targets {
     key    = "tag:Identifier"
-    values = [var.identifier]
+    values = [coalesce(var.identifier, "-")]
   }
   targets {
     key    = "tag:Environment"

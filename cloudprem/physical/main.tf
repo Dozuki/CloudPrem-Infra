@@ -1,7 +1,8 @@
 terraform {
   required_providers {
-    aws    = "4.25.0"
-    random = "3.1.0"
+    aws        = "4.25.0"
+    kubernetes = "2.12.1"
+    random     = "3.3.2"
   }
 }
 provider "kubernetes" {
@@ -11,17 +12,18 @@ provider "kubernetes" {
 }
 
 locals {
-  identifier = var.identifier == "" || var.identifier == "-" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
+  identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
   # EKS
   cluster_access_role_name = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
   create_eks_kms           = var.eks_kms_key_id == "" ? true : false
   eks_kms_key              = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
 
+  # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier
+    Identifier  = coalesce(var.identifier, "-")
     Environment = var.environment
   }
 
@@ -35,10 +37,6 @@ locals {
   bi_access_cidrs          = length(var.bi_access_cidrs) == 0 ? [var.vpc_cidr] : var.bi_access_cidrs
 
   # S3 Buckets
-  #  guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket
-  #  guide_objects_bucket = var.create_s3_buckets ? aws_s3_bucket.guide_objects[0].bucket : data.aws_s3_bucket.guide_objects[0].bucket
-  #  guide_pdfs_bucket    = var.create_s3_buckets ? aws_s3_bucket.guide_pdfs[0].bucket : data.aws_s3_bucket.guide_pdfs[0].bucket
-  #  guide_documents_bucket     = var.create_s3_buckets ? aws_s3_bucket.guide_documents[0].bucket : data.aws_s3_bucket.guide_documents[0].bucket
   guide_buckets  = var.create_s3_buckets ? aws_s3_bucket.guide_buckets : data.aws_s3_bucket.guide_buckets
   logging_bucket = var.create_s3_buckets ? aws_s3_bucket.logging_bucket[0].bucket : data.aws_s3_bucket.logging[0].bucket
 

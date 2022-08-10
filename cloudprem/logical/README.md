@@ -3,18 +3,18 @@
 
 | Name | Version |
 |------|---------|
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | 4.24.0 |
-| <a name="requirement_helm"></a> [helm](#requirement\_helm) | 2.3.0 |
-| <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | 2.4.1 |
-| <a name="requirement_null"></a> [null](#requirement\_null) | 3.1.0 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | 4.25.0 |
+| <a name="requirement_helm"></a> [helm](#requirement\_helm) | 2.6.0 |
+| <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | 2.12.1 |
+| <a name="requirement_null"></a> [null](#requirement\_null) | 3.1.1 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 4.24.0 |
-| <a name="provider_helm"></a> [helm](#provider\_helm) | 2.3.0 |
-| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.4.1 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 4.25.0 |
+| <a name="provider_helm"></a> [helm](#provider\_helm) | 2.6.0 |
+| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.12.1 |
 | <a name="provider_random"></a> [random](#provider\_random) | n/a |
 
 ## Modules
@@ -25,37 +25,37 @@ No modules.
 
 | Name | Type |
 |------|------|
-| [aws_autoscaling_lifecycle_hook.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/resources/autoscaling_lifecycle_hook) | resource |
-| [helm_release.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.cluster_autoscaler](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.container_insights](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.frontegg](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.kubed](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.metrics_server](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.mongodb](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.redis](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.replicated](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [kubernetes_config_map.dozuki_resources](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/config_map) | resource |
-| [kubernetes_config_map.unattended_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/config_map) | resource |
-| [kubernetes_horizontal_pod_autoscaler.app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/horizontal_pod_autoscaler) | resource |
-| [kubernetes_horizontal_pod_autoscaler.queueworkerd](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/horizontal_pod_autoscaler) | resource |
-| [kubernetes_job.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
-| [kubernetes_job.frontegg_database_create](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
-| [kubernetes_job.replicated_sequence_reset](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
-| [kubernetes_job.sites_config_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
+| [aws_autoscaling_lifecycle_hook.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/resources/autoscaling_lifecycle_hook) | resource |
+| [helm_release.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.cluster_autoscaler](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.container_insights](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.frontegg](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.kubed](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.metrics_server](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.mongodb](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.redis](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [helm_release.replicated](https://registry.terraform.io/providers/hashicorp/helm/2.6.0/docs/resources/release) | resource |
+| [kubernetes_config_map.dozuki_resources](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/config_map) | resource |
+| [kubernetes_config_map.unattended_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/config_map) | resource |
+| [kubernetes_horizontal_pod_autoscaler.app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/horizontal_pod_autoscaler) | resource |
+| [kubernetes_horizontal_pod_autoscaler.queueworkerd](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/horizontal_pod_autoscaler) | resource |
+| [kubernetes_job.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/job) | resource |
+| [kubernetes_job.frontegg_database_create](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/job) | resource |
+| [kubernetes_job.replicated_sequence_reset](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/job) | resource |
+| [kubernetes_job.sites_config_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/resources/job) | resource |
 | [random_password.dashboard_password](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
-| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/caller_identity) | data source |
-| [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/eks_cluster) | data source |
-| [aws_eks_cluster_auth.main](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/eks_cluster_auth) | data source |
-| [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/kms_key) | data source |
-| [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/partition) | data source |
-| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/region) | data source |
-| [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/secretsmanager_secret_version) | data source |
-| [aws_ssm_parameter.dozuki_license](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/ssm_parameter) | data source |
-| [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/subnets) | data source |
-| [aws_vpc.main](https://registry.terraform.io/providers/hashicorp/aws/4.24.0/docs/data-sources/vpc) | data source |
-| [kubernetes_all_namespaces.allns](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/data-sources/all_namespaces) | data source |
-| [kubernetes_secret.frontegg](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/data-sources/secret) | data source |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/caller_identity) | data source |
+| [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/eks_cluster) | data source |
+| [aws_eks_cluster_auth.main](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/eks_cluster_auth) | data source |
+| [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/kms_key) | data source |
+| [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/partition) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/region) | data source |
+| [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/secretsmanager_secret_version) | data source |
+| [aws_ssm_parameter.dozuki_license](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/ssm_parameter) | data source |
+| [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/subnets) | data source |
+| [aws_vpc.main](https://registry.terraform.io/providers/hashicorp/aws/4.25.0/docs/data-sources/vpc) | data source |
+| [kubernetes_all_namespaces.allns](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/data-sources/all_namespaces) | data source |
+| [kubernetes_secret.frontegg](https://registry.terraform.io/providers/hashicorp/kubernetes/2.12.1/docs/data-sources/secret) | data source |
 
 ## Inputs
 

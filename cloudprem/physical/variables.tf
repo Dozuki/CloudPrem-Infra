@@ -1,7 +1,7 @@
 variable "identifier" {
   description = "A name identifier to use as prefix for all the resources."
   type        = string
-  default     = "-"
+  default     = ""
 
   validation {
     condition     = length(var.identifier) <= 10

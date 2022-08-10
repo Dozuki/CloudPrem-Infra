@@ -31,7 +31,7 @@ resource "aws_security_group_rule" "app_access_http" {
 #tfsec:ignore:aws-elbv2-alb-not-public
 module "nlb" {
   source  = "terraform-aws-modules/alb/aws"
-  version = "7.0.0"
+  version = "6.10.0"
 
   name = local.identifier
 
