@@ -23,7 +23,7 @@ locals {
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = coalesce(var.identifier, "-")
+    Identifier  = coalesce(var.identifier, "NA")
     Environment = var.environment
   }
 
