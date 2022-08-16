@@ -48,10 +48,6 @@ variable "eks_oidc_cluster_access_role_name" {
   description = "ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler"
   type        = string
 }
-variable "eks_worker_asg_arns" {
-  description = "Autoscaling group ARNS for the EKS cluster"
-  type        = list(string)
-}
 variable "eks_worker_asg_names" {
   description = "Autoscaling group names for the EKS cluster"
   type        = list(string)

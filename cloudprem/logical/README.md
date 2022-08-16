@@ -69,7 +69,6 @@ No modules.
 | <a name="input_eks_cluster_access_role_arn"></a> [eks\_cluster\_access\_role\_arn](#input\_eks\_cluster\_access\_role\_arn) | ARN for cluster access role for app provisioning | `string` | n/a | yes |
 | <a name="input_eks_cluster_id"></a> [eks\_cluster\_id](#input\_eks\_cluster\_id) | ID of EKS cluster for app provisioning | `string` | n/a | yes |
 | <a name="input_eks_oidc_cluster_access_role_name"></a> [eks\_oidc\_cluster\_access\_role\_name](#input\_eks\_oidc\_cluster\_access\_role\_name) | ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler | `string` | n/a | yes |
-| <a name="input_eks_worker_asg_arns"></a> [eks\_worker\_asg\_arns](#input\_eks\_worker\_asg\_arns) | Autoscaling group ARNS for the EKS cluster | `list(string)` | n/a | yes |
 | <a name="input_eks_worker_asg_names"></a> [eks\_worker\_asg\_names](#input\_eks\_worker\_asg\_names) | Autoscaling group names for the EKS cluster | `list(string)` | n/a | yes |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster | `string` | `false` | no |
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
