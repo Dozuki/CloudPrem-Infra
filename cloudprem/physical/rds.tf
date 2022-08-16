@@ -10,7 +10,7 @@ module "primary_database_sg" {
   ingress_with_source_security_group_id = [
     {
       rule                     = "mysql-tcp"
-      source_security_group_id = module.eks_cluster.worker_security_group_id
+      source_security_group_id = module.eks_cluster.node_security_group_id
     },
     {
       rule                     = "mysql-tcp"

@@ -15,7 +15,7 @@ data "aws_iam_policy_document" "aws_node_termination_handler" {
     actions = [
       "autoscaling:CompleteLifecycleAction",
     ]
-    resources = module.eks_cluster.workers_asg_arns
+    resources = [data.aws_autoscaling_group.eks_worker_asg.arn]
   }
   statement {
     effect = "Allow"
@@ -72,7 +72,7 @@ resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_asg" {
       "detail-type" : [
         "EC2 Instance-terminate Lifecycle Action"
       ]
-      "resources" : module.eks_cluster.workers_asg_arns
+      "resources" : [data.aws_autoscaling_group.eks_worker_asg.arn]
     }
   )
 }
@@ -94,7 +94,7 @@ resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_spot" {
       "detail-type" : [
         "EC2 Spot Instance Interruption Warning"
       ]
-      "resources" : module.eks_cluster.workers_asg_arns
+      "resources" : [data.aws_autoscaling_group.eks_worker_asg.arn]
     }
   )
 }
@@ -103,6 +103,10 @@ resource "aws_cloudwatch_event_target" "aws_node_termination_handler_spot" {
   target_id = "${local.identifier}-spot-termination"
   rule      = aws_cloudwatch_event_rule.aws_node_termination_handler_spot.name
   arn       = module.aws_node_termination_handler_sqs.sqs_queue_arn
+}
+
+data "aws_autoscaling_group" "eks_worker_asg" {
+  name = module.eks_cluster.eks_managed_node_groups_autoscaling_group_names[0]
 }
 
 module "aws_node_termination_handler_role" {
