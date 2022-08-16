@@ -88,7 +88,6 @@ dependency "physical" {
     vpc_id = "temporary-dummy-id"
     azs_count = 3
     msk_bootstrap_brokers = "bootstrap-brokers"
-    eks_worker_asg_arns = "dummy-arn1,dummy-arn2"
     eks_worker_asg_names = "dummy-name1,dummy-name2"
     eks_cluster_id = "dummy-cluster-id"
     eks_cluster_access_role_arn = "dummy-arn"
@@ -119,7 +118,6 @@ inputs = {
   eks_oidc_cluster_access_role_name = dependency.physical.outputs.eks_oidc_cluster_access_role_name
   termination_handler_role_arn = dependency.physical.outputs.termination_handler_role_arn
   termination_handler_sqs_queue_id = dependency.physical.outputs.termination_handler_sqs_queue_id
-  eks_worker_asg_arns = dependency.physical.outputs.eks_worker_asg_arns
   eks_worker_asg_names = dependency.physical.outputs.eks_worker_asg_names
   nlb_dns_name = dependency.physical.outputs.nlb_dns_name
   cluster_primary_sg = dependency.physical.outputs.cluster_primary_sg
