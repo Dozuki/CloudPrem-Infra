@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws        = "4.25.0"
     kubernetes = "2.12.1"
-    helm       = "2.3.0"
+    helm       = "2.6.0"
     null       = "3.1.1"
   }
 }
@@ -18,7 +18,7 @@ provider "helm" {
     host                   = data.aws_eks_cluster.main.endpoint
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority.0.data)
     exec {
-      api_version = "client.authentication.k8s.io/v1alpha1"
+      api_version = "client.authentication.k8s.io/v1beta1"
       args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
       command     = "aws"
     }
