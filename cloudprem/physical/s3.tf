@@ -54,6 +54,13 @@ resource "aws_s3_bucket" "logging_bucket" {
     }
 
   }
+
+  lifecycle {
+    ignore_changes = [
+      bucket,
+      bucket_prefix
+    ]
+  }
 }
 resource "aws_s3_bucket_public_access_block" "guide_images_acl_block" {
   count = var.create_s3_buckets ? 1 : 0
@@ -91,6 +98,13 @@ resource "aws_s3_bucket" "guide_images" {
       }
     }
 
+  }
+
+  lifecycle {
+    ignore_changes = [
+      bucket,
+      bucket_prefix
+    ]
   }
 }
 resource "aws_s3_bucket_public_access_block" "guide_objects_acl_block" {
@@ -130,6 +144,13 @@ resource "aws_s3_bucket" "guide_objects" {
     }
 
   }
+
+  lifecycle {
+    ignore_changes = [
+      bucket,
+      bucket_prefix
+    ]
+  }
 }
 resource "aws_s3_bucket_public_access_block" "guide_pdfs_acl_block" {
   count = var.create_s3_buckets ? 1 : 0
@@ -167,6 +188,13 @@ resource "aws_s3_bucket" "guide_pdfs" {
       }
     }
 
+  }
+
+  lifecycle {
+    ignore_changes = [
+      bucket,
+      bucket_prefix
+    ]
   }
 }
 resource "aws_s3_bucket_public_access_block" "guide_documents_acl_block" {
@@ -215,4 +243,10 @@ resource "aws_s3_bucket" "guide_documents" {
     max_age_seconds = 3000
   }
 
+  lifecycle {
+    ignore_changes = [
+      bucket,
+      bucket_prefix
+    ]
+  }
 }
