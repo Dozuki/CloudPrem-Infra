@@ -32,10 +32,11 @@ locals {
 
   dozuki_license_parameter_name = var.dozuki_license_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/license" : "/${var.identifier}/dozuki/${var.environment}/license") : var.dozuki_license_parameter_name
 
+  # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier
+    Identifier  = coalesce(var.identifier, "NA")
     Environment = var.environment
   }
 
