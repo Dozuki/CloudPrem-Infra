@@ -4,6 +4,8 @@ terraform {
     kubernetes = "2.4.1"
     helm       = "2.3.0"
     null       = "3.1.0"
+    # This provider needs to stay for awhile to maintain backwards compatibility with older infra versions (<=2.5.4)
+    local = "2.2.3"
   }
 }
 
