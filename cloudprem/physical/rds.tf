@@ -4,8 +4,9 @@ module "primary_database_sg" {
 
   name            = "${local.identifier}-database"
   use_name_prefix = false
-  description     = "Security group for ${local.identifier}s primary database. Allows access from worker nodes, bastion, and bi database on port 3306"
-  vpc_id          = local.vpc_id
+  # Do not modify the description. Doing so triggers a full recreate (which fails) due to an AWS bug.
+  description = "Security group for ${local.identifier}. Allows access from within the VPC on port 3306"
+  vpc_id      = local.vpc_id
 
   ingress_with_source_security_group_id = [
     {
