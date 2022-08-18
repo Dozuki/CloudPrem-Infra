@@ -1,3 +1,15 @@
+moved {
+  from = module.database_sg
+  to   = module.primary_database_sg
+}
+moved {
+  from = aws_secretsmanager_secret.replica_database[0]
+  to   = aws_secretsmanager_secret.replica_database_credentials[0]
+}
+moved {
+  from = aws_secretsmanager_secret_version.replica_database[0]
+  to   = aws_secretsmanager_secret_version.replica_database_credentials[0]
+}
 module "primary_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "4.7.0"
