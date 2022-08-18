@@ -4,6 +4,8 @@ terraform {
     kubernetes = "2.4.1"
     helm       = "2.3.0"
     null       = "3.1.0"
+    # This provider needs to stay for awhile to maintain backwards compatibility with older infra versions (<=2.5.4)
+    local = "2.2.3"
   }
 }
 
@@ -30,10 +32,11 @@ locals {
 
   dozuki_license_parameter_name = var.dozuki_license_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/license" : "/${var.identifier}/dozuki/${var.environment}/license") : var.dozuki_license_parameter_name
 
+  # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier
+    Identifier  = coalesce(var.identifier, "NA")
     Environment = var.environment
   }
 

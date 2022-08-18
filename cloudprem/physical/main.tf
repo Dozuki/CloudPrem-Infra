@@ -18,10 +18,11 @@ locals {
   create_eks_kms           = var.eks_kms_key_id == "" ? true : false
   eks_kms_key              = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
 
+  # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier == "" ? "-" : var.identifier
+    Identifier  = coalesce(var.identifier, "NA")
     Environment = var.environment
   }
 
