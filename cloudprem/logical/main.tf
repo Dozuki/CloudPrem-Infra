@@ -44,9 +44,11 @@ locals {
 
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
 
-  db_master_host     = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["host"]
-  db_master_username = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["username"]
-  db_master_password = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["password"]
+  db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
+
+  db_master_host     = local.db_credentials["host"]
+  db_master_username = local.db_credentials["username"]
+  db_master_password = local.db_credentials["password"]
 
   frontegg_clientid = try(data.kubernetes_secret.frontegg[0].data.clientid, "")
   frontegg_apikey   = try(data.kubernetes_secret.frontegg[0].data.apikey, "")
