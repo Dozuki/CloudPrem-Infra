@@ -1,0 +1,1 @@
+update sites.site_config set value = 'true' where name = 'feature-webhooks';
