@@ -233,7 +233,7 @@ module "eks_cluster" {
       tags = [
         {
           key                 = "aws-node-termination-handler/managed"
-          value               = ""
+          value               = true
           propagate_at_launch = true
         },
         {
