@@ -22,7 +22,9 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Multiple Ingress CIDRs
-            - We now allow multiple CIDRs for app and dashboard firewall ingress.
+            Bastion Provisioning, Webhooks Refactor and Backwards Compatibility Fixes
+            - We now use AWS SSM documents to provision our bastion hosts for better flexibility
+            - Internals of webhook infra provisioning has been refactored to be more reliable during creation
+            - Backwards compatibility has been improved, verified support upgrading from >=v2.5
           draft: false
           prerelease: false
