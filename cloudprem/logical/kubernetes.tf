@@ -1,6 +1,3 @@
-
-
-
 resource "kubernetes_config_map" "dozuki_resources" {
 
   metadata {
