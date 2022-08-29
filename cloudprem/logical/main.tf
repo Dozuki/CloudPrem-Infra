@@ -4,6 +4,8 @@ terraform {
     kubernetes = "2.4.1"
     helm       = "2.3.0"
     null       = "3.1.0"
+    # This provider needs to stay for awhile to maintain backwards compatibility with older infra versions (<=2.5.4)
+    local = "2.2.3"
   }
 }
 
@@ -30,10 +32,11 @@ locals {
 
   dozuki_license_parameter_name = var.dozuki_license_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/license" : "/${var.identifier}/dozuki/${var.environment}/license") : var.dozuki_license_parameter_name
 
+  # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = var.identifier
+    Identifier  = coalesce(var.identifier, "NA")
     Environment = var.environment
   }
 
@@ -41,9 +44,11 @@ locals {
 
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
 
-  db_master_host     = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["host"]
-  db_master_username = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["username"]
-  db_master_password = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)["password"]
+  db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
+
+  db_master_host     = local.db_credentials["host"]
+  db_master_username = local.db_credentials["username"]
+  db_master_password = local.db_credentials["password"]
 
   db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
