@@ -82,6 +82,11 @@ variable "replicated_app_sequence_number" {
   default     = 0
   type        = number
 }
+variable "replicated_channel" {
+  description = "If specifying an app sequence for a fresh install, this is the channel that sequence was deployed to. You only need to set this if the sequence you configured was not released on the default channel associated with your customer license."
+  default     = ""
+  type        = string
+}
 variable "memcached_cluster_address" {
   description = "Address of the deployed memcached cluster"
 }
