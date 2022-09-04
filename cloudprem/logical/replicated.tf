@@ -20,6 +20,7 @@ resource "kubernetes_config_map" "unattended_config" {
     "replicated.conf" = templatefile("${path.module}/static/replicated_config.json", {
       nlb_hostname       = random_password.dashboard_password.keepers.nlb_dns_name,
       release_sequence   = var.replicated_app_sequence_number,
+      replicated_channel = var.replicated_channel,
       dashboard_password = random_password.dashboard_password.result
     })
   }

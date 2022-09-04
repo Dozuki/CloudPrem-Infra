@@ -263,3 +263,14 @@ variable "aws_profile" {
   type        = string
   default     = ""
 }
+variable "cf_template_version" {
+  description = "Version of the CloudFormation template that deployed this stack for validation"
+  type        = number
+  default     = 0
+
+  validation {
+    // Allow for 0 so we can override this check when deploying from workstations or tests.
+    condition     = var.cf_template_version == 0 || var.cf_template_version >= 1
+    error_message = "CloudFormation template version is out of date. Update your CloudFormation to deploy this version of the infrastructure."
+  }
+}
