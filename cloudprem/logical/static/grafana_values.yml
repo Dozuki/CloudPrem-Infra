@@ -57,6 +57,10 @@ datasources:
 plugins:
   - grafana-piechart-panel
 
+grafana.ini:
+  users:
+    default_theme: light
+
 ## Configure grafana dashboard to import
 ## NOTE: To use dashboards you must also enable/configure dashboardProviders
 ## ref: https://grafana.com/dashboards
