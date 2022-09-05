@@ -11,8 +11,7 @@ provider "kubernetes" {
 }
 
 locals {
-  identifier     = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
-  identifier_tag = var.identifier == "" ? "-" : var.identifier
+  identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
   # EKS
   cluster_access_role_name = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
