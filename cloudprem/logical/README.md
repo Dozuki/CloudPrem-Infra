@@ -105,4 +105,6 @@ No modules.
 | <a name="output_dashboard_url"></a> [dashboard\_url](#output\_dashboard\_url) | URL to your Dozuki Dashboard. |
 | <a name="output_dozuki_url"></a> [dozuki\_url](#output\_dozuki\_url) | URL to your Dozuki Installation. |
 | <a name="output_grafana_admin_password"></a> [grafana\_admin\_password](#output\_grafana\_admin\_password) | Password for Grafana admin user |
+| <a name="output_grafana_admin_username"></a> [grafana\_admin\_username](#output\_grafana\_admin\_username) | n/a |
+| <a name="output_grafana_url"></a> [grafana\_url](#output\_grafana\_url) | n/a |
 <!-- END_TF_DOCS -->

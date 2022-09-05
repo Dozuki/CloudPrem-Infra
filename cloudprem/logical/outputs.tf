@@ -13,7 +13,15 @@ output "dozuki_url" {
   value       = format("https://%s", var.nlb_dns_name)
 }
 
+output "grafana_url" {
+  value = local.grafana_url
+}
+
+output "grafana_admin_username" {
+  value = local.grafana_admin_username
+}
+
 output "grafana_admin_password" {
   description = "Password for Grafana admin user"
-  value       = nonsensitive(try(random_password.grafana_admin[0].result, null))
+  value       = local.grafana_admin_password
 }
