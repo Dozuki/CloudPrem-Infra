@@ -25,7 +25,7 @@ resource "kubernetes_job" "dms_start" {
     backoff_limit = 1
     completions   = 1
   }
-  wait_for_completion = true
+  wait_for_completion = false
 
   timeouts {
     create = "20m"
