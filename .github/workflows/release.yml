@@ -22,9 +22,9 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Bastion Provisioning, Webhooks Refactor and Backwards Compatibility Fixes
-            - We now use AWS SSM documents to provision our bastion hosts for better flexibility
-            - Internals of webhook infra provisioning has been refactored to be more reliable during creation
-            - Backwards compatibility has been improved, verified support upgrading from >=v2.5
+            Grafana Dashboards & Enhanced Replicated Targeting
+            - Grafana Dashboards have been added to Private Cloud! (BI must be enabled to use them)
+            - We now support targeting of Replicated channels for fresh installs
+            - Versioning added to the CloudFormation templates to tie the CodeBuild config to the needed terraform config
           draft: false
           prerelease: false
