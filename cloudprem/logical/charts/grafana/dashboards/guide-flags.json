@@ -1,0 +1,547 @@
+{
+   "annotations": {
+      "list": [
+         {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+         }
+      ]
+   },
+   "description": "Identify Flagged Guides on Your Dozuki Site",
+   "editable": true,
+   "gnetId": null,
+   "graphTooltip": 0,
+   "id": null,
+   "iteration": 1547780549015,
+   "links": [],
+   "panels": [
+      {
+         "content": "<h2>Guide Flags</h2>\nReview flags on existing guides.\n<hr>",
+         "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 0
+         },
+         "id": 4,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": true,
+         "colors": [
+            "#20a7a3",
+            "#20a7a3",
+            "#20a7a3"
+         ],
+         "datasource": "$GUIDE_DB",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 7,
+            "x": 0,
+            "y": 3
+         },
+         "id": 6,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": ":",
+         "postfixFontSize": "80%",
+         "prefix": "",
+         "prefixFontSize": "80%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "case\nWHEN\n'WIKI_STUB'!='WIKI_STUB'\nThen flags.title\nElse \"All Flags\"\nend",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "select\n\ncase\nWHEN\n$FLAGID!='WIKI_STUB'\nThen flags.title\nElse \"All Flags\"\nend\n\n\n\nfrom flags\nwhere\n\ncase\nWHEN\n$FLAGID!='All Flags'\nThen flags.flagid=$FLAGID\nElse 1=1\nend",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "",
+         "title": "",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "100%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": false,
+         "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+         ],
+         "datasource": "$GUIDE_DB",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 9,
+            "w": 17,
+            "x": 7,
+            "y": 3
+         },
+         "id": 7,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": "",
+         "postfixFontSize": "50%",
+         "prefix": "",
+         "prefixFontSize": "50%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "case\nWHEN\n'WIKI_STUB'!='WIKI_STUB'\nThen flags.text\nelse\ngroup_concat(flags.title SEPARATOR ',  ')\nend",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "select\ncase\nWHEN\n$FLAGID!='WIKI_STUB'\nThen flags.text\nelse\ngroup_concat(flags.title SEPARATOR ',  ')\nend\nfrom flags\n\n\nWhere\n\ncase\nWHEN\n$FLAGID!='WIKI_STUB'\nThen flags.flagid=$FLAGID\nelse\n1=1\nend\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "",
+         "title": "",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "50%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "content": "<img src=\"https://d1ulmmr4d4i8j4.cloudfront.net/static/images/flags/svg/$FLAGIMAGE.svg\" /> ",
+         "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 2,
+            "y": 6
+         },
+         "id": 10,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "content": "<hr>",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 12
+         },
+         "id": 8,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "columns": [],
+         "datasource": "$GUIDE_DB",
+         "fontSize": "100%",
+         "gridPos": {
+            "h": 20,
+            "w": 24,
+            "x": 0,
+            "y": 14
+         },
+         "id": 2,
+         "links": [],
+         "pageSize": 20,
+         "scroll": false,
+         "showHeader": true,
+         "sort": {
+            "col": 0,
+            "desc": true
+         },
+         "styles": [
+            {
+               "alias": "Time",
+               "dateFormat": "YYYY-MM-DD HH:mm:ss",
+               "pattern": "Time",
+               "type": "date"
+            },
+            {
+               "alias": "",
+               "colorMode": null,
+               "colors": [
+                  "rgba(245, 54, 54, 0.9)",
+                  "rgba(237, 129, 40, 0.89)",
+                  "rgba(50, 172, 45, 0.97)"
+               ],
+               "dateFormat": "YYYY-MM-DD HH:mm:ss",
+               "decimals": 2,
+               "link": true,
+               "linkTargetBlank": true,
+               "linkTooltip": "https://$SITE_NAME.dozuki.com/guide/${__cell:raw}/${__cell_0:raw}",
+               "linkUrl": "https://$SITE_NAME.dozuki.com/guide/${__cell:raw}/${__cell_0:raw}",
+               "mappingType": 1,
+               "pattern": "Guide Title",
+               "thresholds": [],
+               "type": "string",
+               "unit": "short"
+            },
+            {
+               "alias": "",
+               "colorMode": null,
+               "colors": [
+                  "rgba(245, 54, 54, 0.9)",
+                  "rgba(237, 129, 40, 0.89)",
+                  "rgba(50, 172, 45, 0.97)"
+               ],
+               "dateFormat": "YYYY-MM-DD HH:mm:ss",
+               "decimals": 0,
+               "mappingType": 1,
+               "pattern": "Guide ID",
+               "thresholds": [],
+               "type": "number",
+               "unit": "none"
+            },
+            {
+               "alias": "",
+               "colorMode": null,
+               "colors": [
+                  "rgba(245, 54, 54, 0.9)",
+                  "rgba(237, 129, 40, 0.89)",
+                  "rgba(50, 172, 45, 0.97)"
+               ],
+               "dateFormat": "MM/DD/YY h:mm:ss a",
+               "decimals": 2,
+               "mappingType": 1,
+               "pattern": "Flag Date",
+               "thresholds": [],
+               "type": "date",
+               "unit": "short"
+            },
+            {
+               "alias": "Flag",
+               "colorMode": null,
+               "colors": [
+                  "rgba(245, 54, 54, 0.9)",
+                  "rgba(237, 129, 40, 0.89)",
+                  "rgba(50, 172, 45, 0.97)"
+               ],
+               "dateFormat": "YYYY-MM-DD HH:mm:ss",
+               "decimals": 2,
+               "mappingType": 1,
+               "pattern": "flagname",
+               "thresholds": [],
+               "type": "string",
+               "unit": "short"
+            },
+            {
+               "alias": "",
+               "colorMode": null,
+               "colors": [
+                  "rgba(245, 54, 54, 0.9)",
+                  "rgba(237, 129, 40, 0.89)",
+                  "rgba(50, 172, 45, 0.97)"
+               ],
+               "decimals": 2,
+               "pattern": "/.*/",
+               "thresholds": [],
+               "type": "number",
+               "unit": "short"
+            }
+         ],
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_meta.guideid as \"Guide ID\", guide_text.title as \"Guide Title\",\nflags.title as flagname,\nglobal_users.username as \"Author\",\nFROM_UNIXTIME(guide_revisions.date) as \"Flag Date\"\n\n      \n      -- distinct guide_meta.guideid, CURDATE(), guide_meta.created_date\nFROM guide_current\nleft join guide_revisions on guide_revisions.guide_revisionid=guide_current.guide_revisionid\nleft join guide_meta on guide_revisions.gtr_revisionid=guide_meta.revisionid\nleft join global_users on global_users.userid=guide_meta.userid\nleft join guide_text on guide_text.gt_revisionid=guide_revisions.gt_revisionid\nleft join guide_flag_revisions on guide_flag_revisions.gtr_revisionid=guide_revisions.gtr_revisionid\nleft join flags on flags.flagid=guide_flag_revisions.flagid\n\n-- SELECT guideid as \"Guide ID\", percent as \"Percentage\"\n-- from guide_authors \nwhere flags.title is not null\nand \n\ncase\nwhen $FLAGID!='WIKI_STUB'\nThen flags.flagid=$FLAGID\nElse 1=1\nend\n\n\n\n-- and FROM_UNIXTIME(guide_meta.created_date) >= date_sub(CURDATE(),interval 1 month)\nand FROM_UNIXTIME(guide_meta.created_date) >= $__timeFrom()\nand FROM_UNIXTIME(guide_meta.created_date) <= $__timeTo()\n\n-- \n-- group by guide_meta.guideid",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "title": "",
+         "transform": "table",
+         "transparent": true,
+         "type": "table"
+      }
+   ],
+   "schemaVersion": 16,
+   "style": "dark",
+   "tags": [
+      "Content",
+      "Guide Flags"
+   ],
+   "templating": {
+      "list": [
+         {
+            "current": {
+               "text": "Dozuki",
+               "value": "Dozuki"
+            },
+            "hide": 2,
+            "label": "Guide Database",
+            "name": "GUIDE_DB",
+            "options": [],
+            "query": "mysql",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+         },
+         {
+            "allValue": null,
+            "current": {
+               "text": "onprem",
+               "value": "onprem"
+            },
+            "hide": 2,
+            "includeAll": false,
+            "label": "Site Name",
+            "multi": false,
+            "name": "SITE_NAME",
+            "options": [
+               {
+                  "selected": true,
+                  "text": "onprem",
+                  "value": "onprem"
+               }
+            ],
+            "query": "onprem",
+            "skipUrlSync": false,
+            "type": "custom"
+         },
+         {
+            "allValue": "'WIKI_STUB'",
+            "current": {
+               "text": "All",
+               "value": "$__all"
+            },
+            "datasource": "$GUIDE_DB",
+            "definition": "",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Flag",
+            "multi": false,
+            "name": "FLAGID",
+            "options": [],
+            "query": "select flags.title AS __text, flags.flagid AS __value from flags",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 0,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+         },
+         {
+            "allValue": "STUB_PAGE",
+            "current": {
+               "text": "STUB_PAGE",
+               "value": "STUB_PAGE"
+            },
+            "datasource": "$GUIDE_DB",
+            "definition": "",
+            "hide": 2,
+            "includeAll": false,
+            "label": "Flag Image",
+            "multi": false,
+            "name": "FLAGIMAGE",
+            "options": [],
+            "query": "select flags.image from flags where flags.flagid=$FLAGID",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 0,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+         }
+      ]
+   },
+   "time": {
+      "from": "now-6M",
+      "to": "now"
+   },
+   "timepicker": {
+      "refresh_intervals": [
+         "5s",
+         "10s",
+         "30s",
+         "1m",
+         "5m",
+         "15m",
+         "30m",
+         "1h",
+         "2h",
+         "1d"
+      ],
+      "time_options": [
+         "5m",
+         "15m",
+         "1h",
+         "6h",
+         "12h",
+         "24h",
+         "2d",
+         "7d",
+         "30d"
+      ]
+   },
+   "timezone": "",
+   "title": "Guide Flags",
+   "uid": null,
+   "version": 45
+}

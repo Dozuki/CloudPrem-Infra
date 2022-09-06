@@ -1,0 +1,2595 @@
+{
+   "annotations": {
+      "list": [
+         {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+         }
+      ]
+   },
+   "editable": true,
+   "gnetId": null,
+   "graphTooltip": 0,
+   "id": null,
+   "iteration": 1547780583159,
+   "links": [],
+   "panels": [
+      {
+         "content": "<h1>User Experience Dashboard",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 0
+         },
+         "id": 38,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": false,
+         "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+         ],
+         "datasource": "$GUIDE_DB",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 10,
+            "x": 0,
+            "y": 2
+         },
+         "height": "12px",
+         "id": 1,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": "",
+         "postfixFontSize": "20%",
+         "prefix": "",
+         "prefixFontSize": "20%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "User Name",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "select username as \"User Name\" from global_users u where userid= $USERID;\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "",
+         "title": "",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "80%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 4
+         },
+         "id": 12,
+         "panels": [],
+         "repeat": "GUIDE_DB",
+         "scopedVars": {
+            "GUIDE_DB": {
+               "selected": true,
+               "text": "Dozuki",
+               "value": "Dozuki"
+            }
+         },
+         "title": "",
+         "type": "row"
+      },
+      {
+         "content": "<h2>User Information\n<hr>",
+         "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 5
+         },
+         "id": 56,
+         "links": [],
+         "mode": "html",
+         "scopedVars": {
+            "GUIDE_DB": {
+               "selected": true,
+               "text": "Dozuki",
+               "value": "Dozuki"
+            }
+         },
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": true,
+         "colors": [
+            "#d44a3a",
+            "#20a7a3",
+            "#20a7a3"
+         ],
+         "datasource": "$GUIDE_DB",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 7,
+            "x": 0,
+            "y": 8
+         },
+         "height": "10",
+         "id": 3,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": "",
+         "postfixFontSize": "50%",
+         "prefix": "",
+         "prefixFontSize": "50%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "scopedVars": {
+            "GUIDE_DB": {
+               "selected": true,
+               "text": "Dozuki",
+               "value": "Dozuki"
+            }
+         },
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "Email",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "select \n\nglobal_users.login as \"Email\"\nfrom global_users\nwhere global_users.userid= $USERID\nlimit 1;",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "",
+         "title": "email",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "80%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": true,
+         "colors": [
+            "#20a7a3",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+         ],
+         "datasource": "$GUIDE_DB",
+         "decimals": null,
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 5,
+            "x": 7,
+            "y": 8
+         },
+         "height": "10",
+         "id": 4,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": "",
+         "postfixFontSize": "50%",
+         "prefix": "",
+         "prefixFontSize": "50%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "scopedVars": {
+            "GUIDE_DB": {
+               "selected": true,
+               "text": "Dozuki",
+               "value": "Dozuki"
+            }
+         },
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "Join Date",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "select date_format(FROM_UNIXTIME(global_users.join_date), \"%M %d %Y\") as \"Join Date\"\nfrom global_users\nwhere global_users.userid= $USERID\nlimit 1;",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "50",
+         "title": "Join Date",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "70%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": true,
+         "colors": [
+            "#d44a3a",
+            "rgba(237, 129, 40, 0.89)",
+            "#20a7a3"
+         ],
+         "datasource": "$GUIDE_DB",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 3,
+            "x": 12,
+            "y": 8
+         },
+         "height": "10",
+         "id": 5,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": " rep",
+         "postfixFontSize": "30%",
+         "prefix": "",
+         "prefixFontSize": "50%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "scopedVars": {
+            "GUIDE_DB": {
+               "selected": true,
+               "text": "Dozuki",
+               "value": "Dozuki"
+            }
+         },
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "Reputation",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "select reputation as \"Reputation\" from users  where userid= $USERID;",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "1,100",
+         "title": "Reputation",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "70%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": true,
+         "colors": [
+            "#d44a3a",
+            "rgba(237, 129, 40, 0.89)",
+            "#20a7a3"
+         ],
+         "datasource": "$GUIDE_DB",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 3,
+            "x": 15,
+            "y": 8
+         },
+         "height": "10",
+         "id": 6,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": "",
+         "postfixFontSize": "50%",
+         "prefix": "",
+         "prefixFontSize": "50%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "scopedVars": {
+            "GUIDE_DB": {
+               "selected": true,
+               "text": "Dozuki",
+               "value": "Dozuki"
+            }
+         },
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "count(*)",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "Select count(*)\nFROM work_log\n\nINNER JOIN global_users on work_log.userid=global_users.userid \n\n\n INNER JOIN (\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision FROM guide_revisions GROUP BY guideid\n  ) maxrev ON maxrev.guideid = work_log.guideid \n\nJOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev.maxrevision\n\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\n\nWHERE work_log.userid = $USERID",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "0,1",
+         "title": "Completed Work Orders",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "70%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 33
+         },
+         "id": 15,
+         "panels": [],
+         "repeat": null,
+         "title": "",
+         "type": "row"
+      },
+      {
+         "content": "<h2>Guide Experience\n<hr>",
+         "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 34
+         },
+         "id": 42,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {
+            "ASA 1.0": "#756588",
+            "Advanced Calibration for CNC's": "#51b7c2",
+            "How to 5S Audit": "#e4bee3",
+            "How to Grease Coupling Middle Piece": "#6990ad",
+            "Valve Assembly": "#fac069",
+            "Work Element Name:  Section - Version 2": "#cccccc"
+         },
+         "breakPoint": "50%",
+         "cacheTimeout": null,
+         "combine": {
+            "label": "Others",
+            "threshold": 0
+         },
+         "datasource": "$GUIDE_DB",
+         "decimals": null,
+         "fontSize": "100%",
+         "format": "none",
+         "gridPos": {
+            "h": 11,
+            "w": 6,
+            "x": 0,
+            "y": 37
+         },
+         "hideTimeOverride": true,
+         "id": 7,
+         "interval": null,
+         "legend": {
+            "header": "Completed Guides",
+            "percentage": false,
+            "show": true,
+            "sideWidth": 60,
+            "values": true
+         },
+         "legendType": "Under graph",
+         "links": [],
+         "maxDataPoints": 3,
+         "nullPointMode": "connected",
+         "pieType": "pie",
+         "strokeWidth": "1",
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_text.title AS metric,\r\nuser_success.date as time_sec,\r\ncount(user_success.guideid) AS value\r\n\r\nFROM user_success\r\n\r\nINNER JOIN global_users on user_success.userid=global_users.userid  \r\n-- INNER JOIN guide_current ON user_success.guideid = guide_current.guideid\r\n\r\n\r\n-- JOIN guide_revisions ON guide_revisions.guideid = user_success.guideid\r\n\r\n\r\n INNER JOIN (\r\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision FROM guide_revisions GROUP BY guideid\r\n  ) maxrev ON maxrev.guideid = user_success.guideid \r\n  \r\n  -- AND maxrev.guide_revisionid = maxrevision\r\nJOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev.maxrevision\r\n\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\nWHERE user_success.userid = $USERID\r\nAND user_success.date >1\r\n\r\nGROUP BY user_success.guideid\r\nLIMIT 20 ;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "timeFrom": "3y",
+         "timeShift": null,
+         "title": "Completed Standard Guides",
+         "transparent": true,
+         "type": "grafana-piechart-panel",
+         "valueName": "total"
+      },
+      {
+         "aliasColors": {
+            "Guides to Delete": "#6990ad",
+            "Work Instruction Standards": "#756588",
+            "Work Instructions": "#fac069"
+         },
+         "breakPoint": "50%",
+         "cacheTimeout": null,
+         "combine": {
+            "label": "Others",
+            "threshold": ".05"
+         },
+         "datasource": "$GUIDE_DB",
+         "decimals": null,
+         "fontSize": "80%",
+         "format": "none",
+         "gridPos": {
+            "h": 11,
+            "w": 6,
+            "x": 6,
+            "y": 37
+         },
+         "hideTimeOverride": true,
+         "id": 20,
+         "interval": null,
+         "legend": {
+            "header": "Work Orders",
+            "percentage": false,
+            "percentageDecimals": null,
+            "show": true,
+            "values": true
+         },
+         "legendType": "Under graph",
+         "links": [],
+         "maxDataPoints": 3,
+         "nullPointMode": "connected",
+         "pieType": "pie",
+         "strokeWidth": "1",
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_meta.device AS metric, \r\nwork_log.starttime AS time_sec,\r\ncount(work_log.workorderid) as value\r\n\r\nFROM work_log\r\n\r\nINNER JOIN global_users on work_log.userid=global_users.userid  \r\nINNER JOIN (\r\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision FROM guide_revisions GROUP BY guideid\r\n  ) maxrev ON maxrev.guideid = work_log.guideid \r\n\r\nJOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev.maxrevision\r\n\r\n\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\n\r\n-- JOIN guide_meta ON work_log.guideid = guide_meta.guideid\r\n\r\nWHERE work_log.userid = $USERID\r\nAND work_log.cancelled<>1\r\nand work_log.starttime>0\r\nGROUP BY guide_meta.device\r\norder by count(work_log.workorderid) desc, guide_meta.device\r\n;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "timeFrom": null,
+         "timeShift": null,
+         "title": "Department Experience",
+         "transparent": true,
+         "type": "grafana-piechart-panel",
+         "valueName": "total"
+      },
+      {
+         "aliasColors": {
+            "5S Audit Form": "#bf7381",
+            "Deleted Guide": "#6990ad",
+            "G.0714.03 Safety Orientation": "#51b7c2",
+            "Guide Duplicator Test": "#73bfa1",
+            "How to Calibrate WIPS": "#756588",
+            "How to Remove the Brakes": "#e4bee3",
+            "guides": "#fac069"
+         },
+         "breakPoint": "50%",
+         "cacheTimeout": null,
+         "combine": {
+            "label": "Others",
+            "threshold": "0.01"
+         },
+         "datasource": "$GUIDE_DB",
+         "decimals": null,
+         "fontSize": "80%",
+         "format": "short",
+         "gridPos": {
+            "h": 11,
+            "w": 6,
+            "x": 12,
+            "y": 37
+         },
+         "hideTimeOverride": true,
+         "id": 22,
+         "interval": null,
+         "legend": {
+            "header": "Work Orders",
+            "percentage": true,
+            "show": true,
+            "sortDesc": false,
+            "values": true
+         },
+         "legendType": "Under graph",
+         "links": [],
+         "maxDataPoints": 3,
+         "nullPointMode": "connected",
+         "pieType": "pie",
+         "strokeWidth": "0",
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_text.title AS metric,\r\nwork_log.endtime AS time_sec,\r\ncount(work_log.workorderid) AS value\r\nFROM work_log\r\n\r\nINNER JOIN global_users on work_log.userid=global_users.userid  \r\n\r\n\r\nINNER JOIN (SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision FROM guide_revisions GROUP BY guideid) maxrev ON maxrev.guideid = work_log.guideid \r\n\r\nJOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev.maxrevision\r\n\r\n\r\n\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\n\r\n\r\n\r\nWHERE work_log.userid = $USERID\r\nAND work_log.endtime >1\r\nGROUP BY work_log.guideid\r\norder by count(work_log.workorderid) desc\r\nlimit 7\r\n;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "timeFrom": null,
+         "timeShift": null,
+         "title": "Work Orders",
+         "transparent": true,
+         "type": "grafana-piechart-panel",
+         "valueName": "current"
+      },
+      {
+         "content": "<hr>",
+         "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 48
+         },
+         "id": 59,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "content": "<h3>Views and Work Orders Over Time\n",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 51
+         },
+         "id": 57,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {
+            "Completed Work Orders": "#6990ad",
+            "Guide Views": "#fac069",
+            "Unknown": "#64b0c8",
+            "Wiki Views": "#756588"
+         },
+         "bars": false,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "fill": 1,
+         "gridPos": {
+            "h": 8,
+            "w": 19,
+            "x": 0,
+            "y": 53
+         },
+         "id": 18,
+         "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": true,
+         "linewidth": 1,
+         "links": [],
+         "nullPointMode": "connected",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [
+            {
+               "alias": "Unknown",
+               "yaxis": 1
+            }
+         ],
+         "spaceLength": 10,
+         "stack": false,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT work_log.endtime AS time_sec,\r\n-- work_log.userid as metric,\r\n\"Completed Work Orders\" as metric,\r\ncount(work_log.entryid) as value\r\nFROM work_log\r\n\r\nINNER JOIN global_users on work_log.userid = global_users.userid\r\nwhere work_log.endtime >= global_users.join_date\r\n\r\nand work_log.userid= $USERID\r\n-- and work_log.endtime >0\r\nGROUP BY DATE_FORMAT(FROM_UNIXTIME(work_log.endtime),'%y-%m')\r\n;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            },
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT user_view_history.date AS time_sec,\n\"Guide Views\" as metric,\ncount(user_view_history.historyid) as value\nFROM user_view_history\n\n\nINNER JOIN global_users on user_view_history.userid = global_users.userid\nwhere user_view_history.date >= global_users.join_date\n\n\nand user_view_history.userid= $USERID\nand user_view_history.doc_type= 'GUIDE'\n-- and user_view_history.date >0\ngroup by date_format(FROM_UNIXTIME(user_view_history.date),'%y-%m')\norder by time_sec\n;\n",
+               "refId": "B",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            },
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT user_view_history.date AS time_sec,\r\n\"Wiki Views\" as metric,\r\ncount(user_view_history.historyid) as value\r\nFROM user_view_history\r\n\r\n-- where from_unixtime(user_view_history.date, '%Y-%m-%d') > curdate() - INTERVAL 2 year\r\n\r\nINNER JOIN global_users on user_view_history.userid = global_users.userid\r\nwhere user_view_history.date >= global_users.join_date\r\n\r\n\r\nand user_view_history.userid= $USERID\r\nand user_view_history.doc_type= 'WIKI'\r\n\r\nGROUP BY date_format(FROM_UNIXTIME(user_view_history.date),'%y-%m');\r\n",
+               "refId": "C",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": null,
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": true,
+            "sort": 1,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+         },
+         "yaxes": [
+            {
+               "decimals": null,
+               "format": "none",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            },
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": false
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "content": "<h3>Completed Work Orders",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 61
+         },
+         "id": 58,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {},
+         "bars": true,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "fill": 1,
+         "gridPos": {
+            "h": 9,
+            "w": 19,
+            "x": 0,
+            "y": 63
+         },
+         "id": 9,
+         "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": false,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "rightSide": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": false,
+         "linewidth": 1,
+         "links": [],
+         "minSpan": 1,
+         "nullPointMode": "null",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "repeat": null,
+         "repeatDirection": "h",
+         "seriesOverrides": [],
+         "spaceLength": 10,
+         "stack": false,
+         "steppedLine": true,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_text.title AS metric,   \r\nwork_log.starttime as time_sec,      \r\ncount(work_log.workorderid) AS value\r\n\r\nFROM work_log\r\n\r\nINNER JOIN global_users on work_log.userid=global_users.userid \r\n\r\nINNER JOIN (\r\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision FROM guide_revisions GROUP BY guideid\r\n  ) maxrev ON maxrev.guideid = work_log.guideid \r\n\r\nJOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev.maxrevision\r\n\r\n\r\n\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\nWHERE work_log.userid = $USERID\r\nand work_log.starttime >0\r\n\r\nGROUP BY guide_text.guideid\r\norder by count(work_log.workorderid) desc\r\nLIMIT 7;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": null,
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": false,
+            "sort": 1,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": 1,
+            "mode": "series",
+            "name": null,
+            "show": false,
+            "values": [
+               "total"
+            ]
+         },
+         "yaxes": [
+            {
+               "format": "none",
+               "label": "Completed Work Orders",
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            },
+            {
+               "format": "none",
+               "label": "Completed Work Orders",
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": false
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "content": "<h3>Guide Views",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 72
+         },
+         "id": 60,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "content": "",
+         "gridPos": {
+            "h": 1,
+            "w": 13,
+            "x": 0,
+            "y": 74
+         },
+         "id": 28,
+         "links": [],
+         "mode": "markdown",
+         "repeat": null,
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {},
+         "bars": true,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "fill": 1,
+         "gridPos": {
+            "h": 8,
+            "w": 19,
+            "x": 0,
+            "y": 75
+         },
+         "id": 32,
+         "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": false,
+         "linewidth": 1,
+         "links": [],
+         "nullPointMode": "null",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [],
+         "spaceLength": 10,
+         "stack": false,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_text.title AS metric,\r\nuser_view_history.date as time_sec,\r\n-- guide_text.guideid,\r\ncount(user_view_history.historyid) AS value\r\n\r\nFROM user_view_history\r\n\r\n-- INNER JOIN global_users on user_view_history.userid=global_users.userid  \r\n\r\n-- INNER JOIN guide_current ON user_view_history.docid = guide_current.guideid\r\n\r\n-- JOIN guide_revisions ON guide_revisions.guide_revisionid = guide_current.guide_revisionid\r\n\r\n\r\nINNER JOIN (\r\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision3 FROM guide_revisions GROUP BY guideid\r\n  ) maxrev3 ON maxrev3.guideid = user_view_history.docid \r\n  \r\nINNER JOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev3.maxrevision3\r\n\r\n\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\n-- JOIN guide_meta ON work_log.guideid = guide_meta.guideid\r\n\r\nWHERE user_view_history.userid = $USERID\r\nand user_view_history.doc_type= \"GUIDE\"\r\nGROUP BY guide_text.guideid\r\norder by count(user_view_history.historyid) desc\r\nLIMIT 7;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": null,
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": false,
+            "sort": 0,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "series",
+            "name": null,
+            "show": false,
+            "values": [
+               "total"
+            ]
+         },
+         "yaxes": [
+            {
+               "format": "short",
+               "label": "Guide Views",
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            },
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": false
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 83
+         },
+         "id": 11,
+         "panels": [],
+         "repeat": null,
+         "title": "",
+         "type": "row"
+      },
+      {
+         "content": "<h2>Popular Content</h2>\n<em>The most accessed content created by this user.</em>\n<hr>",
+         "gridPos": {
+            "h": 4,
+            "w": 24,
+            "x": 0,
+            "y": 84
+         },
+         "id": 36,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "content": "<h1>Top Guide:\n",
+         "gridPos": {
+            "h": 2,
+            "w": 11,
+            "x": 0,
+            "y": 88
+         },
+         "id": 61,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "content": "<h1>Top Question:\n",
+         "gridPos": {
+            "h": 2,
+            "w": 10,
+            "x": 11,
+            "y": 88
+         },
+         "id": 62,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": false,
+         "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+         ],
+         "datasource": "$GUIDE_DB",
+         "description": "Most viewed guide created by this user.",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 11,
+            "x": 0,
+            "y": 90
+         },
+         "id": 44,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": "",
+         "postfixFontSize": "50%",
+         "prefix": "",
+         "prefixFontSize": "100%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "Guide",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT \r\n\r\nconcat(guide_text.title,CONVERT(X'C2A0' USING utf8), \"  (\", \"Guide ID  \", guide_authors.guideid,\"):   \",CONVERT(X'C2A0' USING utf8),CONVERT(X'C2A0' USING utf8),CONVERT(X'C2A0' USING utf8),CONVERT(X'C2A0' USING utf8), count(user_view_history.historyid),  \" Views\") as \"Guide\"\r\n\r\n\r\nFROM user_view_history\r\n\r\n-- INNER JOIN global_users on work_log.userid=global_users.userid  \r\n\r\n\r\nINNER JOIN (\r\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS auth_max_revision FROM guide_revisions GROUP BY guideid\r\n  ) auth_maxrev ON auth_maxrev.guideid = user_view_history.docid \r\n\r\nJOIN guide_revisions ON guide_revisions.guide_revisionid = auth_maxrev.auth_max_revision\r\n\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\n\r\nINNER JOIN (\r\n    SELECT percent as auth_percent, last_contribution, guideid, userid AS authorid FROM guide_authors GROUP BY guideid\r\n  ) guideauthors ON guideauthors.guideid = user_view_history.docid \r\n\r\njoin guide_authors on guide_authors.guideid = guideauthors.guideid\r\n\r\n-- JOIN guide_meta ON work_log.guideid = guide_meta.guideid\r\nWhere user_view_history.doc_type = 'Guide'\r\nand guide_authors.userid = $USERID\r\nand guide_authors.percent >= 10\r\n\r\n-- GROUP BY guide_text.title\r\nGROUP BY guide_authors.guideid\r\n\r\norder by count(user_view_history.historyid) desc\r\n\r\nlimit 1;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "",
+         "title": "",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "70%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "cacheTimeout": null,
+         "colorBackground": false,
+         "colorValue": false,
+         "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+         ],
+         "datasource": "$GUIDE_DB",
+         "description": "Most viewed question from this user.",
+         "format": "none",
+         "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 10,
+            "x": 11,
+            "y": 90
+         },
+         "id": 46,
+         "interval": null,
+         "links": [],
+         "mappingType": 1,
+         "mappingTypes": [
+            {
+               "name": "value to text",
+               "value": 1
+            },
+            {
+               "name": "range to text",
+               "value": 2
+            }
+         ],
+         "maxDataPoints": 100,
+         "nullPointMode": "connected",
+         "nullText": null,
+         "postfix": "",
+         "postfixFontSize": "50%",
+         "prefix": "",
+         "prefixFontSize": "100%",
+         "rangeMaps": [
+            {
+               "from": "null",
+               "text": "N/A",
+               "to": "null"
+            }
+         ],
+         "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+         },
+         "tableColumn": "Post",
+         "targets": [
+            {
+               "alias": "",
+               "format": "table",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT -- postid AS `PostID`, --\r\n\r\nconcat(title,\": \",space(10),CONVERT(X'C2A0' USING utf8),CONVERT(X'C2A0' USING utf8),value,\"  Views\") as Post\r\n       -- device AS `Device`, --\r\n       -- value AS `Views` --\r\n\t   -- userid as 'User' --\r\n\tFROM stats_per_month stm\r\n\tJOIN posts p ON (stm.id = p.postid)\r\n\tWHERE stm.metric = 'hits' AND\r\n\tuserid= $USERID AND\r\n\t\t  stm.type = 'post'\r\n\tORDER BY value \t\r\n\tDESC LIMIT 1;",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": "",
+         "title": "",
+         "transparent": true,
+         "type": "singlestat",
+         "valueFontSize": "70%",
+         "valueMaps": [
+            {
+               "op": "=",
+               "text": "N/A",
+               "value": "null"
+            }
+         ],
+         "valueName": "avg"
+      },
+      {
+         "content": "<h3>Most Popular Guides",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 93
+         },
+         "id": 63,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {},
+         "bars": true,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "description": "The most accessed guides written by this user.",
+         "fill": 1,
+         "gridPos": {
+            "h": 7,
+            "w": 21,
+            "x": 0,
+            "y": 95
+         },
+         "id": 30,
+         "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": false,
+         "linewidth": 1,
+         "links": [],
+         "nullPointMode": "null",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [
+            {}
+         ],
+         "spaceLength": 10,
+         "stack": true,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT \n-- concat(guide_text.title, \"  (\", \"Guide ID: \", guide_authors.guideid, \")\") as \"name\",\nguide_text.title as metric,\nuser_view_history.date AS time_sec,\n-- guide_authors.percent as \"Percentage\",  \ncount(user_view_history.historyid) AS value\n\nFROM user_view_history\n\n-- INNER JOIN global_users on work_log.userid=global_users.userid  \n\n\nINNER JOIN (\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS auth_max_revision FROM guide_revisions GROUP BY guideid\n  ) auth_maxrev ON auth_maxrev.guideid = user_view_history.docid \n\nJOIN guide_revisions ON guide_revisions.guide_revisionid = auth_maxrev.auth_max_revision\n\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\n\n\nINNER JOIN (\n    SELECT percent as auth_percent, last_contribution, guideid, userid AS authorid FROM guide_authors GROUP BY guideid\n  ) guideauthors ON guideauthors.guideid = user_view_history.docid \n\njoin guide_authors on guide_authors.guideid = guideauthors.guideid\n\n-- JOIN guide_meta ON work_log.guideid = guide_meta.guideid\nWhere user_view_history.doc_type = 'Guide'\nand guide_authors.userid = $USERID\nand guide_authors.percent >= 10\n\n-- GROUP BY guide_text.title\nGROUP BY guide_authors.guideid\n\norder by count(user_view_history.historyid) desc\n\nlimit 7;",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [
+            {
+               "colorMode": "critical",
+               "fill": true,
+               "line": true,
+               "op": "gt",
+               "yaxis": "left"
+            }
+         ],
+         "timeFrom": null,
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": false,
+            "sort": 2,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "series",
+            "name": null,
+            "show": false,
+            "values": [
+               "total"
+            ]
+         },
+         "yaxes": [
+            {
+               "format": "none",
+               "label": "Total Guide Views",
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            },
+            {
+               "format": "none",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": false
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "content": "<h3>Most Used Guides",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 102
+         },
+         "id": 64,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {},
+         "bars": true,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "description": "Completed work orders for guides authored by this user.",
+         "fill": 1,
+         "gridPos": {
+            "h": 8,
+            "w": 21,
+            "x": 0,
+            "y": 104
+         },
+         "id": 40,
+         "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": false,
+         "linewidth": 1,
+         "links": [],
+         "nullPointMode": "null",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [],
+         "spaceLength": 10,
+         "stack": false,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT \r\n-- concat(guide_text.title, \"  (\", \"Guide ID: \", guide_authors.guideid, \")\") as \"Guide\",\r\nguide_text.title as metric,\r\nwork_log.starttime as time_sec,\r\n-- guide_authors.percent as \"Percentage\",  \r\ncount(work_log.entryid) AS value\r\n\r\nFROM work_log\r\n\r\n-- INNER JOIN global_users on work_log.userid=global_users.userid  \r\n\r\nINNER JOIN \r\n(SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision FROM guide_revisions GROUP BY guideid) \r\nmaxrev ON maxrev.guideid = work_log.guideid \r\n\r\nJOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev.maxrevision\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\n\r\nINNER JOIN (\r\n    SELECT percent as auth_percent, last_contribution, guideid, userid AS authorid FROM guide_authors GROUP BY guideid\r\n  ) guideauthors ON guideauthors.guideid = work_log.guideid \r\n\r\njoin guide_authors on guide_authors.guideid = guideauthors.guideid\r\n\r\n-- JOIN guide_meta ON work_log.guideid = guide_meta.guideid\r\n\r\nWhere guide_authors.userid = $USERID\r\nand work_log.cancelled <> 1\r\nand guide_authors.percent >= 5\r\n\r\n-- GROUP BY guide_text.title\r\nGROUP BY guide_authors.guideid\r\n\r\norder by count(work_log.entryid) desc\r\n\r\nlimit 7;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": null,
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": false,
+            "sort": 0,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "series",
+            "name": null,
+            "show": false,
+            "values": [
+               "total"
+            ]
+         },
+         "yaxes": [
+            {
+               "format": "short",
+               "label": "Completed Work Orders",
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            },
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 112
+         },
+         "id": 70,
+         "panels": [],
+         "title": "",
+         "type": "row"
+      },
+      {
+         "content": "<h2>Contribution History</h2>\nAn overview of content created by this author.\n<hr>",
+         "gridPos": {
+            "h": 4,
+            "w": 24,
+            "x": 0,
+            "y": 113
+         },
+         "id": 71,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "content": "<h3>Recent Author Activity",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 117
+         },
+         "id": 65,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {
+            "Recent Contributions": "#6990ad"
+         },
+         "bars": true,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "fill": 4,
+         "gridPos": {
+            "h": 6,
+            "w": 21,
+            "x": 0,
+            "y": 119
+         },
+         "id": 48,
+         "legend": {
+            "alignAsTable": false,
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": false,
+         "linewidth": 3,
+         "links": [],
+         "nullPointMode": "null",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [],
+         "spaceLength": 10,
+         "stack": false,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_authors.last_contribution AS time_sec,\r\n\"Recent Contributions\" as metric,\r\ncount(guide_authors.guideid) as value\r\nFROM guide_authors\r\n\r\n\r\n-- SELECT guideid as \"Guide ID\", percent as \"Percentage\"\r\n-- from {GUIDE_DB.RAW}.guide_authors \r\nwhere userid= $USERID\r\n\r\nGROUP BY DATE_FORMAT(FROM_UNIXTIME(guide_authors.last_contribution),'%Y-%m')\r\n;",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": "1y",
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": false,
+            "sort": 0,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+         },
+         "yaxes": [
+            {
+               "decimals": null,
+               "format": "none",
+               "label": "Contributions",
+               "logBase": 1,
+               "max": null,
+               "min": "0",
+               "show": true
+            },
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": false
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "content": "<h3>Guide Releases Over Time",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 125
+         },
+         "id": 66,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {
+            "Authorship": "#756588",
+            "Guide Edits": "#fac069",
+            "Guide Editsss": "#756588",
+            "Guide Releases": "#6990ad"
+         },
+         "bars": false,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "fill": 1,
+         "gridPos": {
+            "h": 6,
+            "w": 21,
+            "x": 0,
+            "y": 127
+         },
+         "hideTimeOverride": false,
+         "id": 52,
+         "legend": {
+            "avg": false,
+            "current": false,
+            "hideEmpty": false,
+            "hideZero": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": true,
+         "linewidth": 1,
+         "links": [],
+         "nullPointMode": "null as zero",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [],
+         "spaceLength": 10,
+         "stack": false,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT releases.release_date AS time_sec,\n\"Guide Releases\" as metric,\ncount(releases.releaseid) as value\n\nFROM releases\n\nINNER JOIN global_users on releases.userid = global_users.userid\nwhere releases.doctype='GUIDE'\nand releases.release_date >= global_users.join_date\nand releases.userid= $USERID\n\nGROUP BY DATE_FORMAT(FROM_UNIXTIME(releases.release_date),'%y-%m-%d');\n\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            },
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "hide": false,
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_meta.date AS time_sec,\r\n\"Guide Edits\" as metric,\r\ncount(guide_meta.revisionid) as value\r\nFROM guide_meta\r\n\r\nINNER JOIN global_users on guide_meta.userid = global_users.userid\r\nwhere guide_meta.date >= global_users.join_date\r\n\r\nand guide_meta.userid= $USERID\r\n\r\n\r\nGROUP BY DATE_FORMAT(FROM_UNIXTIME(guide_meta.date),'%y-%m-%d')\r\n\r\n;\r\n",
+               "refId": "B",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            },
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_authors.last_contribution AS time_sec,\r\n\"Authorship\" as metric,\r\ncount(guide_authors.guideid) as value\r\nFROM guide_authors\r\n\r\nINNER JOIN global_users on guide_authors.userid = global_users.userid\r\nwhere guide_authors.last_contribution >= global_users.join_date\r\nand guide_authors.percent >= 10\r\n\r\nand guide_authors.userid= $USERID\r\n\r\nGROUP BY DATE_FORMAT(FROM_UNIXTIME(guide_authors.last_contribution),'%y-%m-%d');\r\n",
+               "refId": "C",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": "2y",
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": false,
+            "sort": 1,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+         },
+         "yaxes": [
+            {
+               "decimals": null,
+               "format": "short",
+               "label": "",
+               "logBase": 1,
+               "max": null,
+               "min": "0",
+               "show": true
+            },
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": false
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "content": "<h3>Guide Edits Over Time",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 133
+         },
+         "id": 67,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {
+            "A-series": "#6990ad",
+            "Recent Edits": "#6990ad"
+         },
+         "bars": false,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "fill": 1,
+         "gridPos": {
+            "h": 7,
+            "w": 21,
+            "x": 0,
+            "y": 135
+         },
+         "id": 50,
+         "legend": {
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+         },
+         "lines": true,
+         "linewidth": 1,
+         "links": [],
+         "nullPointMode": "null as zero",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [],
+         "spaceLength": 10,
+         "stack": true,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT guide_meta.date AS time_sec,\r\n\"Recent Edits\" as metric,\r\ncount(guide_meta.revisionid) as value\r\nFROM guide_meta\r\n\r\nINNER JOIN global_users on guide_meta.userid = global_users.userid\r\nwhere guide_meta.date >= global_users.join_date\r\n\r\nand guide_meta.userid= $USERID\r\n\r\n-- GROUP BY guide_meta.date\r\nGROUP BY DATE_FORMAT(FROM_UNIXTIME(guide_meta.date),'%y-%m-%d');",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": "2y",
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+         },
+         "yaxes": [
+            {
+               "decimals": null,
+               "format": "short",
+               "label": "Recent Edits to Guides",
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            },
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": false
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      },
+      {
+         "content": "<h3>Reputation",
+         "gridPos": {
+            "h": 2,
+            "w": 24,
+            "x": 0,
+            "y": 142
+         },
+         "id": 68,
+         "links": [],
+         "mode": "html",
+         "title": "",
+         "transparent": true,
+         "type": "text"
+      },
+      {
+         "aliasColors": {
+            "Reputation": "#6990ad"
+         },
+         "bars": false,
+         "dashLength": 10,
+         "dashes": false,
+         "datasource": "$GUIDE_DB",
+         "fill": 1,
+         "gridPos": {
+            "h": 7,
+            "w": 21,
+            "x": 0,
+            "y": 144
+         },
+         "id": 54,
+         "legend": {
+            "avg": false,
+            "current": false,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+         },
+         "lines": true,
+         "linewidth": 1,
+         "links": [],
+         "nullPointMode": "null",
+         "percentage": false,
+         "pointradius": 5,
+         "points": false,
+         "renderer": "flot",
+         "seriesOverrides": [],
+         "spaceLength": 10,
+         "stack": false,
+         "steppedLine": false,
+         "targets": [
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT user_history.date AS time_sec,\r\n\"Reputation\" as metric,\r\nSum(\r\nuser_history.rewarded\r\n\t   ) as value\r\nFROM user_history\r\n\r\n\r\nINNER JOIN global_users on user_history.userid = global_users.userid\r\n\r\nwhere from_unixtime(user_history.date) > from_unixtime(global_users.join_date)\r\n\r\nand user_history.userid= $USERID\r\nand user_history.rewarded >= 0\r\nGROUP BY \r\nDATE(FROM_UNIXTIME(user_history.date))\r\n-- YEARWEEK(FROM_UNIXTIME(user_history.date))\r\n;\r\n",
+               "refId": "A",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            },
+            {
+               "alias": "",
+               "format": "time_series",
+               "group": [],
+               "metricColumn": "none",
+               "rawQuery": true,
+               "rawSql": "SELECT user_history.date AS time_sec,\n\"Total Reputation\" as metric,\n\t   \n\t   \n\t      -- (@runtot := @runtot + user_history.rewarded) AS \"Total Reputation\"\n(SELECT SUM(h.rewarded)\nFROM user_history as h\nWHERE h.userid = user_history.userid\nAND DATE(FROM_UNIXTIME(user_history.date)) >= DATE(FROM_UNIXTIME(h.date)) \n)\nAS value\n\t   \nFROM user_history\nINNER JOIN global_users on user_history.userid = global_users.userid\nwhere user_history.date >= global_users.join_date\nand user_history.userid= $USERID\nand user_history.rewarded > 0\nGROUP BY DATE(FROM_UNIXTIME(user_history.date))\n-- GROUP BY DATE_FORMAT(FROM_UNIXTIME(user_history.date),'%y-%m-d%')\n-- GROUP BY YEARWEEK(FROM_UNIXTIME(user_history.date))\n;\n\n",
+               "refId": "B",
+               "select": [
+                  [
+                     {
+                        "params": [
+                           "value"
+                        ],
+                        "type": "column"
+                     }
+                  ]
+               ],
+               "timeColumn": "time",
+               "where": [
+                  {
+                     "name": "$__timeFilter",
+                     "params": [],
+                     "type": "macro"
+                  }
+               ]
+            }
+         ],
+         "thresholds": [],
+         "timeFrom": "2y",
+         "timeRegions": [],
+         "timeShift": null,
+         "title": "",
+         "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+         },
+         "transparent": true,
+         "type": "graph",
+         "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+         },
+         "yaxes": [
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            },
+            {
+               "format": "short",
+               "label": null,
+               "logBase": 1,
+               "max": null,
+               "min": null,
+               "show": true
+            }
+         ],
+         "yaxis": {
+            "align": false,
+            "alignLevel": null
+         }
+      }
+   ],
+   "refresh": false,
+   "schemaVersion": 16,
+   "style": "dark",
+   "tags": [
+      "Worker Training",
+      "User Work Experience"
+   ],
+   "templating": {
+      "list": [
+         {
+            "allValue": "'All Users'",
+            "current": {
+               "tags": [],
+               "text": "Dozuki System — User ID:1",
+               "value": "1"
+            },
+            "datasource": "$GUIDE_DB",
+            "definition": "",
+            "hide": 0,
+            "includeAll": false,
+            "label": "User",
+            "multi": false,
+            "name": "USERID",
+            "options": [],
+            "query": "select  CONCAT(global_users.username, \" — \", \"User ID:\", global_users.userid) AS __text, global_users.userid AS __value from global_users",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 1,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+         },
+         {
+            "current": {
+               "text": "Dozuki",
+               "value": "Dozuki"
+            },
+            "hide": 2,
+            "label": "Guide Database",
+            "name": "GUIDE_DB",
+            "options": [],
+            "query": "mysql",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+         }
+      ]
+   },
+   "time": {
+      "from": "now-24h",
+      "to": "now"
+   },
+   "timepicker": {
+      "hidden": false,
+      "refresh_intervals": [
+         "5s",
+         "10s",
+         "30s",
+         "1m",
+         "5m",
+         "15m",
+         "30m",
+         "1h",
+         "2h",
+         "1d"
+      ],
+      "time_options": [
+         "5m",
+         "15m",
+         "1h",
+         "6h",
+         "12h",
+         "24h",
+         "2d",
+         "7d",
+         "30d"
+      ]
+   },
+   "timezone": "utc",
+   "title": "User Work Experience",
+   "uid": null,
+   "version": 57
+}

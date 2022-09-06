@@ -69,6 +69,11 @@ variable "primary_db_secret" {
   description = "ARN to secret containing primary db credentials"
   type        = string
 }
+variable "bi_database_credential_secret" {
+  description = "ARN to secret containing bi db credentials"
+  type        = string
+  default     = ""
+}
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
   type        = bool

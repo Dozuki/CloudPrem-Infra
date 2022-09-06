@@ -50,11 +50,18 @@ locals {
   db_master_username = local.db_credentials["username"]
   db_master_password = local.db_credentials["password"]
 
+  db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
+  db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
+
   frontegg_clientid = try(data.kubernetes_secret.frontegg[0].data.clientid, "")
   frontegg_apikey   = try(data.kubernetes_secret.frontegg[0].data.apikey, "")
   frontegg_pub_key  = try(data.kubernetes_secret.frontegg[0].data.pubkey, "")
   frontegg_username = try(data.kubernetes_secret.frontegg[0].data.username, "")
   frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "") #tfsec:ignore:general-secrets-no-plaintext-exposure
+
+  grafana_url            = var.enable_bi ? format("http://%s:3000", var.nlb_dns_name) : null
+  grafana_admin_username = var.enable_bi ? "dozuki" : null
+  grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
 
 }
 
@@ -91,4 +98,8 @@ data "aws_subnets" "private" {
 
 data "aws_secretsmanager_secret_version" "db_master" {
   secret_id = var.primary_db_secret
+}
+data "aws_secretsmanager_secret_version" "db_bi" {
+  count     = var.enable_bi ? 1 : 0
+  secret_id = var.bi_database_credential_secret
 }

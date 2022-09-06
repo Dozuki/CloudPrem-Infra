@@ -28,6 +28,16 @@ resource "aws_security_group_rule" "app_access_http" {
   description       = "Access to application"
 }
 
+resource "aws_security_group_rule" "grafana_access_http" {
+  type              = "ingress"
+  from_port         = 32020
+  to_port           = 32020
+  protocol          = "tcp"
+  cidr_blocks       = local.grafana_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
+  security_group_id = module.eks_cluster.worker_security_group_id
+  description       = "Access to Grafana"
+}
+
 #tfsec:ignore:aws-elbv2-alb-not-public
 module "nlb" {
   source  = "terraform-aws-modules/alb/aws"
@@ -59,6 +69,12 @@ module "nlb" {
       backend_protocol = "TCP"
       backend_port     = 32010
       target_type      = "instance"
+    },
+    {
+      name_prefix      = "graf-"
+      backend_protocol = "TCP"
+      backend_port     = 32020
+      target_type      = "instance"
     }
   ]
 
@@ -77,6 +93,11 @@ module "nlb" {
       port               = 80
       protocol           = "TCP"
       target_group_index = 2
+    },
+    {
+      port               = 3000
+      protocol           = "TCP"
+      target_group_index = 3
     }
   ]
 

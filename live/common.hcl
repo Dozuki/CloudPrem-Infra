@@ -80,6 +80,11 @@ generate "metrics_server_helmignore" {
   if_exists = "overwrite_terragrunt"
   contents  = local.helmignore
 }
+generate "grafana_helmignore" {
+  path      = "charts/grafana/.helmignore"
+  if_exists = "overwrite_terragrunt"
+  contents  = local.helmignore
+}
 
 dependency "physical" {
   config_path = "${get_terragrunt_dir()}/../physical"
@@ -104,6 +109,7 @@ dependency "physical" {
     guide_pdfs_bucket = "dummy-pdfs-bucket"
     memcached_cluster_address = "dummy-memcache"
     dms_task_arn = "dummy-dms-arn"
+    bi_database_credential_secret = "dummy-secret"
   }
   mock_outputs_merge_strategy_with_state = "shallow"
 }
@@ -125,6 +131,7 @@ inputs = {
   cluster_primary_sg = dependency.physical.outputs.cluster_primary_sg
 
   primary_db_secret = dependency.physical.outputs.primary_db_secret
+  bi_database_credential_secret = dependency.physical.outputs.bi_database_credential_secret
   s3_images_bucket = dependency.physical.outputs.guide_images_bucket
   s3_objects_bucket = dependency.physical.outputs.guide_objects_bucket
   s3_documents_bucket = dependency.physical.outputs.documents_bucket

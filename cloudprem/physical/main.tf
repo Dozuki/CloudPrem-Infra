@@ -33,7 +33,8 @@ locals {
   ca_cert_identifier       = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
   ca_cert_pem_file         = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
   bi_subnet_ids            = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
-  bi_access_cidrs          = length(var.bi_access_cidrs) == 0 ? [var.vpc_cidr] : var.bi_access_cidrs
+  bi_access_cidrs          = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs
+  grafana_access_cidrs     = length(var.grafana_access_cidrs) == 0 ? [local.vpc_cidr] : var.grafana_access_cidrs
 
   # S3 Buckets
   guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket
