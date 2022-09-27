@@ -20,7 +20,9 @@
 
 ## Modules
 
-No modules.
+| Name | Source | Version |
+|------|--------|---------|
+| <a name="module_ssl_cert"></a> [ssl\_cert](#module\_ssl\_cert) | ../common/acm | n/a |
 
 ## Resources
 
@@ -46,6 +48,8 @@ No modules.
 | [kubernetes_job.replicated_sequence_reset](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
 | [kubernetes_job.sites_config_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
 | [kubernetes_job.wait_for_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/job) | resource |
+| [kubernetes_secret.grafana_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/secret) | resource |
+| [kubernetes_secret.grafana_ssl](https://registry.terraform.io/providers/hashicorp/kubernetes/2.4.1/docs/resources/secret) | resource |
 | [random_password.dashboard_password](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.grafana_admin](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/caller_identity) | data source |

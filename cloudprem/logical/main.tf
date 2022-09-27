@@ -59,7 +59,7 @@ locals {
   frontegg_username = try(data.kubernetes_secret.frontegg[0].data.username, "")
   frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "") #tfsec:ignore:general-secrets-no-plaintext-exposure
 
-  grafana_url            = var.enable_bi ? format("http://%s:3000", var.nlb_dns_name) : null
+  grafana_url            = var.enable_bi ? format("https://%s:3000", var.nlb_dns_name) : null
   grafana_admin_username = var.enable_bi ? "dozuki" : null
   grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
 
