@@ -1,3 +1,12 @@
+
+module "ssl_cert" {
+  source      = "../../../common/acm"
+  environment = var.environment
+  identifier  = var.identifier
+
+  namespace = "vpn"
+}
+
 resource "tls_private_key" "client" {
   count     = length(var.vpn-client-list)
   algorithm = "RSA"
@@ -15,8 +24,8 @@ resource "tls_locally_signed_cert" "client" {
   count                 = length(var.vpn-client-list)
   cert_request_pem      = tls_cert_request.client[count.index].cert_request_pem
   ca_key_algorithm      = "RSA"
-  ca_private_key_pem    = tls_private_key.ca.private_key_pem
-  ca_cert_pem           = tls_self_signed_cert.ca.cert_pem
+  ca_private_key_pem    = module.ssl_cert.ssm_ca_key.value
+  ca_cert_pem           = module.ssl_cert.ssm_ca_cert.value
   validity_period_hours = 87600
   allowed_uses = [
     "key_encipherment",
@@ -29,7 +38,7 @@ resource "aws_acm_certificate" "client" {
   count             = length(var.vpn-client-list)
   private_key       = tls_private_key.client[count.index].private_key_pem
   certificate_body  = tls_locally_signed_cert.client[count.index].cert_pem
-  certificate_chain = tls_self_signed_cert.ca.cert_pem
+  certificate_chain = module.ssl_cert.ssm_ca_cert.value
 
   tags = merge(
     local.tags,
@@ -60,7 +69,7 @@ cipher AES-256-GCM
 verb 3
 
 <ca>
-${aws_ssm_parameter.vpn_ca_cert.value}
+${module.ssl_cert.ssm_ca_cert.value}
 </ca>
 
 reneg-sec 0

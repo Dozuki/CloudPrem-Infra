@@ -1,3 +1,4 @@
+
 resource "tls_private_key" "ca" {
   algorithm = "RSA"
 }
@@ -6,7 +7,7 @@ resource "tls_self_signed_cert" "ca" {
   private_key_pem = tls_private_key.ca.private_key_pem
 
   subject {
-    common_name  = "${local.identifier}.${data.aws_region.current.name}.vpn.ca"
+    common_name  = local.ssl_ca_cn
     organization = local.identifier
   }
   validity_period_hours = 87600
@@ -25,15 +26,15 @@ resource "aws_acm_certificate" "ca" {
 }
 
 # AWS SSM records
-resource "aws_ssm_parameter" "vpn_ca_key" {
-  name        = "${local.ssm_prefix}/acm/vpn/ca_key"
-  description = "VPN CA key"
+resource "aws_ssm_parameter" "ca_key" {
+  name        = "${local.ssm_prefix}/acm/${var.namespace}/ca_key"
+  description = "General CA key"
   type        = "SecureString"
   value       = tls_private_key.ca.private_key_pem
 }
-resource "aws_ssm_parameter" "vpn_ca_cert" {
-  name        = "${local.ssm_prefix}/acm/vpn/ca_cert"
-  description = "VPN CA cert"
+resource "aws_ssm_parameter" "ca_cert" {
+  name        = "${local.ssm_prefix}/acm/${var.namespace}/ca_cert"
+  description = "General CA cert"
   type        = "SecureString"
   value       = tls_self_signed_cert.ca.cert_pem
 }
