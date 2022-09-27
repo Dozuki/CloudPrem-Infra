@@ -1,24 +1,27 @@
 terraform {
+  required_version = ">= 1.1.0"
+
   required_providers {
     aws        = "3.70.0"
     kubernetes = "2.4.1"
     helm       = "2.3.0"
     null       = "3.1.0"
     # This provider needs to stay for awhile to maintain backwards compatibility with older infra versions (<=2.5.4)
-    local = "2.2.3"
+    local  = "2.2.3"
+    random = "3.1.0"
   }
 }
 
 provider "kubernetes" {
   host                   = data.aws_eks_cluster.main.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority.0.data)
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
   token                  = data.aws_eks_cluster_auth.main.token
 }
 
 provider "helm" {
   kubernetes {
     host                   = data.aws_eks_cluster.main.endpoint
-    cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority.0.data)
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
     exec {
       api_version = "client.authentication.k8s.io/v1alpha1"
       args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
@@ -28,17 +31,7 @@ provider "helm" {
 }
 
 locals {
-  identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
-
   dozuki_license_parameter_name = var.dozuki_license_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/license" : "/${var.identifier}/dozuki/${var.environment}/license") : var.dozuki_license_parameter_name
-
-  # Tags for all resources. If you add a tag, it must never be blank.
-  tags = {
-    Terraform   = "true"
-    Project     = "Dozuki"
-    Identifier  = coalesce(var.identifier, "NA")
-    Environment = var.environment
-  }
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
@@ -79,21 +72,6 @@ data "aws_caller_identity" "current" {}
 
 data "aws_kms_key" "s3" {
   key_id = var.s3_kms_key_id
-}
-
-data "aws_vpc" "main" {
-  id = var.vpc_id
-}
-
-data "aws_subnets" "private" {
-  filter {
-    name   = "vpc-id"
-    values = [var.vpc_id]
-  }
-
-  tags = {
-    type = "private"
-  }
 }
 
 data "aws_secretsmanager_secret_version" "db_master" {

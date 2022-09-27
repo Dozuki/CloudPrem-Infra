@@ -21,19 +21,14 @@ variable "vpn-client-list" {
   description = "List of VPN Users"
   type        = list(string)
 }
-variable "session_timeout_hours" {
-  description = "Session timeout hours"
-  type        = number
-  default     = 8
-}
+#variable "session_timeout_hours" {
+#  description = "Session timeout hours"
+#  type        = number
+#  default     = 8
+#}
 variable "vpc_id" {
   description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private"
   type        = string
-}
-variable "vpc_cidr" {
-  description = "The CIDR block for the VPC"
-  type        = string
-  default     = "172.16.0.0/16"
 }
 variable "azs_count" {
   description = "The number of availability zones we should use for deployment."

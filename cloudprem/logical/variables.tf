@@ -9,6 +9,7 @@ variable "identifier" {
   }
 }
 variable "dozuki_license_parameter_name" {
+  type        = string
   description = "Parameter name for dozuki license in AWS Parameter store."
   default     = ""
 }
@@ -22,13 +23,9 @@ variable "environment" {
     error_message = "The length of the Environment must be less than 6 characters."
   }
 }
-variable "vpc_id" {
-  description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private"
-  type        = string
-  default     = ""
-}
 variable "azs_count" {
   default     = 3
+  type        = number
   description = "The number of availability zones we should use for deployment."
 
   validation {
@@ -40,17 +37,9 @@ variable "eks_cluster_id" {
   description = "ID of EKS cluster for app provisioning"
   type        = string
 }
-variable "eks_cluster_access_role_arn" {
-  description = "ARN for cluster access role for app provisioning"
-  type        = string
-}
 variable "eks_oidc_cluster_access_role_name" {
   description = "ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler"
   type        = string
-}
-variable "eks_worker_asg_arns" {
-  description = "Autoscaling group ARNS for the EKS cluster"
-  type        = list(string)
 }
 variable "eks_worker_asg_names" {
   description = "Autoscaling group names for the EKS cluster"
@@ -58,12 +47,11 @@ variable "eks_worker_asg_names" {
 }
 variable "termination_handler_role_arn" {
   description = "IAM Role for EKS node termination handler"
+  type        = string
 }
 variable "termination_handler_sqs_queue_id" {
   description = "SQS Queue ID for the EKS node termination handler"
-}
-variable "cluster_primary_sg" {
-  description = "Primary Security Group for the EKS cluster, used for ingress SG source"
+  type        = string
 }
 variable "primary_db_secret" {
   description = "ARN to secret containing primary db credentials"
@@ -80,6 +68,7 @@ variable "enable_webhooks" {
   default     = false
 }
 variable "nlb_dns_name" {
+  type        = string
   description = "DNS address of the network load balancer and URL to the deployed application"
 }
 variable "replicated_app_sequence_number" {
@@ -93,6 +82,7 @@ variable "replicated_channel" {
   type        = string
 }
 variable "memcached_cluster_address" {
+  type        = string
   description = "Address of the deployed memcached cluster"
 }
 variable "s3_kms_key_id" {
@@ -120,6 +110,9 @@ variable "s3_pdfs_bucket" {
   type        = string
   default     = ""
 }
+# This needs to have no type due to terraform's weird handling of string lists. If you set a type it will convert it to
+# a format we can't feed into helm
+# tflint-ignore: terraform_typed_variables
 variable "msk_bootstrap_brokers" {
   description = "Kafka bootstrap broker list"
 }
@@ -135,6 +128,7 @@ variable "enable_bi" {
   default     = false
 }
 variable "dms_task_arn" {
+  type        = string
   description = "If BI is enabled, the DMS replication task arn."
 }
 variable "aws_profile" {
