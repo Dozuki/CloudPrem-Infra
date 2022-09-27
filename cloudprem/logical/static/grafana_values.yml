@@ -17,6 +17,27 @@ service:
   port: 80
   nodePort: 32020
 
+extraSecretMounts:
+  - name: ssl-files
+    mountPath: /etc/secrets
+    secretName: grafana-ssl
+    readOnly: true
+
+readinessProbe:
+  httpGet:
+    scheme: HTTPS
+    path: /api/health
+    port: 3000
+
+livenessProbe:
+  httpGet:
+    scheme: HTTPS
+    path: /api/health
+    port: 3000
+  initialDelaySeconds: 60
+  timeoutSeconds: 30
+  failureThreshold: 10
+
 persistence:
   type: pvc
   enabled: true
@@ -34,7 +55,7 @@ initChownData:
 
 # Administrator credentials when not using an existing secret (see below)
 adminUser: dozuki
-# adminPassword: s
+envFromSecret: "grafana-config"
 
 ## Configure grafana datasources
 ## ref: http://docs.grafana.org/administration/provisioning/#datasources
@@ -56,10 +77,6 @@ datasources:
 ##
 plugins:
   - grafana-piechart-panel
-
-grafana.ini:
-  users:
-    default_theme: light
 
 ## Configure grafana dashboard to import
 ## NOTE: To use dashboards you must also enable/configure dashboardProviders
