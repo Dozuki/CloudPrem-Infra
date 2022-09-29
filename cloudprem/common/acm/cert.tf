@@ -13,7 +13,7 @@ resource "tls_cert_request" "server" {
   key_algorithm   = "RSA"
   private_key_pem = tls_private_key.server.private_key_pem
   subject {
-    common_name  = "${local.identifier}.${data.aws_region.current.name}.vpn.server"
+    common_name  = local.ssl_cert_cn
     organization = local.identifier
   }
 }
@@ -30,15 +30,15 @@ resource "tls_locally_signed_cert" "server" {
   ]
 }
 
-resource "aws_ssm_parameter" "vpn_server_key" {
-  name        = "${local.ssm_prefix}/acm/vpn/server_key"
-  description = "VPN server key"
+resource "aws_ssm_parameter" "server_key" {
+  name        = "${local.ssm_prefix}/acm/${var.namespace}/server_key"
+  description = "General server key"
   type        = "SecureString"
   value       = tls_private_key.server.private_key_pem
 }
-resource "aws_ssm_parameter" "vpn_server_cert" {
-  name        = "${local.ssm_prefix}/acm/vpn/server_cert"
-  description = "VPN server cert"
+resource "aws_ssm_parameter" "server_cert" {
+  name        = "${local.ssm_prefix}/acm/${var.namespace}/server_cert"
+  description = "General server cert"
   type        = "SecureString"
   value       = tls_locally_signed_cert.server.cert_pem
 }

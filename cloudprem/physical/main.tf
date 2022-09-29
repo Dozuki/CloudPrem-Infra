@@ -1,13 +1,21 @@
 terraform {
+  required_version = ">= 1.1.0"
+
   required_providers {
-    aws    = "3.70.0"
-    random = "3.1.0"
+    aws        = "3.70.0"
+    random     = "3.4.3"
+    kubernetes = "2.13.1"
+    null       = "3.1.0"
   }
 }
 provider "kubernetes" {
   host                   = data.aws_eks_cluster.main.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority.0.data)
-  token                  = data.aws_eks_cluster_auth.main.token
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
+    command     = "aws"
+  }
 }
 
 locals {
@@ -52,9 +60,6 @@ locals {
   private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private[0].ids
 }
 data "aws_eks_cluster" "main" {
-  name = module.eks_cluster.cluster_id
-}
-data "aws_eks_cluster_auth" "main" {
   name = module.eks_cluster.cluster_id
 }
 

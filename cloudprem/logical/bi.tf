@@ -32,6 +32,39 @@ resource "kubernetes_job" "dms_start" {
   }
 }
 
+module "ssl_cert" {
+  source      = "../common/acm"
+  environment = var.environment
+  identifier  = var.identifier
+
+  cert_common_name = var.nlb_dns_name
+  namespace        = "grafana"
+}
+
+resource "kubernetes_secret" "grafana_ssl" {
+  metadata {
+    name = "grafana-ssl"
+  }
+
+  data = {
+    "server.key" = module.ssl_cert.ssm_server_key.value
+    "server.crt" = module.ssl_cert.ssm_server_cert.value
+  }
+}
+
+resource "kubernetes_secret" "grafana_config" {
+  metadata {
+    name = "grafana-config"
+  }
+
+  data = {
+    GF_SERVER_PROTOCOL     = "https"
+    GF_SERVER_CERT_FILE    = "/etc/secrets/server.crt"
+    GF_SERVER_CERT_KEY     = "/etc/secrets/server.key"
+    GF_USERS_DEFAULT_THEME = "light"
+  }
+}
+
 resource "random_password" "grafana_admin" {
   count = var.enable_bi ? 1 : 0
 
@@ -41,6 +74,8 @@ resource "random_password" "grafana_admin" {
 
 resource "helm_release" "grafana" {
   count = var.enable_bi ? 1 : 0
+
+  depends_on = [kubernetes_secret.grafana_ssl, kubernetes_secret.grafana_config]
 
   name  = "grafana"
   chart = "${path.module}/charts/grafana"

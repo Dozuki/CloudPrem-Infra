@@ -19,6 +19,9 @@ locals {
 
   ssm_prefix = "/dozuki/${coalesce(var.identifier, "general")}/${var.environment}/${data.aws_region.current.name}"
 
+  ssl_ca_cn   = var.ca_common_name == "" ? "${local.identifier}.${data.aws_region.current.name}.general.ca" : var.ca_common_name
+  ssl_cert_cn = var.cert_common_name == "" ? "${local.identifier}.${data.aws_region.current.name}.general.server" : var.cert_common_name
+
   # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
     Terraform   = "true"
@@ -29,5 +32,3 @@ locals {
 }
 
 data "aws_region" "current" {}
-data "aws_partition" "current" {}
-data "aws_caller_identity" "current" {}
