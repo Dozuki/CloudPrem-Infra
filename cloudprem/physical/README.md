@@ -7,7 +7,7 @@
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | 3.70.0 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | 2.13.1 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | 3.1.0 |
-| <a name="requirement_random"></a> [random](#requirement\_random) | 3.1.0 |
+| <a name="requirement_random"></a> [random](#requirement\_random) | 3.4.3 |
 
 ## Providers
 
@@ -15,7 +15,7 @@
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 3.70.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.1.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.1.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.4.3 |
 
 ## Modules
 
@@ -100,8 +100,8 @@
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_document) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/3.1.0/docs/resources/resource) | resource |
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/3.1.0/docs/resources/resource) | resource |
-| [random_password.primary_database](https://registry.terraform.io/providers/hashicorp/random/3.1.0/docs/resources/password) | resource |
-| [random_password.replica_database](https://registry.terraform.io/providers/hashicorp/random/3.1.0/docs/resources/password) | resource |
+| [random_password.primary_database](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
+| [random_password.replica_database](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
 | [aws_ami.amazon_linux_2](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/ami) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/caller_identity) | data source |

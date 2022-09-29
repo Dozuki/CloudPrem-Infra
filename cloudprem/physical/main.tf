@@ -3,7 +3,7 @@ terraform {
 
   required_providers {
     aws        = "3.70.0"
-    random     = "3.1.0"
+    random     = "3.4.3"
     kubernetes = "2.13.1"
     null       = "3.1.0"
   }
