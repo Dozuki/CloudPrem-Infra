@@ -22,9 +22,8 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Grafana Dashboards & Enhanced Replicated Targeting
-            - Grafana Dashboards have been added to Private Cloud! (BI must be enabled to use them)
-            - We now support targeting of Replicated channels for fresh installs
-            - Versioning added to the CloudFormation templates to tie the CodeBuild config to the needed terraform config
+            Grafana Dashboard SSL & Code Cleanup
+            - A Self-signed SSL cert has been added to the Grafana Dashboard frontend to enable HTTPS.
+            - Multiple unused variables and resources removed to clean up the code.
           draft: false
           prerelease: false
