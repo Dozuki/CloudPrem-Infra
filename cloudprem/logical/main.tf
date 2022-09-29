@@ -15,7 +15,11 @@ terraform {
 provider "kubernetes" {
   host                   = data.aws_eks_cluster.main.endpoint
   cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
-  token                  = data.aws_eks_cluster_auth.main.token
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
+    command     = "aws"
+  }
 }
 
 provider "helm" {
@@ -23,7 +27,7 @@ provider "helm" {
     host                   = data.aws_eks_cluster.main.endpoint
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
     exec {
-      api_version = "client.authentication.k8s.io/v1alpha1"
+      api_version = "client.authentication.k8s.io/v1beta1"
       args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
       command     = "aws"
     }
@@ -59,10 +63,6 @@ locals {
 }
 
 data "aws_eks_cluster" "main" {
-  name = var.eks_cluster_id
-}
-
-data "aws_eks_cluster_auth" "main" {
   name = var.eks_cluster_id
 }
 
