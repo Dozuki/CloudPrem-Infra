@@ -11,28 +11,30 @@ cleanPrefixes() {
     for p in ${prefixes[@]}; do
         echo "Cleaning prefix $p"
         cleanTerraFiles
-        for region in $(ls); do
-             if [[ $region != "account.hcl" ]]; then
-                echo "Clearing k8 auth from state for $region"
-                pushd $region
-                for env in ${envs[@]}; do
-                    echo "Clearing $env"
-                    pushd $env/physical
-                    TG_STATE_PREFIX="test/$p/" terragrunt state rm "module.eks_cluster.kubernetes_config_map.aws_auth[0]"
-                    popd
-                done
-                popd
-             fi
-        done
+#         for region in $(ls); do
+#              if [[ $region != "account.hcl" ]]; then
+#                 echo "Clearing k8 auth from state for $region"
+#                 pushd $region
+#                 for env in ${envs[@]}; do
+#                     echo "Clearing $env"
+#                     pushd $env/physical
+#                     TG_STATE_PREFIX="test/$p/" terragrunt state rm "module.eks_cluster.kubernetes_config_map.aws_auth[0]"
+#                     popd
+#                 done
+#                 popd
+#              fi
+#         done
         SKIP_LOGICAL=true TG_STATE_PREFIX="test/$p/" terragrunt run-all destroy --terragrunt-non-interactive
     done
 }
 echo "Cleaning standard"
-cd standard
+pushd standard
 cleanPrefixes
-cd ../gov
+popd
+pushd gov
 cleanPrefixes
-cd ..
+popd
+
 
 for region in $(ls standard/); do
  if [[ $region != "account.hcl" ]]; then
