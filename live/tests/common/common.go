@@ -21,20 +21,18 @@ func BootstrapTerraform(t *testing.T, physFolder string, logicFolder string, env
 	var logiConfig = ConvertToTFConfig(env, "logical")
 
 	physical = terraform.WithDefaultRetryableErrors(t, &terraform.Options{
-		TerraformDir:             physFolder,
-		TerraformBinary:          "terragrunt",
-		Vars:                     physConfig,
-		EnvVars:                  BuildEnvVars(env.Prefix),
-		RetryableTerraformErrors: RetryableErrors,
-		NoColor:                  true,
+		TerraformDir:    physFolder,
+		TerraformBinary: "terragrunt",
+		Vars:            physConfig,
+		EnvVars:         BuildEnvVars(env.Prefix),
+		NoColor:         true,
 	})
 	logical = terraform.WithDefaultRetryableErrors(t, &terraform.Options{
-		TerraformDir:             logicFolder,
-		TerraformBinary:          "terragrunt",
-		Vars:                     logiConfig,
-		EnvVars:                  BuildEnvVars(env.Prefix),
-		RetryableTerraformErrors: RetryableErrors,
-		NoColor:                  true,
+		TerraformDir:    logicFolder,
+		TerraformBinary: "terragrunt",
+		Vars:            logiConfig,
+		EnvVars:         BuildEnvVars(env.Prefix),
+		NoColor:         true,
 	})
 
 	return physical, logical
