@@ -3,7 +3,7 @@ resource "aws_security_group_rule" "replicated_ui_access" {
   from_port         = 32001
   to_port           = 32001
   protocol          = "tcp"
-  cidr_blocks       = var.replicated_ui_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
+  cidr_blocks       = local.replicated_ui_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
   security_group_id = module.eks_cluster.worker_security_group_id
   description       = "Access to the replicated UI"
 }
@@ -13,7 +13,7 @@ resource "aws_security_group_rule" "app_access_https" {
   from_port         = 32005
   to_port           = 32005
   protocol          = "tcp"
-  cidr_blocks       = var.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
+  cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
   security_group_id = module.eks_cluster.worker_security_group_id
   description       = "Access to application"
 }
@@ -23,7 +23,7 @@ resource "aws_security_group_rule" "app_access_http" {
   from_port         = 32010
   to_port           = 32010
   protocol          = "tcp"
-  cidr_blocks       = var.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
+  cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
   security_group_id = module.eks_cluster.worker_security_group_id
   description       = "Access to application"
 }
