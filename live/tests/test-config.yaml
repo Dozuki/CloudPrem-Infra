@@ -61,6 +61,7 @@ bi_public:
   enable_bi: true
   bi_public_access: true
   bi_access_cidrs: "[\"0.0.0.0/0\"]"
+  grafana_access_cidrs: "[\"0.0.0.0/0\"]"
   create_s3_buckets: true
 webhooks:
   prefix: "test/default/"
@@ -82,4 +83,5 @@ full:
   enable_bi: true
   bi_vpn_access: true
   bi_access_cidrs: "[\"0.0.0.0/0\"]"
+  grafana_access_cidrs: "[\"0.0.0.0/0\"]"
   create_s3_buckets: true

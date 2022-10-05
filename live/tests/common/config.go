@@ -44,6 +44,7 @@ type Environment struct {
 	ReplicatedAccessCIDRs      string `yaml:"replicated_ui_access_cidrs" physical:"true"`
 	LicenseParameter           string `yaml:"dozuki_license_parameter_name" logical:"true"`
 	BootstrapAppSequenceNumber int    `yaml:"replicated_app_sequence_number" logical:"true"`
+	BootstrapAppChannelID      string `yaml:"replicated_channel" logical:"true"`
 	GoogleTranslateAPIToken    string `yaml:"google_translate_api_token" logical:"true"`
 	S3KMSKeyID                 string `yaml:"s3_kms_key_id" physical:"true" logical:"true"`
 	S3CreateBuckets            bool   `yaml:"create_s3_buckets" physical:"true"`
@@ -57,6 +58,7 @@ type Environment struct {
 	BIVPNAccess                bool   `yaml:"bi_vpn_access" physical:"true"`
 	BIVPNUserList              string `yaml:"bi_vpn_user_list" physical:"true"`
 	BIAccessCIDRs              string `yaml:"bi_access_cidrs" physical:"true"`
+	GrafanaAccessCIDRs         string `yaml:"grafana_access_cidrs" physical:"true"`
 	RDSKMSKeyID                string `yaml:"rds_kms_key_id" physical:"true"`
 	RDSSnapshotIdentifier      string `yaml:"rds_snapshot_identifier" physical:"true"`
 	RDSInstanceType            string `yaml:"rds_instance_type" physical:"true"`
@@ -83,12 +85,6 @@ type InfraTest struct {
 	Region      string
 	Profile     string
 	Environment Environment
-}
-
-var RetryableErrors = map[string]string{
-	"(?s).*DependencyViolation": "Retrying due to dependency violation",
-	"(?s).*sites-config-update": "Retrying due to k8 job failure",
-	"(?s).*replicated":          "Retrying due to a helm deploy failure",
 }
 
 func ReadConfig() TestConfig {
