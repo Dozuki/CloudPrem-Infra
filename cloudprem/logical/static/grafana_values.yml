@@ -94,8 +94,6 @@ dashboards:
        file: dashboards/course-completion.json
      data-explorer:
        file: dashboards/data-explorer.json
-     factory-view:
-       file: dashboards/factory-view.json
      guide-drafts-and-release-versions:
        file: dashboards/guide-drafts-and-release-versions.json
      guide-flags:
