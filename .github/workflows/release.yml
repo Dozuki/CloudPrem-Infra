@@ -22,8 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Grafana Dashboard SSL & Code Cleanup
-            - A Self-signed SSL cert has been added to the Grafana Dashboard frontend to enable HTTPS.
-            - Multiple unused variables and resources removed to clean up the code.
+            Restricted Access Fix
+            - Added private VPC CIDR to worker node security groups to ensure node health checks always have access.
           draft: false
           prerelease: false
