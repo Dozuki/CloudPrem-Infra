@@ -1,3 +1,5 @@
+# --- BEGIN General Configuration --- #
+
 variable "identifier" {
   description = "A name identifier to use as prefix for all the resources."
   type        = string
@@ -19,10 +21,39 @@ variable "environment" {
     error_message = "The length of the Environment must be less than 6 characters."
   }
 }
+
 variable "protect_resources" {
   description = "Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled."
   type        = bool
   default     = true
+}
+
+variable "aws_profile" {
+  description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
+  type        = string
+  default     = ""
+}
+
+variable "cf_template_version" {
+  description = "Version of the CloudFormation template that deployed this stack for validation"
+  type        = number
+  default     = 0
+
+  validation {
+    // Allow for 0 so we can override this check when deploying from workstations or tests.
+    condition     = var.cf_template_version == 0 || var.cf_template_version >= 1
+    error_message = "CloudFormation template version is out of date. Update your CloudFormation to deploy this version of the infrastructure."
+  }
+}
+
+# --- END General Configuration --- #
+
+# --- BEGIN Network Configuration --- #
+
+variable "vpc_id" {
+  description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private"
+  type        = string
+  default     = ""
 }
 
 variable "vpc_cidr" {
@@ -31,11 +62,6 @@ variable "vpc_cidr" {
   default     = "172.16.0.0/16"
 }
 
-variable "highly_available_nat_gateway" {
-  description = "Should be true if you want to provision a highly available NAT Gateway across all of your private networks"
-  type        = bool
-  default     = true
-}
 variable "azs_count" {
   description = "The number of availability zones we should use for deployment."
   type        = number
@@ -46,6 +72,17 @@ variable "azs_count" {
     error_message = "AZ count must be between 3 and 10."
   }
 }
+
+variable "highly_available_nat_gateway" {
+  description = "Should be true if you want to provision a highly available NAT Gateway across all of your private networks"
+  type        = bool
+  default     = true
+}
+
+# --- END Network Configuration --- #
+
+# --- BEGIN Storage Configuration --- #
+
 variable "s3_kms_key_id" {
   description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
@@ -57,26 +94,31 @@ variable "create_s3_buckets" {
   type        = bool
   default     = true
 }
+
 variable "s3_objects_bucket" {
   description = "Name of the bucket to store guide objects. Use with 'create_s3_buckets' = false."
   type        = string
   default     = ""
 }
+
 variable "s3_images_bucket" {
   description = "Name of the bucket to store guide images. Use with 'create_s3_buckets' = false."
   type        = string
   default     = ""
 }
+
 variable "s3_documents_bucket" {
   description = "Name of the bucket to store documents. Use with 'create_s3_buckets' = false."
   type        = string
   default     = ""
 }
+
 variable "s3_pdfs_bucket" {
   description = "Name of the bucket to store guide pdfs. Use with 'create_s3_buckets' = false."
   type        = string
   default     = ""
 }
+
 variable "s3_logging_bucket" {
   description = "Name of the bucket to store bucket object access logs. Use with 'create_s3_buckets' = false."
   type        = string
@@ -145,30 +187,51 @@ variable "enable_bi" {
   type        = bool
   default     = false
 }
+
 variable "bi_public_access" {
   description = "NOTE: This is mutually exclusive with VPN access, both cannot be enabled at the same time. If BI is enabled and you need access to the BI database server from outside the amazon network, set this to true."
   type        = bool
   default     = false
 }
+
 variable "bi_vpn_access" {
   description = "NOTE: This is mutually exclusive with public BI access, both cannot be enabled at the same time. If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server."
   type        = bool
   default     = false
 }
+
 variable "bi_vpn_user_list" {
   description = "List of users to create OpenVPN configurations for usint mutual authentication."
   type        = list(string)
   default     = ["root"]
 }
+
 variable "bi_access_cidrs" {
   description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. If left empty it will default to your VPC CIDR"
   type        = list(string)
   default     = []
 }
+
+# --- END Storage Configuration --- #
+
+# --- BEGIN App Configuration --- #
+
 variable "app_public_access" {
   description = "Should the app and dashboard be accessible via a publicly routable IP and domain?"
   type        = bool
   default     = true
+}
+
+variable "replicated_ui_access_cidrs" {
+  description = "These CIDRs will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "app_access_cidrs" {
+  description = "These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }
 
 variable "elasticache_instance_type" {
@@ -188,11 +251,7 @@ variable "eks_kms_key_id" {
   type        = string
   default     = ""
 }
-variable "vpc_id" {
-  description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private"
-  type        = string
-  default     = ""
-}
+
 variable "eks_instance_types" {
   description = "The instance type of each node in the application's EKS worker node group."
   default     = ["m5.large", "m5a.large", "m5d.large", "m5ad.large"]
@@ -242,40 +301,17 @@ variable "eks_desired_capacity" {
     error_message = "NodeAutoScalingGroupDesiredCapacity must be an integer >= 1\nNodeAutoScalingGroupDesiredCapacity must be >= NodeAutoScalingGroupMinSize\nNodeAutoScalingGroupDesiredCapacity must be <= NodeAutoScalingGroupMaxSize."
   }
 }
-variable "replicated_ui_access_cidrs" {
-  description = "These CIDRs will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
 
-variable "app_access_cidrs" {
-  description = "These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
 variable "grafana_access_cidrs" {
   description = "If BI is enabled these CIDRs will be allowed to connect to Grafana. If left empty it will default to your VPC CIDR which will only allow access via VPN or Transit Gateway."
   type        = list(string)
   default     = []
 }
+
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
   type        = bool
   default     = false
 }
-variable "aws_profile" {
-  description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
-  type        = string
-  default     = ""
-}
-variable "cf_template_version" {
-  description = "Version of the CloudFormation template that deployed this stack for validation"
-  type        = number
-  default     = 0
 
-  validation {
-    // Allow for 0 so we can override this check when deploying from workstations or tests.
-    condition     = var.cf_template_version == 0 || var.cf_template_version >= 1
-    error_message = "CloudFormation template version is out of date. Update your CloudFormation to deploy this version of the infrastructure."
-  }
-}
+# --- END App Configuration --- #

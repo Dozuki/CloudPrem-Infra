@@ -36,11 +36,11 @@ resource "kubernetes_annotations" "www_tls" {
   # If BI is enabled and we ARE using the replicated SSL cert than add the annotation.
   count = var.enable_bi ? var.grafana_use_replicated_ssl ? 1 : 0 : 0
 
-  depends_on = [helm_release.replicated]
+  depends_on  = [helm_release.replicated]
   api_version = "v1"
   kind        = "Secret"
   metadata {
-    name = "www-tls"
+    name      = "www-tls"
     namespace = coalesce([for i, v in data.kubernetes_all_namespaces.allns.namespaces : try(regexall("replicated\\-.*", v)[0], "")]...)
   }
   annotations = {
@@ -106,7 +106,7 @@ resource "helm_release" "grafana" {
 
   values = [
     templatefile("${path.module}/static/grafana_values.yml", {
-      ssl_secret_name = local.grafana_ssl_secret_name
+      ssl_secret_name   = local.grafana_ssl_secret_name
       database_hostname = local.db_bi_host
       database_password = local.db_bi_password
     })
