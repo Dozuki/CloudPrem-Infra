@@ -41,6 +41,7 @@ locals {
 
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
 
+  # Database
   db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
 
   db_master_host     = local.db_credentials["host"]
@@ -50,15 +51,19 @@ locals {
   db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
+  # Webhooks
   frontegg_clientid = try(data.kubernetes_secret.frontegg[0].data.clientid, "")
   frontegg_apikey   = try(data.kubernetes_secret.frontegg[0].data.apikey, "")
   frontegg_pub_key  = try(data.kubernetes_secret.frontegg[0].data.pubkey, "")
   frontegg_username = try(data.kubernetes_secret.frontegg[0].data.username, "")
   frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "") #tfsec:ignore:general-secrets-no-plaintext-exposure
 
+  # Grafana
   grafana_url            = var.enable_bi ? format("https://%s:3000", var.nlb_dns_name) : null
   grafana_admin_username = var.enable_bi ? "dozuki" : null
   grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
+  grafana_ssl_cert_cn = var.grafana_ssl_cn == "" ? var.nlb_dns_name : var.grafana_ssl_cn
+  grafana_ssl_secret_name = var.grafana_use_replicated_ssl ? "www-tls" : kubernetes_secret.grafana_ssl[0].metadata[0].name
 
 }
 

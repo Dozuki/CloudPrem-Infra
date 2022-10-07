@@ -32,23 +32,43 @@ resource "kubernetes_job" "dms_start" {
   }
 }
 
+resource "kubernetes_annotations" "www_tls" {
+  # If BI is enabled and we ARE using the replicated SSL cert than add the annotation.
+  count = var.enable_bi ? var.grafana_use_replicated_ssl ? 1 : 0 : 0
+
+  depends_on = [helm_release.replicated]
+  api_version = "v1"
+  kind        = "Secret"
+  metadata {
+    name = "www-tls"
+    namespace = coalesce([for i, v in data.kubernetes_all_namespaces.allns.namespaces : try(regexall("replicated\\-.*", v)[0], "")]...)
+  }
+  annotations = {
+    "kubed.appscode.com/sync" = ""
+  }
+}
+
 module "ssl_cert" {
+  # If BI is enabled and we are NOT using the replicated ssl cert then create one.
+  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
+
   source      = "../common/acm"
   environment = var.environment
   identifier  = var.identifier
 
-  cert_common_name = var.nlb_dns_name
+  cert_common_name = local.grafana_ssl_cert_cn
   namespace        = "grafana"
 }
 
 resource "kubernetes_secret" "grafana_ssl" {
+  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
   metadata {
     name = "grafana-ssl"
   }
 
   data = {
-    "server.key" = module.ssl_cert.ssm_server_key.value
-    "server.crt" = module.ssl_cert.ssm_server_cert.value
+    "onprem.key" = module.ssl_cert[0].ssm_server_key.value
+    "onprem.crt" = module.ssl_cert[0].ssm_server_cert.value
   }
 }
 
@@ -59,8 +79,8 @@ resource "kubernetes_secret" "grafana_config" {
 
   data = {
     GF_SERVER_PROTOCOL     = "https"
-    GF_SERVER_CERT_FILE    = "/etc/secrets/server.crt"
-    GF_SERVER_CERT_KEY     = "/etc/secrets/server.key"
+    GF_SERVER_CERT_FILE    = "/etc/secrets/onprem.crt"
+    GF_SERVER_CERT_KEY     = "/etc/secrets/onprem.key"
     GF_USERS_DEFAULT_THEME = "light"
   }
 }
@@ -86,6 +106,7 @@ resource "helm_release" "grafana" {
 
   values = [
     templatefile("${path.module}/static/grafana_values.yml", {
+      ssl_secret_name = local.grafana_ssl_secret_name
       database_hostname = local.db_bi_host
       database_password = local.db_bi_password
     })
