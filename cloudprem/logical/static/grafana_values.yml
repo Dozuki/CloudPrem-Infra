@@ -20,7 +20,7 @@ service:
 extraSecretMounts:
   - name: ssl-files
     mountPath: /etc/secrets
-    secretName: grafana-ssl
+    secretName: ${ssl_secret_name}
     readOnly: true
 
 readinessProbe:
