@@ -43,8 +43,9 @@ locals {
   bi_subnet_ids            = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
 
   # Access Config
-  bi_access_cidrs                     = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs
+  secure_default_bi_access_cidrs      = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs
   secure_default_grafana_access_cidrs = length(var.grafana_access_cidrs) == 0 ? [local.vpc_cidr] : var.grafana_access_cidrs
+  bi_access_cidrs                     = local.secure_default_bi_access_cidrs != tolist(["0.0.0.0/0"]) && local.secure_default_bi_access_cidrs != [local.vpc_cidr] ? concat([local.vpc_cidr], var.bi_access_cidrs) : local.secure_default_bi_access_cidrs
   grafana_access_cidrs                = local.secure_default_grafana_access_cidrs != tolist(["0.0.0.0/0"]) && local.secure_default_grafana_access_cidrs != [local.vpc_cidr] ? concat([local.vpc_cidr], var.grafana_access_cidrs) : local.secure_default_grafana_access_cidrs
   app_access_cidrs                    = var.app_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.app_access_cidrs) : var.app_access_cidrs
   replicated_ui_access_cidrs          = var.replicated_ui_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.replicated_ui_access_cidrs) : var.replicated_ui_access_cidrs
