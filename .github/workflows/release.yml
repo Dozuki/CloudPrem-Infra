@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Restricted Access Fix
-            - Added private VPC CIDR to worker node security groups to ensure node health checks always have access.
+            Unified SSL Certs
+            - We now use the same SSL cert for Grafana dashboards as we use for the main app and Replicated.
           draft: false
           prerelease: false
