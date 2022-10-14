@@ -272,7 +272,7 @@ variable "eks_volume_size" {
 variable "eks_min_size" {
   description = "The minimum amount of nodes we will autoscale to."
   type        = number
-  default     = "2"
+  default     = "3"
 
   validation {
     condition     = var.eks_min_size >= 1
