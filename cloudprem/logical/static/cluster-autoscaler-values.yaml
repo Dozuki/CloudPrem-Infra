@@ -8,4 +8,6 @@ rbac:
       eks.amazonaws.com/role-arn: "arn:${partition}:iam::${account_id}:role/${role_name}"
 
 autoDiscovery:
-  enabled: true
+  tags:
+    - k8s.io/cluster-autoscaler/enabled
+    - k8s.io/cluster-autoscaler/${cluster_name}
