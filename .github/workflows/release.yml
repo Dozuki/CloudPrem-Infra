@@ -22,7 +22,9 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Unified SSL Certs
-            - We now use the same SSL cert for Grafana dashboards as we use for the main app and Replicated.
+            BI Restricted Access & Scaling Fixes
+            - Fixed an issue which occurs when using a whitelist for public BI access preventing dashboards from working.
+            - Fixed Kubernetes cluster autoscaler minsize to respect variable configuration. No longer hard coded at 1.
+            - Updated cluster autoscaler Helm chart to v9.21.0
           draft: false
           prerelease: false
