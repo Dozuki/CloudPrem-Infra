@@ -220,6 +220,7 @@ module "eks_cluster" {
       name                                 = "workers"
       asg_max_size                         = var.eks_max_size
       asg_desired_capacity                 = var.eks_desired_capacity
+      asg_min_size                         = var.eks_min_size
       instance_refresh_enabled             = true
       instance_refresh_instance_warmup     = 60
       public_ip                            = false

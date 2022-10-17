@@ -6,9 +6,10 @@ resource "helm_release" "cluster_autoscaler" {
 
   values = [
     templatefile("static/cluster-autoscaler-values.yaml", {
-      account_id = data.aws_caller_identity.current.account_id,
-      partition  = data.aws_partition.current.partition,
-      role_name  = var.eks_oidc_cluster_access_role_name
+      account_id   = data.aws_caller_identity.current.account_id,
+      partition    = data.aws_partition.current.partition,
+      role_name    = var.eks_oidc_cluster_access_role_name,
+      cluster_name = var.eks_cluster_id
     })
   ]
 
@@ -40,7 +41,7 @@ resource "kubernetes_horizontal_pod_autoscaler" "app" {
 
   spec {
     min_replicas = 2
-    max_replicas = 10
+    max_replicas = 30
 
     scale_target_ref {
       kind        = "Deployment"
