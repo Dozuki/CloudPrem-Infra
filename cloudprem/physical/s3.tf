@@ -35,7 +35,7 @@ resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
 resource "aws_s3_bucket" "logging_bucket" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket        = "dozuki-bucket-access-logs-${local.identifier}-${data.aws_region.current.name}"
+  bucket_prefix = "${local.identifier}-log-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -75,7 +75,7 @@ resource "aws_s3_bucket_public_access_block" "guide_images_acl_block" {
 resource "aws_s3_bucket" "guide_images" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket        = "dozuki-guide-images-${local.identifier}-${data.aws_region.current.name}"
+  bucket_prefix = "${local.identifier}-image-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -120,7 +120,7 @@ resource "aws_s3_bucket_public_access_block" "guide_objects_acl_block" {
 resource "aws_s3_bucket" "guide_objects" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket        = "dozuki-guide-objects-${local.identifier}-${data.aws_region.current.name}"
+  bucket_prefix = "${local.identifier}-obj-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -165,7 +165,7 @@ resource "aws_s3_bucket_public_access_block" "guide_pdfs_acl_block" {
 resource "aws_s3_bucket" "guide_pdfs" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket        = "dozuki-guide-pdfs-${local.identifier}-${data.aws_region.current.name}"
+  bucket_prefix = "${local.identifier}-pdf-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
@@ -210,7 +210,7 @@ resource "aws_s3_bucket_public_access_block" "guide_documents_acl_block" {
 resource "aws_s3_bucket" "guide_documents" {
   count = var.create_s3_buckets ? 1 : 0
 
-  bucket        = "dozuki-guide-documents-${local.identifier}-${data.aws_region.current.name}"
+  bucket_prefix = "${local.identifier}-doc-${data.aws_region.current.name}"
   acl           = "private"
   force_destroy = !var.protect_resources
 
