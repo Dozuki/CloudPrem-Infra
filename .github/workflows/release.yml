@@ -22,9 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            BI Restricted Access & Scaling Fixes
-            - Fixed an issue which occurs when using a whitelist for public BI access preventing dashboards from working.
-            - Fixed Kubernetes cluster autoscaler minsize to respect variable configuration. No longer hard coded at 1.
-            - Updated cluster autoscaler Helm chart to v9.21.0
+            S3 Unique Bucket Name Fix
+            - Fixed an issue where S3 bucket names were not unique across the global S3 namespace causing collisions.
           draft: false
           prerelease: false
