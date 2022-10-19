@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            S3 Unique Bucket Name Fix
-            - Fixed an issue where S3 bucket names were not unique across the global S3 namespace causing collisions.
+            Identifier validation fix
+            - Fixed an issue where an updated identifier validation rule prevented a blank identifier which is a valid use-case.
           draft: false
           prerelease: false
