@@ -6,8 +6,8 @@ variable "identifier" {
   default     = ""
 
   validation {
-    condition     = length(var.identifier) <= 10
-    error_message = "The length of the identifier must be less than 11 characters."
+    condition     = length(var.identifier) <= 10 && can(regex("[[:lower:]]", substr(var.identifier, 0, 1)))
+    error_message = "The length of the identifier must be less than or equal to 10 characters and must begin with a lower-case letter."
   }
 }
 
