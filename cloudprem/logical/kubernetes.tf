@@ -146,6 +146,15 @@ resource "kubernetes_config_map" "dozuki_resources" {
       }
     EOF
 
+    "saml.json" = <<-EOF
+      {
+        "activeX509CertPath": "/var/www/key/onprem.crt",
+        "activePrivateKeyPath": "/var/www/key/onprem.key",
+        "pendingX509CertPath": "/var/www/key/onprem.crt",
+        "signatureAlgorithm": "RSA_SHA1"
+      }
+    EOF
+
   }
 
   lifecycle {
