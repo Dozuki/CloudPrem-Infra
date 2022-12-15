@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Identifier validation fix
-            - Fixed an issue where an updated identifier validation rule prevented a blank identifier which is a valid use-case.
+            SAML Signing Configuration
+            - Added the SAML signing configuration to the dozuki-resources-configmap.
           draft: false
           prerelease: false
