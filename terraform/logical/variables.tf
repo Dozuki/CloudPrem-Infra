@@ -65,11 +65,11 @@ variable "enable_bi" {
   default     = false
 }
 
-variable "replicated_app_sequence_number" {
-  description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release."
-  default     = 0
-  type        = number
-}
+#variable "replicated_app_sequence_number" {
+#  description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release."
+#  default     = 0
+#  type        = number
+#}
 
 variable "replicated_channel" {
   description = "If specifying an app sequence for a fresh install, this is the channel that sequence was deployed to. You only need to set this if the sequence you configured was not released on the default channel associated with your customer license."
@@ -106,6 +106,11 @@ variable "eks_cluster_id" {
 
 variable "eks_oidc_cluster_access_role_name" {
   description = "ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler"
+  type        = string
+}
+
+variable "eks_cluster_access_role_arn" {
+  description = "ARN for the IAM Role for API-based EKS cluster access."
   type        = string
 }
 
