@@ -32,19 +32,19 @@ jobs:
 
     - name: Terraform ${{ matrix.module }} Module Init
       run: terraform init
-      working-directory: ./cloudprem/${{ matrix.module }}
+      working-directory: ./terraform/${{ matrix.module }}
 
     # Checks that all Terraform configuration files adhere to a canonical format
     - name: Terraform Format Check
       run: terraform fmt -check
-      working-directory: ./cloudprem/${{ matrix.module }}
+      working-directory: ./terraform/${{ matrix.module }}
 
     # Performs linting on the Terraform files
     - name: Terraform Linter
       uses: reviewdog/action-tflint@master
       with:
         github_token: ${{ secrets.github_token }}
-        working_directory: "./cloudprem/${{ matrix.module }}" # Optional. Change working directory
+        working_directory: "./terraform/${{ matrix.module }}" # Optional. Change working directory
         reporter: github-pr-review # Optional. Change reporter
         fail_on_error: "true" # Optional. Fail action if errors are found
         filter_mode: "nofilter" # Optional. Check all files, not just the diff
@@ -54,7 +54,7 @@ jobs:
       uses: reviewdog/action-tfsec@master
       with:
         github_token: ${{ secrets.github_token }}
-        working_directory: ./cloudprem/${{ matrix.module }}
+        working_directory: ./terraform/${{ matrix.module }}
         level: info
         reporter: github-pr-review
         filter_mode: nofilter
