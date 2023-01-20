@@ -2,11 +2,7 @@ resource "kubernetes_config_map" "dozuki_resources" {
 
   metadata {
     name      = "dozuki-resources-configmap"
-    namespace = "default"
-
-    annotations = {
-      "kubed.appscode.com/sync" = ""
-    }
+    namespace = local.k8s_namespace
   }
 
   data = {
@@ -156,19 +152,6 @@ resource "kubernetes_config_map" "dozuki_resources" {
     EOF
 
   }
-
-  lifecycle {
-    ignore_changes = [metadata]
-  }
-}
-
-resource "helm_release" "kubed" {
-
-  name    = "kubed"
-  chart   = "${path.module}/charts/kubed"
-  version = "v0.12.0"
-
-  namespace = "default"
 }
 
 resource "helm_release" "container_insights" {

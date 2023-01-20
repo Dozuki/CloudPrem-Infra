@@ -1,7 +1,7 @@
 resource "kubernetes_job" "dms_start" {
   count = var.enable_bi ? 1 : 0
 
-  depends_on = [helm_release.replicated]
+  depends_on = [local_file.replicated_install]
 
   metadata {
     name = "dms-start"
@@ -16,7 +16,7 @@ resource "kubernetes_job" "dms_start" {
           command = [
             "/bin/sh",
             "-c",
-            "kubectl -n ${coalesce([for i, v in data.kubernetes_all_namespaces.allns.namespaces : try(regexall("replicated\\-.*", v)[0], "")]...)} wait deploy/app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current.name}"
+            "kubectl -n ${local.k8s_namespace} wait deploy/app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current.name}"
           ]
         }
         restart_policy = "Never"
@@ -36,19 +36,19 @@ resource "kubernetes_annotations" "www_tls" {
   # If BI is enabled and we ARE using the replicated SSL cert than add the annotation.
   count = var.enable_bi ? var.grafana_use_replicated_ssl ? 1 : 0 : 0
 
-  depends_on  = [helm_release.replicated]
+  depends_on  = [local_file.replicated_install]
   api_version = "v1"
   kind        = "Secret"
   metadata {
     name      = "www-tls"
-    namespace = coalesce([for i, v in data.kubernetes_all_namespaces.allns.namespaces : try(regexall("replicated\\-.*", v)[0], "")]...)
+    namespace = local.k8s_namespace
   }
   annotations = {
     "kubed.appscode.com/sync" = ""
   }
 }
 
-module "ssl_cert" {
+module "grafana_ssl_cert" {
   # If BI is enabled and we are NOT using the replicated ssl cert then create one.
   count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
 
@@ -67,8 +67,8 @@ resource "kubernetes_secret" "grafana_ssl" {
   }
 
   data = {
-    "onprem.key" = module.ssl_cert[0].ssm_server_key.value
-    "onprem.crt" = module.ssl_cert[0].ssm_server_cert.value
+    "onprem.key" = module.grafana_ssl_cert[0].ssm_server_key.value
+    "onprem.crt" = module.grafana_ssl_cert[0].ssm_server_cert.value
   }
 }
 

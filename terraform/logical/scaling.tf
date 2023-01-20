@@ -27,16 +27,12 @@ resource "helm_release" "metrics_server" {
   name  = "metrics-server"
   chart = "charts/metrics-server"
 }
-data "kubernetes_all_namespaces" "allns" {
-  depends_on = [helm_release.replicated]
-}
 
 resource "kubernetes_horizontal_pod_autoscaler" "app" {
-  depends_on = [helm_release.replicated]
+  depends_on = [local_file.replicated_install]
   metadata {
-    name = "app-hpa"
-    # Terraform magic required to find the randomly created replicated namespace so we can install the HPAs in the right place.
-    namespace = coalesce([for i, v in data.kubernetes_all_namespaces.allns.namespaces : try(regexall("replicated\\-.*", v)[0], "")]...)
+    name      = "app-hpa"
+    namespace = local.k8s_namespace
   }
 
   spec {
@@ -74,11 +70,10 @@ resource "kubernetes_horizontal_pod_autoscaler" "app" {
 }
 
 resource "kubernetes_horizontal_pod_autoscaler" "queueworkerd" {
-  depends_on = [helm_release.replicated]
+  depends_on = [local_file.replicated_install]
   metadata {
-    name = "queueworkerd-hpa"
-    # Terraform magic required to find the randomly created replicated namespace so we can install the HPAs in the right place.
-    namespace = coalesce([for i, v in data.kubernetes_all_namespaces.allns.namespaces : try(regexall("replicated\\-.*", v)[0], "")]...)
+    name      = "queueworkerd-hpa"
+    namespace = local.k8s_namespace
   }
 
   spec {

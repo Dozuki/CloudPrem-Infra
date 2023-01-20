@@ -18,12 +18,14 @@
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 3.70.0 |
 | <a name="provider_helm"></a> [helm](#provider\_helm) | 2.3.0 |
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.13.1 |
+| <a name="provider_local"></a> [local](#provider\_local) | 2.2.3 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.4.3 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
+| <a name="module_grafana_ssl_cert"></a> [grafana\_ssl\_cert](#module\_grafana\_ssl\_cert) | ../common/acm | n/a |
 | <a name="module_ssl_cert"></a> [ssl\_cert](#module\_ssl\_cert) | ../common/acm | n/a |
 
 ## Resources
@@ -36,23 +38,23 @@
 | [helm_release.container_insights](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
 | [helm_release.frontegg](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
 | [helm_release.grafana](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.kubed](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
 | [helm_release.metrics_server](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
 | [helm_release.mongodb](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
 | [helm_release.redis](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
-| [helm_release.replicated](https://registry.terraform.io/providers/hashicorp/helm/2.3.0/docs/resources/release) | resource |
 | [kubernetes_annotations.www_tls](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/annotations) | resource |
 | [kubernetes_config_map.dozuki_resources](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/config_map) | resource |
-| [kubernetes_config_map.unattended_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/config_map) | resource |
 | [kubernetes_horizontal_pod_autoscaler.app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/horizontal_pod_autoscaler) | resource |
 | [kubernetes_horizontal_pod_autoscaler.queueworkerd](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/horizontal_pod_autoscaler) | resource |
 | [kubernetes_job.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/job) | resource |
 | [kubernetes_job.frontegg_database_create](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/job) | resource |
-| [kubernetes_job.replicated_sequence_reset](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/job) | resource |
 | [kubernetes_job.sites_config_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/job) | resource |
 | [kubernetes_job.wait_for_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/job) | resource |
+| [kubernetes_namespace.kots_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/namespace) | resource |
 | [kubernetes_secret.grafana_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |
 | [kubernetes_secret.grafana_ssl](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |
+| [kubernetes_secret.site_tls](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |
+| [local_file.replicated_install](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
+| [local_file.replicated_license](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
 | [random_password.dashboard_password](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
 | [random_password.grafana_admin](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/caller_identity) | data source |
@@ -63,7 +65,6 @@
 | [aws_secretsmanager_secret_version.db_bi](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/secretsmanager_secret_version) | data source |
 | [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/secretsmanager_secret_version) | data source |
 | [aws_ssm_parameter.dozuki_license](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/ssm_parameter) | data source |
-| [kubernetes_all_namespaces.allns](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/data-sources/all_namespaces) | data source |
 | [kubernetes_secret.frontegg](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/data-sources/secret) | data source |
 
 ## Inputs
@@ -75,6 +76,7 @@
 | <a name="input_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#input\_bi\_database\_credential\_secret) | ARN to secret containing bi db credentials | `string` | `""` | no |
 | <a name="input_dms_task_arn"></a> [dms\_task\_arn](#input\_dms\_task\_arn) | If BI is enabled, the DMS replication task arn. | `string` | n/a | yes |
 | <a name="input_dozuki_license_parameter_name"></a> [dozuki\_license\_parameter\_name](#input\_dozuki\_license\_parameter\_name) | Parameter name for dozuki license in AWS Parameter store. | `string` | `""` | no |
+| <a name="input_eks_cluster_access_role_arn"></a> [eks\_cluster\_access\_role\_arn](#input\_eks\_cluster\_access\_role\_arn) | ARN for the IAM Role for API-based EKS cluster access. | `string` | n/a | yes |
 | <a name="input_eks_cluster_id"></a> [eks\_cluster\_id](#input\_eks\_cluster\_id) | ID of EKS cluster for app provisioning | `string` | n/a | yes |
 | <a name="input_eks_oidc_cluster_access_role_name"></a> [eks\_oidc\_cluster\_access\_role\_name](#input\_eks\_oidc\_cluster\_access\_role\_name) | ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler | `string` | n/a | yes |
 | <a name="input_eks_worker_asg_names"></a> [eks\_worker\_asg\_names](#input\_eks\_worker\_asg\_names) | Autoscaling group names for the EKS cluster | `list(string)` | n/a | yes |
@@ -89,7 +91,6 @@
 | <a name="input_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#input\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list | `any` | n/a | yes |
 | <a name="input_nlb_dns_name"></a> [nlb\_dns\_name](#input\_nlb\_dns\_name) | DNS address of the network load balancer and URL to the deployed application | `string` | n/a | yes |
 | <a name="input_primary_db_secret"></a> [primary\_db\_secret](#input\_primary\_db\_secret) | ARN to secret containing primary db credentials | `string` | n/a | yes |
-| <a name="input_replicated_app_sequence_number"></a> [replicated\_app\_sequence\_number](#input\_replicated\_app\_sequence\_number) | For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release. | `number` | `0` | no |
 | <a name="input_replicated_channel"></a> [replicated\_channel](#input\_replicated\_channel) | If specifying an app sequence for a fresh install, this is the channel that sequence was deployed to. You only need to set this if the sequence you configured was not released on the default channel associated with your customer license. | `string` | `""` | no |
 | <a name="input_s3_documents_bucket"></a> [s3\_documents\_bucket](#input\_s3\_documents\_bucket) | Name of the bucket to store documents. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_images_bucket"></a> [s3\_images\_bucket](#input\_s3\_images\_bucket) | Name of the bucket to store guide images. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
