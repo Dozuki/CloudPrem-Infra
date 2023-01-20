@@ -2,7 +2,6 @@
 # feed forward to the child modules.
 locals {
   environment = "min"
-  #identifier = "a234567890"
   enable_webhooks = false
   enable_bi = false
   rds_multi_az = false

@@ -11,6 +11,5 @@ locals {
   bi_public_access = false
   bi_access_cidrs = ["0.0.0.0/0"]
   grafana_access_cidrs = ["0.0.0.0/0"]
-#  grafana_ssl_cn = "ccswb.dozuki.com"
   bi_vpn_access = false
 }
