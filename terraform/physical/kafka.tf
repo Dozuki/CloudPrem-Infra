@@ -26,7 +26,7 @@ resource "aws_security_group_rule" "kafka_egress" {
   to_port           = 0
   protocol          = "-1"
   cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:AWS007
-  security_group_id = join("", aws_security_group.kafka.*.id)
+  security_group_id = join("", aws_security_group.kafka[*].id)
   type              = "egress"
 }
 
@@ -38,7 +38,7 @@ resource "aws_security_group_rule" "kafka_ingress_security_groups" {
   to_port                  = 0
   protocol                 = "-1"
   source_security_group_id = module.eks_cluster.cluster_primary_security_group_id
-  security_group_id        = join("", aws_security_group.kafka.*.id)
+  security_group_id        = join("", aws_security_group.kafka[*].id)
   type                     = "ingress"
 }
 
@@ -50,7 +50,7 @@ resource "aws_security_group_rule" "kafka_ingress_cidr_blocks" {
   to_port           = 0
   protocol          = "-1"
   cidr_blocks       = [local.vpc_cidr]
-  security_group_id = join("", aws_security_group.kafka.*.id)
+  security_group_id = join("", aws_security_group.kafka[*].id)
   type              = "ingress"
 }
 
@@ -77,7 +77,7 @@ resource "aws_msk_cluster" "this" {
     instance_type   = "kafka.t3.small"
     ebs_volume_size = 50
     client_subnets  = local.private_subnet_ids
-    security_groups = [join("", aws_security_group.kafka.*.id)]
+    security_groups = [join("", aws_security_group.kafka[*].id)]
   }
 
   configuration_info {
