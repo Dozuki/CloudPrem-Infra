@@ -1,9 +1,0 @@
-{
-  "DaemonAuthenticationType": "password",
-  "ReleaseSequence": ${release_sequence},
-  "LicenseBootstrapChannelID": "${replicated_channel}",
-  "LicenseFileLocation": "/tmp/license.rli",
-  "DaemonAuthenticationPassword": "${dashboard_password}",
-  "TlsBootstrapType": "self-signed",
-  "TlsBootstrapHostname": "${nlb_hostname}"
-}
