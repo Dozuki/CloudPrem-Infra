@@ -6,10 +6,11 @@ locals {
   enable_bi = true
   rds_multi_az = false
   highly_available_nat_gateway = false
-  dozuki_license_parameter_name = "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name = "/dozuki/workstation/kots"
   protect_resources = false
   bi_public_access = false
   bi_access_cidrs = ["0.0.0.0/0"]
   grafana_access_cidrs = ["0.0.0.0/0"]
+#  grafana_ssl_cn = "ccswb.dozuki.com"
   bi_vpn_access = false
 }

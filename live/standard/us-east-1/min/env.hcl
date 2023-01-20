@@ -2,10 +2,11 @@
 # feed forward to the child modules.
 locals {
   environment = "min"
+  #identifier = "a234567890"
   enable_webhooks = false
   enable_bi = false
   rds_multi_az = false
   highly_available_nat_gateway = false
-  dozuki_license_parameter_name = "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name = "/dozuki/workstation/kots"
   protect_resources = false
 }
