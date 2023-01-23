@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            SAML Signing Configuration
-            - Added the SAML signing configuration to the dozuki-resources-configmap.
+            Kubed Helm Chart Update
+            - Restore kubed config sync function by updating helm chart to latest version.
           draft: false
           prerelease: false
