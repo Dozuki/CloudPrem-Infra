@@ -166,7 +166,7 @@ resource "helm_release" "kubed" {
 
   name    = "kubed"
   chart   = "${path.module}/charts/kubed"
-  version = "v0.12.0"
+  version = "v0.14.0-rc.0"
 
   namespace = "default"
 }
