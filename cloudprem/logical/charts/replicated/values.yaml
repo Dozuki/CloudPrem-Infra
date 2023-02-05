@@ -1,8 +1,0 @@
-# Default values for replicated.
-# This is a YAML-formatted file.
-
-# Name of a Kubernetes secret containing the replicated license file "license.rli"
-license:
-
-# The hostname of the deployed NLB
-nlb_hostname:

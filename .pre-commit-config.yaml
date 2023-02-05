@@ -3,9 +3,9 @@ repos:
     rev: "v0.16.0"
     hooks:
       - id: terraform-docs-go
-        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/physical"]
+        args: ["markdown", "table", "--output-file", "README.md", "./terraform/physical"]
       - id: terraform-docs-go
-        args: ["markdown", "table", "--output-file", "README.md", "./cloudprem/logical"]
+        args: ["markdown", "table", "--output-file", "README.md", "./terraform/logical"]
   - repo: git://github.com/antonbabenko/pre-commit-terraform
     rev: "v1.62.2"
     hooks:

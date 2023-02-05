@@ -41,7 +41,7 @@ variable "cf_template_version" {
 
   validation {
     // Allow for 0 so we can override this check when deploying from workstations or tests.
-    condition     = var.cf_template_version == 0 || var.cf_template_version >= 1
+    condition     = var.cf_template_version == 0 || var.cf_template_version >= 2
     error_message = "CloudFormation template version is out of date. Update your CloudFormation to deploy this version of the infrastructure."
   }
 }

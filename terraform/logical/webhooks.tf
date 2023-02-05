@@ -2,7 +2,7 @@
 data "kubernetes_secret" "frontegg" {
   count = var.enable_webhooks ? 1 : 0
 
-  depends_on = [helm_release.replicated]
+  depends_on = [local_file.replicated_install]
 
   metadata {
     name      = "frontegg-credentials"
@@ -12,7 +12,7 @@ data "kubernetes_secret" "frontegg" {
 resource "kubernetes_job" "wait_for_app" {
   count = var.enable_webhooks ? 1 : 0
 
-  depends_on = [helm_release.replicated]
+  depends_on = [local_file.replicated_install]
 
   metadata {
     name = "wait-for-app"
@@ -27,7 +27,7 @@ resource "kubernetes_job" "wait_for_app" {
           command = [
             "/bin/sh",
             "-c",
-            "kubectl -n ${coalesce([for i, v in data.kubernetes_all_namespaces.allns.namespaces : try(regexall("replicated\\-.*", v)[0], "")]...)} wait deploy/app-deployment --for condition=available --timeout=1200s"
+            "kubectl -n ${local.k8s_namespace} wait deploy/app-deployment --for condition=available --timeout=1200s"
           ]
         }
         restart_policy = "Never"

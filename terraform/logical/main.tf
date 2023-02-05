@@ -65,6 +65,11 @@ locals {
   grafana_ssl_cert_cn     = var.grafana_ssl_cn == "" ? var.nlb_dns_name : var.grafana_ssl_cn
   grafana_ssl_secret_name = var.grafana_use_replicated_ssl ? "www-tls" : kubernetes_secret.grafana_ssl[0].metadata[0].name
 
+  # Replicated
+  app_slug        = "dozukikots"
+  k8s_namespace   = "dozuki"
+  app_and_channel = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
+
 }
 
 data "aws_eks_cluster" "main" {
