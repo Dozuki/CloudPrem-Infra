@@ -41,7 +41,7 @@ locals {
 
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
 
-  aws_profile = var.aws_profile ? "AWS_PROFILE=${var.aws_profile}" : ""
+  aws_profile_prefix = var.aws_profile != "" ? "AWS_PROFILE=${var.aws_profile}" : ""
 
   # Database
   db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
