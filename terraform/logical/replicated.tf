@@ -46,6 +46,21 @@ resource "kubernetes_secret" "site_tls" {
   }
 }
 
+resource "local_file" "replicated_bootstrap_config" {
+  filename = "./replicated_config.yaml"
+  content  = <<EOT
+apiVersion: kots.io/v1beta1
+kind: ConfigValues
+metadata:
+  name: replicated_bootstrap_config
+spec:
+  values:
+    hostname:
+      value: ${var.nlb_dns_name}
+status: {}
+EOT
+}
+
 
 resource "local_file" "replicated_install" {
   depends_on = [null_resource.pull_replicated_license, kubernetes_secret.site_tls]
@@ -67,6 +82,7 @@ kubectl kots install ${local.app_and_channel} \
   --namespace ${local.k8s_namespace} \
   --license-file ./dozuki.yaml \
   --shared-password '${random_password.dashboard_password.result}' \
+  --config-values ${local_file.replicated_bootstrap_config.filename} \
   --no-port-forward \
   --skip-preflights \
   --wait-duration=10m
