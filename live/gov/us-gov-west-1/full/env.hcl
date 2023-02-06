@@ -6,6 +6,10 @@ locals {
   enable_bi = true
   rds_multi_az = true
   highly_available_nat_gateway = false
-  dozuki_license_parameter_name = "/dozuki/workstation/webhooks/kots"
+  dozuki_customer_id_parameter_name = "/dozuki/workstation/kots/webhooks/customer_id"
   protect_resources = false
+  bi_public_access = true
+  bi_access_cidrs = ["0.0.0.0/0"]
+  grafana_access_cidrs = ["0.0.0.0/0"]
+  bi_vpn_access = false
 }

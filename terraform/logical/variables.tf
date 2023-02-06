@@ -47,9 +47,9 @@ variable "azs_count" {
 
 # --- BEGIN App Configuration --- #
 
-variable "dozuki_license_parameter_name" {
+variable "dozuki_customer_id_parameter_name" {
   type        = string
-  description = "Parameter name for dozuki license in AWS Parameter store."
+  description = "Parameter name for dozuki customer id in AWS Parameter store."
   default     = ""
 }
 
@@ -64,12 +64,6 @@ variable "enable_bi" {
   type        = string
   default     = false
 }
-
-#variable "replicated_app_sequence_number" {
-#  description = "For fresh installs you can target a specific Replicated sequence for first install. This will not be respected for existing installations. Use 0 for latest release."
-#  default     = 0
-#  type        = number
-#}
 
 variable "replicated_channel" {
   description = "If specifying an app sequence for a fresh install, this is the channel that sequence was deployed to. You only need to set this if the sequence you configured was not released on the default channel associated with your customer license."

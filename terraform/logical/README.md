@@ -19,6 +19,7 @@
 | <a name="provider_helm"></a> [helm](#provider\_helm) | 2.3.0 |
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.13.1 |
 | <a name="provider_local"></a> [local](#provider\_local) | 2.2.3 |
+| <a name="provider_null"></a> [null](#provider\_null) | 3.1.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.4.3 |
 
 ## Modules
@@ -54,7 +55,7 @@
 | [kubernetes_secret.grafana_ssl](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |
 | [kubernetes_secret.site_tls](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |
 | [local_file.replicated_install](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
-| [local_file.replicated_license](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
+| [null_resource.pull_replicated_license](https://registry.terraform.io/providers/hashicorp/null/3.1.0/docs/resources/resource) | resource |
 | [random_password.dashboard_password](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
 | [random_password.grafana_admin](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/caller_identity) | data source |
@@ -64,7 +65,7 @@
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/region) | data source |
 | [aws_secretsmanager_secret_version.db_bi](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/secretsmanager_secret_version) | data source |
 | [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/secretsmanager_secret_version) | data source |
-| [aws_ssm_parameter.dozuki_license](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.dozuki_customer_id](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/ssm_parameter) | data source |
 | [kubernetes_secret.frontegg](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/data-sources/secret) | data source |
 
 ## Inputs
@@ -75,7 +76,7 @@
 | <a name="input_azs_count"></a> [azs\_count](#input\_azs\_count) | The number of availability zones we should use for deployment. | `number` | `3` | no |
 | <a name="input_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#input\_bi\_database\_credential\_secret) | ARN to secret containing bi db credentials | `string` | `""` | no |
 | <a name="input_dms_task_arn"></a> [dms\_task\_arn](#input\_dms\_task\_arn) | If BI is enabled, the DMS replication task arn. | `string` | n/a | yes |
-| <a name="input_dozuki_license_parameter_name"></a> [dozuki\_license\_parameter\_name](#input\_dozuki\_license\_parameter\_name) | Parameter name for dozuki license in AWS Parameter store. | `string` | `""` | no |
+| <a name="input_dozuki_customer_id_parameter_name"></a> [dozuki\_customer\_id\_parameter\_name](#input\_dozuki\_customer\_id\_parameter\_name) | Parameter name for dozuki customer id in AWS Parameter store. | `string` | `""` | no |
 | <a name="input_eks_cluster_access_role_arn"></a> [eks\_cluster\_access\_role\_arn](#input\_eks\_cluster\_access\_role\_arn) | ARN for the IAM Role for API-based EKS cluster access. | `string` | n/a | yes |
 | <a name="input_eks_cluster_id"></a> [eks\_cluster\_id](#input\_eks\_cluster\_id) | ID of EKS cluster for app provisioning | `string` | n/a | yes |
 | <a name="input_eks_oidc_cluster_access_role_name"></a> [eks\_oidc\_cluster\_access\_role\_name](#input\_eks\_oidc\_cluster\_access\_role\_name) | ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler | `string` | n/a | yes |

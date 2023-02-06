@@ -1,5 +1,5 @@
-data "aws_ssm_parameter" "dozuki_license" {
-  name = local.dozuki_license_parameter_name
+data "aws_ssm_parameter" "dozuki_customer_id" {
+  name = local.dozuki_customer_id_parameter_name
 }
 
 resource "random_password" "dashboard_password" {
@@ -11,16 +11,16 @@ resource "random_password" "dashboard_password" {
   }
 }
 
+resource "null_resource" "pull_replicated_license" {
+  provisioner "local-exec" {
+    command = "curl -o dozuki.yaml -H 'Authorization: ${data.aws_ssm_parameter.dozuki_customer_id.value}' https://replicated.app/customer/license/download/dozukikots"
+  }
+}
 
 resource "kubernetes_namespace" "kots_app" {
   metadata {
     name = local.k8s_namespace
   }
-}
-
-resource "local_file" "replicated_license" {
-  filename = "./dozuki.yaml"
-  content  = data.aws_ssm_parameter.dozuki_license.value
 }
 
 module "ssl_cert" {
@@ -48,7 +48,7 @@ resource "kubernetes_secret" "site_tls" {
 
 
 resource "local_file" "replicated_install" {
-  depends_on = [local_file.replicated_license, kubernetes_secret.site_tls]
+  depends_on = [null_resource.pull_replicated_license, kubernetes_secret.site_tls]
 
   filename = "./kots_install.sh"
   content  = <<EOT
