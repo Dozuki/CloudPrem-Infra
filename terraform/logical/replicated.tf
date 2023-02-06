@@ -67,7 +67,7 @@ resource "local_file" "replicated_install" {
 
   filename = "./kots_install.sh"
   content  = <<EOT
-#!/bin/sh
+#!/bin/bash
 set -euo pipefail
 
 aws --region ${data.aws_region.current.name} eks update-kubeconfig --name ${var.eks_cluster_id} --role-arn ${var.eks_cluster_access_role_arn} --profile ${var.aws_profile}
