@@ -23,29 +23,12 @@ resource "kubernetes_job" "dms_start" {
         restart_policy = "Never"
       }
     }
-    backoff_limit = 1
-    completions   = 1
+    completions = 1
   }
   wait_for_completion = false
 
   timeouts {
     create = "20m"
-  }
-}
-
-resource "kubernetes_annotations" "www_tls" {
-  # If BI is enabled and we ARE using the replicated SSL cert than add the annotation.
-  count = var.enable_bi ? var.grafana_use_replicated_ssl ? 1 : 0 : 0
-
-  depends_on  = [local_file.replicated_install]
-  api_version = "v1"
-  kind        = "Secret"
-  metadata {
-    name      = "www-tls"
-    namespace = local.k8s_namespace
-  }
-  annotations = {
-    "kubed.appscode.com/sync" = ""
   }
 }
 
@@ -77,6 +60,8 @@ resource "kubernetes_secret" "grafana_ssl" {
 }
 
 resource "kubernetes_secret" "grafana_config" {
+  depends_on = [kubernetes_namespace.kots_app]
+
   metadata {
     name      = "grafana-config"
     namespace = local.k8s_namespace
@@ -94,13 +79,13 @@ resource "random_password" "grafana_admin" {
   count = var.enable_bi ? 1 : 0
 
   length  = 16
-  special = true
+  special = false
 }
 
 resource "helm_release" "grafana" {
   count = var.enable_bi ? 1 : 0
 
-  depends_on = [kubernetes_secret.grafana_ssl, kubernetes_secret.grafana_config]
+  depends_on = [kubernetes_secret.grafana_ssl, kubernetes_secret.grafana_config, local_file.replicated_install]
 
   name  = "grafana"
   chart = "${path.module}/charts/grafana"
