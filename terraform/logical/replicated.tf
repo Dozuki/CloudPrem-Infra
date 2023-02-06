@@ -70,7 +70,7 @@ resource "local_file" "replicated_install" {
 #!/bin/bash
 set -euo pipefail
 
-aws --region ${data.aws_region.current.name} eks update-kubeconfig --name ${var.eks_cluster_id} --role-arn ${var.eks_cluster_access_role_arn} --profile ${var.aws_profile}
+AWS_PROFILE=${var.aws_profile} aws --region ${data.aws_region.current.name} eks update-kubeconfig --name ${var.eks_cluster_id} --role-arn ${var.eks_cluster_access_role_arn}
 
 kubectl config set-context --current --namespace=${local.k8s_namespace}
 
