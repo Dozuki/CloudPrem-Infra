@@ -51,6 +51,8 @@
 | [kubernetes_job.sites_config_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/job) | resource |
 | [kubernetes_job.wait_for_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/job) | resource |
 | [kubernetes_namespace.kots_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/namespace) | resource |
+| [kubernetes_role.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/role) | resource |
+| [kubernetes_role_binding.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/role_binding) | resource |
 | [kubernetes_secret.grafana_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |
 | [kubernetes_secret.grafana_ssl](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |
 | [kubernetes_secret.site_tls](https://registry.terraform.io/providers/hashicorp/kubernetes/2.13.1/docs/resources/secret) | resource |

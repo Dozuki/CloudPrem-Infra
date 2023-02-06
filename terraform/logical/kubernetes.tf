@@ -1,3 +1,35 @@
+resource "kubernetes_role" "dozuki_list_role" {
+
+  metadata {
+    name      = "dozuki_list_role"
+    namespace = local.k8s_namespace
+  }
+
+  rule {
+    api_groups = ["apps"]
+    resources  = ["deployments"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+resource "kubernetes_role_binding" "dozuki_list_role_binding" {
+
+  metadata {
+    name      = "dozuki_list_role_binding"
+    namespace = local.k8s_namespace
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role.dozuki_list_role.metadata[0].name
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "default"
+    namespace = local.k8s_namespace
+  }
+}
+
 resource "kubernetes_config_map" "dozuki_resources" {
 
   metadata {
