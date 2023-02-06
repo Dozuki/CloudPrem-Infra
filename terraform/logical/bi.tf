@@ -4,7 +4,8 @@ resource "kubernetes_job" "dms_start" {
   depends_on = [local_file.replicated_install, kubernetes_role_binding.dozuki_list_role_binding]
 
   metadata {
-    name = "dms-start"
+    name      = "dms-start"
+    namespace = local.k8s_namespace
   }
   spec {
     template {
@@ -16,7 +17,7 @@ resource "kubernetes_job" "dms_start" {
           command = [
             "/bin/sh",
             "-c",
-            "kubectl -n ${local.k8s_namespace} wait deploy/app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current.name}"
+            "kubectl wait deploy/app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current.name}"
           ]
         }
         restart_policy = "Never"
@@ -61,9 +62,12 @@ module "grafana_ssl_cert" {
 }
 
 resource "kubernetes_secret" "grafana_ssl" {
-  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
+  count      = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
+  depends_on = [kubernetes_namespace.kots_app]
+
   metadata {
-    name = "grafana-ssl"
+    name      = "grafana-ssl"
+    namespace = local.k8s_namespace
   }
 
   data = {
@@ -74,7 +78,8 @@ resource "kubernetes_secret" "grafana_ssl" {
 
 resource "kubernetes_secret" "grafana_config" {
   metadata {
-    name = "grafana-config"
+    name      = "grafana-config"
+    namespace = local.k8s_namespace
   }
 
   data = {
@@ -100,7 +105,7 @@ resource "helm_release" "grafana" {
   name  = "grafana"
   chart = "${path.module}/charts/grafana"
 
-  namespace = "default"
+  namespace = local.k8s_namespace
 
   reuse_values = true
 

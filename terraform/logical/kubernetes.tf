@@ -136,7 +136,7 @@ resource "kubernetes_config_map" "dozuki_resources" {
       {
         "clientId": "${local.frontegg_clientid}",
         "apiToken": "${local.frontegg_apikey}",
-        "apiBaseUrl": "http://frontegg-api-gateway.default.svc.cluster.local",
+        "apiBaseUrl": "http://frontegg-api-gateway.${local.k8s_namespace}.svc.cluster.local",
         "authUrl": "https://api.frontegg.com/auth/vendor"
       }
     EOF
@@ -190,7 +190,7 @@ resource "helm_release" "container_insights" {
   name  = "container-insights"
   chart = "${path.module}/charts/container_insights"
 
-  namespace = "default"
+  namespace = local.k8s_namespace
 
   set {
     name  = "cluster_name"
