@@ -12,8 +12,13 @@ resource "random_password" "dashboard_password" {
 }
 
 resource "null_resource" "pull_replicated_license" {
+
+  triggers = {
+    customer_parameter_name = data.aws_ssm_parameter.dozuki_customer_id.value
+  }
+
   provisioner "local-exec" {
-    command = "curl -o dozuki.yaml -H 'Authorization: ${data.aws_ssm_parameter.dozuki_customer_id.value}' https://replicated.app/customer/license/download/dozukikots"
+    command = "curl -o dozuki.yaml -H 'Authorization: ${self.triggers.customer_parameter_name}' https://replicated.app/customer/license/download/dozukikots"
   }
 }
 
