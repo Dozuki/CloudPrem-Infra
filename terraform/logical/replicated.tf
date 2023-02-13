@@ -22,12 +22,6 @@ resource "null_resource" "pull_replicated_license" {
   }
 }
 
-resource "kubernetes_namespace" "kots_app" {
-  metadata {
-    name = local.k8s_namespace
-  }
-}
-
 module "ssl_cert" {
 
   source      = "../common/acm"

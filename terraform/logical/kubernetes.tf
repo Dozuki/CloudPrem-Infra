@@ -1,3 +1,9 @@
+resource "kubernetes_namespace" "kots_app" {
+  metadata {
+    name = local.k8s_namespace_name
+  }
+}
+
 resource "kubernetes_role" "dozuki_list_role" {
 
   metadata {
