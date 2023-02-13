@@ -5,7 +5,7 @@ resource "kubernetes_job" "dms_start" {
 
   metadata {
     name      = "dms-start"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   spec {
     template {
@@ -45,12 +45,11 @@ module "grafana_ssl_cert" {
 }
 
 resource "kubernetes_secret" "grafana_ssl" {
-  count      = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
-  depends_on = [kubernetes_namespace.kots_app]
+  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
 
   metadata {
     name      = "grafana-ssl"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   data = {
@@ -60,11 +59,10 @@ resource "kubernetes_secret" "grafana_ssl" {
 }
 
 resource "kubernetes_secret" "grafana_config" {
-  depends_on = [kubernetes_namespace.kots_app]
 
   metadata {
     name      = "grafana-config"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   data = {
@@ -90,7 +88,7 @@ resource "helm_release" "grafana" {
   name  = "grafana"
   chart = "${path.module}/charts/grafana"
 
-  namespace = local.k8s_namespace
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   reuse_values = true
 

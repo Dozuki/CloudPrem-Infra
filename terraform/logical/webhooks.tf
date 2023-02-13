@@ -6,7 +6,7 @@ data "kubernetes_secret" "frontegg" {
 
   metadata {
     name      = "frontegg-credentials"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 }
 resource "kubernetes_job" "wait_for_app" {
@@ -16,7 +16,7 @@ resource "kubernetes_job" "wait_for_app" {
 
   metadata {
     name      = "wait-for-app"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   spec {
     template {
@@ -48,7 +48,7 @@ resource "kubernetes_job" "frontegg_database_create" {
 
   metadata {
     name      = "frontegg-db-update"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   spec {
     template {
@@ -79,7 +79,7 @@ resource "kubernetes_job" "sites_config_update" {
 
   metadata {
     name      = "sites-config-update"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   spec {
     template {
@@ -109,7 +109,7 @@ resource "helm_release" "mongodb" {
 
   name      = "frontegg-documents"
   chart     = "charts/mongodb"
-  namespace = local.k8s_namespace
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   set {
     name  = "auth.enabled"
@@ -122,7 +122,7 @@ resource "helm_release" "redis" {
 
   name      = "frontegg-kvstore"
   chart     = "charts/redis"
-  namespace = local.k8s_namespace
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   set {
     name  = "auth.enabled"
@@ -151,7 +151,7 @@ resource "helm_release" "frontegg" {
   name  = "frontegg"
   chart = "charts/connectivity"
 
-  namespace = local.k8s_namespace
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   reuse_values = true
 

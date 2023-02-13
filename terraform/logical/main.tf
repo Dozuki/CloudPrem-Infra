@@ -68,9 +68,9 @@ locals {
   grafana_ssl_secret_name = var.grafana_use_replicated_ssl ? "www-tls" : kubernetes_secret.grafana_ssl[0].metadata[0].name
 
   # Replicated
-  app_slug        = "dozukikots"
-  k8s_namespace   = "dozuki"
-  app_and_channel = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
+  app_slug           = "dozukikots"
+  k8s_namespace_name = "dozuki"
+  app_and_channel    = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
 
 }
 

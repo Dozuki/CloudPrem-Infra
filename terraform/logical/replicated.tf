@@ -29,14 +29,14 @@ module "ssl_cert" {
   identifier  = var.identifier
 
   cert_common_name = var.nlb_dns_name
-  namespace        = local.k8s_namespace
+  namespace        = kubernetes_namespace.kots_app.metadata[0].name
 }
 
 resource "kubernetes_secret" "site_tls" {
 
   metadata {
     name      = "www-tls"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   data = {
@@ -71,14 +71,14 @@ set -euo pipefail
 
 ${local.aws_profile_prefix} aws --region ${data.aws_region.current.name} eks update-kubeconfig --name ${var.eks_cluster_id} --role-arn ${var.eks_cluster_access_role_arn}
 
-kubectl config set-context --current --namespace=${local.k8s_namespace}
+kubectl config set-context --current --namespace=${kubernetes_namespace.kots_app.metadata[0].name}
 
 [[ -x $(which kubectl-kots) ]] || curl https://kots.io/install | bash
 
 set -v
 
 kubectl kots install ${local.app_and_channel} \
-  --namespace ${local.k8s_namespace} \
+  --namespace ${kubernetes_namespace.kots_app.metadata[0].name} \
   --license-file ./dozuki.yaml \
   --shared-password '${random_password.dashboard_password.result}' \
   --config-values ${local_file.replicated_bootstrap_config.filename} \
