@@ -30,9 +30,10 @@ resource "helm_release" "metrics_server" {
 
 resource "kubernetes_horizontal_pod_autoscaler" "app" {
   depends_on = [local_file.replicated_install]
+
   metadata {
     name      = "app-hpa"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   spec {
@@ -71,9 +72,10 @@ resource "kubernetes_horizontal_pod_autoscaler" "app" {
 
 resource "kubernetes_horizontal_pod_autoscaler" "queueworkerd" {
   depends_on = [local_file.replicated_install]
+
   metadata {
     name      = "queueworkerd-hpa"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   spec {

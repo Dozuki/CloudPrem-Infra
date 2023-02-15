@@ -35,11 +35,13 @@ provider "helm" {
 }
 
 locals {
-  dozuki_license_parameter_name = var.dozuki_license_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/license" : "/${var.identifier}/dozuki/${var.environment}/license") : var.dozuki_license_parameter_name
+  dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.identifier}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
+
+  aws_profile_prefix = var.aws_profile != "" ? "AWS_PROFILE=${var.aws_profile}" : ""
 
   # Database
   db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
@@ -66,9 +68,9 @@ locals {
   grafana_ssl_secret_name = var.grafana_use_replicated_ssl ? "www-tls" : kubernetes_secret.grafana_ssl[0].metadata[0].name
 
   # Replicated
-  app_slug        = "dozukikots"
-  k8s_namespace   = "dozuki"
-  app_and_channel = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
+  app_slug           = "dozukikots"
+  k8s_namespace_name = "dozuki"
+  app_and_channel    = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
 
 }
 

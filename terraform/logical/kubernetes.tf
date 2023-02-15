@@ -1,8 +1,46 @@
+resource "kubernetes_namespace" "kots_app" {
+  metadata {
+    name = local.k8s_namespace_name
+  }
+}
+
+resource "kubernetes_role" "dozuki_list_role" {
+
+  metadata {
+    name      = "dozuki_list_role"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
+  }
+
+  rule {
+    api_groups = ["apps"]
+    resources  = ["deployments"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+resource "kubernetes_role_binding" "dozuki_list_role_binding" {
+
+  metadata {
+    name      = "dozuki_list_role_binding"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role.dozuki_list_role.metadata[0].name
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "default"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
+  }
+}
+
 resource "kubernetes_config_map" "dozuki_resources" {
 
   metadata {
     name      = "dozuki-resources-configmap"
-    namespace = local.k8s_namespace
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   data = {
@@ -104,7 +142,7 @@ resource "kubernetes_config_map" "dozuki_resources" {
       {
         "clientId": "${local.frontegg_clientid}",
         "apiToken": "${local.frontegg_apikey}",
-        "apiBaseUrl": "http://frontegg-api-gateway.default.svc.cluster.local",
+        "apiBaseUrl": "http://frontegg-api-gateway.${kubernetes_namespace.kots_app.metadata[0].name}.svc.cluster.local",
         "authUrl": "https://api.frontegg.com/auth/vendor"
       }
     EOF
@@ -158,7 +196,7 @@ resource "helm_release" "container_insights" {
   name  = "container-insights"
   chart = "${path.module}/charts/container_insights"
 
-  namespace = "default"
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   set {
     name  = "cluster_name"

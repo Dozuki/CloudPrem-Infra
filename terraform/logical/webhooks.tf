@@ -6,16 +6,17 @@ data "kubernetes_secret" "frontegg" {
 
   metadata {
     name      = "frontegg-credentials"
-    namespace = "default"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 }
 resource "kubernetes_job" "wait_for_app" {
   count = var.enable_webhooks ? 1 : 0
 
-  depends_on = [local_file.replicated_install]
+  depends_on = [local_file.replicated_install, kubernetes_role_binding.dozuki_list_role_binding]
 
   metadata {
-    name = "wait-for-app"
+    name      = "wait-for-app"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   spec {
     template {
@@ -27,7 +28,7 @@ resource "kubernetes_job" "wait_for_app" {
           command = [
             "/bin/sh",
             "-c",
-            "kubectl -n ${local.k8s_namespace} wait deploy/app-deployment --for condition=available --timeout=1200s"
+            "kubectl wait deploy/app-deployment --for condition=available --timeout=1200s"
           ]
         }
         restart_policy = "Never"
@@ -46,7 +47,8 @@ resource "kubernetes_job" "frontegg_database_create" {
   count = var.enable_webhooks ? 1 : 0
 
   metadata {
-    name = "frontegg-db-update"
+    name      = "frontegg-db-update"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   spec {
     template {
@@ -76,7 +78,8 @@ resource "kubernetes_job" "sites_config_update" {
   depends_on = [kubernetes_job.wait_for_app]
 
   metadata {
-    name = "sites-config-update"
+    name      = "sites-config-update"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   spec {
     template {
@@ -104,8 +107,9 @@ resource "kubernetes_job" "sites_config_update" {
 resource "helm_release" "mongodb" {
   count = var.enable_webhooks ? 1 : 0
 
-  name  = "frontegg-documents"
-  chart = "charts/mongodb"
+  name      = "frontegg-documents"
+  chart     = "charts/mongodb"
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   set {
     name  = "auth.enabled"
@@ -116,8 +120,9 @@ resource "helm_release" "mongodb" {
 resource "helm_release" "redis" {
   count = var.enable_webhooks ? 1 : 0
 
-  name  = "frontegg-kvstore"
-  chart = "charts/redis"
+  name      = "frontegg-kvstore"
+  chart     = "charts/redis"
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   set {
     name  = "auth.enabled"
@@ -146,7 +151,7 @@ resource "helm_release" "frontegg" {
   name  = "frontegg"
   chart = "charts/connectivity"
 
-  namespace = "default"
+  namespace = kubernetes_namespace.kots_app.metadata[0].name
 
   reuse_values = true
 
