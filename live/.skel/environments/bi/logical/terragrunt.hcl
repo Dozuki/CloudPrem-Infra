@@ -1,5 +1,5 @@
-skip = get_env("SKIP_LOGICAL", false)
-# Terragrunt will copy the Terraform configurations specified by the source parameter, along with any files in the
+skip = get_env("SKIP_LOGICAL", false) || get_env("SKIP_INFRA", false)
+#skip = get_env("SKIP_INFRA", false) the Terraform configurations specified by the source parameter, along with any files in the
 # working directory, into a temporary folder, and execute your Terraform commands in that folder.
 terraform {
   source = "../../../../../terraform//logical"
