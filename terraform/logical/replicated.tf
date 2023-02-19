@@ -21,6 +21,9 @@ resource "null_resource" "pull_replicated_license" {
 
   triggers = {
     customer_parameter_name = data.aws_ssm_parameter.dozuki_customer_id.value
+    # We use a timestamp as a trigger so this resource is always executed. That way the license file is always available
+    # in case of a partial apply.
+    timestamp = timestamp()
   }
 
   provisioner "local-exec" {
