@@ -8,4 +8,8 @@ locals {
   highly_available_nat_gateway = false
   dozuki_customer_id_parameter_name = "/dozuki/workstation/kots/webhooks/customer_id"
   protect_resources = false
+  bi_public_access = false
+  bi_access_cidrs = ["0.0.0.0/0"]
+  bi_vpn_access = false
+  grafana_access_cidrs = ["0.0.0.0/0"]
 }
