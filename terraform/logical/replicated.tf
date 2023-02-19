@@ -39,6 +39,10 @@ spec:
   values:
     hostname:
       value: ${var.nlb_dns_name}
+    tls_private_key_file:
+      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_key.value)}
+    tls_certificate_file:
+      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_cert.value)}
 status: {}
 EOT
 }
