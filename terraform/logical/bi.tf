@@ -1,3 +1,14 @@
+data "aws_ssm_parameter" "grafana_ssl_cert" {
+  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
+
+  name = var.grafana_ssl_server_cert_parameter
+}
+data "aws_ssm_parameter" "grafana_ssl_key" {
+  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
+
+  name = var.grafana_ssl_server_key_parameter
+}
+
 resource "kubernetes_job" "dms_start" {
   count = var.enable_bi ? 1 : 0
 
@@ -32,18 +43,6 @@ resource "kubernetes_job" "dms_start" {
   }
 }
 
-module "grafana_ssl_cert" {
-  # If BI is enabled and we are NOT using the replicated ssl cert then create one.
-  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
-
-  source      = "../common/acm"
-  environment = var.environment
-  identifier  = var.identifier
-
-  cert_common_name = local.grafana_ssl_cert_cn
-  namespace        = "grafana"
-}
-
 resource "kubernetes_secret" "grafana_ssl" {
   count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
 
@@ -53,8 +52,8 @@ resource "kubernetes_secret" "grafana_ssl" {
   }
 
   data = {
-    "onprem.key" = module.grafana_ssl_cert[0].ssm_server_key.value
-    "onprem.crt" = module.grafana_ssl_cert[0].ssm_server_cert.value
+    "onprem.key" = data.aws_ssm_parameter.grafana_ssl_key[0].value
+    "onprem.crt" = data.aws_ssm_parameter.grafana_ssl_cert[0].value
   }
 }
 

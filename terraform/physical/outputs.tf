@@ -34,6 +34,14 @@ output "nlb_dns_name" {
   description = "URL to deployed application"
   value       = module.nlb.lb_dns_name
 }
+output "nlb_ssl_cert_parameter" {
+  description = "Parameter name for the NLB SSL cert"
+  value       = module.nlb_ssl_cert.ssm_server_cert.name
+}
+output "nlb_ssl_key_parameter" {
+  description = "Parameter name for the NLB SSL cert key"
+  value       = module.nlb_ssl_cert.ssm_server_key.name
+}
 output "cluster_primary_sg" {
   description = "Primary security group for EKS cluster"
   value       = module.eks_cluster.cluster_primary_security_group_id
@@ -76,6 +84,14 @@ output "bi_database_credential_secret" {
 output "bi_vpn_configuration_bucket" {
   description = "If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet."
   value       = try(module.vpn[0].aws_vpn_configuration_bucket, "")
+}
+output "grafana_ssl_cert_parameter" {
+  description = "Parameter name for the Grafana SSL cert"
+  value       = try(module.grafana_ssl_cert.ssm_server_cert.name, "")
+}
+output "grafana_ssl_key_parameter" {
+  description = "Parameter name for the Grafana SSL cert key"
+  value       = try(module.grafana_ssl_cert.ssm_server_key.name, "")
 }
 output "bastion_asg_name" {
   value = module.bastion.this_autoscaling_group_name

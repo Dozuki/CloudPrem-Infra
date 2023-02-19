@@ -1,6 +1,12 @@
 data "aws_ssm_parameter" "dozuki_customer_id" {
   name = local.dozuki_customer_id_parameter_name
 }
+data "aws_ssm_parameter" "nlb_ssl_cert" {
+  name = var.nlb_ssl_server_cert_parameter
+}
+data "aws_ssm_parameter" "nlb_ssl_key" {
+  name = var.nlb_ssl_server_key_parameter
+}
 
 resource "random_password" "dashboard_password" {
   length  = 16
@@ -22,29 +28,6 @@ resource "null_resource" "pull_replicated_license" {
   }
 }
 
-module "ssl_cert" {
-
-  source      = "../common/acm"
-  environment = var.environment
-  identifier  = var.identifier
-
-  cert_common_name = var.nlb_dns_name
-  namespace        = kubernetes_namespace.kots_app.metadata[0].name
-}
-
-resource "kubernetes_secret" "site_tls" {
-
-  metadata {
-    name      = "www-tls"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
-  }
-
-  data = {
-    "onprem.key" = module.ssl_cert.ssm_server_key.value
-    "onprem.crt" = module.ssl_cert.ssm_server_cert.value
-  }
-}
-
 resource "local_file" "replicated_bootstrap_config" {
   filename = "./replicated_config.yaml"
   content  = <<EOT
@@ -62,7 +45,7 @@ EOT
 
 
 resource "local_file" "replicated_install" {
-  depends_on = [null_resource.pull_replicated_license, kubernetes_secret.site_tls]
+  depends_on = [null_resource.pull_replicated_license]
 
   filename = "./kots_install.sh"
   content  = <<EOT

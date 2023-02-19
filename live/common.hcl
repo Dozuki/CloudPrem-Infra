@@ -101,6 +101,8 @@ dependency "physical" {
     termination_handler_role_arn = "dummy-termination-handler-role-arn"
     termination_handler_sqs_queue_id = "dummy-sqs-id"
     nlb_dns_name = "dummy-lb-dns"
+    nlb_ssl_cert_parameter = "dummy-cert"
+    nlb_ssl_key_parameter = "dummy-key"
     cluster_primary_sg = "dummy-sg"
     primary_db_secret = "dummy-secret-id"
     guide_images_bucket = "dummy-images-bucket"
@@ -110,6 +112,8 @@ dependency "physical" {
     memcached_cluster_address = "dummy-memcache"
     dms_task_arn = "dummy-dms-arn"
     bi_database_credential_secret = "dummy-secret"
+    grafana_ssl_cert_parameter = "dummy-cert"
+    grafana_ssl_key_parameter = "dummy-key"
   }
   mock_outputs_merge_strategy_with_state = "shallow"
 }
@@ -128,6 +132,8 @@ inputs = {
   eks_worker_asg_arns = dependency.physical.outputs.eks_worker_asg_arns
   eks_worker_asg_names = dependency.physical.outputs.eks_worker_asg_names
   nlb_dns_name = dependency.physical.outputs.nlb_dns_name
+  nlb_ssl_server_cert_parameter = dependency.physical.outputs.nlb_ssl_cert_parameter
+  nlb_ssl_server_key_parameter = dependency.physical.outputs.nlb_ssl_key_parameter
   cluster_primary_sg = dependency.physical.outputs.cluster_primary_sg
 
   primary_db_secret = dependency.physical.outputs.primary_db_secret
@@ -138,4 +144,6 @@ inputs = {
   s3_pdfs_bucket = dependency.physical.outputs.guide_pdfs_bucket
   memcached_cluster_address = dependency.physical.outputs.memcached_cluster_address
   dms_task_arn = dependency.physical.outputs.dms_task_arn
+  grafana_ssl_server_cert_parameter = dependency.physical.outputs.grafana_ssl_cert_parameter
+  grafana_ssl_server_key_parameter = dependency.physical.outputs.grafana_ssl_key_parameter
 }
