@@ -1,6 +1,12 @@
 data "aws_ssm_parameter" "dozuki_customer_id" {
   name = local.dozuki_customer_id_parameter_name
 }
+data "aws_ssm_parameter" "nlb_ssl_cert" {
+  name = var.nlb_ssl_server_cert_parameter
+}
+data "aws_ssm_parameter" "nlb_ssl_key" {
+  name = var.nlb_ssl_server_key_parameter
+}
 
 resource "random_password" "dashboard_password" {
   length  = 16
@@ -15,33 +21,13 @@ resource "null_resource" "pull_replicated_license" {
 
   triggers = {
     customer_parameter_name = data.aws_ssm_parameter.dozuki_customer_id.value
+    # We use a timestamp as a trigger so this resource is always executed. That way the license file is always available
+    # in case of a partial apply.
+    timestamp = timestamp()
   }
 
   provisioner "local-exec" {
     command = "curl -o dozuki.yaml -H 'Authorization: ${self.triggers.customer_parameter_name}' https://replicated.app/customer/license/download/dozukikots"
-  }
-}
-
-module "ssl_cert" {
-
-  source      = "../common/acm"
-  environment = var.environment
-  identifier  = var.identifier
-
-  cert_common_name = var.nlb_dns_name
-  namespace        = kubernetes_namespace.kots_app.metadata[0].name
-}
-
-resource "kubernetes_secret" "site_tls" {
-
-  metadata {
-    name      = "www-tls"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
-  }
-
-  data = {
-    "onprem.key" = module.ssl_cert.ssm_server_key.value
-    "onprem.crt" = module.ssl_cert.ssm_server_cert.value
   }
 }
 
@@ -56,13 +42,17 @@ spec:
   values:
     hostname:
       value: ${var.nlb_dns_name}
+    tls_private_key_file:
+      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_key.value)}
+    tls_certificate_file:
+      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_cert.value)}
 status: {}
 EOT
 }
 
 
 resource "local_file" "replicated_install" {
-  depends_on = [null_resource.pull_replicated_license, kubernetes_secret.site_tls]
+  depends_on = [null_resource.pull_replicated_license]
 
   filename = "./kots_install.sh"
   content  = <<EOT

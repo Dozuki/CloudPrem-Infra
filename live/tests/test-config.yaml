@@ -3,14 +3,14 @@ min_default:
   identifier: "default"
   environment: "min"
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/default/customer_id"
   create_s3_buckets: true
 min_ha:
   prefix: "test/ha/"
   identifier: "ha"
   environment: "min"
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/default/customer_id"
   highly_available_nat_gateway: true
   rds_multi_az: true
   create_s3_buckets: true
@@ -19,7 +19,7 @@ bi_default:
   identifier: "default"
   environment: "bi"
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/default/customer_id"
   enable_bi: true
   create_s3_buckets: true
 bi_ha:
@@ -28,7 +28,7 @@ bi_ha:
   environment: "bi"
   highly_available_nat_gateway: true
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/default/customer_id"
   rds_multi_az: true
   enable_bi: true
   create_s3_buckets: true
@@ -37,7 +37,7 @@ bi_vpn:
   identifier: "vpn"
   environment: "bi"
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/default/customer_id"
   enable_bi: true
   bi_vpn_access: true
   create_s3_buckets: true
@@ -47,7 +47,7 @@ bi_ha_vpn:
   environment: "bi"
   highly_available_nat_gateway: true
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/default/customer_id"
   rds_multi_az: true
   enable_bi: true
   bi_vpn_access: true
@@ -57,7 +57,7 @@ bi_public:
   identifier: "public"
   environment: "bi"
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/beta/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/default/customer_id"
   enable_bi: true
   bi_public_access: true
   bi_access_cidrs: "[\"0.0.0.0/0\"]"
@@ -68,7 +68,7 @@ webhooks:
   identifier: "default"
   environment: "hooks"
   app_public_access: true
-  dozuki_license_parameter_name: "/dozuki/workstation/alpha/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/webhooks/customer_id"
   enable_webhooks: true
   create_s3_buckets: true
 full:
@@ -78,7 +78,7 @@ full:
   app_public_access: true
   enable_webhooks: true
   highly_available_nat_gateway: true
-  dozuki_license_parameter_name: "/dozuki/workstation/alpha/license"
+  dozuki_license_parameter_name: "/dozuki/workstation/kots/webhooks/customer_id"
   rds_multi_az: true
   enable_bi: true
   bi_vpn_access: true

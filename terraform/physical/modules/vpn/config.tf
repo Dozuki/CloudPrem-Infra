@@ -1,6 +1,6 @@
 
 module "ssl_cert" {
-  source      = "../../../common/acm"
+  source      = "../acm"
   environment = var.environment
   identifier  = var.identifier
 

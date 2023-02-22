@@ -7,3 +7,5 @@ tfvars
 .idea
 *.iml
 test_output*
+/live/gov/
+/live/standard/

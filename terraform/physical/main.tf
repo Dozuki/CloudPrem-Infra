@@ -41,6 +41,7 @@ locals {
   ca_cert_identifier       = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
   ca_cert_pem_file         = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
   bi_subnet_ids            = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
+  grafana_ssl_cert_cn      = var.grafana_ssl_cn == "" ? module.nlb.lb_dns_name : var.grafana_ssl_cn
 
   # Access Config
   secure_default_bi_access_cidrs      = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs
