@@ -22,7 +22,9 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Kubed Helm Chart Update
-            - Restore kubed config sync function by updating helm chart to latest version.
+            KOTS Deployment Update
+            - Use KOTS instead of the deprecated Kubernetes scheduler for Replicated.
+            - Refactored the live environment to be DRYer.
+            - Refactored the logical module resources into physical module as necessary.
           draft: false
           prerelease: false
