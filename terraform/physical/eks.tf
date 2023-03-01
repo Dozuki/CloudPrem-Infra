@@ -194,7 +194,7 @@ module "eks_cluster" {
 
   # EKS cofigurations
   cluster_name    = local.identifier
-  cluster_version = "1.21"
+  cluster_version = "1.22"
   enable_irsa     = true
   # Need public access even when deploying from AWS due to the occasional inability to access private endpoints.
   cluster_endpoint_public_access                 = true

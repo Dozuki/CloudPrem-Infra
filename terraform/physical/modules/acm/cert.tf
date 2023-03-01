@@ -12,8 +12,9 @@ resource "tls_private_key" "server" {
 resource "tls_cert_request" "server" {
   key_algorithm   = "RSA"
   private_key_pem = tls_private_key.server.private_key_pem
+  dns_names       = [local.ssl_cert_cn]
+
   subject {
-    common_name  = local.ssl_cert_cn
     organization = local.identifier
   }
 }
