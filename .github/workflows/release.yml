@@ -22,9 +22,8 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            KOTS Deployment Update
-            - Use KOTS instead of the deprecated Kubernetes scheduler for Replicated.
-            - Refactored the live environment to be DRYer.
-            - Refactored the logical module resources into physical module as necessary.
+            Kubernetes Upgrade
+            - Update Kubernetes to 1.22
+            - Fix issue with live environment directory structure
           draft: false
           prerelease: false
