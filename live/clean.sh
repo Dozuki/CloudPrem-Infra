@@ -41,7 +41,7 @@ fi
 
 echo "Cleaning standard"
 pushd standard || exit
-#cleanPrefixes
+cleanPrefixes
 for region in *; do
  if [ -d "$region" ]; then
     echo "Cleaning $region"
@@ -52,11 +52,11 @@ done
 cloud-nuke aws --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type iam-role --force --config ../tests/cloud-nuke.yaml
 popd || exit
 
-# echo "Cleaning gov"
-# pushd gov || exit
-# cleanPrefixes
-# awsweeper --region us-gov-west-1 --profile gov --force ../tests/awsweeper.yaml
-# AWS_PROFILE=gov cloud-nuke aws --region us-gov-west-1 --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type macie-member --force --config ../tests/cloud-nuke.yaml
+echo "Cleaning gov"
+pushd gov || exit
+cleanPrefixes
+awsweeper --region us-gov-west-1 --profile gov --force ../tests/awsweeper.yaml
+AWS_PROFILE=gov cloud-nuke aws --region us-gov-west-1 --exclude-resource-type cloudwatch-loggroup --exclude-resource-type lambda --exclude-resource-type macie-member --force --config ../tests/cloud-nuke.yaml
 popd || exit
 
 
