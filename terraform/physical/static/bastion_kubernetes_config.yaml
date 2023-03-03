@@ -15,12 +15,23 @@ parameters:
     type: "String"
     description: "AWS Region"
 mainSteps:
+  - action: aws:runShellScript
+    name: ReplaceAwsCLIv1Tov2
+    inputs:
+      runCommand:
+        - sudo yum remove awscli -y
+        - mkdir tempdir && cd tempdir
+        - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        - unzip awscliv2.zip
+        - sudo ./aws/install
+        - cd ..
+        - rm -rf tempdir
   - action: aws:downloadContent
     name: downloadKubectl
     inputs:
       sourceType: "HTTP"
       sourceInfo:
-        url: "https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubectl"
+        url: "https://dl.k8s.io/release/v1.22.17/bin/linux/amd64/kubectl"
       destinationPath: "/usr/bin/kubectl"
   - action: aws:runShellScript
     name: installK9s
@@ -30,8 +41,7 @@ mainSteps:
         - cd k9stemp
         - curl -LO https://github.com/derailed/k9s/releases/download/v0.27.3/k9s_Linux_amd64.tar.gz
         - tar -xzf k9s_Linux_amd64.tar.gz
-        - sudo mv k9s /usr/local/bin/
-        - sudo chmod +x /usr/local/bin/k9s
+        - sudo cp k9s /usr/local/bin/; sudo cp k9s /usr/bin/
         - cd ..
         - rm -rf k9stemp
   - action: aws:downloadContent
@@ -69,5 +79,6 @@ mainSteps:
       runCommand:
         - chmod 755 /usr/bin/kubectl
         - chmod 755 /usr/bin/helm
+        - chmod 755 /usr/local/bin/k9s; chmod 755 /usr/bin/k9s
         - chown -R ssm-user:ssm-user /home/ssm-user/.kube
         - chmod -R 700 /home/ssm-user/.kube

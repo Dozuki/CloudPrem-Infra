@@ -140,4 +140,10 @@ module "bastion" {
   tags_as_map = merge(local.tags, {
     Role = "Bastion"
   })
+
+  # load launch config with ssm
+  depends_on = [
+    aws_ssm_document.bastion_mysql_config,
+    aws_ssm_document.bastion_kubernetes_config
+  ]
 }
