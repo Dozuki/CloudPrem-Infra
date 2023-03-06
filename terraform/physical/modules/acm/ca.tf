@@ -6,8 +6,9 @@ resource "tls_self_signed_cert" "ca" {
   key_algorithm   = "RSA"
   private_key_pem = tls_private_key.ca.private_key_pem
 
+  dns_names = [local.ssl_ca_cn]
+
   subject {
-    common_name  = local.ssl_ca_cn
     organization = local.identifier
   }
   validity_period_hours = 87600
