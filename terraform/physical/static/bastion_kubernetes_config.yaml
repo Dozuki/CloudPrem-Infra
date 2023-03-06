@@ -15,17 +15,6 @@ parameters:
     type: "String"
     description: "AWS Region"
 mainSteps:
-  - action: aws:runShellScript
-    name: ReplaceAwsCLIv1Tov2
-    inputs:
-      runCommand:
-        - sudo yum remove awscli -y
-        - mkdir tempdir && cd tempdir
-        - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-        - unzip awscliv2.zip
-        - sudo ./aws/install
-        - cd ..
-        - rm -rf tempdir
   - action: aws:downloadContent
     name: downloadKubectl
     inputs:

@@ -19,7 +19,7 @@ mainSteps:
     name: installDeps
     inputs:
       runCommand:
-        - sudo yum install -y jq mariadb
+        - sudo yum install -y jq mariadb105
   - action: aws:runShellScript
     name: configMySQL
     inputs:
