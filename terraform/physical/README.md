@@ -65,20 +65,28 @@
 | [aws_iam_policy.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.cluster_autoscaler_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_iam_role.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_kms_alias.s3_kms_key](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_alias) | resource |
 | [aws_kms_key.bi](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
 | [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
+| [aws_kms_key.s3_kms_key](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
 | [aws_msk_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/msk_cluster) | resource |
 | [aws_msk_configuration.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/msk_configuration) | resource |
-| [aws_s3_bucket.guide_documents](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket.guide_images](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket.guide_objects](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket.guide_pdfs](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket.logging_bucket](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket_public_access_block.guide_documents_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_s3_bucket_public_access_block.guide_images_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_s3_bucket_public_access_block.guide_objects_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_s3_bucket_public_access_block.guide_pdfs_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_acl.guide_buckets_acl](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_acl) | resource |
+| [aws_s3_bucket_acl.logging_bucket_acl](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_acl) | resource |
+| [aws_s3_bucket_cors_configuration.guide_documents](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_cors_configuration) | resource |
+| [aws_s3_bucket_logging.guide_buckets_logging](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_logging) | resource |
+| [aws_s3_bucket_policy.logging_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_policy) | resource |
+| [aws_s3_bucket_public_access_block.guide_buckets_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
 | [aws_s3_bucket_public_access_block.logging_bucket_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_replication_configuration.replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_replication_configuration) | resource |
+| [aws_s3_bucket_server_side_encryption_configuration.guide_buckets_encryption](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_server_side_encryption_configuration) | resource |
+| [aws_s3_bucket_versioning.guide_buckets_versioning](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_versioning) | resource |
+| [aws_s3_bucket_versioning.logging_bucket_versioning_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_versioning) | resource |
 | [aws_secretsmanager_secret.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret_version) | resource |
@@ -100,6 +108,7 @@
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_document) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
+| [null_resource.s3_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
 | [aws_ami.amazon_linux_2](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ami) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/caller_identity) | data source |
@@ -108,15 +117,15 @@
 | [aws_iam_policy_document.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cluster_autoscaler_pd](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.logging_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.s3_replication_assume_role](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
 | [aws_kms_key.rds](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
+| [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/region) | data source |
-| [aws_s3_bucket.documents](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.guide_images](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.guide_objects](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.guide_pdfs](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.logging](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
+| [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
 | [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/subnets) | data source |
 | [aws_subnets.public](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/subnets) | data source |
 | [aws_vpc.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/vpc) | data source |
@@ -134,7 +143,6 @@
 | <a name="input_bi_vpn_access"></a> [bi\_vpn\_access](#input\_bi\_vpn\_access) | NOTE: This is mutually exclusive with public BI access, both cannot be enabled at the same time. If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server. | `bool` | `false` | no |
 | <a name="input_bi_vpn_user_list"></a> [bi\_vpn\_user\_list](#input\_bi\_vpn\_user\_list) | List of users to create OpenVPN configurations for usint mutual authentication. | `list(string)` | <pre>[<br>  "root"<br>]</pre> | no |
 | <a name="input_cf_template_version"></a> [cf\_template\_version](#input\_cf\_template\_version) | Version of the CloudFormation template that deployed this stack for validation | `number` | `0` | no |
-| <a name="input_create_s3_buckets"></a> [create\_s3\_buckets](#input\_create\_s3\_buckets) | Wheter to create the dozuki S3 buckets or not. | `bool` | `true` | no |
 | <a name="input_eks_desired_capacity"></a> [eks\_desired\_capacity](#input\_eks\_desired\_capacity) | This is what the node count will start out as. | `number` | `"3"` | no |
 | <a name="input_eks_instance_types"></a> [eks\_instance\_types](#input\_eks\_instance\_types) | The instance type of each node in the application's EKS worker node group. | `list(string)` | <pre>[<br>  "m5.large",<br>  "m5a.large",<br>  "m5d.large",<br>  "m5ad.large"<br>]</pre> | no |
 | <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
@@ -160,12 +168,8 @@
 | <a name="input_rds_multi_az"></a> [rds\_multi\_az](#input\_rds\_multi\_az) | If true we will tell RDS to automatically deploy and manage a highly available standby instance of your database. Enabling this doubles the cost of the RDS instance but without it you are susceptible to downtime if the AWS availability zone your RDS instance is in becomes unavailable. | `bool` | `true` | no |
 | <a name="input_rds_snapshot_identifier"></a> [rds\_snapshot\_identifier](#input\_rds\_snapshot\_identifier) | We can seed the database from an existing RDS snapshot in this region. Type the snapshot identifier in this field or leave blank to start with a fresh database. Note: If you do use a snapshot it's critical that during stack updates you continue to include the snapshot identifier in this parameter. Clearing this parameter after using it will cause AWS to spin up a new fresh DB and delete your old one. | `string` | `""` | no |
 | <a name="input_replicated_ui_access_cidrs"></a> [replicated\_ui\_access\_cidrs](#input\_replicated\_ui\_access\_cidrs) | These CIDRs will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
-| <a name="input_s3_documents_bucket"></a> [s3\_documents\_bucket](#input\_s3\_documents\_bucket) | Name of the bucket to store documents. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
-| <a name="input_s3_images_bucket"></a> [s3\_images\_bucket](#input\_s3\_images\_bucket) | Name of the bucket to store guide images. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
-| <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `"alias/aws/s3"` | no |
-| <a name="input_s3_logging_bucket"></a> [s3\_logging\_bucket](#input\_s3\_logging\_bucket) | Name of the bucket to store bucket object access logs. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
-| <a name="input_s3_objects_bucket"></a> [s3\_objects\_bucket](#input\_s3\_objects\_bucket) | Name of the bucket to store guide objects. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
-| <a name="input_s3_pdfs_bucket"></a> [s3\_pdfs\_bucket](#input\_s3\_pdfs\_bucket) | Name of the bucket to store guide pdfs. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
+| <a name="input_s3_existing_buckets"></a> [s3\_existing\_buckets](#input\_s3\_existing\_buckets) | List of the existing Dozuki buckets to use. Do not include the logging bucket. | <pre>list(object({<br>    type        = string<br>    bucket_name = string<br>  }))</pre> | `[]` | no |
+| <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | `"172.16.0.0/16"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private | `string` | `""` | no |
 
@@ -196,6 +200,8 @@
 | <a name="output_nlb_ssl_cert_parameter"></a> [nlb\_ssl\_cert\_parameter](#output\_nlb\_ssl\_cert\_parameter) | Parameter name for the NLB SSL cert |
 | <a name="output_nlb_ssl_key_parameter"></a> [nlb\_ssl\_key\_parameter](#output\_nlb\_ssl\_key\_parameter) | Parameter name for the NLB SSL cert key |
 | <a name="output_primary_db_secret"></a> [primary\_db\_secret](#output\_primary\_db\_secret) | Secretmanager ARN to MySQL credential storage |
+| <a name="output_s3_kms_key_id"></a> [s3\_kms\_key\_id](#output\_s3\_kms\_key\_id) | n/a |
+| <a name="output_s3_replicate_buckets"></a> [s3\_replicate\_buckets](#output\_s3\_replicate\_buckets) | n/a |
 | <a name="output_termination_handler_role_arn"></a> [termination\_handler\_role\_arn](#output\_termination\_handler\_role\_arn) | IAM Role arn for EKS node termination handler |
 | <a name="output_termination_handler_sqs_queue_id"></a> [termination\_handler\_sqs\_queue\_id](#output\_termination\_handler\_sqs\_queue\_id) | SQS Queue ID for EKS node termination handler |
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | VPC ID |

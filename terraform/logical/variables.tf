@@ -141,7 +141,7 @@ variable "memcached_cluster_address" {
 variable "s3_kms_key_id" {
   description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
-  default     = "alias/aws/s3"
+  default     = ""
 }
 
 variable "s3_objects_bucket" {
@@ -166,6 +166,12 @@ variable "s3_pdfs_bucket" {
   description = "Name of the bucket to store guide pdfs. Use with 'create_s3_buckets' = false."
   type        = string
   default     = ""
+}
+
+variable "s3_replicate_buckets" {
+  description = "Whether or not we are replicating objects from existing S3 buckets."
+  type        = bool
+  default     = false
 }
 
 # This needs to have no type due to terraform's weird handling of string lists. If you set a type it will convert it to

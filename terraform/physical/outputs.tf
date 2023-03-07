@@ -51,16 +51,22 @@ output "primary_db_secret" {
   value       = aws_secretsmanager_secret.primary_database_credentials.arn
 }
 output "guide_images_bucket" {
-  value = local.guide_images_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["image"], "bucket", null)
 }
 output "guide_objects_bucket" {
-  value = local.guide_objects_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["obj"], "bucket", null)
 }
 output "guide_pdfs_bucket" {
-  value = local.guide_pdfs_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["pdf"], "bucket", null)
 }
 output "documents_bucket" {
-  value = local.documents_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["doc"], "bucket", null)
+}
+output "s3_kms_key_id" {
+  value = aws_kms_key.s3_kms_key.arn
+}
+output "s3_replicate_buckets" {
+  value = local.use_existing_buckets
 }
 output "memcached_cluster_address" {
   value = aws_elasticache_cluster.this.cluster_address

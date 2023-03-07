@@ -25,3 +25,7 @@ output "grafana_admin_password" {
   description = "Password for Grafana admin user"
   value       = local.grafana_admin_password
 }
+
+output "replicate_instructions" {
+  value = var.s3_replicate_buckets ? "NOTE: Be sure to verify the Replicate Batch Operations complete successfully before deleting the donor buckets!" : null
+}

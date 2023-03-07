@@ -109,6 +109,8 @@ dependency "physical" {
     guide_objects_bucket = "dummy-objects-bucket"
     documents_bucket = "dummy-documents-bucket"
     guide_pdfs_bucket = "dummy-pdfs-bucket"
+    s3_kms_key_id = "dummy-kms-arn"
+    s3_replicate_buckets = "false"
     memcached_cluster_address = "dummy-memcache"
     dms_task_arn = "dummy-dms-arn"
     bi_database_credential_secret = "dummy-secret"
@@ -142,6 +144,8 @@ inputs = {
   s3_objects_bucket = dependency.physical.outputs.guide_objects_bucket
   s3_documents_bucket = dependency.physical.outputs.documents_bucket
   s3_pdfs_bucket = dependency.physical.outputs.guide_pdfs_bucket
+  s3_kms_key_id = dependency.physical.outputs.s3_kms_key_id
+  s3_replicate_buckets = dependency.physical.outputs.s3_replicate_buckets
   memcached_cluster_address = dependency.physical.outputs.memcached_cluster_address
   dms_task_arn = dependency.physical.outputs.dms_task_arn
   grafana_ssl_server_cert_parameter = dependency.physical.outputs.grafana_ssl_cert_parameter

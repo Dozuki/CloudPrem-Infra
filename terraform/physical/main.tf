@@ -52,11 +52,24 @@ locals {
   replicated_ui_access_cidrs          = var.replicated_ui_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.replicated_ui_access_cidrs) : var.replicated_ui_access_cidrs
 
   # S3 Buckets
-  guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket
-  guide_objects_bucket = var.create_s3_buckets ? aws_s3_bucket.guide_objects[0].bucket : data.aws_s3_bucket.guide_objects[0].bucket
-  guide_pdfs_bucket    = var.create_s3_buckets ? aws_s3_bucket.guide_pdfs[0].bucket : data.aws_s3_bucket.guide_pdfs[0].bucket
-  documents_bucket     = var.create_s3_buckets ? aws_s3_bucket.guide_documents[0].bucket : data.aws_s3_bucket.documents[0].bucket
-  logging_bucket       = var.create_s3_buckets ? aws_s3_bucket.logging_bucket[0].bucket : data.aws_s3_bucket.logging[0].bucket
+  // If all 4 guide buckets are specified we use them as a replication source.
+  use_existing_buckets = length(var.s3_existing_buckets) == 4 ? true : false
+
+  // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
+  // The format of the s3_existing_buckets object is important and described in the variables.tf file.
+  existing_s3_bucket_names = local.use_existing_buckets ? var.s3_existing_buckets : []
+
+  // Do not change these values without modifying the `moved` blocks in s3.tf
+  create_s3_bucket_names = ["image", "obj", "pdf", "doc"]
+
+  // Build a list of maps of existing buckets with their prefix, source, and destination in this format:
+  //{ type = one of local.create_s3_bucket_names, destination = arn of destination bucket for replication, source = arn of source bucket for replication }
+  existing_bucket_map = local.use_existing_buckets ? [for _, bucket_type in local.create_s3_bucket_names : { type = bucket_type, destination = aws_s3_bucket.guide_buckets[bucket_type].arn, source = data.aws_s3_bucket.guide_buckets[bucket_type].bucket }] : []
+
+  // Build lists for IAM policies to include all the source and destination buckets and objects
+  s3_source_bucket_arn_list                   = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : bucket.arn] : []
+  s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"] : []
+  s3_destination_bucket_arn_list_with_objects = [for _, bucket in one(flatten(toset(aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"]
 
   # VPC
   azs_count          = var.azs_count

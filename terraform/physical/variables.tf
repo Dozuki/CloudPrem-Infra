@@ -86,43 +86,16 @@ variable "highly_available_nat_gateway" {
 variable "s3_kms_key_id" {
   description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
-  default     = "alias/aws/s3"
-}
-
-variable "create_s3_buckets" {
-  description = "Wheter to create the dozuki S3 buckets or not."
-  type        = bool
-  default     = true
-}
-
-variable "s3_objects_bucket" {
-  description = "Name of the bucket to store guide objects. Use with 'create_s3_buckets' = false."
-  type        = string
   default     = ""
 }
 
-variable "s3_images_bucket" {
-  description = "Name of the bucket to store guide images. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
-}
-
-variable "s3_documents_bucket" {
-  description = "Name of the bucket to store documents. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
-}
-
-variable "s3_pdfs_bucket" {
-  description = "Name of the bucket to store guide pdfs. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
-}
-
-variable "s3_logging_bucket" {
-  description = "Name of the bucket to store bucket object access logs. Use with 'create_s3_buckets' = false."
-  type        = string
-  default     = ""
+variable "s3_existing_buckets" {
+  description = "List of the existing Dozuki buckets to use. Do not include the logging bucket."
+  type = list(object({
+    type        = string
+    bucket_name = string
+  }))
+  default = []
 }
 
 variable "rds_kms_key_id" {
