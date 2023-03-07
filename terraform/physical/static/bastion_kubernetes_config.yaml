@@ -30,7 +30,7 @@ mainSteps:
         - cd k9stemp
         - curl -LO https://github.com/derailed/k9s/releases/download/v0.27.3/k9s_Linux_amd64.tar.gz
         - tar -xzf k9s_Linux_amd64.tar.gz
-        - sudo cp k9s /usr/local/bin/; sudo cp k9s /usr/bin/
+        - cp k9s /usr/bin/
         - cd ..
         - rm -rf k9stemp
   - action: aws:downloadContent
