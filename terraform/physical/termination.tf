@@ -24,7 +24,7 @@ data "aws_iam_policy_document" "aws_node_termination_handler" {
       "sqs:ReceiveMessage"
     ]
     resources = [
-      module.aws_node_termination_handler_sqs.sqs_queue_arn
+      module.aws_node_termination_handler_sqs.queue_arn
     ]
   }
 }
@@ -33,32 +33,11 @@ resource "aws_iam_policy" "aws_node_termination_handler" {
   policy = data.aws_iam_policy_document.aws_node_termination_handler.json
 }
 
-data "aws_iam_policy_document" "aws_node_termination_handler_events" {
-  statement {
-    effect = "Allow"
-    principals {
-      type = "Service"
-      identifiers = [
-        "events.amazonaws.com",
-        "sqs.amazonaws.com",
-      ]
-    }
-    actions = [
-      "sqs:SendMessage",
-    ]
-    resources = [
-      "arn:${data.aws_partition.current.partition}:sqs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${local.identifier}",
-    ]
-  }
-}
-
-
 module "aws_node_termination_handler_sqs" {
   source                    = "terraform-aws-modules/sqs/aws"
-  version                   = "~> 3.1.0"
+  version                   = "~> 4.0.1"
   name                      = local.identifier
   message_retention_seconds = 300
-  policy                    = data.aws_iam_policy_document.aws_node_termination_handler_events.json
 }
 
 resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_asg" {
@@ -80,7 +59,7 @@ resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_asg" {
 resource "aws_cloudwatch_event_target" "aws_node_termination_handler_asg" {
   target_id = "${local.identifier}-asg-termination"
   rule      = aws_cloudwatch_event_rule.aws_node_termination_handler_asg.name
-  arn       = module.aws_node_termination_handler_sqs.sqs_queue_arn
+  arn       = module.aws_node_termination_handler_sqs.queue_arn
 }
 
 resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_spot" {
@@ -102,12 +81,12 @@ resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_spot" {
 resource "aws_cloudwatch_event_target" "aws_node_termination_handler_spot" {
   target_id = "${local.identifier}-spot-termination"
   rule      = aws_cloudwatch_event_rule.aws_node_termination_handler_spot.name
-  arn       = module.aws_node_termination_handler_sqs.sqs_queue_arn
+  arn       = module.aws_node_termination_handler_sqs.queue_arn
 }
 
 module "aws_node_termination_handler_role" {
   source                        = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version                       = "4.7.0"
+  version                       = "5.11.2"
   create_role                   = true
   role_description              = "IRSA role for ANTH, cluster ${local.identifier}"
   role_name_prefix              = local.identifier

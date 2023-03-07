@@ -28,7 +28,7 @@ output "termination_handler_role_arn" {
 }
 output "termination_handler_sqs_queue_id" {
   description = "SQS Queue ID for EKS node termination handler"
-  value       = module.aws_node_termination_handler_sqs.sqs_queue_id
+  value       = module.aws_node_termination_handler_sqs.queue_id
 }
 output "nlb_dns_name" {
   description = "URL to deployed application"
@@ -80,7 +80,6 @@ output "bi_database_credential_secret" {
   description = "If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database."
   value       = try(aws_secretsmanager_secret.replica_database_credentials[0].arn, "")
 }
-
 output "bi_vpn_configuration_bucket" {
   description = "If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet."
   value       = try(module.vpn[0].aws_vpn_configuration_bucket, "")
@@ -94,5 +93,5 @@ output "grafana_ssl_key_parameter" {
   value       = try(module.grafana_ssl_cert.ssm_server_key.name, "")
 }
 output "bastion_asg_name" {
-  value = module.bastion.this_autoscaling_group_name
+  value = module.bastion.autoscaling_group_name
 }

@@ -2,10 +2,10 @@ terraform {
   required_version = ">= 1.1.0"
 
   required_providers {
-    aws        = "3.70.0"
-    kubernetes = "2.13.1"
-    helm       = "2.3.0"
-    null       = "3.1.0"
+    aws        = "4.57.0"
+    kubernetes = "2.18.1"
+    helm       = "2.9.0"
+    null       = "3.2.1"
     # This provider needs to stay for awhile to maintain backwards compatibility with older infra versions (<=2.5.4)
     local  = "2.2.3"
     random = "3.4.3"

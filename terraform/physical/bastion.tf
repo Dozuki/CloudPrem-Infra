@@ -14,7 +14,7 @@ data "aws_ami" "amazon_linux_2" {
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 module "bastion_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.7.0"
+  version = "4.17.1"
 
   name            = "${local.identifier}-bastion"
   use_name_prefix = false
@@ -24,27 +24,6 @@ module "bastion_sg" {
   egress_rules = ["all-tcp"]
 }
 
-module "bastion_role" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
-  version = "4.7.0"
-
-  create_role = true
-
-  role_name               = "${local.identifier}-${data.aws_region.current.name}-bastion"
-  role_requires_mfa       = false
-  create_instance_profile = true
-
-  custom_role_policy_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEC2RoleforSSM",
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
-  ]
-
-  trusted_role_services = [
-    "ec2.amazonaws.com",
-  ]
-
-  tags = local.tags
-}
 resource "aws_ssm_document" "bastion_mysql_config" {
   name            = "BastionMySQLConfig-${local.identifier}"
   document_type   = "Command"
@@ -111,24 +90,28 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
   }
 }
 
-
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
-  version = "3.8.0"
+  version = "6.7.1"
 
   name = "${local.identifier}-bastion"
 
-  iam_instance_profile = module.bastion_role.iam_instance_profile_arn
+  create_iam_instance_profile = true
+  iam_role_name               = "${local.identifier}-${data.aws_region.current.name}-bastion"
+  iam_role_path               = "/ec2/"
+  iam_role_description        = "Bastion IAM Role"
+  iam_role_tags = {
+    CustomIamRole = "Yes"
+  }
+  iam_role_policies = {
+    AmazonSSMManagedInstanceCore = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+    AdministratorAccess          = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
+  }
 
-  image_id                     = data.aws_ami.amazon_linux_2.id
-  instance_type                = "t3.micro"
-  security_groups              = [module.bastion_sg.security_group_id]
-  associate_public_ip_address  = false
-  recreate_asg_when_lc_changes = true
-
-  # Leave it blank because it is a required variable but we don't use userdata anymore
-  user_data_base64 = ""
+  image_id        = data.aws_ami.amazon_linux_2.id
+  instance_type   = "t3.micro"
+  security_groups = [module.bastion_sg.security_group_id]
 
   # Auto scaling group
   vpc_zone_identifier = local.private_subnet_ids
@@ -137,7 +120,7 @@ module "bastion" {
   max_size            = 1
   desired_capacity    = 1
 
-  tags_as_map = merge(local.tags, {
+  tags = merge(local.tags, {
     Role = "Bastion"
   })
 }

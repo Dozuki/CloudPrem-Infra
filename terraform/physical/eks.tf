@@ -50,7 +50,7 @@ data "aws_iam_policy_document" "cluster_autoscaler_pd" {
 # IAM role that the bastion host can assume.
 module "cluster_access_role_assumable" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
-  version = "4.7.0"
+  version = "5.11.2"
 
   create_role = true
 
@@ -72,7 +72,7 @@ module "cluster_access_role_assumable" {
 # IAM role to access the EKS cluster. By default only the user that creates the cluster has access to it
 module "cluster_access_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version = "4.7.0"
+  version = "5.11.2"
 
   create_role = true
   role_name   = local.cluster_access_role_name

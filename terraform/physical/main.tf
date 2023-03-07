@@ -2,10 +2,10 @@ terraform {
   required_version = ">= 1.1.0"
 
   required_providers {
-    aws        = "3.70.0"
+    aws        = "4.57.0"
     random     = "3.4.3"
-    kubernetes = "2.13.1"
-    null       = "3.1.0"
+    kubernetes = "2.18.1"
+    null       = "3.2.1"
   }
 }
 provider "kubernetes" {

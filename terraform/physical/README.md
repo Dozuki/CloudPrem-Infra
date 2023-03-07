@@ -4,128 +4,123 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.1.0 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | 3.70.0 |
-| <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | 2.13.1 |
-| <a name="requirement_null"></a> [null](#requirement\_null) | 3.1.0 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | 4.57.0 |
+| <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | 2.18.1 |
+| <a name="requirement_null"></a> [null](#requirement\_null) | 3.2.1 |
 | <a name="requirement_random"></a> [random](#requirement\_random) | 3.4.3 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 3.70.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.1.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.4.3 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 4.57.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | 3.2.1 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_aws_node_termination_handler_role"></a> [aws\_node\_termination\_handler\_role](#module\_aws\_node\_termination\_handler\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 4.7.0 |
-| <a name="module_aws_node_termination_handler_sqs"></a> [aws\_node\_termination\_handler\_sqs](#module\_aws\_node\_termination\_handler\_sqs) | terraform-aws-modules/sqs/aws | ~> 3.1.0 |
-| <a name="module_bastion"></a> [bastion](#module\_bastion) | terraform-aws-modules/autoscaling/aws | 3.8.0 |
-| <a name="module_bastion_role"></a> [bastion\_role](#module\_bastion\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 4.7.0 |
-| <a name="module_bastion_sg"></a> [bastion\_sg](#module\_bastion\_sg) | terraform-aws-modules/security-group/aws | 4.7.0 |
-| <a name="module_bi_database_sg"></a> [bi\_database\_sg](#module\_bi\_database\_sg) | terraform-aws-modules/security-group/aws | 4.7.0 |
-| <a name="module_cluster_access_role"></a> [cluster\_access\_role](#module\_cluster\_access\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 4.7.0 |
-| <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 4.7.0 |
-| <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
+| <a name="module_aws_node_termination_handler_role"></a> [aws\_node\_termination\_handler\_role](#module\_aws\_node\_termination\_handler\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 5.11.2 |
+| <a name="module_aws_node_termination_handler_sqs"></a> [aws\_node\_termination\_handler\_sqs](#module\_aws\_node\_termination\_handler\_sqs) | terraform-aws-modules/sqs/aws | ~> 4.0.1 |
+| <a name="module_bastion"></a> [bastion](#module\_bastion) | terraform-aws-modules/autoscaling/aws | 6.7.1 |
+| <a name="module_bastion_sg"></a> [bastion\_sg](#module\_bastion\_sg) | terraform-aws-modules/security-group/aws | 4.17.1 |
+| <a name="module_bi_database_sg"></a> [bi\_database\_sg](#module\_bi\_database\_sg) | terraform-aws-modules/security-group/aws | 4.17.1 |
+| <a name="module_cluster_access_role"></a> [cluster\_access\_role](#module\_cluster\_access\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 5.11.2 |
+| <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 5.11.2 |
+| <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.24.0 |
 | <a name="module_grafana_ssl_cert"></a> [grafana\_ssl\_cert](#module\_grafana\_ssl\_cert) | ./modules/acm | n/a |
-| <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
-| <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 6.6.1 |
+| <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
+| <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 8.4.0 |
 | <a name="module_nlb_ssl_cert"></a> [nlb\_ssl\_cert](#module\_nlb\_ssl\_cert) | ./modules/acm | n/a |
-| <a name="module_nodes_alarm"></a> [nodes\_alarm](#module\_nodes\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
-| <a name="module_primary_database"></a> [primary\_database](#module\_primary\_database) | terraform-aws-modules/rds/aws | 3.4.1 |
-| <a name="module_primary_database_sg"></a> [primary\_database\_sg](#module\_primary\_database\_sg) | terraform-aws-modules/security-group/aws | 4.7.0 |
-| <a name="module_replica_database"></a> [replica\_database](#module\_replica\_database) | terraform-aws-modules/rds/aws | 3.4.1 |
-| <a name="module_sns"></a> [sns](#module\_sns) | terraform-aws-modules/sns/aws | 2.1.0 |
-| <a name="module_status_alarm"></a> [status\_alarm](#module\_status\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 2.1.0 |
-| <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 3.14.1 |
+| <a name="module_nodes_alarm"></a> [nodes\_alarm](#module\_nodes\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
+| <a name="module_primary_database"></a> [primary\_database](#module\_primary\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
+| <a name="module_primary_database_sg"></a> [primary\_database\_sg](#module\_primary\_database\_sg) | terraform-aws-modules/security-group/aws | 4.17.1 |
+| <a name="module_replica_database"></a> [replica\_database](#module\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
+| <a name="module_sns"></a> [sns](#module\_sns) | terraform-aws-modules/sns/aws | 5.1.0 |
+| <a name="module_status_alarm"></a> [status\_alarm](#module\_status\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
+| <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 3.19.0 |
 | <a name="module_vpn"></a> [vpn](#module\_vpn) | ./modules/vpn | n/a |
 
 ## Resources
 
 | Name | Type |
 |------|------|
-| [aws_cloudwatch_event_rule.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/cloudwatch_event_rule) | resource |
-| [aws_cloudwatch_event_rule.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/cloudwatch_event_rule) | resource |
-| [aws_cloudwatch_event_target.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/cloudwatch_event_target) | resource |
-| [aws_cloudwatch_event_target.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/cloudwatch_event_target) | resource |
-| [aws_db_parameter_group.bi](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/db_parameter_group) | resource |
-| [aws_db_parameter_group.default](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/db_parameter_group) | resource |
-| [aws_dms_certificate.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_certificate) | resource |
-| [aws_dms_endpoint.source](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_endpoint) | resource |
-| [aws_dms_endpoint.target](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_endpoint) | resource |
-| [aws_dms_replication_instance.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_replication_instance) | resource |
-| [aws_dms_replication_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_replication_subnet_group) | resource |
-| [aws_dms_replication_task.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/dms_replication_task) | resource |
-| [aws_elasticache_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/elasticache_cluster) | resource |
-| [aws_elasticache_parameter_group.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/elasticache_parameter_group) | resource |
-| [aws_elasticache_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/elasticache_subnet_group) | resource |
-| [aws_iam_policy.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/iam_policy) | resource |
-| [aws_iam_policy.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/iam_policy) | resource |
-| [aws_iam_policy.cluster_autoscaler_policy](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/iam_policy) | resource |
-| [aws_iam_policy.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/iam_policy) | resource |
-| [aws_kms_key.bi](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/kms_key) | resource |
-| [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/kms_key) | resource |
-| [aws_msk_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/msk_cluster) | resource |
-| [aws_msk_configuration.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/msk_configuration) | resource |
-| [aws_s3_bucket.guide_documents](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket.guide_images](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket.guide_objects](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket.guide_pdfs](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket.logging_bucket](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket) | resource |
-| [aws_s3_bucket_public_access_block.guide_documents_acl_block](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_s3_bucket_public_access_block.guide_images_acl_block](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_s3_bucket_public_access_block.guide_objects_acl_block](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_s3_bucket_public_access_block.guide_pdfs_acl_block](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_s3_bucket_public_access_block.logging_bucket_acl_block](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/s3_bucket_public_access_block) | resource |
-| [aws_secretsmanager_secret.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret) | resource |
-| [aws_secretsmanager_secret.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret) | resource |
-| [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret_version) | resource |
-| [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/secretsmanager_secret_version) | resource |
-| [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group) | resource |
-| [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group) | resource |
-| [aws_security_group_rule.app_access_http](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.app_access_https](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.grafana_access_http](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.replicated_ui_access](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/security_group_rule) | resource |
-| [aws_ssm_association.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_association) | resource |
-| [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_association) | resource |
-| [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_document) | resource |
-| [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/resources/ssm_document) | resource |
-| [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/3.1.0/docs/resources/resource) | resource |
-| [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/3.1.0/docs/resources/resource) | resource |
-| [random_password.primary_database](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
-| [random_password.replica_database](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
-| [aws_ami.amazon_linux_2](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/ami) | data source |
-| [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/availability_zones) | data source |
-| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/caller_identity) | data source |
-| [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/eks_cluster) | data source |
-| [aws_iam_policy_document.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
-| [aws_iam_policy_document.aws_node_termination_handler_events](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
-| [aws_iam_policy_document.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
-| [aws_iam_policy_document.cluster_autoscaler_pd](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
-| [aws_iam_policy_document.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/iam_policy_document) | data source |
-| [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/kms_key) | data source |
-| [aws_kms_key.rds](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/kms_key) | data source |
-| [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/kms_key) | data source |
-| [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/partition) | data source |
-| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/region) | data source |
-| [aws_s3_bucket.documents](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.guide_images](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.guide_objects](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.guide_pdfs](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
-| [aws_s3_bucket.logging](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/s3_bucket) | data source |
-| [aws_subnet_ids.private](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/subnet_ids) | data source |
-| [aws_subnet_ids.public](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/subnet_ids) | data source |
-| [aws_vpc.this](https://registry.terraform.io/providers/hashicorp/aws/3.70.0/docs/data-sources/vpc) | data source |
+| [aws_cloudwatch_event_rule.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
+| [aws_cloudwatch_event_rule.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
+| [aws_cloudwatch_event_target.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
+| [aws_cloudwatch_event_target.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
+| [aws_db_parameter_group.bi](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/db_parameter_group) | resource |
+| [aws_db_parameter_group.default](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/db_parameter_group) | resource |
+| [aws_dms_certificate.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_certificate) | resource |
+| [aws_dms_endpoint.source](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_endpoint) | resource |
+| [aws_dms_endpoint.target](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_endpoint) | resource |
+| [aws_dms_replication_instance.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_replication_instance) | resource |
+| [aws_dms_replication_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_replication_subnet_group) | resource |
+| [aws_dms_replication_task.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_replication_task) | resource |
+| [aws_elasticache_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/elasticache_cluster) | resource |
+| [aws_elasticache_parameter_group.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/elasticache_parameter_group) | resource |
+| [aws_elasticache_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/elasticache_subnet_group) | resource |
+| [aws_iam_policy.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.cluster_autoscaler_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_kms_key.bi](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
+| [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
+| [aws_msk_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/msk_cluster) | resource |
+| [aws_msk_configuration.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/msk_configuration) | resource |
+| [aws_s3_bucket.guide_documents](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket.guide_images](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket.guide_objects](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket.guide_pdfs](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket.logging_bucket](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket_public_access_block.guide_documents_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_public_access_block.guide_images_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_public_access_block.guide_objects_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_public_access_block.guide_pdfs_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_public_access_block.logging_bucket_acl_block](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_secretsmanager_secret.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret) | resource |
+| [aws_secretsmanager_secret.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret) | resource |
+| [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret_version) | resource |
+| [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret_version) | resource |
+| [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group) | resource |
+| [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group) | resource |
+| [aws_security_group_rule.app_access_http](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.app_access_https](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.grafana_access_http](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.replicated_ui_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_ssm_association.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_association) | resource |
+| [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_association) | resource |
+| [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_document) | resource |
+| [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_document) | resource |
+| [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
+| [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
+| [aws_ami.amazon_linux_2](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ami) | data source |
+| [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/availability_zones) | data source |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/caller_identity) | data source |
+| [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/eks_cluster) | data source |
+| [aws_iam_policy_document.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.cluster_autoscaler_pd](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
+| [aws_kms_key.rds](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
+| [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
+| [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/partition) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/region) | data source |
+| [aws_s3_bucket.documents](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
+| [aws_s3_bucket.guide_images](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
+| [aws_s3_bucket.guide_objects](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
+| [aws_s3_bucket.guide_pdfs](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
+| [aws_s3_bucket.logging](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |
+| [aws_subnet_ids.private](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/subnet_ids) | data source |
+| [aws_subnet_ids.public](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/subnet_ids) | data source |
+| [aws_vpc.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/vpc) | data source |
 
 ## Inputs
 
