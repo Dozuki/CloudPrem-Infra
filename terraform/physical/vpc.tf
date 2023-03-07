@@ -1,3 +1,32 @@
+data "aws_vpc" "this" {
+  count = local.create_vpc ? 0 : 1
+  id    = var.vpc_id
+}
+
+data "aws_subnets" "public" {
+  count = local.create_vpc ? 0 : 1
+
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+  tags = {
+    type = "public"
+  }
+}
+
+data "aws_subnets" "private" {
+  count = local.create_vpc ? 0 : 1
+
+  filter {
+    name   = "vpc-id"
+    values = [var.vpc_id]
+  }
+  tags = {
+    type = "private"
+  }
+}
+
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "3.19.0"

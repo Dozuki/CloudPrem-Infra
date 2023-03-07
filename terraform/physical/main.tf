@@ -63,49 +63,15 @@ locals {
   create_vpc         = var.vpc_id == "" ? true : false
   vpc_id             = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
-  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnet_ids.public[0].ids
-  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private[0].ids
+  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnets.public[0].ids
+  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnets.private[0].ids
 }
+
+# Provider and global data resources
 data "aws_eks_cluster" "main" {
   name = module.eks_cluster.cluster_id
 }
-
 data "aws_partition" "current" {}
 data "aws_availability_zones" "available" {}
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
-
-data "aws_vpc" "this" {
-  count = local.create_vpc ? 0 : 1
-  id    = var.vpc_id
-}
-data "aws_subnet_ids" "public" {
-  count = local.create_vpc ? 0 : 1
-
-  vpc_id = var.vpc_id
-
-  tags = {
-    type = "public"
-  }
-}
-data "aws_subnet_ids" "private" {
-  count = local.create_vpc ? 0 : 1
-
-  vpc_id = var.vpc_id
-
-  tags = {
-    type = "private"
-  }
-}
-
-data "aws_kms_key" "rds" {
-  key_id = var.rds_kms_key_id
-}
-data "aws_kms_key" "s3" {
-  key_id = var.s3_kms_key_id
-}
-data "aws_kms_key" "eks" {
-  count = local.create_eks_kms ? 0 : 1
-
-  key_id = var.eks_kms_key_id
-}

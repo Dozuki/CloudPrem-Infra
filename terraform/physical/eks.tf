@@ -1,3 +1,9 @@
+data "aws_kms_key" "eks" {
+  count = local.create_eks_kms ? 0 : 1
+
+  key_id = var.eks_kms_key_id
+}
+
 resource "aws_iam_policy" "cluster_autoscaler_policy" {
   name_prefix = "cluster-autoscaler"
   description = "EKS cluster-autoscaler policy for cluster ${module.eks_cluster.cluster_id}"
