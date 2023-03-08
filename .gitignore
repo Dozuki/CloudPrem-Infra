@@ -9,3 +9,5 @@ tfvars
 test_output*
 /live/gov/
 /live/standard/
+/live/.skel/partitions/standard/account.hcl
+/live/.skel/partitions/gov/account.hcl
