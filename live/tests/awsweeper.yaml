@@ -73,15 +73,21 @@ aws_lb_target_group:
   - tags:
       Terraform: true
 aws_iam_instance_profile:
-  - id: (.*dozuki.*)
+  - tags:
+      Terraform: true
 aws_iam_policy:
-  - id: (.*dozuki.*|cluster\-autoscaler.*)
+  - tags:
+      Terraform: true
 aws_iam_role:
-  - id: (.*dozuki.*)
+  - tags:
+      Terraform: true
 aws_iam_user:
-  - id: (.*dozuki.*)
+  - tags:
+      Terraform: true
 aws_msk_configuration:
   - id: (.*dozuki.*)
+  - tags:
+      Terraform: true
 aws_msk_cluster:
   - tags:
       Terraform: true
