@@ -318,6 +318,19 @@ resource "aws_s3_bucket" "logging_bucket" {
   force_destroy = !var.protect_resources
 }
 
+resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_encryption" {
+
+  bucket = aws_s3_bucket.logging_bucket.bucket
+
+  rule {
+    bucket_key_enabled = false
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.s3_kms_key.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
 # Begin creating buckets and associated bucket resources dynamically
 resource "aws_s3_bucket" "guide_buckets" {
   for_each = toset(local.create_s3_bucket_names)
