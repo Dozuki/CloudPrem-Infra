@@ -1,4 +1,4 @@
-data "aws_ami" "amazon_linux_2" {
+data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
@@ -6,7 +6,7 @@ data "aws_ami" "amazon_linux_2" {
     name = "name"
 
     values = [
-      "amzn2-ami-hvm-*-x86_64-gp2",
+      "al2023-ami-2023.*-x86_64",
     ]
   }
 }
@@ -111,7 +111,6 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
   }
 }
 
-
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
@@ -121,7 +120,7 @@ module "bastion" {
 
   iam_instance_profile = module.bastion_role.iam_instance_profile_arn
 
-  image_id                     = data.aws_ami.amazon_linux_2.id
+  image_id                     = data.aws_ami.amazon_linux_2023.id
   instance_type                = "t3.micro"
   security_groups              = [module.bastion_sg.security_group_id]
   associate_public_ip_address  = false
