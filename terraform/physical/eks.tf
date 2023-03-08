@@ -218,6 +218,10 @@ module "eks_cluster" {
   vpc_id  = local.vpc_id
   subnets = local.private_subnet_ids
 
+  workers_group_defaults = {
+    instance_type = var.eks_instance_types[0]
+  }
+
   workers_additional_policies = [
     aws_iam_policy.eks_worker.arn,
   ]
