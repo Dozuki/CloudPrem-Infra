@@ -1,6 +1,6 @@
 resource "aws_s3_bucket_versioning" "vpn_config_versioning_block" {
 
-  bucket = aws_s3_bucket.vpn-config-files
+  bucket = aws_s3_bucket.vpn-config-files.bucket
 
   versioning_configuration {
     status = "Enabled"
