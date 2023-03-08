@@ -19,7 +19,11 @@ const AWSGovDefaultProfile = "gov"
 
 const TgStatePrefixVar = "TG_STATE_PREFIX"
 
-const AWSGovEKSInstanceTypes = "[\"m5.large\", \"m5a.large\", \"m5d.large\"]"
+var AWSRDSInstanceTypes = []string{"db.m4.large", "db.m5.large"}
+var AWSBastionInstanceTypes = []string{"t2.micro", "t3.micro"}
+
+var AWSStandardAllowedRegions = []string{"us-east-1", "us-east-2", "us-west-2", "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "ap-southeast-2"}
+var AWSGovAllowedRegions = []string{"us-gov-west-1"}
 
 type Environment struct {
 	Identifier                string `yaml:"identifier" physical:"true" logical:"true"`
@@ -150,11 +154,4 @@ func BuildEnvVars(prefix string) map[string]string {
 	return map[string]string{
 		TgStatePrefixVar: prefix,
 	}
-}
-
-// GovInstanceOverrides Override the default EKS Instance types to exclude the m5ad.large that is not available in every
-// us-gov-west-1 AZ
-// @todo This needs to be handled inside the terraform
-func GovInstanceOverrides(tc *InfraTest) {
-	tc.Environment.EKSInstanceTypes = AWSGovEKSInstanceTypes
 }
