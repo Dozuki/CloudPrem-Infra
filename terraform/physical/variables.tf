@@ -46,6 +46,12 @@ variable "cf_template_version" {
   }
 }
 
+variable "bastion_instance_type" {
+  description = "Instance type for the embedded SSH bastion"
+  type        = string
+  default     = "t3.micro"
+}
+
 # --- END General Configuration --- #
 
 # --- BEGIN Network Configuration --- #
@@ -84,7 +90,7 @@ variable "highly_available_nat_gateway" {
 # --- BEGIN Storage Configuration --- #
 
 variable "s3_kms_key_id" {
-  description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
+  description = "AWS KMS key identifier for S3 encryption of migration source. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
   default     = ""
 }

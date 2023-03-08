@@ -93,7 +93,7 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
-  version = "6.7.1"
+  version = "6.9.0"
 
   name = "${local.identifier}-bastion"
 
@@ -110,15 +110,16 @@ module "bastion" {
   }
 
   image_id        = data.aws_ami.amazon_linux_2.id
-  instance_type   = "t3.micro"
+  instance_type   = var.bastion_instance_type
   security_groups = [module.bastion_sg.security_group_id]
 
   # Auto scaling group
-  vpc_zone_identifier = local.private_subnet_ids
-  health_check_type   = "EC2"
-  min_size            = 1
-  max_size            = 1
-  desired_capacity    = 1
+  vpc_zone_identifier    = local.private_subnet_ids
+  health_check_type      = "EC2"
+  min_size               = 1
+  max_size               = 1
+  desired_capacity       = 1
+  update_default_version = true
 
   tags = merge(local.tags, {
     Role = "Bastion"
