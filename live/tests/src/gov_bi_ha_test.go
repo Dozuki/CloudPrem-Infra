@@ -2,23 +2,25 @@ package src
 
 import (
 	tc "dozuki.com/tests/common"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
+	"github.com/gruntwork-io/terratest/modules/aws"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"testing"
 )
 
-func Test_UsEast1_BI_Default(t *testing.T) {
+func Test_Gov_BI_HA(t *testing.T) {
 	t.Parallel()
 
 	var cfg = tc.ReadConfig()
 
 	var testConfig = tc.InfraTest{
-		Partition:   tc.StandardPartitionDir,
-		Region:      endpoints.UsEast1RegionID,
-		Profile:     tc.AWSTestDefaultProfile,
-		Environment: cfg.BIDefault,
+		Partition:   tc.GovCloudPartitionDir,
+		Region:      aws.GetRandomRegion(t, tc.AWSGovAllowedRegions, nil),
+		Profile:     tc.AWSGovDefaultProfile,
+		Environment: cfg.BIHA,
 	}
+
+	tc.RegionalOverrides(t, &testConfig)
 
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 

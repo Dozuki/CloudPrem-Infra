@@ -2,25 +2,25 @@ package src
 
 import (
 	tc "dozuki.com/tests/common"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
+	"github.com/gruntwork-io/terratest/modules/aws"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"testing"
 )
 
-func Test_UsGovWest1_Min_HA(t *testing.T) {
+func Test_Gov_BI_VPN(t *testing.T) {
 	t.Parallel()
 
 	var cfg = tc.ReadConfig()
 
 	var testConfig = tc.InfraTest{
 		Partition:   tc.GovCloudPartitionDir,
-		Region:      endpoints.UsGovWest1RegionID,
+		Region:      aws.GetRandomRegion(t, tc.AWSGovAllowedRegions, nil),
 		Profile:     tc.AWSGovDefaultProfile,
-		Environment: cfg.MinHA,
+		Environment: cfg.BIVPN,
 	}
 
-	tc.GovInstanceOverrides(&testConfig)
+	tc.RegionalOverrides(t, &testConfig)
 
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
