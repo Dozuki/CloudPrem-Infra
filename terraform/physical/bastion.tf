@@ -111,7 +111,6 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
   }
 }
 
-
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
