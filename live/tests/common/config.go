@@ -22,50 +22,45 @@ const TgStatePrefixVar = "TG_STATE_PREFIX"
 const AWSGovEKSInstanceTypes = "[\"m5.large\", \"m5a.large\", \"m5d.large\"]"
 
 type Environment struct {
-	Identifier                 string `yaml:"identifier" physical:"true" logical:"true"`
-	AWSProfile                 string `yaml:"aws_profile" physical:"true" logical:"true"`
-	Name                       string `yaml:"environment" physical:"true" logical:"true"`
-	Prefix                     string `yaml:"prefix"`
-	EnableWebhooks             bool   `yaml:"enable_webhooks" physical:"true" logical:"true"`
-	HANatGateway               bool   `yaml:"highly_available_nat_gateway" physical:"true"`
-	ProtectResources           bool   `yaml:"protect_resources" physical:"true"`
-	VPCID                      string `yaml:"vpc_id" physical:"true" logical:"true"`
-	VPCCIDR                    string `yaml:"vpc_cidr" physical:"true"`
-	PublicAccess               bool   `yaml:"app_public_access" physical:"true"`
-	ElasticacheInstanceType    string `yaml:"elasticache_instance_type" physical:"true"`
-	ElasticacheClusterSize     string `yaml:"elasticache_cluster_size" physical:"true"`
-	EKSKMSKeyId                string `yaml:"eks_kms_key_id" physical:"true"`
-	EKSInstanceTypes           string `yaml:"eks_instance_types" physical:"true"`
-	EKSVolumeSize              string `yaml:"eks_volume_size" physical:"true"`
-	EKSClusterMinSize          string `yaml:"eks_min_size" physical:"true"`
-	EKSClusterMaxSize          string `yaml:"eks_max_size" physical:"true"`
-	EKSClusterDesiredCapacity  string `yaml:"eks_desired_capacity" physical:"true"`
-	AppAccessCIDRs             string `yaml:"app_access_cidrs" physical:"true"`
-	ReplicatedAccessCIDRs      string `yaml:"replicated_ui_access_cidrs" physical:"true"`
-	LicenseParameter           string `yaml:"dozuki_license_parameter_name" logical:"true"`
-	BootstrapAppSequenceNumber int    `yaml:"replicated_app_sequence_number" logical:"true"`
-	BootstrapAppChannelID      string `yaml:"replicated_channel" logical:"true"`
-	GoogleTranslateAPIToken    string `yaml:"google_translate_api_token" logical:"true"`
-	S3KMSKeyID                 string `yaml:"s3_kms_key_id" physical:"true" logical:"true"`
-	S3CreateBuckets            bool   `yaml:"create_s3_buckets" physical:"true"`
-	S3ObjectBucket             string `yaml:"s3_objects_bucket" physical:"true"`
-	S3ImageBucket              string `yaml:"s3_images_bucket" physical:"true"`
-	S3DocumentBucket           string `yaml:"s3_documents_bucket" physical:"true"`
-	S3PDFBucket                string `yaml:"s3_pdfs_bucket" physical:"true"`
-	S3LogBucket                string `yaml:"s3_logging_bucket" physical:"true"`
-	BIEnabled                  bool   `yaml:"enable_bi" physical:"true" logical:"true"`
-	BIPublicAccess             bool   `yaml:"bi_public_access" physical:"true"`
-	BIVPNAccess                bool   `yaml:"bi_vpn_access" physical:"true"`
-	BIVPNUserList              string `yaml:"bi_vpn_user_list" physical:"true"`
-	BIAccessCIDRs              string `yaml:"bi_access_cidrs" physical:"true"`
-	GrafanaAccessCIDRs         string `yaml:"grafana_access_cidrs" physical:"true"`
-	RDSKMSKeyID                string `yaml:"rds_kms_key_id" physical:"true"`
-	RDSSnapshotIdentifier      string `yaml:"rds_snapshot_identifier" physical:"true"`
-	RDSInstanceType            string `yaml:"rds_instance_type" physical:"true"`
-	RDSMultiAZ                 bool   `yaml:"rds_multi_az" physical:"true"`
-	RDSAllocatedStorage        string `yaml:"rds_allocated_storage" physical:"true"`
-	RDSMaxAllocatedStorage     string `yaml:"rds_max_allocated_storage" physical:"true"`
-	RDSBackupRetention         string `yaml:"rds_backup_retention_period" physical:"true"`
+	Identifier                string `yaml:"identifier" physical:"true" logical:"true"`
+	AWSProfile                string `yaml:"aws_profile" physical:"true" logical:"true"`
+	Name                      string `yaml:"environment" physical:"true" logical:"true"`
+	Prefix                    string `yaml:"prefix"`
+	EnableWebhooks            bool   `yaml:"enable_webhooks" physical:"true" logical:"true"`
+	HANatGateway              bool   `yaml:"highly_available_nat_gateway" physical:"true"`
+	ProtectResources          bool   `yaml:"protect_resources" physical:"true"`
+	VPCID                     string `yaml:"vpc_id" physical:"true" logical:"true"`
+	VPCCIDR                   string `yaml:"vpc_cidr" physical:"true"`
+	PublicAccess              bool   `yaml:"app_public_access" physical:"true"`
+	ElasticacheInstanceType   string `yaml:"elasticache_instance_type" physical:"true"`
+	ElasticacheClusterSize    string `yaml:"elasticache_cluster_size" physical:"true"`
+	EKSKMSKeyId               string `yaml:"eks_kms_key_id" physical:"true"`
+	EKSInstanceTypes          string `yaml:"eks_instance_types" physical:"true"`
+	EKSVolumeSize             string `yaml:"eks_volume_size" physical:"true"`
+	EKSClusterMinSize         string `yaml:"eks_min_size" physical:"true"`
+	EKSClusterMaxSize         string `yaml:"eks_max_size" physical:"true"`
+	EKSClusterDesiredCapacity string `yaml:"eks_desired_capacity" physical:"true"`
+	AppAccessCIDRs            string `yaml:"app_access_cidrs" physical:"true"`
+	ReplicatedAccessCIDRs     string `yaml:"replicated_ui_access_cidrs" physical:"true"`
+	CustomerParameter         string `yaml:"dozuki_customer_id_parameter_name" logical:"true"`
+	BootstrapAppChannelID     string `yaml:"replicated_channel" logical:"true"`
+	GoogleTranslateAPIToken   string `yaml:"google_translate_api_token" logical:"true"`
+	S3KMSKeyID                string `yaml:"s3_kms_key_id" physical:"true" logical:"true"`
+	S3ExistingBuckets         string `yaml:"s3_existing_buckets" physical:"true"`
+	BIEnabled                 bool   `yaml:"enable_bi" physical:"true" logical:"true"`
+	BIPublicAccess            bool   `yaml:"bi_public_access" physical:"true"`
+	BIVPNAccess               bool   `yaml:"bi_vpn_access" physical:"true"`
+	BIVPNUserList             string `yaml:"bi_vpn_user_list" physical:"true"`
+	BIAccessCIDRs             string `yaml:"bi_access_cidrs" physical:"true"`
+	GrafanaAccessCIDRs        string `yaml:"grafana_access_cidrs" physical:"true"`
+	RDSKMSKeyID               string `yaml:"rds_kms_key_id" physical:"true"`
+	RDSSnapshotIdentifier     string `yaml:"rds_snapshot_identifier" physical:"true"`
+	RDSInstanceType           string `yaml:"rds_instance_type" physical:"true"`
+	RDSMultiAZ                bool   `yaml:"rds_multi_az" physical:"true"`
+	RDSAllocatedStorage       string `yaml:"rds_allocated_storage" physical:"true"`
+	RDSMaxAllocatedStorage    string `yaml:"rds_max_allocated_storage" physical:"true"`
+	RDSBackupRetention        string `yaml:"rds_backup_retention_period" physical:"true"`
+	BastionInstanceType       string `yaml:"bastion_instance_type" physical:"true"`
 }
 
 type TestConfig struct {
