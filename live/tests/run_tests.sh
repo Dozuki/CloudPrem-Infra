@@ -5,7 +5,7 @@ date=$(date +%Y-%m-%d-%T)
 # Ensure the live environment exists
 if [ ! -d ../standard ] || [ ! -d ../gov ]; then
   pushd ../
-  ./generate_live_env.sh
+  ./generate_live_env.sh || exit
   popd || exit
 fi
 # Clear all existing terragrunt config/terraform files in live environment
