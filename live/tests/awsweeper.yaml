@@ -121,3 +121,6 @@ aws_sqs_queue:
       Terraform: true
 aws_ssm_parameter:
   - id: (.*vpn.*)
+  - id: (.*acm.*)
+  - tags:
+      Terraform: true
