@@ -9,7 +9,7 @@ terraform {
 locals {
   # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
-    Terraform   = "true"
+    Terraform   = "nodelete"
     Project     = "Dozuki"
     Environment = "bootstrap"
   }
