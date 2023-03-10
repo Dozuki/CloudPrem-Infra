@@ -213,7 +213,7 @@ func VerifyBastion(t *testing.T, terragruntPhysicalOptions *terraform.Options, c
 		}
 		require.Fail(t, err.Error())
 	}
-	require.Contains(t, result.Stdout, "Client Version: v1.21")
+	require.Contains(t, result.Stdout, "Client Version: v1.22")
 	require.Equal(t, result.Stderr, "")
 	require.Equal(t, int64(0), result.ExitCode)
 
