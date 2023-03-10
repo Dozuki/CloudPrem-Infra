@@ -255,7 +255,7 @@ resource "null_resource" "s3_replication_job_init" {
   }
 
   provisioner "local-exec" {
-    command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_profile"]} ${self.triggers["aws_account"]}"
+    command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_account"]} ${self.triggers["aws_profile"]}"
   }
 }
 

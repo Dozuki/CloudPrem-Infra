@@ -5,12 +5,18 @@ set -euo pipefail
 AWS_LOGGING_BUCKET="$1"
 AWS_SOURCE_BUCKET="$2"
 AWS_REPLICATION_ROLE="$3"
-AWS_PROFILE="$4"
-AWS_ACCOUNT="$5"
+AWS_ACCOUNT="$4"
+AWS_PROFILE="$5"
 
-aws s3control create-job \
+AWS_PREFIX=""
+
+if [ "$AWS_PROFILE" != "" ]; then
+  AWS_PREFIX="AWS_PROFILE=$AWS_PROFILE"
+fi
+
+
+$AWS_PREFIX aws s3control create-job \
   --account-id "$AWS_ACCOUNT" \
-  --profile "$AWS_PROFILE" \
   --operation '{"S3ReplicateObject":{}}' \
   --report "{\"Bucket\":\"$AWS_LOGGING_BUCKET\",\"Prefix\":\"batch-replication-report\", \"Format\":\"Report_CSV_20180820\",\"Enabled\":true,\"ReportScope\":\"AllTasks\"}" \
   --manifest-generator "{\"S3JobManifestGenerator\": {\"SourceBucket\": \"arn:aws:s3:::$AWS_SOURCE_BUCKET\", \"EnableManifestOutput\": false, \"Filter\": {\"EligibleForReplication\": true, \"ObjectReplicationStatuses\": [\"NONE\",\"FAILED\"]}}}" \
