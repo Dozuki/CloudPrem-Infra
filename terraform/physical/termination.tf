@@ -54,6 +54,8 @@ resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_asg" {
       "resources" : module.eks_cluster.workers_asg_arns
     }
   )
+
+  tags = local.tags
 }
 
 resource "aws_cloudwatch_event_target" "aws_node_termination_handler_asg" {
@@ -76,6 +78,8 @@ resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_spot" {
       "resources" : module.eks_cluster.workers_asg_arns
     }
   )
+
+  tags = local.tags
 }
 
 resource "aws_cloudwatch_event_target" "aws_node_termination_handler_spot" {

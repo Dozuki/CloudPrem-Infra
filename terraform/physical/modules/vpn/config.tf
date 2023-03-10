@@ -91,6 +91,8 @@ resource "aws_ssm_parameter" "vpn_client_key" {
   description = "VPN ${var.vpn-client-list[count.index]} client key"
   type        = "SecureString"
   value       = tls_private_key.client[count.index].private_key_pem
+
+  tags = local.tags
 }
 resource "aws_ssm_parameter" "vpn_client_cert" {
   count       = length(var.vpn-client-list)
@@ -98,4 +100,6 @@ resource "aws_ssm_parameter" "vpn_client_cert" {
   description = "VPN ${var.vpn-client-list[count.index]} client cert"
   type        = "SecureString"
   value       = tls_locally_signed_cert.client[count.index].cert_pem
+
+  tags = local.tags
 }

@@ -24,11 +24,15 @@ resource "aws_kms_key" "vpn-logs" {
   enable_key_rotation = true
 
   policy = data.aws_iam_policy_document.vpn-logs-kms.json
+
+  tags = local.tags
 }
 resource "aws_cloudwatch_log_group" "vpn-logs" {
   name_prefix       = "${local.identifier}-vpn"
   retention_in_days = 30
   kms_key_id        = aws_kms_key.vpn-logs.arn
+
+  tags = local.tags
 }
 resource "aws_cloudwatch_log_stream" "vpn-logs-stream" {
   name           = "connection_logs"

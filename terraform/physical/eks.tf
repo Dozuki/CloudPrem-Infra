@@ -8,6 +8,8 @@ resource "aws_iam_policy" "cluster_autoscaler_policy" {
   name_prefix = "cluster-autoscaler"
   description = "EKS cluster-autoscaler policy for cluster ${module.eks_cluster.cluster_id}"
   policy      = data.aws_iam_policy_document.cluster_autoscaler_pd.json
+
+  tags = local.tags
 }
 
 #tfsec:ignore:aws-iam-no-policy-wildcards
@@ -111,6 +113,8 @@ data "aws_iam_policy_document" "cluster_access" {
 resource "aws_iam_policy" "cluster_access" {
   name   = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
   policy = data.aws_iam_policy_document.cluster_access.json
+
+  tags = local.tags
 }
 
 #tfsec:ignore:aws-iam-no-policy-wildcards
@@ -178,6 +182,8 @@ data "aws_iam_policy_document" "eks_worker" {
 resource "aws_iam_policy" "eks_worker" {
   name   = "${local.identifier}-${data.aws_region.current.name}"
   policy = data.aws_iam_policy_document.eks_worker.json
+
+  tags = local.tags
 }
 
 resource "aws_kms_key" "eks" {
@@ -185,6 +191,8 @@ resource "aws_kms_key" "eks" {
 
   description         = "EKS Secret Encryption Key"
   enable_key_rotation = true
+
+  tags = local.tags
 }
 
 #tfsec:ignore:aws-vpc-no-public-egress-sgr

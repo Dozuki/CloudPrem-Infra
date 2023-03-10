@@ -104,6 +104,8 @@ resource "aws_db_parameter_group" "bi" {
     name  = "group_concat_max_len"
     value = "33554432"
   }
+
+  tags = local.tags
 }
 
 resource "aws_db_parameter_group" "default" {
@@ -115,6 +117,8 @@ resource "aws_db_parameter_group" "default" {
     name  = "group_concat_max_len"
     value = "33554432"
   }
+
+  tags = local.tags
 }
 
 #tfsec:ignore:general-secrets-sensitive-in-variable
@@ -173,6 +177,8 @@ resource "aws_secretsmanager_secret" "primary_database_credentials" {
 
   recovery_window_in_days = 0
   //  kms_key_id              = data.aws_kms_key.rds.arn
+
+  tags = local.tags
 }
 
 resource "aws_secretsmanager_secret_version" "primary_database_credentials" {
@@ -248,6 +254,8 @@ resource "aws_secretsmanager_secret" "replica_database_credentials" {
   name = "${local.identifier}-replica-database"
 
   recovery_window_in_days = var.protect_resources ? 7 : 0
+
+  tags = local.tags
 }
 
 resource "aws_secretsmanager_secret_version" "replica_database_credentials" {
@@ -281,6 +289,8 @@ resource "aws_kms_key" "bi" {
 
   description         = "BI KMS key for replication credentials"
   enable_key_rotation = true
+
+  tags = local.tags
 }
 
 resource "aws_dms_replication_instance" "this" {

@@ -55,11 +55,15 @@ resource "null_resource" "cluster_urls" {
 resource "aws_elasticache_subnet_group" "this" {
   name       = local.identifier
   subnet_ids = local.private_subnet_ids
+
+  tags = local.tags
 }
 
 resource "aws_elasticache_parameter_group" "this" {
   name   = local.identifier
   family = "memcached1.5"
+
+  tags = local.tags
 }
 
 resource "aws_elasticache_cluster" "this" {

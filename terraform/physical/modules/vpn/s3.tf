@@ -10,6 +10,8 @@ resource "aws_s3_bucket_versioning" "vpn_config_versioning_block" {
 resource "aws_s3_bucket" "vpn-config-files" {
   bucket        = "${local.identifier}-${data.aws_region.current.name}-vpn-credentials"
   force_destroy = true
+
+  tags = local.tags
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "vpn-config-files" {
@@ -23,7 +25,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "vpn-config-files"
       sse_algorithm     = "aws:kms"
     }
   }
-
 }
 
 resource "aws_s3_bucket_public_access_block" "vpn-config-files" {

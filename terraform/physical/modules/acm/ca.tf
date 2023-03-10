@@ -31,10 +31,14 @@ resource "aws_ssm_parameter" "ca_key" {
   description = "General CA key"
   type        = "SecureString"
   value       = tls_private_key.ca.private_key_pem
+
+  tags = local.tags
 }
 resource "aws_ssm_parameter" "ca_cert" {
   name        = "${local.ssm_prefix}/acm/${var.namespace}/ca_cert"
   description = "General CA cert"
   type        = "SecureString"
   value       = tls_self_signed_cert.ca.cert_pem
+
+  tags = local.tags
 }

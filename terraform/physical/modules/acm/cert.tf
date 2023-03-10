@@ -35,10 +35,14 @@ resource "aws_ssm_parameter" "server_key" {
   description = "General server key"
   type        = "SecureString"
   value       = tls_private_key.server.private_key_pem
+
+  tags = local.tags
 }
 resource "aws_ssm_parameter" "server_cert" {
   name        = "${local.ssm_prefix}/acm/${var.namespace}/server_cert"
   description = "General server cert"
   type        = "SecureString"
   value       = tls_locally_signed_cert.server.cert_pem
+
+  tags = local.tags
 }

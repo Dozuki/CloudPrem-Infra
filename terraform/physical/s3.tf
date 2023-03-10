@@ -61,6 +61,8 @@ data "aws_kms_key" "s3" {
 resource "aws_kms_key" "s3_kms_key" {
   description             = "KMS key to encrypt S3 bucket contents"
   deletion_window_in_days = 7
+
+  tags = local.tags
 }
 resource "aws_kms_alias" "s3_kms_key" {
   name_prefix   = "alias/${local.identifier}/${data.aws_region.current.name}/s3/"
@@ -106,6 +108,8 @@ resource "aws_iam_role" "s3_replication" {
 
   name               = "${local.identifier}-${data.aws_region.current.name}-s3-replication-role"
   assume_role_policy = data.aws_iam_policy_document.s3_replication_assume_role[0].json
+
+  tags = local.tags
 }
 
 data "aws_iam_policy_document" "s3_replication" {
@@ -297,8 +301,7 @@ resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
 resource "aws_s3_bucket_acl" "logging_bucket_acl" {
 
   bucket = aws_s3_bucket.logging_bucket.id
-
-  acl = "log-delivery-write"
+  acl    = "log-delivery-write"
 }
 
 resource "aws_s3_bucket_versioning" "logging_bucket_versioning_block" {
@@ -316,6 +319,8 @@ resource "aws_s3_bucket" "logging_bucket" {
 
   bucket_prefix = "${local.identifier}-log-${data.aws_region.current.name}"
   force_destroy = !var.protect_resources
+
+  tags = local.tags
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_encryption" {
@@ -337,6 +342,8 @@ resource "aws_s3_bucket" "guide_buckets" {
 
   bucket_prefix = "${local.identifier}-${each.key}-${data.aws_region.current.name}"
   force_destroy = !var.protect_resources
+
+  tags = local.tags
 }
 resource "aws_s3_bucket_logging" "guide_buckets_logging" {
   for_each = toset(local.create_s3_bucket_names)
@@ -384,7 +391,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "guide_buckets_enc
       sse_algorithm     = "aws:kms"
     }
   }
-
 }
 
 resource "aws_s3_bucket_cors_configuration" "guide_documents" {
