@@ -102,11 +102,6 @@ variable "eks_cluster_access_role_arn" {
   type        = string
 }
 
-variable "eks_worker_asg_names" {
-  description = "Autoscaling group names for the EKS cluster"
-  type        = list(string)
-}
-
 variable "termination_handler_role_arn" {
   description = "IAM Role for EKS node termination handler"
   type        = string
