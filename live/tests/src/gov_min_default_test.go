@@ -2,7 +2,6 @@ package src
 
 import (
 	tc "dozuki.com/tests/common"
-	"fmt"
 	"github.com/gruntwork-io/terratest/modules/aws"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
@@ -22,8 +21,6 @@ func Test_Gov_Min_Default(t *testing.T) {
 	}
 
 	tc.RegionalOverrides(t, &testConfig)
-
-	fmt.Println("RDS Instance Types: ", testConfig.Environment.RDSInstanceType, " Bastion Instance Types: ", testConfig.Environment.BastionInstanceType)
 
 	terraformFolder := test_structure.CopyTerraformFolderToTemp(t, tc.TfPath, "")
 
