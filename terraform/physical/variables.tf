@@ -96,6 +96,16 @@ variable "s3_existing_buckets" {
     bucket_name = string
   }))
   default = []
+
+  validation {
+    condition     = length(var.s3_existing_buckets) == 0 || length(var.s3_existing_buckets) == 4
+    error_message = "You must specify all 4 guide buckets; no logging bucket."
+  }
+
+  validation {
+    condition     = length(var.s3_existing_buckets) == 0 || sort([for _, bucket in var.s3_existing_buckets : bucket.type]) == tolist(["doc", "image", "obj", "pdf"])
+    error_message = "You must include all 4 bucket types and 'type' must be one of 'doc', 'image', 'obj', or 'pdf'."
+  }
 }
 
 variable "rds_kms_key_id" {
