@@ -10,6 +10,15 @@ moved {
   from = aws_secretsmanager_secret_version.replica_database[0]
   to   = aws_secretsmanager_secret_version.replica_database_credentials[0]
 }
+moved {
+  from = random_password.replica_database[0]
+  to   = module.replica_database[0].random_password.master_password[0]
+}
+moved {
+  from = random_password.primary_database
+  to   = module.primary_database.random_password.master_password[0]
+}
+
 data "aws_kms_key" "rds" {
   key_id = var.rds_kms_key_id
 }
@@ -135,7 +144,8 @@ module "primary_database" {
   kms_key_id            = data.aws_kms_key.rds.arn
   apply_immediately     = !var.protect_resources
 
-  username = "dozuki"
+  username               = "dozuki"
+  random_password_length = 40
 
   multi_az           = var.rds_multi_az
   ca_cert_identifier = local.ca_cert_identifier
@@ -211,7 +221,8 @@ module "replica_database" {
   apply_immediately     = !var.protect_resources
   publicly_accessible   = var.bi_public_access
 
-  username = "dozuki"
+  username               = "dozuki"
+  random_password_length = 40
 
   multi_az           = var.rds_multi_az
   ca_cert_identifier = local.ca_cert_identifier
