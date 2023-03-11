@@ -57,7 +57,7 @@ locals {
 
   // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
   // The format of the s3_existing_buckets object is important and described in the variables.tf file.
-  existing_s3_bucket_names = local.use_existing_buckets ? var.s3_existing_buckets : []
+  s3_existing_buckets = local.use_existing_buckets ? var.s3_existing_buckets : []
 
   // Do not change these values without modifying the `moved` blocks in s3.tf
   create_s3_bucket_names = ["image", "obj", "pdf", "doc"]

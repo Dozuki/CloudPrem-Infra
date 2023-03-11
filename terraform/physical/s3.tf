@@ -71,9 +71,9 @@ resource "aws_kms_alias" "s3_kms_key" {
 data "aws_s3_bucket" "guide_buckets" {
 
   // If not using existing buckets the local variable will be empty and the resource will not be created.
-  // This loop says: for each entry in the existing_s3_bucket_names map, use the "type" attribute for the resource key
+  // This loop says: for each entry in the s3_existing_buckets map, use the "type" attribute for the resource key
   // (i.e. v.type = "pdf" then aws_s3_bucket.guide_buckets["pdf"])
-  for_each = { for k, v in local.existing_s3_bucket_names : v.type => v }
+  for_each = { for k, v in local.s3_existing_buckets : v.type => v }
 
   bucket = each.value.bucket_name
 
