@@ -230,8 +230,7 @@ module "replica_database" {
 
   # DB subnet group
   subnet_ids             = local.bi_subnet_ids
-  create_db_subnet_group = var.bi_public_access ? true : false
-  db_subnet_group_name   = var.bi_public_access ? null : module.primary_database.db_subnet_group_id
+  create_db_subnet_group = true
 
   # DB parameter group
   create_db_parameter_group = false
