@@ -1,4 +1,4 @@
-data "aws_ami" "amazon_linux_2" {
+data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
@@ -6,7 +6,7 @@ data "aws_ami" "amazon_linux_2" {
     name = "name"
 
     values = [
-      "amzn2-ami-hvm-*-x86_64-gp2",
+      "al2023-ami-2023.*-x86_64",
     ]
   }
 }
@@ -109,7 +109,7 @@ module "bastion" {
     AdministratorAccess          = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
   }
 
-  image_id        = data.aws_ami.amazon_linux_2.id
+  image_id        = data.aws_ami.amazon_linux_2023.id
   instance_type   = "t3.micro"
   security_groups = [module.bastion_sg.security_group_id]
 

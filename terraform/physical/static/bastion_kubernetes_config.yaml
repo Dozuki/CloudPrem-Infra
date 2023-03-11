@@ -20,8 +20,19 @@ mainSteps:
     inputs:
       sourceType: "HTTP"
       sourceInfo:
-        url: "https://dl.k8s.io/release/v1.22.0/bin/linux/amd64/kubectl"
+        url: "https://dl.k8s.io/release/v1.22.17/bin/linux/amd64/kubectl"
       destinationPath: "/usr/bin/kubectl"
+  - action: aws:runShellScript
+    name: installK9s
+    inputs:
+      runCommand:
+        - mkdir k9stemp
+        - cd k9stemp
+        - curl -LO https://github.com/derailed/k9s/releases/download/v0.27.3/k9s_Linux_amd64.tar.gz
+        - tar -xzf k9s_Linux_amd64.tar.gz
+        - cp k9s /usr/bin/
+        - cd ..
+        - rm -rf k9stemp
   - action: aws:downloadContent
     name: downloadHelm
     inputs:
@@ -57,5 +68,6 @@ mainSteps:
       runCommand:
         - chmod 755 /usr/bin/kubectl
         - chmod 755 /usr/bin/helm
+        - chmod 755 /usr/bin/k9s
         - chown -R ssm-user:ssm-user /home/ssm-user/.kube
         - chmod -R 700 /home/ssm-user/.kube
