@@ -93,7 +93,7 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
-  version = "6.7.1"
+  version = "6.9.0"
 
   name = "${local.identifier}-bastion"
 
