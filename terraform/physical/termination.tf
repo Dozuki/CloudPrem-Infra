@@ -28,16 +28,35 @@ data "aws_iam_policy_document" "aws_node_termination_handler" {
     ]
   }
 }
+data "aws_iam_policy_document" "aws_node_termination_handler_events" {
+  statement {
+    effect = "Allow"
+    principals {
+      type = "Service"
+      identifiers = [
+        "events.amazonaws.com",
+        "sqs.amazonaws.com",
+      ]
+    }
+    actions = [
+      "sqs:SendMessage",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:sqs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${local.identifier}",
+    ]
+  }
+}
 resource "aws_iam_policy" "aws_node_termination_handler" {
   name   = "${local.identifier}-${data.aws_region.current.name}-aws-node-termination-handler"
   policy = data.aws_iam_policy_document.aws_node_termination_handler.json
 }
 
 module "aws_node_termination_handler_sqs" {
-  source                    = "terraform-aws-modules/sqs/aws"
-  version                   = "~> 4.0.1"
-  name                      = local.identifier
-  message_retention_seconds = 300
+  source                        = "terraform-aws-modules/sqs/aws"
+  version                       = "~> 4.0.1"
+  name                          = local.identifier
+  message_retention_seconds     = 300
+  source_queue_policy_documents = [data.aws_iam_policy_document.aws_node_termination_handler_events.json]
 }
 
 resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_asg" {

@@ -115,6 +115,7 @@
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/caller_identity) | data source |
 | [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/eks_cluster) | data source |
 | [aws_iam_policy_document.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.aws_node_termination_handler_events](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cluster_autoscaler_pd](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
