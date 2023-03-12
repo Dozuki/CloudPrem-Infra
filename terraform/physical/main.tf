@@ -4,7 +4,7 @@ terraform {
   required_providers {
     aws        = "4.57.0"
     random     = "3.4.3"
-    kubernetes = "2.18.1"
+    kubernetes = "2.13.1"
     null       = "3.2.1"
   }
 }
@@ -59,10 +59,11 @@ locals {
   // The format of the s3_existing_buckets object is important and described in the variables.tf file.
   s3_existing_buckets = local.use_existing_buckets ? var.s3_existing_buckets : []
 
-  // Do not change these values without modifying the `moved` blocks in s3.tf
+  // This should be considered a `constant`
+  // Do not change these values without modifying the magic strings elsewhere.
   create_s3_bucket_names = ["image", "obj", "pdf", "doc"]
 
-  // Build a list of maps of existing buckets with their prefix, source, and destination in this format:
+  // Build a list of maps of existing buckets with their type, source, and destination in this format:
   //{ type = one of local.create_s3_bucket_names, destination = arn of destination bucket for replication, source = arn of source bucket for replication }
   existing_bucket_map = local.use_existing_buckets ? [for _, bucket_type in local.create_s3_bucket_names : { type = bucket_type, destination = aws_s3_bucket.guide_buckets[bucket_type].arn, source = data.aws_s3_bucket.guide_buckets[bucket_type].bucket }] : []
 
