@@ -65,6 +65,7 @@
 | [aws_iam_policy.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.cluster_autoscaler_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.eks_worker_kms](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_role.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role_policy_attachment) | resource |
@@ -118,12 +119,14 @@
 | [aws_iam_policy_document.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cluster_autoscaler_pd](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.eks_worker_kms](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.logging_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.s3_replication_assume_role](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
 | [aws_kms_key.rds](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
 | [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
+| [aws_kms_key.s3-default](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/kms_key) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/region) | data source |
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/s3_bucket) | data source |

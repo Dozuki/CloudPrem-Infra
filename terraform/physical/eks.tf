@@ -113,6 +113,26 @@ resource "aws_iam_policy" "cluster_access" {
   policy = data.aws_iam_policy_document.cluster_access.json
 }
 
+data "aws_iam_policy_document" "eks_worker_kms" {
+  statement {
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncryptTo",
+      "kms:ReEncryptFrom",
+      "kms:GenerateDataKey",
+      "kms:GenerateDataKeyPair",
+      "kms:GenerateDataKeyPairWithoutPlaintext",
+      "kms:GenerateDataKeyWithoutPlaintext",
+      "kms:DescribeKey",
+    ]
+
+    resources = [
+      aws_kms_key.s3_kms_key.arn,
+    ]
+  }
+}
+
 #tfsec:ignore:aws-iam-no-policy-wildcards
 data "aws_iam_policy_document" "eks_worker" {
   statement {
@@ -144,8 +164,10 @@ data "aws_iam_policy_document" "eks_worker" {
       "kms:DescribeKey",
     ]
 
+    # This is done to maintain backwards compatibility with <=3.1.
+    # The actual KMS permissions exist in the `eks_worker_kms` policy resource.
     resources = [
-      aws_kms_key.s3_kms_key.arn,
+      data.aws_kms_key.s3-default.arn,
     ]
   }
 
@@ -178,6 +200,13 @@ data "aws_iam_policy_document" "eks_worker" {
 resource "aws_iam_policy" "eks_worker" {
   name   = "${local.identifier}-${data.aws_region.current.name}"
   policy = data.aws_iam_policy_document.eks_worker.json
+}
+
+# We need separate policies to maintain backwards compatibility with existing stacks. Modifying the existing policy
+# with new resources triggers a cluster breaking event.
+resource "aws_iam_policy" "eks_worker_kms" {
+  name   = "${local.identifier}-${data.aws_region.current.name}-kms"
+  policy = data.aws_iam_policy_document.eks_worker_kms.json
 }
 
 resource "aws_kms_key" "eks" {
@@ -220,7 +249,9 @@ module "eks_cluster" {
 
   workers_additional_policies = [
     aws_iam_policy.eks_worker.arn,
+    aws_iam_policy.eks_worker_kms.arn
   ]
+
   worker_groups_launch_template = [
     {
       name                                 = "workers"

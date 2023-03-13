@@ -50,6 +50,10 @@ moved {
   from = aws_s3_bucket_public_access_block.guide_pdfs_acl_block[0]
   to   = aws_s3_bucket_public_access_block.guide_buckets_acl_block["pdf"]
 }
+# Backwards compatibility kms key for existing clusters.
+data "aws_kms_key" "s3-default" {
+  key_id = "alias/aws/s3"
+}
 # - End backwards Compatibility
 
 // If S3 key is provided by a variable, use that otherwise create a new one.
