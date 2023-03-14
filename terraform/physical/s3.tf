@@ -51,24 +51,23 @@ moved {
   to   = aws_s3_bucket_public_access_block.guide_buckets_acl_block["pdf"]
 }
 # Backwards compatibility kms key for existing clusters.
-data "aws_kms_key" "s3-default" {
+data "aws_kms_key" "s3_default" {
   key_id = "alias/aws/s3"
 }
 # - End backwards Compatibility
 
-// If S3 key is provided by a variable, use that otherwise create a new one.
-data "aws_kms_key" "s3" {
+data "aws_kms_key" "s3_migration" {
   count = var.s3_kms_key_id != "" ? 1 : 0
 
   key_id = var.s3_kms_key_id
 }
-resource "aws_kms_key" "s3_kms_key" {
+resource "aws_kms_key" "s3" {
   description             = "KMS key to encrypt S3 bucket contents"
   deletion_window_in_days = 7
 }
-resource "aws_kms_alias" "s3_kms_key" {
+resource "aws_kms_alias" "s3" {
   name_prefix   = "alias/${local.identifier}/${data.aws_region.current.name}/s3/"
-  target_key_id = aws_kms_key.s3_kms_key.id
+  target_key_id = aws_kms_key.s3.id
 }
 
 // If using existing buckets
@@ -162,9 +161,11 @@ data "aws_iam_policy_document" "s3_replication" {
   statement {
     effect = "Allow"
 
-    actions = ["s3:GetObject",
+    actions = [
+      "s3:GetObject",
       "s3:GetObjectVersion",
-    "s3:PutObject"]
+      "s3:PutObject"
+    ]
 
     resources = ["${aws_s3_bucket.logging_bucket.arn}/*"]
   }
@@ -185,7 +186,7 @@ data "aws_iam_policy_document" "s3_replication" {
       values   = local.s3_source_bucket_arn_list_with_objects
     }
 
-    resources = [data.aws_kms_key.s3[0].arn]
+    resources = [data.aws_kms_key.s3_migration[0].arn]
   }
 
   statement {
@@ -204,7 +205,7 @@ data "aws_iam_policy_document" "s3_replication" {
       values   = local.s3_destination_bucket_arn_list_with_objects
     }
 
-    resources = [aws_kms_key.s3_kms_key.arn]
+    resources = [aws_kms_key.s3.arn]
   }
 }
 
@@ -241,7 +242,7 @@ resource "aws_s3_bucket_replication_configuration" "replication" {
       bucket        = each.value.destination
       storage_class = "STANDARD"
       encryption_configuration {
-        replica_kms_key_id = aws_kms_key.s3_kms_key.arn
+        replica_kms_key_id = aws_kms_key.s3.arn
       }
     }
   }
@@ -329,7 +330,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_en
   rule {
     bucket_key_enabled = false
     apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.s3_kms_key.arn
+      kms_master_key_id = aws_kms_key.s3.arn
       sse_algorithm     = "aws:kms"
     }
   }
@@ -384,7 +385,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "guide_buckets_enc
   rule {
     bucket_key_enabled = false
     apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.s3_kms_key.arn
+      kms_master_key_id = aws_kms_key.s3.arn
       sse_algorithm     = "aws:kms"
     }
   }

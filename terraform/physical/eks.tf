@@ -128,7 +128,7 @@ data "aws_iam_policy_document" "eks_worker_kms" {
     ]
 
     resources = [
-      aws_kms_key.s3_kms_key.arn,
+      aws_kms_key.s3.arn,
     ]
   }
 }
@@ -167,7 +167,7 @@ data "aws_iam_policy_document" "eks_worker" {
     # This is done to maintain backwards compatibility with <=3.1.
     # The actual KMS permissions exist in the `eks_worker_kms` policy resource.
     resources = [
-      data.aws_kms_key.s3-default.arn,
+      data.aws_kms_key.s3_default.arn
     ]
   }
 
