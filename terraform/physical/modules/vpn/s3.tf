@@ -1,23 +1,29 @@
+resource "aws_s3_bucket_versioning" "vpn_config_versioning_block" {
+
+  bucket = aws_s3_bucket.vpn-config-files.bucket
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
 #tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "vpn-config-files" {
   bucket        = "${local.identifier}-${data.aws_region.current.name}-vpn-credentials"
   force_destroy = true
+}
 
-  versioning {
-    enabled = true
-  }
+resource "aws_s3_bucket_server_side_encryption_configuration" "vpn-config-files" {
 
-  server_side_encryption_configuration {
+  bucket = aws_s3_bucket.vpn-config-files.bucket
 
-    rule {
-      bucket_key_enabled = true
-      apply_server_side_encryption_by_default {
-        kms_master_key_id = var.s3_kms_key_id
-        sse_algorithm     = "aws:kms"
-      }
+  rule {
+    bucket_key_enabled = true
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = var.s3_kms_key_id
+      sse_algorithm     = "aws:kms"
     }
-
   }
+
 }
 
 resource "aws_s3_bucket_public_access_block" "vpn-config-files" {

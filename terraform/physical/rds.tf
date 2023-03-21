@@ -10,9 +10,21 @@ moved {
   from = aws_secretsmanager_secret_version.replica_database[0]
   to   = aws_secretsmanager_secret_version.replica_database_credentials[0]
 }
+moved {
+  from = random_password.replica_database[0]
+  to   = module.replica_database[0].random_password.master_password[0]
+}
+moved {
+  from = random_password.primary_database
+  to   = module.primary_database.random_password.master_password[0]
+}
+
+data "aws_kms_key" "rds" {
+  key_id = var.rds_kms_key_id
+}
 module "primary_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.7.0"
+  version = "4.17.1"
 
   name            = "${local.identifier}-database"
   use_name_prefix = false
@@ -40,7 +52,7 @@ module "primary_database_sg" {
 # To make the terraform a bit easier we will always create this security group even if BI is disabled.
 module "bi_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.7.0"
+  version = "4.17.1"
 
   name            = "${local.identifier}-bi-database"
   use_name_prefix = false
@@ -77,11 +89,6 @@ module "bi_database_sg" {
   ]
 
   tags = local.tags
-}
-
-resource "random_password" "primary_database" {
-  length  = 40
-  special = false
 }
 
 resource "aws_db_parameter_group" "bi" {
@@ -122,12 +129,13 @@ resource "aws_db_parameter_group" "default" {
 #tfsec:ignore:general-secrets-sensitive-in-variable
 module "primary_database" {
   source  = "terraform-aws-modules/rds/aws"
-  version = "3.4.1"
+  version = "5.6.0"
 
   identifier = local.identifier
 
-  engine                = "mysql"
-  engine_version        = "8.0"
+  engine         = "mysql"
+  engine_version = "8.0"
+
   port                  = 3306
   instance_class        = var.rds_instance_type
   allocated_storage     = var.rds_allocated_storage
@@ -136,8 +144,8 @@ module "primary_database" {
   kms_key_id            = data.aws_kms_key.rds.arn
   apply_immediately     = !var.protect_resources
 
-  username = "dozuki"
-  password = random_password.primary_database.result
+  username               = "dozuki"
+  random_password_length = 40
 
   multi_az           = var.rds_multi_az
   ca_cert_identifier = local.ca_cert_identifier
@@ -149,23 +157,22 @@ module "primary_database" {
   vpc_security_group_ids = [module.primary_database_sg.security_group_id]
 
   # Snapshot configuration
-  deletion_protection       = var.protect_resources
-  snapshot_identifier       = var.rds_snapshot_identifier # Restore from snapshot
-  skip_final_snapshot       = !var.protect_resources
-  final_snapshot_identifier = local.identifier # Snapshot name upon DB deletion
-  copy_tags_to_snapshot     = true
+  deletion_protection              = var.protect_resources
+  snapshot_identifier              = var.rds_snapshot_identifier # Restore from snapshot
+  skip_final_snapshot              = !var.protect_resources
+  final_snapshot_identifier_prefix = local.identifier # Snapshot name upon DB deletion
+  copy_tags_to_snapshot            = true
 
   # DB subnet group
-  # db_subnet_group_name = local.identifier # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/42
-  subnet_ids = local.private_subnet_ids
+  subnet_ids             = local.private_subnet_ids
+  create_db_subnet_group = true
+
 
   # DB parameter group
   create_db_parameter_group = false
   parameter_group_name      = local.rds_parameter_group_name
 
-  # DB option group
-  option_group_name      = null
-  create_db_option_group = false # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/188
+  create_db_option_group = false
 
   tags = local.tags
 }
@@ -187,30 +194,24 @@ resource "aws_secretsmanager_secret_version" "primary_database_credentials" {
     port                 = module.primary_database.db_instance_port
     engine               = "mysql"
     username             = module.primary_database.db_instance_username
-    password             = random_password.primary_database.result
+    password             = module.primary_database.db_instance_password
   })
 }
 
 #  ############### BI ##############
 
-resource "random_password" "replica_database" {
-  count = var.enable_bi ? 1 : 0
-
-  length  = 40
-  special = false
-}
-
 #tfsec:ignore:general-secrets-sensitive-in-variable
 module "replica_database" {
   source  = "terraform-aws-modules/rds/aws"
-  version = "3.4.1"
+  version = "5.6.0"
 
   count = var.enable_bi ? 1 : 0
 
   identifier = "${local.identifier}-replica"
 
-  engine                = "mysql"
-  engine_version        = "8.0"
+  engine         = "mysql"
+  engine_version = "8.0"
+
   port                  = 3306
   instance_class        = var.rds_instance_type
   allocated_storage     = var.rds_allocated_storage
@@ -220,8 +221,8 @@ module "replica_database" {
   apply_immediately     = !var.protect_resources
   publicly_accessible   = var.bi_public_access
 
-  username = "dozuki"
-  password = random_password.replica_database[0].result
+  username               = "dozuki"
+  random_password_length = 40
 
   multi_az           = var.rds_multi_az
   ca_cert_identifier = local.ca_cert_identifier
@@ -233,22 +234,20 @@ module "replica_database" {
   vpc_security_group_ids = [module.bi_database_sg.security_group_id]
 
   # Snapshot configuration
-  deletion_protection       = var.protect_resources
-  skip_final_snapshot       = !var.protect_resources
-  final_snapshot_identifier = "${local.identifier}-replica" # Snapshot name upon DB deletion
-  copy_tags_to_snapshot     = true
+  deletion_protection              = var.protect_resources
+  skip_final_snapshot              = !var.protect_resources
+  final_snapshot_identifier_prefix = "${local.identifier}-replica" # Snapshot name upon DB deletion
+  copy_tags_to_snapshot            = true
 
   # DB subnet group
-  # db_subnet_group_name = local.identifier # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/42
-  subnet_ids = local.bi_subnet_ids
+  subnet_ids             = local.bi_subnet_ids
+  create_db_subnet_group = true
 
   # DB parameter group
   create_db_parameter_group = false
   parameter_group_name      = local.rds_parameter_group_name
 
-  # DB option group
-  option_group_name      = null
-  create_db_option_group = false # https://github.com/terraform-aws-modules/terraform-aws-rds/issues/188
+  create_db_option_group = false
 
   tags = local.tags
 }
@@ -272,7 +271,7 @@ resource "aws_secretsmanager_secret_version" "replica_database_credentials" {
     port                 = module.replica_database[0].db_instance_port
     engine               = "mysql"
     username             = module.replica_database[0].db_instance_username
-    password             = random_password.replica_database[0].result
+    password             = module.replica_database[0].db_instance_password
   })
 }
 
@@ -336,7 +335,7 @@ resource "aws_dms_endpoint" "source" {
   kms_key_arn                 = aws_kms_key.bi[0].arn
 
   username    = module.primary_database.db_instance_username
-  password    = random_password.primary_database.result
+  password    = module.primary_database.db_instance_password
   server_name = module.primary_database.db_instance_address
 
   tags = local.tags
@@ -355,7 +354,7 @@ resource "aws_dms_endpoint" "target" {
   kms_key_arn                 = aws_kms_key.bi[0].arn
 
   username    = module.replica_database[0].db_instance_username
-  password    = random_password.replica_database[0].result
+  password    = module.replica_database[0].db_instance_password
   server_name = module.replica_database[0].db_instance_address
 
   tags = local.tags

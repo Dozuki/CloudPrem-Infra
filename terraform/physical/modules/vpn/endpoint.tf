@@ -2,6 +2,8 @@ resource "aws_ec2_client_vpn_endpoint" "vpn-client" {
   description            = "${local.identifier}-vpn-client"
   server_certificate_arn = module.ssl_cert.acm_server_arn
   client_cidr_block      = var.client_cidr_block
+  vpc_id                 = var.vpc_id
+  security_group_ids     = [aws_security_group.vpn.id]
 
   split_tunnel = true
   authentication_options {
@@ -23,7 +25,6 @@ resource "aws_ec2_client_vpn_endpoint" "vpn-client" {
 resource "aws_ec2_client_vpn_network_association" "vpn-client" {
   client_vpn_endpoint_id = aws_ec2_client_vpn_endpoint.vpn-client.id
   subnet_id              = var.subnet_id
-  security_groups        = [aws_security_group.vpn.id]
 }
 resource "aws_ec2_client_vpn_authorization_rule" "vpn-client" {
   client_vpn_endpoint_id = aws_ec2_client_vpn_endpoint.vpn-client.id

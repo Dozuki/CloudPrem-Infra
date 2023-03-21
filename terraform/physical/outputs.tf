@@ -28,7 +28,7 @@ output "termination_handler_role_arn" {
 }
 output "termination_handler_sqs_queue_id" {
   description = "SQS Queue ID for EKS node termination handler"
-  value       = module.aws_node_termination_handler_sqs.sqs_queue_id
+  value       = module.aws_node_termination_handler_sqs.queue_id
 }
 output "nlb_dns_name" {
   description = "URL to deployed application"
@@ -51,16 +51,22 @@ output "primary_db_secret" {
   value       = aws_secretsmanager_secret.primary_database_credentials.arn
 }
 output "guide_images_bucket" {
-  value = local.guide_images_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["image"], "bucket", null)
 }
 output "guide_objects_bucket" {
-  value = local.guide_objects_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["obj"], "bucket", null)
 }
 output "guide_pdfs_bucket" {
-  value = local.guide_pdfs_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["pdf"], "bucket", null)
 }
 output "documents_bucket" {
-  value = local.documents_bucket
+  value = lookup(aws_s3_bucket.guide_buckets["doc"], "bucket", null)
+}
+output "s3_kms_key_id" {
+  value = aws_kms_key.s3.arn
+}
+output "s3_replicate_buckets" {
+  value = local.use_existing_buckets
 }
 output "memcached_cluster_address" {
   value = aws_elasticache_cluster.this.cluster_address
@@ -80,7 +86,6 @@ output "bi_database_credential_secret" {
   description = "If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database."
   value       = try(aws_secretsmanager_secret.replica_database_credentials[0].arn, "")
 }
-
 output "bi_vpn_configuration_bucket" {
   description = "If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet."
   value       = try(module.vpn[0].aws_vpn_configuration_bucket, "")
@@ -94,5 +99,5 @@ output "grafana_ssl_key_parameter" {
   value       = try(module.grafana_ssl_cert.ssm_server_key.name, "")
 }
 output "bastion_asg_name" {
-  value = module.bastion.this_autoscaling_group_name
+  value = module.bastion.autoscaling_group_name
 }

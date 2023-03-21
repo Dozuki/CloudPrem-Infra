@@ -1,3 +1,9 @@
+data "aws_kms_key" "eks" {
+  count = local.create_eks_kms ? 0 : 1
+
+  key_id = var.eks_kms_key_id
+}
+
 resource "aws_iam_policy" "cluster_autoscaler_policy" {
   name_prefix = "cluster-autoscaler"
   description = "EKS cluster-autoscaler policy for cluster ${module.eks_cluster.cluster_id}"
@@ -50,7 +56,7 @@ data "aws_iam_policy_document" "cluster_autoscaler_pd" {
 # IAM role that the bastion host can assume.
 module "cluster_access_role_assumable" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
-  version = "4.7.0"
+  version = "5.11.2"
 
   create_role = true
 
@@ -72,7 +78,7 @@ module "cluster_access_role_assumable" {
 # IAM role to access the EKS cluster. By default only the user that creates the cluster has access to it
 module "cluster_access_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version = "4.7.0"
+  version = "5.11.2"
 
   create_role = true
   role_name   = local.cluster_access_role_name
@@ -107,6 +113,26 @@ resource "aws_iam_policy" "cluster_access" {
   policy = data.aws_iam_policy_document.cluster_access.json
 }
 
+data "aws_iam_policy_document" "eks_worker_kms" {
+  statement {
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncryptTo",
+      "kms:ReEncryptFrom",
+      "kms:GenerateDataKey",
+      "kms:GenerateDataKeyPair",
+      "kms:GenerateDataKeyPairWithoutPlaintext",
+      "kms:GenerateDataKeyWithoutPlaintext",
+      "kms:DescribeKey",
+    ]
+
+    resources = [
+      aws_kms_key.s3.arn,
+    ]
+  }
+}
+
 #tfsec:ignore:aws-iam-no-policy-wildcards
 data "aws_iam_policy_document" "eks_worker" {
   statement {
@@ -138,8 +164,10 @@ data "aws_iam_policy_document" "eks_worker" {
       "kms:DescribeKey",
     ]
 
+    # This is done to maintain backwards compatibility with <=3.1.
+    # The actual KMS permissions exist in the `eks_worker_kms` policy resource.
     resources = [
-      data.aws_kms_key.s3.arn,
+      data.aws_kms_key.s3_default.arn
     ]
   }
 
@@ -172,6 +200,13 @@ data "aws_iam_policy_document" "eks_worker" {
 resource "aws_iam_policy" "eks_worker" {
   name   = "${local.identifier}-${data.aws_region.current.name}"
   policy = data.aws_iam_policy_document.eks_worker.json
+}
+
+# We need separate policies to maintain backwards compatibility with existing stacks. Modifying the existing policy
+# with new resources triggers a cluster breaking event.
+resource "aws_iam_policy" "eks_worker_kms" {
+  name   = "${local.identifier}-${data.aws_region.current.name}-kms"
+  policy = data.aws_iam_policy_document.eks_worker_kms.json
 }
 
 resource "aws_kms_key" "eks" {
@@ -214,7 +249,9 @@ module "eks_cluster" {
 
   workers_additional_policies = [
     aws_iam_policy.eks_worker.arn,
+    aws_iam_policy.eks_worker_kms.arn
   ]
+
   worker_groups_launch_template = [
     {
       name                                 = "workers"

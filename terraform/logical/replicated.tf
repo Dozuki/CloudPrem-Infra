@@ -56,7 +56,7 @@ resource "local_file" "replicated_install" {
 
   filename = "./kots_install.sh"
   content  = <<EOT
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 ${local.aws_profile_prefix} aws --region ${data.aws_region.current.name} eks update-kubeconfig --name ${var.eks_cluster_id} --role-arn ${var.eks_cluster_access_role_arn}
@@ -67,15 +67,19 @@ kubectl config set-context --current --namespace=${kubernetes_namespace.kots_app
 
 set -v
 
-kubectl kots install ${local.app_and_channel} \
-  --namespace ${kubernetes_namespace.kots_app.metadata[0].name} \
-  --license-file ./dozuki.yaml \
-  --shared-password '${random_password.dashboard_password.result}' \
-  --config-values ${local_file.replicated_bootstrap_config.filename} \
-  --no-port-forward \
-  --skip-preflights \
-  --wait-duration=10m
+# Ensure the app is not already installed
+if ! kubectl kots get apps -n ${kubernetes_namespace.kots_app.metadata[0].name} >/dev/null 2>&1; then
 
+  kubectl kots install ${local.app_and_channel} \
+    --namespace ${kubernetes_namespace.kots_app.metadata[0].name} \
+    --license-file ./dozuki.yaml \
+    --shared-password '${random_password.dashboard_password.result}' \
+    --config-values ${local_file.replicated_bootstrap_config.filename} \
+    --no-port-forward \
+    --skip-preflights \
+    --wait-duration=10m
+
+fi
 
 EOT
   provisioner "local-exec" {

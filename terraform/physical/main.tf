@@ -1,11 +1,11 @@
 terraform {
-  required_version = ">= 1.1.0"
+  required_version = ">= 1.3.9"
 
   required_providers {
-    aws        = "3.70.0"
+    aws        = "4.57.0"
     random     = "3.4.3"
-    kubernetes = "2.13.1"
-    null       = "3.1.0"
+    kubernetes = "2.18.1"
+    null       = "3.2.1"
   }
 }
 provider "kubernetes" {
@@ -52,60 +52,39 @@ locals {
   replicated_ui_access_cidrs          = var.replicated_ui_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.replicated_ui_access_cidrs) : var.replicated_ui_access_cidrs
 
   # S3 Buckets
-  guide_images_bucket  = var.create_s3_buckets ? aws_s3_bucket.guide_images[0].bucket : data.aws_s3_bucket.guide_images[0].bucket
-  guide_objects_bucket = var.create_s3_buckets ? aws_s3_bucket.guide_objects[0].bucket : data.aws_s3_bucket.guide_objects[0].bucket
-  guide_pdfs_bucket    = var.create_s3_buckets ? aws_s3_bucket.guide_pdfs[0].bucket : data.aws_s3_bucket.guide_pdfs[0].bucket
-  documents_bucket     = var.create_s3_buckets ? aws_s3_bucket.guide_documents[0].bucket : data.aws_s3_bucket.documents[0].bucket
-  logging_bucket       = var.create_s3_buckets ? aws_s3_bucket.logging_bucket[0].bucket : data.aws_s3_bucket.logging[0].bucket
+  // If all 4 guide buckets are specified we use them as a replication source.
+  use_existing_buckets = length(var.s3_existing_buckets) == 4 ? true : false
+
+  // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
+  // The format of the s3_existing_buckets object is important and described in the variables.tf file.
+  s3_existing_buckets = local.use_existing_buckets ? var.s3_existing_buckets : []
+
+  // Do not change these values without modifying the `moved` blocks in s3.tf
+  create_s3_bucket_names = ["image", "obj", "pdf", "doc"]
+
+  // Build a list of maps of existing buckets with their prefix, source, and destination in this format:
+  //{ type = one of local.create_s3_bucket_names, destination = arn of destination bucket for replication, source = arn of source bucket for replication }
+  existing_bucket_map = local.use_existing_buckets ? [for _, bucket_type in local.create_s3_bucket_names : { type = bucket_type, destination = aws_s3_bucket.guide_buckets[bucket_type].arn, source = data.aws_s3_bucket.guide_buckets[bucket_type].bucket }] : []
+
+  // Build lists for IAM policies to include all the source and destination buckets and objects
+  s3_source_bucket_arn_list                   = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : bucket.arn] : []
+  s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"] : []
+  s3_destination_bucket_arn_list_with_objects = [for _, bucket in one(flatten(toset(aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"]
 
   # VPC
   azs_count          = var.azs_count
   create_vpc         = var.vpc_id == "" ? true : false
   vpc_id             = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
-  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnet_ids.public[0].ids
-  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnet_ids.private[0].ids
+  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnets.public[0].ids
+  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnets.private[0].ids
 }
+
+# Provider and global data resources
 data "aws_eks_cluster" "main" {
   name = module.eks_cluster.cluster_id
 }
-
 data "aws_partition" "current" {}
 data "aws_availability_zones" "available" {}
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
-
-data "aws_vpc" "this" {
-  count = local.create_vpc ? 0 : 1
-  id    = var.vpc_id
-}
-data "aws_subnet_ids" "public" {
-  count = local.create_vpc ? 0 : 1
-
-  vpc_id = var.vpc_id
-
-  tags = {
-    type = "public"
-  }
-}
-data "aws_subnet_ids" "private" {
-  count = local.create_vpc ? 0 : 1
-
-  vpc_id = var.vpc_id
-
-  tags = {
-    type = "private"
-  }
-}
-
-data "aws_kms_key" "rds" {
-  key_id = var.rds_kms_key_id
-}
-data "aws_kms_key" "s3" {
-  key_id = var.s3_kms_key_id
-}
-data "aws_kms_key" "eks" {
-  count = local.create_eks_kms ? 0 : 1
-
-  key_id = var.eks_kms_key_id
-}

@@ -12,8 +12,8 @@ resource "tls_private_key" "client" {
   algorithm = "RSA"
 }
 resource "tls_cert_request" "client" {
-  count           = length(var.vpn-client-list)
-  key_algorithm   = "RSA"
+  count = length(var.vpn-client-list)
+
   private_key_pem = tls_private_key.client[count.index].private_key_pem
   subject {
     common_name  = "${local.identifier}.${data.aws_region.current.name}.vpn.${var.vpn-client-list[count.index]}-client"
@@ -21,9 +21,9 @@ resource "tls_cert_request" "client" {
   }
 }
 resource "tls_locally_signed_cert" "client" {
-  count                 = length(var.vpn-client-list)
-  cert_request_pem      = tls_cert_request.client[count.index].cert_request_pem
-  ca_key_algorithm      = "RSA"
+  count            = length(var.vpn-client-list)
+  cert_request_pem = tls_cert_request.client[count.index].cert_request_pem
+
   ca_private_key_pem    = module.ssl_cert.ssm_ca_key.value
   ca_cert_pem           = module.ssl_cert.ssm_ca_cert.value
   validity_period_hours = 87600
@@ -50,7 +50,7 @@ resource "aws_acm_certificate" "client" {
   )
 }
 
-resource "aws_s3_bucket_object" "vpn-config-file" {
+resource "aws_s3_object" "vpn-config-file" {
   count                  = length(var.vpn-client-list)
   bucket                 = aws_s3_bucket.vpn-config-files.id
   server_side_encryption = "aws:kms"
