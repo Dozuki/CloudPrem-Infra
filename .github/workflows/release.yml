@@ -22,8 +22,11 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Kubernetes Upgrade
-            - Update Kubernetes to 1.22
-            - Fix issue with live environment directory structure
+            Intelligent S3 Bucket Migration Support
+            - Install k9s utility on the bastion.
+            - Update AWS provider to 4.57.0.
+            - Refactor S3 implementation to use dynamic resources.
+            - Refactor support for migrating from existing S3 buckets to use bucket replication for safety.
+            - Fix KOTS install script from constantly attempting a re-install on empeheral environments.
           draft: false
           prerelease: false
