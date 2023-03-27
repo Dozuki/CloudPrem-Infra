@@ -321,6 +321,13 @@ resource "aws_s3_bucket" "logging_bucket" {
 
   bucket_prefix = "${local.identifier}-log-${data.aws_region.current.name}"
   force_destroy = !var.protect_resources
+
+  lifecycle {
+    ignore_changes = [
+      bucket,
+      bucket_prefix
+    ]
+  }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_encryption" {
@@ -342,6 +349,13 @@ resource "aws_s3_bucket" "guide_buckets" {
 
   bucket_prefix = "${local.identifier}-${each.key}-${data.aws_region.current.name}"
   force_destroy = !var.protect_resources
+
+  lifecycle {
+    ignore_changes = [
+      bucket,
+      bucket_prefix
+    ]
+  }
 }
 resource "aws_s3_bucket_logging" "guide_buckets_logging" {
   for_each = toset(local.create_s3_bucket_names)
