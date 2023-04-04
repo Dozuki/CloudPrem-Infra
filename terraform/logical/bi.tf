@@ -1,14 +1,3 @@
-data "aws_ssm_parameter" "grafana_ssl_cert" {
-  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
-
-  name = var.grafana_ssl_server_cert_parameter
-}
-data "aws_ssm_parameter" "grafana_ssl_key" {
-  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
-
-  name = var.grafana_ssl_server_key_parameter
-}
-
 resource "kubernetes_job" "dms_start" {
   count = var.enable_bi ? 1 : 0
 
@@ -43,21 +32,8 @@ resource "kubernetes_job" "dms_start" {
   }
 }
 
-resource "kubernetes_secret" "grafana_ssl" {
-  count = var.enable_bi ? !var.grafana_use_replicated_ssl ? 1 : 0 : 0
-
-  metadata {
-    name      = "grafana-ssl"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
-  }
-
-  data = {
-    "onprem.key" = data.aws_ssm_parameter.grafana_ssl_key[0].value
-    "onprem.crt" = data.aws_ssm_parameter.grafana_ssl_cert[0].value
-  }
-}
-
 resource "kubernetes_secret" "grafana_config" {
+  count = var.enable_bi ? 1 : 0
 
   metadata {
     name      = "grafana-config"
@@ -65,10 +41,9 @@ resource "kubernetes_secret" "grafana_config" {
   }
 
   data = {
-    GF_SERVER_PROTOCOL     = "https"
-    GF_SERVER_CERT_FILE    = "/etc/secrets/onprem.crt"
-    GF_SERVER_CERT_KEY     = "/etc/secrets/onprem.key"
-    GF_USERS_DEFAULT_THEME = "light"
+    GF_SERVER_ROOT_URL           = local.grafana_url
+    GF_SERVER_SERVE_FROM_SUBPATH = true
+    GF_USERS_DEFAULT_THEME       = "light"
   }
 }
 
@@ -93,9 +68,9 @@ resource "helm_release" "grafana" {
 
   values = [
     templatefile("${path.module}/static/grafana_values.yml", {
-      ssl_secret_name   = local.grafana_ssl_secret_name
       database_hostname = local.db_bi_host
       database_password = local.db_bi_password
+      hostname          = var.dns_domain_name
     })
   ]
 

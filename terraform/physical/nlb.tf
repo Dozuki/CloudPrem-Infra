@@ -103,13 +103,3 @@ module "nlb" {
 
   tags = local.tags
 }
-
-module "nlb_ssl_cert" {
-
-  source      = "./modules/acm"
-  environment = var.environment
-  identifier  = var.identifier
-
-  cert_common_name = module.nlb.lb_dns_name
-  namespace        = "nlb"
-}

@@ -82,14 +82,6 @@ output "bi_vpn_configuration_bucket" {
   description = "If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet."
   value       = try(module.vpn[0].aws_vpn_configuration_bucket, "")
 }
-output "grafana_ssl_cert_parameter" {
-  description = "Parameter name for the Grafana SSL cert"
-  value       = try(module.grafana_ssl_cert.ssm_server_cert.name, "")
-}
-output "grafana_ssl_key_parameter" {
-  description = "Parameter name for the Grafana SSL cert key"
-  value       = try(module.grafana_ssl_cert.ssm_server_key.name, "")
-}
 output "bastion_asg_name" {
   value = module.bastion.autoscaling_group_name
 }
