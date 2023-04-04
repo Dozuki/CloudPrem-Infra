@@ -86,6 +86,17 @@ variable "external_fqdn" {
   default     = ""
 }
 
+variable "alarm_email" {
+  description = "Email address to send status alarms to."
+  type        = string
+  default     = ""
+}
+variable "slack_webhook_url" {
+  description = "URL to an optional Slack webhook for SNS alerts."
+  type        = string
+  default     = ""
+}
+
 # --- END General Configuration --- #
 
 # --- BEGIN Network Configuration --- #
