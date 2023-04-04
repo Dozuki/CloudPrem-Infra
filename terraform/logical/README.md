@@ -31,10 +31,9 @@ No modules.
 | Name | Type |
 |------|------|
 | [aws_autoscaling_lifecycle_hook.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/autoscaling_lifecycle_hook) | resource |
-| [helm_release.adot_exporter](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
-| [helm_release.cert_manager](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.cluster_autoscaler](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
+| [helm_release.container_insights](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.frontegg](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.grafana](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.metrics_server](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
@@ -45,17 +44,15 @@ No modules.
 | [kubernetes_horizontal_pod_autoscaler.queueworkerd](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/horizontal_pod_autoscaler) | resource |
 | [kubernetes_job.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
 | [kubernetes_job.frontegg_database_create](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
-| [kubernetes_job.grafana_db_create](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
 | [kubernetes_job.sites_config_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
 | [kubernetes_job.wait_for_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
-| [kubernetes_namespace.cert_manager](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/namespace) | resource |
 | [kubernetes_namespace.kots_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/namespace) | resource |
 | [kubernetes_role.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/role) | resource |
 | [kubernetes_role_binding.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/role_binding) | resource |
 | [kubernetes_secret.grafana_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/secret) | resource |
+| [kubernetes_secret.grafana_ssl](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/secret) | resource |
 | [local_file.replicated_bootstrap_config](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
 | [local_file.replicated_install](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
-| [local_file.replicated_uninstall](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
 | [null_resource.pull_replicated_license](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
 | [random_password.dashboard_password](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
 | [random_password.grafana_admin](https://registry.terraform.io/providers/hashicorp/random/3.4.3/docs/resources/password) | resource |
@@ -67,6 +64,10 @@ No modules.
 | [aws_secretsmanager_secret_version.db_bi](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/secretsmanager_secret_version) | data source |
 | [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/secretsmanager_secret_version) | data source |
 | [aws_ssm_parameter.dozuki_customer_id](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.grafana_ssl_cert](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.grafana_ssl_key](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.nlb_ssl_cert](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ssm_parameter) | data source |
+| [aws_ssm_parameter.nlb_ssl_key](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ssm_parameter) | data source |
 | [kubernetes_secret.frontegg](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/data-sources/secret) | data source |
 
 ## Inputs
@@ -88,8 +89,13 @@ No modules.
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_google_translate_api_token"></a> [google\_translate\_api\_token](#input\_google\_translate\_api\_token) | If using machine translation, enter your google translate API token here. | `string` | `""` | no |
+| <a name="input_grafana_ssl_server_cert_parameter"></a> [grafana\_ssl\_server\_cert\_parameter](#input\_grafana\_ssl\_server\_cert\_parameter) | Parameter that stores the SSL server cert for Grafana | `string` | `""` | no |
+| <a name="input_grafana_ssl_server_key_parameter"></a> [grafana\_ssl\_server\_key\_parameter](#input\_grafana\_ssl\_server\_key\_parameter) | Parameter that stores the SSL server key for Grafana | `string` | `""` | no |
+| <a name="input_grafana_use_replicated_ssl"></a> [grafana\_use\_replicated\_ssl](#input\_grafana\_use\_replicated\_ssl) | If true the Grafana installation will use the same SSL cert uploaded (or generated by) to the Replicated dashboard. | `bool` | `true` | no |
 | <a name="input_memcached_cluster_address"></a> [memcached\_cluster\_address](#input\_memcached\_cluster\_address) | Address of the deployed memcached cluster | `string` | n/a | yes |
 | <a name="input_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#input\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list | `any` | n/a | yes |
+| <a name="input_nlb_ssl_server_cert_parameter"></a> [nlb\_ssl\_server\_cert\_parameter](#input\_nlb\_ssl\_server\_cert\_parameter) | Parameter that stores the SSL server cert for the NLB | `string` | n/a | yes |
+| <a name="input_nlb_ssl_server_key_parameter"></a> [nlb\_ssl\_server\_key\_parameter](#input\_nlb\_ssl\_server\_key\_parameter) | Parameter that stores the SSL server key for the NLB | `string` | n/a | yes |
 | <a name="input_primary_db_secret"></a> [primary\_db\_secret](#input\_primary\_db\_secret) | ARN to secret containing primary db credentials | `string` | n/a | yes |
 | <a name="input_replicated_channel"></a> [replicated\_channel](#input\_replicated\_channel) | If specifying an app sequence for a fresh install, this is the channel that sequence was deployed to. You only need to set this if the sequence you configured was not released on the default channel associated with your customer license. | `string` | `""` | no |
 | <a name="input_s3_documents_bucket"></a> [s3\_documents\_bucket](#input\_s3\_documents\_bucket) | Name of the bucket to store documents. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |

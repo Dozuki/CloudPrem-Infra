@@ -13,7 +13,7 @@ resource "random_password" "dashboard_password" {
   special = true
 
   keepers = {
-    nlb_dns_name = var.nlb_dns_name
+    nlb_dns_name = var.dns_domain_name
   }
 }
 
@@ -41,11 +41,7 @@ metadata:
 spec:
   values:
     hostname:
-      value: ${var.nlb_dns_name}
-    tls_private_key_file:
-      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_key.value)}
-    tls_certificate_file:
-      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_cert.value)}
+      value: ${var.dns_domain_name}
 status: {}
 EOT
 }
