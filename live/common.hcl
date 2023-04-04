@@ -100,7 +100,7 @@ dependency "physical" {
     eks_oidc_cluster_access_role_name = "dummy-ca-role-arn"
     termination_handler_role_arn = "dummy-termination-handler-role-arn"
     termination_handler_sqs_queue_id = "dummy-sqs-id"
-    nlb_dns_name = "dummy-lb-dns"
+    dns_domain_name = "dummy-lb-dns"
     nlb_ssl_cert_parameter = "dummy-cert"
     nlb_ssl_key_parameter = "dummy-key"
     cluster_primary_sg = "dummy-sg"
@@ -133,7 +133,7 @@ inputs = {
   termination_handler_sqs_queue_id = dependency.physical.outputs.termination_handler_sqs_queue_id
   eks_worker_asg_arns = dependency.physical.outputs.eks_worker_asg_arns
   eks_worker_asg_names = dependency.physical.outputs.eks_worker_asg_names
-  nlb_dns_name = dependency.physical.outputs.nlb_dns_name
+  dns_domain_name = dependency.physical.outputs.dns_domain_name
   nlb_ssl_server_cert_parameter = dependency.physical.outputs.nlb_ssl_cert_parameter
   nlb_ssl_server_key_parameter = dependency.physical.outputs.nlb_ssl_key_parameter
   cluster_primary_sg = dependency.physical.outputs.cluster_primary_sg
