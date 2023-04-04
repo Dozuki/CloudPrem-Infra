@@ -65,11 +65,11 @@ module "cluster_access_role_assumable" {
 
   custom_role_policy_arns = [
     "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
-    aws_iam_policy.cluster_access.arn,
+    aws_iam_policy.cluster_access.arn
   ]
 
   trusted_role_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root",
+    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
   ]
 
   tags = local.tags
@@ -216,6 +216,22 @@ resource "aws_kms_key" "eks" {
   enable_key_rotation = true
 }
 
+resource "aws_iam_policy" "assume_cross_account_role" {
+  name        = "AssumeCrossAccountRole"
+  description = "Policy to assume the cross-account role for Route 53 hosted zone access"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = "sts:AssumeRole"
+        Effect   = "Allow"
+        Resource = local.route_53_role
+      }
+    ]
+  })
+}
+
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 #tfsec:ignore:aws-eks-no-public-cluster-access-to-cidr
 #tfsec:ignore:aws-eks-no-public-cluster-access
@@ -249,7 +265,8 @@ module "eks_cluster" {
 
   workers_additional_policies = [
     aws_iam_policy.eks_worker.arn,
-    aws_iam_policy.eks_worker_kms.arn
+    aws_iam_policy.eks_worker_kms.arn,
+    aws_iam_policy.assume_cross_account_role.arn
   ]
 
   worker_groups_launch_template = [

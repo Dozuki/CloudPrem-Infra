@@ -35,7 +35,7 @@ provider "helm" {
 }
 
 locals {
-  dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.identifier}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
+  dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.customer == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.customer}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 

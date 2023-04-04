@@ -19,7 +19,8 @@ provider "kubernetes" {
 }
 
 locals {
-  identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-${var.environment}"
+  identifier    = var.customer == "" ? "dozuki-${var.environment}" : "${var.customer}-${var.environment}"
+  customer_name = var.customer == "" ? "dozuki" : var.customer
 
   # EKS
   cluster_access_role_name = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
@@ -30,11 +31,22 @@ locals {
   tags = {
     Terraform   = "true"
     Project     = "Dozuki"
-    Identifier  = coalesce(var.identifier, "NA")
+    Identifier  = coalesce(var.customer, "Dozuki")
     Environment = var.environment
   }
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
+
+  # DNS
+  subdomain_parts = {
+    "%CUSTOMER%"    = local.customer_name
+    "%ENVIRONMENT%" = var.environment
+    "%REGION%"      = data.aws_region.current.name
+  }
+  subdomain           = join("-", [for part in var.subdomain_format : local.subdomain_parts[part] if local.subdomain_parts[part] != ""])
+  route_53_role       = local.is_us_gov ? "arn:aws-us-gov:iam::446787640263:role/Route53AccessRole" : "arn:aws:iam::010601635461:role/Route53AccessRole"
+  dns_domain_name     = local.is_us_gov ? module.nlb.lb_dns_name : var.external_fqdn == "" ? aws_route53_record.subdomain[0].name : var.external_fqdn
+  autogenerate_domain = local.is_us_gov ? "" : "dozuki.guide"
 
   # Database
   rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default.id
