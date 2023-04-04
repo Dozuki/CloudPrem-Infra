@@ -30,6 +30,7 @@
 | <a name="module_cluster_access_role"></a> [cluster\_access\_role](#module\_cluster\_access\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 5.11.2 |
 | <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 5.11.2 |
 | <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
+| <a name="module_disk_alarm"></a> [disk\_alarm](#module\_disk\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.24.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 8.4.0 |
@@ -48,8 +49,10 @@
 |------|------|
 | [aws_cloudwatch_event_rule.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_rule.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
+| [aws_cloudwatch_event_rule.dms_task_state_changed_rule](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_target.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
 | [aws_cloudwatch_event_target.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
+| [aws_cloudwatch_event_target.dms_task_state_changed_target](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
 | [aws_db_parameter_group.default](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/db_parameter_group) | resource |
 | [aws_dms_certificate.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_certificate) | resource |
 | [aws_dms_endpoint.source](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_endpoint) | resource |

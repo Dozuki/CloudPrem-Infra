@@ -33,21 +33,51 @@ module "cpu_alarm" {
   ]
 }
 
+# The alarm should never trigger unless something is wrong with the cluster autoscaler, or the max scale has been met
 module "memory_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "4.2.1"
 
-  alarm_name        = "${local.identifier}-memory-high"
-  alarm_description = "Memory utilization high for ${local.identifier} cluster"
+  alarm_name        = "${local.identifier}-memory-utilization"
+  alarm_description = "High memory utilization for ${local.identifier} cluster"
 
   namespace   = "ContainerInsights"
   metric_name = "node_memory_utilization"
   statistic   = "Average"
 
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 3
-  threshold           = 75
-  period              = 120
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  threshold           = 80
+  period              = 300
+
+  dimensions = {
+    ClusterName = module.eks_cluster.cluster_id
+  }
+
+  alarm_actions = [
+    module.sns.topic_arn
+  ]
+
+  ok_actions = [
+    module.sns.topic_arn
+  ]
+}
+
+module "disk_alarm" {
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  version = "4.2.1"
+
+  alarm_name        = "${local.identifier}-out-of-disk"
+  alarm_description = "Disk usage high for ${local.identifier} cluster"
+
+  namespace   = "ContainerInsights"
+  metric_name = "node_filesystem_utilization"
+  statistic   = "Average"
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  threshold           = 60
+  period              = 300
 
   dimensions = {
     ClusterName = module.eks_cluster.cluster_id
@@ -118,4 +148,28 @@ module "nodes_alarm" {
   ok_actions = [
     module.sns.topic_arn
   ]
+}
+
+resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
+  count = var.enable_bi ? 1 : 0
+
+  name        = "${local.identifier}-dms-task-changed-rule"
+  description = "Capture change state of DMS replication tasks"
+
+  event_pattern = jsonencode({
+    "source" : [
+      "aws.dms"
+    ],
+    "detail-type" : [
+      "DMS Replication Task State Change"
+    ]
+  })
+}
+
+resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
+  count = var.enable_bi ? 1 : 0
+
+  rule      = aws_cloudwatch_event_rule.dms_task_state_changed_rule[0].name
+  target_id = "DmsTaskChangedTarget"
+  arn       = module.sns.topic_arn
 }
