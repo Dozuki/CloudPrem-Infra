@@ -45,6 +45,7 @@ No modules.
 | [kubernetes_horizontal_pod_autoscaler.queueworkerd](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/horizontal_pod_autoscaler) | resource |
 | [kubernetes_job.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
 | [kubernetes_job.frontegg_database_create](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
+| [kubernetes_job.grafana_db_create](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
 | [kubernetes_job.sites_config_update](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
 | [kubernetes_job.wait_for_app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |
 | [kubernetes_namespace.cert_manager](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/namespace) | resource |

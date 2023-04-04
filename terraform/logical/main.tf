@@ -37,8 +37,7 @@ provider "helm" {
 locals {
   dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.customer == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.customer}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
 
-  is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
-
+  is_us_gov        = data.aws_partition.current.partition == "aws-us-gov"
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
 
   aws_profile_prefix = var.aws_profile != "" ? "AWS_PROFILE=${var.aws_profile}" : ""
@@ -51,6 +50,7 @@ locals {
   db_master_password = local.db_credentials["password"]
 
   db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
+  db_bi_username = local.db_master_username
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
   # Webhooks
