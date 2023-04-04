@@ -1,0 +1,10 @@
+{{- if and .Values.adotCollector.daemonSet.enabled .Values.adotCollector.daemonSet.createNamespace }}
+# Specify namespace for ADOT Collector as a DaemonSet.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "adotCollector.daemonSet.namespace" . }}
+  labels:
+    name: {{ include "adotCollector.daemonSet.namespace" . }}
+    {{- include "adotCollector.daemonSet.labels" . | indent 4 }}
+{{- end }}

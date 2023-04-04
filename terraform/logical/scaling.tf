@@ -23,11 +23,6 @@ resource "helm_release" "cluster_autoscaler" {
   }
 }
 
-resource "helm_release" "metrics_server" {
-  name  = "metrics-server"
-  chart = "charts/metrics-server"
-}
-
 resource "kubernetes_horizontal_pod_autoscaler" "app" {
   depends_on = [local_file.replicated_install]
 
