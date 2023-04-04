@@ -100,10 +100,9 @@
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group) | resource |
 | [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group) | resource |
-| [aws_security_group_rule.app_access_http](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.acme_access_http](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.app_access_https](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.grafana_access_http](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
@@ -145,7 +144,6 @@
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_alarm_email"></a> [alarm\_email](#input\_alarm\_email) | Email address to send status alarms to. | `string` | `""` | no |
 | <a name="input_app_access_cidrs"></a> [app\_access\_cidrs](#input\_app\_access\_cidrs) | These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
@@ -180,7 +178,6 @@
 | <a name="input_replicated_ui_access_cidrs"></a> [replicated\_ui\_access\_cidrs](#input\_replicated\_ui\_access\_cidrs) | These CIDRs will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_s3_existing_buckets"></a> [s3\_existing\_buckets](#input\_s3\_existing\_buckets) | List of the existing Dozuki buckets to use. Do not include the logging bucket. | <pre>list(object({<br>    type        = string<br>    bucket_name = string<br>  }))</pre> | `[]` | no |
 | <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
-| <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | URL to an optional Slack webhook for SNS alerts. | `string` | `""` | no |
 | <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br>  "%CUSTOMER%",<br>  "%ENVIRONMENT%",<br>  "%REGION%"<br>]</pre> | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | `"172.16.0.0/16"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private | `string` | `""` | no |

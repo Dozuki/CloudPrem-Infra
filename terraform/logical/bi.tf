@@ -57,7 +57,7 @@ resource "random_password" "grafana_admin" {
 resource "helm_release" "grafana" {
   count = var.enable_bi ? 1 : 0
 
-  depends_on = [kubernetes_secret.grafana_ssl, kubernetes_secret.grafana_config, local_file.replicated_install]
+  depends_on = [kubernetes_secret.grafana_config, local_file.replicated_install]
 
   name  = "grafana"
   chart = "${path.module}/charts/grafana"

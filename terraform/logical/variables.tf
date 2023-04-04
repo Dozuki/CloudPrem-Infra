@@ -33,7 +33,6 @@ variable "aws_profile" {
   type        = string
   default     = ""
 }
-
 # --- END General Configuration --- #
 
 # --- BEGIN Network Configuration --- #
