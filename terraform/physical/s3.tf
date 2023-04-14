@@ -61,9 +61,50 @@ data "aws_kms_key" "s3_migration" {
 
   key_id = var.s3_kms_key_id
 }
+
+data "aws_iam_policy_document" "s3_kms_key_policy" {
+
+  statement {
+    sid       = "Allow access through S3 for all principals in the account that are authorized to use S3"
+    effect    = "Allow"
+    actions   = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${data.aws_partition.current.dns_suffix}"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:CallerAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  statement {
+    sid       = "Allow direct access to key metadata to the account"
+    effect    = "Allow"
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+}
+
 resource "aws_kms_key" "s3" {
   description             = "KMS key to encrypt S3 bucket contents"
   deletion_window_in_days = 7
+  policy                  = data.aws_iam_policy_document.s3_kms_key_policy.json
 }
 resource "aws_kms_alias" "s3" {
   name_prefix   = "alias/${local.identifier}/${data.aws_region.current.name}/s3/"
