@@ -8,14 +8,14 @@ provider "aws" {
 }
 
 data "aws_route53_zone" "subdomain" {
-  count    = var.external_fqdn == "" ? 1 : 0
+  count    = local.autogenerate_domain != "" ? 1 : 0
   provider = aws.dns
 
   name = local.autogenerate_domain
 }
 
 resource "aws_route53_record" "subdomain" {
-  count = var.external_fqdn == "" ? 1 : 0
+  count = local.autogenerate_domain != "" ? 1 : 0
 
   provider = aws.dns
 
@@ -27,7 +27,7 @@ resource "aws_route53_record" "subdomain" {
 }
 
 resource "aws_route53_record" "subsite_subdomain" {
-  count = var.external_fqdn == "" ? 1 : 0
+  count = local.autogenerate_domain != "" ? 1 : 0
 
   provider = aws.dns
 
