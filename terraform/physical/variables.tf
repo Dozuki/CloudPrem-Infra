@@ -17,6 +17,23 @@ variable "customer" {
   }
 }
 
+variable "subdomain_override" {
+  description = "For upgrades only, new stacks use `customer`. If the previous version used an identifier but you want the subdomain to be different, add it here."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      length(var.subdomain_override) == 0 ||
+      (length(var.subdomain_override) <= 10 &&
+        can(regex("^[a-z0-9]", var.subdomain_override)) &&
+        can(regex("[a-z0-9-]+", var.subdomain_override)) &&
+        can(regex("[a-z0-9]$", var.subdomain_override))
+    ))
+    error_message = "Subdomain must be empty or between 1 and 10 characters long, start with a letter or digit, contain only lowercase letters, digits, or hyphens, and end with a letter or digit."
+  }
+}
+
 variable "environment" {
   description = "Environment of the application"
   type        = string

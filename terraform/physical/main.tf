@@ -21,7 +21,7 @@ provider "kubernetes" {
 
 locals {
   identifier    = var.customer == "" ? "dozuki-${var.environment}" : "${var.customer}-${var.environment}"
-  customer_name = var.customer == "" ? "dozuki" : var.customer
+  customer_name = var.subdomain_override != "" ? var.subdomain_override : var.customer == "" ? "dozuki" : var.customer
 
   # EKS
   cluster_access_role_name = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
