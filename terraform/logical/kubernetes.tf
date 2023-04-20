@@ -16,6 +16,12 @@ resource "kubernetes_role" "dozuki_list_role" {
     resources  = ["deployments"]
     verbs      = ["get", "list", "watch"]
   }
+  rule {
+    api_groups = ["networking.k8s.io"]
+    resources  = ["ingresses"]
+    verbs      = ["get", "list", "watch", "create"]
+  }
+
 }
 
 resource "kubernetes_role_binding" "dozuki_list_role_binding" {
