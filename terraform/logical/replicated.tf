@@ -5,10 +5,6 @@ data "aws_ssm_parameter" "dozuki_customer_id" {
 resource "random_password" "dashboard_password" {
   length  = 16
   special = true
-
-  keepers = {
-    nlb_dns_name = var.dns_domain_name
-  }
 }
 
 resource "null_resource" "pull_replicated_license" {
