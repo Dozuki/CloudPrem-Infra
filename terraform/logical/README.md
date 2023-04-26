@@ -41,6 +41,7 @@ No modules.
 | [helm_release.mongodb](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.redis](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [kubernetes_config_map.dozuki_resources](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/config_map) | resource |
+| [kubernetes_config_map.grafana_sqlite_migrate](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/config_map) | resource |
 | [kubernetes_horizontal_pod_autoscaler.app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/horizontal_pod_autoscaler) | resource |
 | [kubernetes_horizontal_pod_autoscaler.queueworkerd](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/horizontal_pod_autoscaler) | resource |
 | [kubernetes_job.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/job) | resource |

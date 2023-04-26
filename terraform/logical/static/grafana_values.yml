@@ -27,7 +27,8 @@ ingress:
       hosts:
         - ${hostname}
 
-
+## Still create the pvc even though we don't use it anymore to prevent the init migration script from failing.
+## Eventually in the future we will remove it once all existing sqlite grafana instances have been upgraded.
 persistence:
   type: pvc
   enabled: true
@@ -44,7 +45,7 @@ initChownData:
   enabled: false
 
 # Administrator credentials when not using an existing secret (see below)
-adminUser: dozuki
+adminUser: ${admin_user}
 envFromSecret: "grafana-config"
 
 ## Configure grafana datasources
@@ -110,3 +111,44 @@ dashboards:
        file: dashboards/work-order-signoff-status.json
      work-order-status:
        file: dashboards/work-order-status.json
+
+
+extraInitContainers:
+  - name: migrate-sqlite-to-mysql
+    image: python:3.8-slim
+    command:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /tmp/app-packages
+        pip install --no-cache-dir --target=/tmp/app-packages pymysql
+        export PYTHONPATH=$PYTHONPATH:/tmp/app-packages
+        python /scripts/grafana_migrate_sqlite_to_mysql.py
+    env:
+      - name: MYSQL_HOST
+        valueFrom:
+          secretKeyRef:
+            name: grafana-mysql-credentials
+            key: host
+      - name: MYSQL_USER
+        valueFrom:
+          secretKeyRef:
+            name: grafana-mysql-credentials
+            key: user
+      - name: MYSQL_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: grafana-mysql-credentials
+            key: password
+      - name: MYSQL_DB
+        value: grafana
+    volumeMounts:
+      - name: storage
+        mountPath: /sqlite-data
+        readOnly: true
+      - name: migration-script
+        mountPath: /scripts
+extraContainerVolumes:
+  - name: migration-script
+    configMap:
+      name: grafana-sqlite-migrate
