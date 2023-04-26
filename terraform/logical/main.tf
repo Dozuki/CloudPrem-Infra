@@ -61,7 +61,7 @@ locals {
 
   # Grafana
   grafana_url            = var.enable_bi ? format("https://%s/dashboards", var.dns_domain_name) : null
-  grafana_admin_username = var.enable_bi ? "dozuki" : null
+  grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : null
   grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
 
   # Replicated

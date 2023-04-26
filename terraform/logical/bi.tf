@@ -170,7 +170,8 @@ resource "helm_release" "grafana" {
   reuse_values = true
 
   values = [
-    templatefile("${path.module}/static/grafana_values.yml", {
+    templatefile("static/grafana_values.yml", {
+      admin_user        = local.grafana_admin_username
       database_hostname = local.db_bi_host
       database_password = local.db_bi_password
       hostname          = var.dns_domain_name
