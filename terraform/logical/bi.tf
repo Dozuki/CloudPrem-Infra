@@ -163,7 +163,7 @@ resource "helm_release" "grafana" {
   depends_on = [kubernetes_secret.grafana_config, local_file.replicated_install, kubernetes_job.grafana_db_create]
 
   name  = "grafana"
-  chart = "${path.module}/charts/grafana"
+  chart = "charts/grafana"
 
   namespace = kubernetes_namespace.kots_app.metadata[0].name
 
