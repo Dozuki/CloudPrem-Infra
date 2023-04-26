@@ -50,7 +50,6 @@ locals {
   db_master_password = local.db_credentials["password"]
 
   db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
-  db_bi_username = local.db_master_username
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
   # Webhooks

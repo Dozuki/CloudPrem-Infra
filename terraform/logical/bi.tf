@@ -45,9 +45,9 @@ resource "kubernetes_secret" "grafana_config" {
     GF_SERVER_SERVE_FROM_SUBPATH            = true
     GF_USERS_DEFAULT_THEME                  = "light"
     GF_DATABASE_TYPE                        = "mysql"
-    GF_DATABASE_HOST                        = local.db_bi_host
-    GF_DATABASE_USER                        = local.db_bi_username
-    GF_DATABASE_PASSWORD                    = local.db_bi_password
+    GF_DATABASE_HOST                        = local.db_master_host
+    GF_DATABASE_USER                        = local.db_master_username
+    GF_DATABASE_PASSWORD                    = local.db_master_password
     GF_ANALYTICS_REPORTING_ENABLED          = false
     GF_ANALYTICS_CHECK_FOR_UPDATES          = false
     GF_METRICS_ENABLED                      = false
@@ -75,9 +75,9 @@ resource "kubernetes_job" "grafana_db_create" {
           image = "imega/mysql-client"
           command = [
             "mysql",
-            "--host=${local.db_bi_host}",
-            "--user=${local.db_bi_username}",
-            "--password=${local.db_bi_password}",
+            "--host=${local.db_master_host}",
+            "--user=${local.db_master_username}",
+            "--password=${local.db_master_password}",
             "--execute=${file("static/grafana-db.sql")}"
           ]
         }
