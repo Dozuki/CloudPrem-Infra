@@ -41,6 +41,7 @@ No modules.
 | [helm_release.mongodb](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.redis](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [kubernetes_config_map.dozuki_resources](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/config_map) | resource |
+| [kubernetes_config_map.grafana_create_db_script](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/config_map) | resource |
 | [kubernetes_config_map.grafana_sqlite_migrate](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/config_map) | resource |
 | [kubernetes_horizontal_pod_autoscaler.app](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/horizontal_pod_autoscaler) | resource |
 | [kubernetes_horizontal_pod_autoscaler.queueworkerd](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/horizontal_pod_autoscaler) | resource |
@@ -54,6 +55,7 @@ No modules.
 | [kubernetes_role.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/role) | resource |
 | [kubernetes_role_binding.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/role_binding) | resource |
 | [kubernetes_secret.grafana_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/secret) | resource |
+| [kubernetes_secret.grafana_mysql_credentials](https://registry.terraform.io/providers/hashicorp/kubernetes/2.18.1/docs/resources/secret) | resource |
 | [local_file.replicated_bootstrap_config](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
 | [local_file.replicated_install](https://registry.terraform.io/providers/hashicorp/local/2.2.3/docs/resources/file) | resource |
 | [null_resource.pull_replicated_license](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |

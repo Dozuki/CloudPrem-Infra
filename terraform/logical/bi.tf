@@ -58,6 +58,31 @@ resource "kubernetes_secret" "grafana_config" {
   }
 }
 
+resource "kubernetes_config_map" "grafana_create_db_script" {
+  metadata {
+    name      = "grafana-create-db-script"
+    namespace = local.k8s_namespace_name
+  }
+
+  data = {
+    "grafana-db.sql" = file("static/grafana-db.sql")
+  }
+}
+
+
+resource "kubernetes_secret" "grafana_mysql_credentials" {
+  metadata {
+    name      = "grafana-mysql-credentials"
+    namespace = local.k8s_namespace_name
+  }
+  type = "Opaque"
+
+  data = {
+    host     = base64encode(local.db_master_host)
+    user     = base64encode(local.db_master_username)
+    password = base64encode(local.db_master_password)
+  }
+}
 
 resource "kubernetes_job" "grafana_db_create" {
   count = var.enable_bi ? 1 : 0
@@ -73,13 +98,49 @@ resource "kubernetes_job" "grafana_db_create" {
         container {
           name  = "grafana-db-create"
           image = "imega/mysql-client"
+          env {
+            name = "MYSQL_HOST"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.grafana_mysql_credentials.metadata[0].name
+                key  = "host"
+              }
+            }
+          }
+          env {
+            name = "MYSQL_USER"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.grafana_mysql_credentials.metadata[0].name
+                key  = "user"
+              }
+            }
+          }
+          env {
+            name = "MYSQL_PASSWORD"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.grafana_mysql_credentials.metadata[0].name
+                key  = "password"
+              }
+            }
+          }
           command = [
-            "mysql",
-            "--host=${local.db_master_host}",
-            "--user=${local.db_master_username}",
-            "--password=${local.db_master_password}",
-            "--execute=${file("static/grafana-db.sql")}"
+            "sh",
+            "-c",
+            "MYSQL_HOST_DECODED=$(echo $MYSQL_HOST | base64 -d) && MYSQL_USER_DECODED=$(echo $MYSQL_USER | base64 -d) && MYSQL_PASSWORD_DECODED=$(echo $MYSQL_PASSWORD | base64 -d) && mysql --host=$MYSQL_HOST_DECODED --user=$MYSQL_USER_DECODED --password=$MYSQL_PASSWORD_DECODED --execute=\"$(cat /scripts/grafana-db.sql)\""
           ]
+          volume_mount {
+            name       = "scripts"
+            mount_path = "/scripts"
+            read_only  = true
+          }
+        }
+        volume {
+          name = "scripts"
+          config_map {
+            name = kubernetes_config_map.grafana_create_db_script.metadata[0].name
+          }
         }
         restart_policy = "OnFailure"
       }
