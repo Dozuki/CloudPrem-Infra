@@ -35,7 +35,7 @@ provider "helm" {
 }
 
 locals {
-  dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.identifier == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.identifier}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
+  dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.customer == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.customer}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
@@ -61,10 +61,9 @@ locals {
   frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "") #tfsec:ignore:general-secrets-no-plaintext-exposure
 
   # Grafana
-  grafana_url             = var.enable_bi ? format("https://%s:3000", var.nlb_dns_name) : null
-  grafana_admin_username  = var.enable_bi ? "dozuki" : null
-  grafana_admin_password  = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
-  grafana_ssl_secret_name = var.grafana_use_replicated_ssl ? "www-tls" : kubernetes_secret.grafana_ssl[0].metadata[0].name
+  grafana_url            = var.enable_bi ? format("https://%s/dashboards", var.dns_domain_name) : null
+  grafana_admin_username = var.enable_bi ? "dozuki" : null
+  grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
 
   # Replicated
   app_slug           = "dozukikots"

@@ -16,6 +16,12 @@ resource "kubernetes_role" "dozuki_list_role" {
     resources  = ["deployments"]
     verbs      = ["get", "list", "watch"]
   }
+  rule {
+    api_groups = ["networking.k8s.io"]
+    resources  = ["ingresses"]
+    verbs      = ["get", "list", "watch", "create"]
+  }
+
 }
 
 resource "kubernetes_role_binding" "dozuki_list_role_binding" {
@@ -206,5 +212,23 @@ resource "helm_release" "container_insights" {
   set {
     name  = "region_name"
     value = data.aws_region.current.name
+  }
+}
+
+resource "kubernetes_namespace" "cert_manager" {
+  metadata {
+    name = "cert-manager"
+  }
+}
+
+resource "helm_release" "cert_manager" {
+  name  = "cert-manager"
+  chart = "${path.module}/charts/cert-manager"
+
+  namespace = kubernetes_namespace.cert_manager.metadata[0].name
+
+  set {
+    name  = "installCRDs"
+    value = "true"
   }
 }

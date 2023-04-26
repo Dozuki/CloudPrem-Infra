@@ -11,32 +11,22 @@ image:
 ## or access it from within the cluster (ClusterIP service). Set the service type and the port to serve it.
 ## ref: http://kubernetes.io/docs/user-guide/services/
 ##
-service:
+ingress:
   enabled: true
-  type: NodePort
-  port: 80
-  nodePort: 32020
+  ingressClassName: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "cert-issuer"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: "/$2"
+  path: /dashboards(/|$)(.*)
+  hosts:
+    - ${hostname}
+  tls:
+    - secretName: tls-secret
+      hosts:
+        - ${hostname}
 
-extraSecretMounts:
-  - name: ssl-files
-    mountPath: /etc/secrets
-    secretName: ${ssl_secret_name}
-    readOnly: true
-
-readinessProbe:
-  httpGet:
-    scheme: HTTPS
-    path: /api/health
-    port: 3000
-
-livenessProbe:
-  httpGet:
-    scheme: HTTPS
-    path: /api/health
-    port: 3000
-  initialDelaySeconds: 60
-  timeoutSeconds: 30
-  failureThreshold: 10
 
 persistence:
   type: pvc

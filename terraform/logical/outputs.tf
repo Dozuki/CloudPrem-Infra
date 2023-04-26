@@ -1,6 +1,6 @@
 output "dashboard_url" {
   description = "URL to your Dozuki Dashboard."
-  value       = format("https://%s:8800", var.nlb_dns_name)
+  value       = format("https://%s:8800", var.dns_domain_name)
 }
 
 output "dashboard_password" {
@@ -10,7 +10,7 @@ output "dashboard_password" {
 
 output "dozuki_url" {
   description = "URL to your Dozuki Installation."
-  value       = format("https://%s", var.nlb_dns_name)
+  value       = format("https://%s", var.dns_domain_name)
 }
 
 output "grafana_url" {

@@ -73,7 +73,7 @@ module "vpn" {
   count = var.bi_vpn_access ? 1 : 0
 
   environment = var.environment
-  identifier  = var.identifier
+  identifier  = var.customer
   vpc_id      = local.vpc_id
 
   subnet_id       = local.private_subnet_ids[0]

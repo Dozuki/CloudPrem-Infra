@@ -18,24 +18,14 @@ resource "aws_security_group_rule" "app_access_https" {
   description       = "Access to application"
 }
 
-resource "aws_security_group_rule" "app_access_http" {
+resource "aws_security_group_rule" "acme_access_http" {
   type              = "ingress"
   from_port         = 32010
   to_port           = 32010
   protocol          = "tcp"
-  cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
+  cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:aws-vpc-no-public-ingress-sgr
   security_group_id = module.eks_cluster.worker_security_group_id
-  description       = "Access to application"
-}
-
-resource "aws_security_group_rule" "grafana_access_http" {
-  type              = "ingress"
-  from_port         = 32020
-  to_port           = 32020
-  protocol          = "tcp"
-  cidr_blocks       = local.grafana_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.worker_security_group_id
-  description       = "Access to Grafana"
+  description       = "Access to port 80 for ACME http01 certificate challenges"
 }
 
 #tfsec:ignore:aws-elbv2-alb-not-public
@@ -65,15 +55,9 @@ module "nlb" {
       target_type      = "instance"
     },
     {
-      name_prefix      = "http-"
+      name_prefix      = "acme-"
       backend_protocol = "TCP"
       backend_port     = 32010
-      target_type      = "instance"
-    },
-    {
-      name_prefix      = "graf-"
-      backend_protocol = "TCP"
-      backend_port     = 32020
       target_type      = "instance"
     }
   ]
@@ -93,23 +77,8 @@ module "nlb" {
       port               = 80
       protocol           = "TCP"
       target_group_index = 2
-    },
-    {
-      port               = 3000
-      protocol           = "TCP"
-      target_group_index = 3
     }
   ]
 
   tags = local.tags
-}
-
-module "nlb_ssl_cert" {
-
-  source      = "./modules/acm"
-  environment = var.environment
-  identifier  = var.identifier
-
-  cert_common_name = module.nlb.lb_dns_name
-  namespace        = "nlb"
 }

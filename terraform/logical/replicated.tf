@@ -1,20 +1,10 @@
 data "aws_ssm_parameter" "dozuki_customer_id" {
   name = local.dozuki_customer_id_parameter_name
 }
-data "aws_ssm_parameter" "nlb_ssl_cert" {
-  name = var.nlb_ssl_server_cert_parameter
-}
-data "aws_ssm_parameter" "nlb_ssl_key" {
-  name = var.nlb_ssl_server_key_parameter
-}
 
 resource "random_password" "dashboard_password" {
   length  = 16
   special = true
-
-  keepers = {
-    nlb_dns_name = var.nlb_dns_name
-  }
 }
 
 resource "null_resource" "pull_replicated_license" {
@@ -41,18 +31,14 @@ metadata:
 spec:
   values:
     hostname:
-      value: ${var.nlb_dns_name}
-    tls_private_key_file:
-      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_key.value)}
-    tls_certificate_file:
-      value: ${base64encode(data.aws_ssm_parameter.nlb_ssl_cert.value)}
+      value: ${var.dns_domain_name}
 status: {}
 EOT
 }
 
 
 resource "local_file" "replicated_install" {
-  depends_on = [null_resource.pull_replicated_license]
+  depends_on = [null_resource.pull_replicated_license, helm_release.cert_manager]
 
   filename = "./kots_install.sh"
   content  = <<EOT
