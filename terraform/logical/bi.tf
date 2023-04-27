@@ -78,9 +78,9 @@ resource "kubernetes_secret" "grafana_mysql_credentials" {
   type = "Opaque"
 
   data = {
-    host     = base64encode(local.db_master_host)
-    user     = base64encode(local.db_master_username)
-    password = base64encode(local.db_master_password)
+    host     = local.db_master_host
+    user     = local.db_master_username
+    password = local.db_master_password
   }
 }
 
