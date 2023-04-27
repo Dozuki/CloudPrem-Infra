@@ -183,14 +183,3 @@ resource "helm_release" "grafana" {
     value = random_password.grafana_admin[0].result
   }
 }
-
-resource "kubernetes_config_map" "grafana_sqlite_migrate" {
-  metadata {
-    name      = "grafana-sqlite-migrate"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
-  }
-
-  data = {
-    "grafana_migrate_sqlite_to_mysql.py" = file("${path.module}/utils/grafana_migrate_sqlite_to_mysql.py")
-  }
-}
