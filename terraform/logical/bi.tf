@@ -100,7 +100,7 @@ resource "kubernetes_job" "grafana_db_create" {
       spec {
         container {
           name  = "grafana-db-create"
-          image = "imega/mysql-client"
+          image = "imega/mysql-client:10.6.4"
           env {
             name = "MYSQL_HOST"
             value_from {

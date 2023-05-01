@@ -56,7 +56,7 @@ resource "kubernetes_job" "frontegg_database_create" {
       spec {
         container {
           name  = "frontegg-db-update"
-          image = "imega/mysql-client"
+          image = "imega/mysql-client:10.6.4"
           command = [
             "mysql",
             "--host=${local.db_master_host}",
@@ -87,7 +87,7 @@ resource "kubernetes_job" "sites_config_update" {
       spec {
         container {
           name  = "sites-config-update"
-          image = "imega/mysql-client"
+          image = "imega/mysql-client:10.6.4"
           command = [
             "mysql",
             "--host=${local.db_master_host}",
