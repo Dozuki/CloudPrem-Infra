@@ -59,6 +59,7 @@ resource "kubernetes_secret" "grafana_config" {
 }
 
 resource "kubernetes_config_map" "grafana_create_db_script" {
+  count = var.enable_bi ? 1 : 0
   metadata {
     name      = "grafana-create-db-script"
     namespace = local.k8s_namespace_name
@@ -71,6 +72,8 @@ resource "kubernetes_config_map" "grafana_create_db_script" {
 
 
 resource "kubernetes_secret" "grafana_mysql_credentials" {
+  count = var.enable_bi ? 1 : 0
+
   metadata {
     name      = "grafana-mysql-credentials"
     namespace = local.k8s_namespace_name
@@ -102,7 +105,7 @@ resource "kubernetes_job" "grafana_db_create" {
             name = "MYSQL_HOST"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret.grafana_mysql_credentials.metadata[0].name
+                name = kubernetes_secret.grafana_mysql_credentials[0].metadata[0].name
                 key  = "host"
               }
             }
@@ -111,7 +114,7 @@ resource "kubernetes_job" "grafana_db_create" {
             name = "MYSQL_USER"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret.grafana_mysql_credentials.metadata[0].name
+                name = kubernetes_secret.grafana_mysql_credentials[0].metadata[0].name
                 key  = "user"
               }
             }
@@ -120,7 +123,7 @@ resource "kubernetes_job" "grafana_db_create" {
             name = "MYSQL_PASSWORD"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret.grafana_mysql_credentials.metadata[0].name
+                name = kubernetes_secret.grafana_mysql_credentials[0].metadata[0].name
                 key  = "password"
               }
             }
@@ -139,7 +142,7 @@ resource "kubernetes_job" "grafana_db_create" {
         volume {
           name = "scripts"
           config_map {
-            name = kubernetes_config_map.grafana_create_db_script.metadata[0].name
+            name = kubernetes_config_map.grafana_create_db_script[0].metadata[0].name
           }
         }
         restart_policy = "OnFailure"
