@@ -16,7 +16,7 @@ resource "aws_iam_role" "dms-cloudwatch-logs-role" {
   count = var.enable_bi ? 1 : 0
 
   assume_role_policy = data.aws_iam_policy_document.dms_assume_role[0].json
-  name               = "${local.identifier}-dms-cloudwatch-logs-role"
+  name               = "${local.identifier}-${data.aws_region.current.name}-dms-cloudwatch-logs-role"
 }
 
 resource "aws_iam_role_policy_attachment" "dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole" {
