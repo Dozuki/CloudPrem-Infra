@@ -131,7 +131,7 @@ resource "kubernetes_job" "grafana_db_create" {
           command = [
             "sh",
             "-c",
-            "mysql --host=$MYSQL_HOST --user=$MYSQL_USER --password=$MYSQL_PASSWORD --execute=\"$(cat /scripts/grafana-db.sql)\""
+            "mysql --host=$MYSQL_HOST --user=$MYSQL_USER --password=$MYSQL_PASSWORD < /scripts/grafana-db.sql"
           ]
           volume_mount {
             name       = "scripts"
