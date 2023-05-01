@@ -160,10 +160,56 @@ resource "random_password" "grafana_admin" {
   special = false
 }
 
+resource "kubernetes_job" "wait_for_ingress" {
+  count = var.enable_bi ? 1 : 0
+
+  depends_on = [local_file.replicated_install, kubernetes_role_binding.dozuki_list_role_binding]
+
+  metadata {
+    name      = "wait-for-ingress"
+    namespace = "ingress-nginx"
+  }
+  spec {
+    template {
+      metadata {}
+      spec {
+        container {
+          name  = "wait-for-ingress"
+          image = "bearengineer/awscli-kubectl:latest"
+          command = [
+            "/bin/sh",
+            "-c",
+            <<EOT
+            while true; do
+              desired_number=$(kubectl get daemonset -l app.kubernetes.io/name=ingress-nginx -o jsonpath='{.items[0].status.desiredNumberScheduled}')
+              number_ready=$(kubectl get daemonset -l app.kubernetes.io/name=ingress-nginx -o jsonpath='{.items[0].status.numberReady}')
+              if [[ "$desired_number" == "$number_ready" ]]; then
+                break
+              else
+                echo "Waiting for Ingress controller DaemonSet to be ready..."
+              sleep 5
+              fi
+            done
+            EOT
+          ]
+        }
+        restart_policy = "Never"
+      }
+    }
+    backoff_limit = 1
+    completions   = 1
+  }
+  wait_for_completion = true
+
+  timeouts {
+    create = "20m"
+  }
+}
+
 resource "helm_release" "grafana" {
   count = var.enable_bi ? 1 : 0
 
-  depends_on = [kubernetes_secret.grafana_config, local_file.replicated_install, kubernetes_job.grafana_db_create]
+  depends_on = [kubernetes_secret.grafana_config, local_file.replicated_install, kubernetes_job.grafana_db_create, kubernetes_job.wait_for_ingress]
 
   name  = "grafana"
   chart = "charts/grafana"
