@@ -295,13 +295,14 @@ resource "null_resource" "s3_replication_job_init" {
   triggers = {
     aws_account      = data.aws_caller_identity.current.account_id
     aws_profile      = var.aws_profile
+    aws_partition    = data.aws_partition.current.partition
     logging_bucket   = aws_s3_bucket.logging_bucket.arn
     source_bucket    = each.value.source
     replication_role = aws_iam_role.s3_replication[0].arn
   }
 
   provisioner "local-exec" {
-    command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_account"]} ${self.triggers["aws_profile"]}"
+    command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_account"]} ${self.triggers["aws_partition"]} ${self.triggers["aws_profile"]}"
   }
 }
 

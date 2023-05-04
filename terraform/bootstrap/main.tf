@@ -15,6 +15,8 @@ locals {
   }
 }
 
+data "aws_partition" "current" {}
+
 resource "aws_ssm_parameter" "customer_ids" {
   for_each = var.customer_id_parameters
 
@@ -46,7 +48,7 @@ resource "aws_iam_role" "dms-access-for-endpoint" {
 resource "aws_iam_role_policy_attachment" "dms-access-for-endpoint-AmazonDMSRedshiftS3Role" {
   count = var.dms_setup ? 1 : 0
 
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSRedshiftS3Role"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSRedshiftS3Role"
   role       = aws_iam_role.dms-access-for-endpoint[0].name
 }
 
@@ -60,7 +62,7 @@ resource "aws_iam_role" "dms-cloudwatch-logs-role" {
 resource "aws_iam_role_policy_attachment" "dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole" {
   count = var.dms_setup ? 1 : 0
 
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
   role       = aws_iam_role.dms-cloudwatch-logs-role[0].name
 }
 
@@ -74,7 +76,7 @@ resource "aws_iam_role" "dms-vpc-role" {
 resource "aws_iam_role_policy_attachment" "dms-vpc-role-AmazonDMSVPCManagementRole" {
   count = var.dms_setup ? 1 : 0
 
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSVPCManagementRole"
   role       = aws_iam_role.dms-vpc-role[0].name
 }
 
