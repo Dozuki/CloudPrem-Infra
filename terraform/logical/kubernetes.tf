@@ -17,6 +17,11 @@ resource "kubernetes_role" "dozuki_list_role" {
     verbs      = ["get", "list", "watch"]
   }
   rule {
+    api_groups = [""]
+    resources  = ["pods"]
+    verbs      = ["list"]
+  }
+  rule {
     api_groups = ["networking.k8s.io"]
     resources  = ["ingresses"]
     verbs      = ["get", "list", "watch", "create"]
