@@ -9,3 +9,5 @@ tfvars
 test_output*
 /live/gov/
 /live/standard/
+/live/logs
+/live/logs/

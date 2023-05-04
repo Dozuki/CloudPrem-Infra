@@ -59,10 +59,9 @@ locals {
   autogenerate_domain = local.is_us_gov ? "" : "dozuki.cloud"
 
   # Database
-  rds_parameter_group_name = var.enable_bi ? aws_db_parameter_group.bi[0].id : aws_db_parameter_group.default.id
-  ca_cert_identifier       = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
-  ca_cert_pem_file         = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
-  bi_subnet_ids            = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
+  ca_cert_identifier = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
+  ca_cert_pem_file   = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
+  bi_subnet_ids      = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
 
   # Access Config
   secure_default_bi_access_cidrs = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs

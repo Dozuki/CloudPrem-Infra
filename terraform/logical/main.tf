@@ -37,8 +37,7 @@ provider "helm" {
 locals {
   dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.customer == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.customer}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
 
-  is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
-
+  is_us_gov        = data.aws_partition.current.partition == "aws-us-gov"
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
 
   aws_profile_prefix = var.aws_profile != "" ? "AWS_PROFILE=${var.aws_profile}" : ""
@@ -62,7 +61,7 @@ locals {
 
   # Grafana
   grafana_url            = var.enable_bi ? format("https://%s/dashboards", var.dns_domain_name) : null
-  grafana_admin_username = var.enable_bi ? "dozuki" : null
+  grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : null
   grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
 
   # Replicated
