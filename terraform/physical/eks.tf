@@ -174,7 +174,8 @@ data "aws_iam_policy_document" "eks_worker" {
   statement {
     actions = [
       "rds:CreateDBSnapshot",
-      "rds:DescribeDBSnapshots"
+      "rds:DescribeDBSnapshots",
+      "rds:AddTagsToResource"
     ]
 
     resources = ["*"]
