@@ -342,6 +342,8 @@ resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
 
 resource "aws_s3_bucket_acl" "logging_bucket_acl" {
 
+  depends_on = [aws_s3_bucket_ownership_controls.logging_bucket]
+
   bucket = aws_s3_bucket.logging_bucket.id
 
   acl = "log-delivery-write"
@@ -353,6 +355,13 @@ resource "aws_s3_bucket_versioning" "logging_bucket_versioning_block" {
 
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_ownership_controls" "logging_bucket" {
+  bucket = aws_s3_bucket.logging_bucket.id
+  rule {
+    object_ownership = "BucketOwnerPreferred"
   }
 }
 
@@ -417,12 +426,6 @@ resource "aws_s3_bucket_public_access_block" "guide_buckets_acl_block" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-resource "aws_s3_bucket_acl" "guide_buckets_acl" {
-  for_each = aws_s3_bucket.guide_buckets
-
-  bucket = each.value.id
-  acl    = "private"
 }
 resource "aws_s3_bucket_versioning" "guide_buckets_versioning" {
   for_each = aws_s3_bucket.guide_buckets
