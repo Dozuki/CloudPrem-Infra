@@ -8,4 +8,5 @@ locals {
   highly_available_nat_gateway = false
   dozuki_customer_id_parameter_name = "/dozuki/workstation/kots/default/customer_id"
   protect_resources = false
+  alarm_email = "ddv@dozuki.com"
 }

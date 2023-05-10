@@ -2,5 +2,5 @@
 # terragrunt.hcl configuration.
 locals {
   aws_account_id = "446787640263"
-  aws_profile    = "gov"
+  aws_profile    = "govcloud"
 }
