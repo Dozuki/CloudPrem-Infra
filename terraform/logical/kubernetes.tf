@@ -210,8 +210,6 @@ resource "helm_release" "adot_exporter" {
   name  = "adot-exporter-for-eks-on-ec2"
   chart = "${path.module}/charts/adot-exporter-for-eks-on-ec2"
 
-  namespace = kubernetes_namespace.kots_app.metadata[0].name
-
   set {
     name  = "clusterName"
     value = var.eks_cluster_id
