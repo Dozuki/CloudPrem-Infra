@@ -1,5 +1,5 @@
 data "aws_iam_policy_document" "dms_assume_role" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   statement {
     effect = "Allow"
@@ -13,21 +13,21 @@ data "aws_iam_policy_document" "dms_assume_role" {
   }
 }
 resource "aws_iam_role" "dms-cloudwatch-logs-role" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   assume_role_policy = data.aws_iam_policy_document.dms_assume_role[0].json
   name               = "${local.identifier}-${data.aws_region.current.name}-dms-cloudwatch-logs-role"
 }
 
 resource "aws_iam_role_policy_attachment" "dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
   role       = aws_iam_role.dms-cloudwatch-logs-role[0].name
 }
 
 resource "aws_dms_replication_subnet_group" "this" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   replication_subnet_group_id          = "${local.identifier}-replication"
   replication_subnet_group_description = "${local.identifier} replication subnet group"
@@ -45,7 +45,7 @@ resource "aws_kms_key" "bi" {
 }
 
 resource "aws_dms_replication_instance" "this" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   replication_instance_id    = local.identifier
   replication_instance_class = "dms.r5.large"
@@ -63,7 +63,7 @@ resource "aws_dms_replication_instance" "this" {
 }
 
 resource "aws_dms_certificate" "this" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   certificate_id  = "${local.identifier}-dms-certificate"
   certificate_pem = file(local.ca_cert_pem_file)
@@ -73,7 +73,7 @@ resource "aws_dms_certificate" "this" {
 }
 
 resource "aws_dms_endpoint" "source" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   endpoint_id                 = "${local.identifier}-source"
   certificate_arn             = aws_dms_certificate.this[0].certificate_arn
@@ -92,7 +92,7 @@ resource "aws_dms_endpoint" "source" {
 }
 
 resource "aws_dms_endpoint" "target" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   endpoint_id                 = "${local.identifier}-target"
   certificate_arn             = aws_dms_certificate.this[0].certificate_arn
@@ -111,7 +111,7 @@ resource "aws_dms_endpoint" "target" {
 }
 
 resource "aws_dms_replication_task" "this" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   replication_task_id       = local.identifier
   migration_type            = "full-load-and-cdc"
@@ -131,7 +131,7 @@ resource "aws_dms_replication_task" "this" {
 
 # AWS provider issue to replace this https://github.com/hashicorp/terraform-provider-aws/issues/2083
 resource "null_resource" "replication_control" {
-  count = var.enable_bi ? 1 : 0
+  count = local.dms_enabled ? 1 : 0
 
   triggers = {
     dms_task_arn        = aws_dms_replication_task.this[0].replication_task_arn,

@@ -222,6 +222,12 @@ variable "enable_bi" {
   default     = false
 }
 
+variable "bi_dms_enabled" {
+  description = "If BI is enabled, whether or not to use DMS for conditional replication if true or a basic RDS read replica if false."
+  type        = bool
+  default     = false
+}
+
 variable "bi_public_access" {
   description = "NOTE: This is mutually exclusive with VPN access, both cannot be enabled at the same time. If BI is enabled and you need access to the BI database server from outside the amazon network, set this to true."
   type        = bool
