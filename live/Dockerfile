@@ -1,5 +1,5 @@
 # Use the specified base image
-FROM devopsinfra/docker-terragrunt:aws-tf-1.3.9-tg-0.44.0
+FROM devopsinfra/docker-terragrunt:aws-latest
 
 # Set environment variables for kubectl version
 ENV KUBE_VERSION="v1.23.0"
