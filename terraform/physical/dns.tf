@@ -1,12 +1,3 @@
-provider "aws" {
-  alias  = "dns"
-  region = data.aws_region.current.name
-
-  assume_role {
-    role_arn = local.route_53_role
-  }
-}
-
 data "aws_route53_zone" "subdomain" {
   count    = local.autogenerate_domain != "" ? 1 : 0
   provider = aws.dns
