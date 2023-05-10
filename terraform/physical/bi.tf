@@ -12,6 +12,28 @@ data "aws_iam_policy_document" "dms_assume_role" {
     actions = ["sts:AssumeRole"]
   }
 }
+data "aws_iam_role" "dms-vpc-role" {
+  count = local.dms_enabled ? try(length(data.aws_iam_roles.dms-vpc-roles.arns), 0) > 0 ? 1 : 0 : 0
+
+  name = "dms-vpc-role"
+}
+data "aws_iam_roles" "dms-vpc-roles" {
+  name_regex = "dms-vpc-role"
+}
+resource "null_resource" "create_dms_vpc_role" {
+  count = local.dms_enabled ? length(data.aws_iam_role.dms-vpc-role) > 0 ? 0 : 1 : 0
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws iam create-role \
+        --role-name dms-vpc-role \
+        --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"dms.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+      aws iam attach-role-policy \
+        --role-name dms-vpc-role \
+        --policy-arn arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSVPCManagementRole
+    EOT
+  }
+}
 resource "aws_iam_role" "dms-cloudwatch-logs-role" {
   count = local.dms_enabled ? 1 : 0
 
