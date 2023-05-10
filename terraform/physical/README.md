@@ -14,6 +14,7 @@
 
 | Name | Version |
 |------|---------|
+| <a name="provider_archive"></a> [archive](#provider\_archive) | 2.3.0 |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 4.57.0 |
 | <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 4.57.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.2.1 |
@@ -30,6 +31,7 @@
 | <a name="module_cluster_access_role"></a> [cluster\_access\_role](#module\_cluster\_access\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 5.11.2 |
 | <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 5.11.2 |
 | <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
+| <a name="module_disk_alarm"></a> [disk\_alarm](#module\_disk\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.24.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 8.4.0 |
@@ -48,8 +50,10 @@
 |------|------|
 | [aws_cloudwatch_event_rule.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_rule.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
+| [aws_cloudwatch_event_rule.dms_task_state_changed_rule](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_target.aws_node_termination_handler_asg](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
 | [aws_cloudwatch_event_target.aws_node_termination_handler_spot](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
+| [aws_cloudwatch_event_target.dms_task_state_changed_target](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/cloudwatch_event_target) | resource |
 | [aws_db_parameter_group.default](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/db_parameter_group) | resource |
 | [aws_dms_certificate.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_certificate) | resource |
 | [aws_dms_endpoint.source](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/dms_endpoint) | resource |
@@ -66,15 +70,21 @@
 | [aws_iam_policy.cluster_autoscaler_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.eks_worker_kms](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.lambda_permissions](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_policy) | resource |
 | [aws_iam_role.dms-cloudwatch-logs-role](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role) | resource |
+| [aws_iam_role.lambda_execution](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role) | resource |
 | [aws_iam_role.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.lambda_basic_execution](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.lambda_iam_alias](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_kms_alias.s3](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_alias) | resource |
 | [aws_kms_key.bi](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
 | [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
 | [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/kms_key) | resource |
+| [aws_lambda_function.sns_to_slack](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/lambda_function) | resource |
+| [aws_lambda_permission.sns_to_slack_permission](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/lambda_permission) | resource |
 | [aws_msk_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/msk_cluster) | resource |
 | [aws_msk_configuration.this](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/msk_configuration) | resource |
 | [aws_route53_record.subdomain](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/route53_record) | resource |
@@ -107,6 +117,8 @@
 | [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.replicated_ui_access](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/security_group_rule) | resource |
+| [aws_sns_topic_subscription.email_subscription](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/sns_topic_subscription) | resource |
+| [aws_sns_topic_subscription.sns_to_slack_subscription](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/sns_topic_subscription) | resource |
 | [aws_ssm_association.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_association) | resource |
 | [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_association) | resource |
 | [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/ssm_document) | resource |
@@ -114,6 +126,7 @@
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
 | [null_resource.s3_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/3.2.1/docs/resources/resource) | resource |
+| [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.3.0/docs/data-sources/file) | data source |
 | [aws_ami.amazon_linux_2023](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/ami) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/caller_identity) | data source |
@@ -124,6 +137,8 @@
 | [aws_iam_policy_document.dms_assume_role](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.eks_worker](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.eks_worker_kms](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.lambda_execution](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.lambda_permissions](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.logging_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.s3_kms_key_policy](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/data-sources/iam_policy_document) | data source |
@@ -144,6 +159,7 @@
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_alarm_email"></a> [alarm\_email](#input\_alarm\_email) | Email address to send status alarms to. | `string` | `""` | no |
 | <a name="input_app_access_cidrs"></a> [app\_access\_cidrs](#input\_app\_access\_cidrs) | These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
@@ -178,6 +194,7 @@
 | <a name="input_replicated_ui_access_cidrs"></a> [replicated\_ui\_access\_cidrs](#input\_replicated\_ui\_access\_cidrs) | These CIDRs will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_s3_existing_buckets"></a> [s3\_existing\_buckets](#input\_s3\_existing\_buckets) | List of the existing Dozuki buckets to use. Do not include the logging bucket. | <pre>list(object({<br>    type        = string<br>    bucket_name = string<br>  }))</pre> | `[]` | no |
 | <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
+| <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | URL to an optional Slack webhook for SNS alerts. | `string` | `""` | no |
 | <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br>  "%CUSTOMER%",<br>  "%ENVIRONMENT%",<br>  "%REGION%"<br>]</pre> | no |
 | <a name="input_subdomain_override"></a> [subdomain\_override](#input\_subdomain\_override) | For upgrades only, new stacks use `customer`. If the previous version used an identifier but you want the subdomain to be different, add it here. | `string` | `""` | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | `"172.16.0.0/16"` | no |

@@ -385,6 +385,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_en
 }
 
 # Begin creating buckets and associated bucket resources dynamically
+# Ignore bucket logging error as tfsec is unable to figure out we *are* adding logging resources.
+#tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "guide_buckets" {
   for_each = toset(local.create_s3_bucket_names)
 

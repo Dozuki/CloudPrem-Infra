@@ -198,20 +198,54 @@ resource "kubernetes_config_map" "dozuki_resources" {
   }
 }
 
-resource "helm_release" "container_insights" {
-  name  = "container-insights"
-  chart = "${path.module}/charts/container_insights"
 
-  namespace = kubernetes_namespace.kots_app.metadata[0].name
+resource "helm_release" "metrics_server" {
+  name  = "metrics-server"
+  chart = "charts/metrics-server"
+}
+
+resource "helm_release" "adot_exporter" {
+  depends_on = [helm_release.metrics_server]
+
+  name  = "adot-exporter-for-eks-on-ec2"
+  chart = "${path.module}/charts/adot-exporter-for-eks-on-ec2"
 
   set {
-    name  = "cluster_name"
+    name  = "clusterName"
     value = var.eks_cluster_id
   }
 
   set {
-    name  = "region_name"
+    name  = "awsRegion"
     value = data.aws_region.current.name
+  }
+
+  set {
+    name  = "adotCollector.daemonSet.service.metrics.receivers"
+    value = "{awscontainerinsightreceiver}"
+  }
+  set {
+    name  = "adotCollector.daemonSet.service.metrics.exporters"
+    value = "{awsemf}"
+  }
+}
+
+resource "helm_release" "fluent_bit_log_exporter" {
+  depends_on = [helm_release.adot_exporter]
+
+  chart = "${path.module}/charts/aws-for-fluent-bit"
+  name  = "aws-for-fluent-bit"
+
+  namespace = "amazon-metrics"
+
+  set {
+    name  = "cloudWatchLogs.region"
+    value = data.aws_region.current.name
+  }
+
+  set {
+    name  = "global.namespaceOverride"
+    value = "amazon-metrics"
   }
 }
 

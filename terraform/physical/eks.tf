@@ -271,20 +271,45 @@ module "eks_cluster" {
 
   worker_groups_launch_template = [
     {
-      name                                 = "workers"
-      asg_max_size                         = var.eks_max_size
-      asg_desired_capacity                 = var.eks_desired_capacity
-      asg_min_size                         = var.eks_min_size
-      instance_refresh_enabled             = true
-      instance_refresh_instance_warmup     = 60
-      public_ip                            = false
-      metadata_http_put_response_hop_limit = 3
-      spot_instance_pools                  = 4
-      update_default_version               = true
-      instance_refresh_triggers            = ["tag"]
-      kubelet_extra_args                   = "--node-labels=node.kubernetes.io/lifecycle=spot"
-      override_instance_types              = var.eks_instance_types
-      target_group_arns                    = module.nlb.target_group_arns
+      name                                    = "workers"
+      asg_max_size                            = var.eks_max_size
+      asg_desired_capacity                    = var.eks_desired_capacity
+      asg_min_size                            = var.eks_min_size
+      instance_refresh_enabled                = true
+      instance_refresh_instance_warmup        = 60
+      public_ip                               = false
+      metadata_http_put_response_hop_limit    = 3
+      spot_instance_pools                     = 4
+      update_default_version                  = true
+      instance_refresh_triggers               = ["tag"]
+      instance_refresh_min_healthy_percentage = 50
+      kubelet_extra_args                      = "--node-labels=node.kubernetes.io/lifecycle=spot"
+      override_instance_types                 = var.eks_instance_types
+      enable_monitoring                       = true
+      enabled_metrics = [
+        "GroupAndWarmPoolDesiredCapacity",
+        "GroupAndWarmPoolTotalCapacity",
+        "GroupDesiredCapacity",
+        "GroupInServiceCapacity",
+        "GroupInServiceInstances",
+        "GroupMaxSize",
+        "GroupMinSize",
+        "GroupPendingCapacity",
+        "GroupPendingInstances",
+        "GroupStandbyCapacity",
+        "GroupStandbyInstances",
+        "GroupTerminatingCapacity",
+        "GroupTerminatingInstances",
+        "GroupTotalCapacity",
+        "GroupTotalInstances",
+        "WarmPoolDesiredCapacity",
+        "WarmPoolMinSize",
+        "WarmPoolPendingCapacity",
+        "WarmPoolTerminatingCapacity",
+        "WarmPoolTotalCapacity",
+        "WarmPoolWarmedCapacity"
+      ]
+      target_group_arns = module.nlb.target_group_arns
       tags = [
         {
           key                 = "aws-node-termination-handler/managed"

@@ -85,6 +85,11 @@ generate "grafana_helmignore" {
   if_exists = "overwrite_terragrunt"
   contents  = local.helmignore
 }
+generate "adotexporter_helmignore" {
+  path      = "charts/adot-exporter-for-eks-on-ec2/.helmignore"
+  if_exists = "overwrite_terragrunt"
+  contents  = local.helmignore
+}
 
 dependency "physical" {
   config_path = "${get_terragrunt_dir()}/../physical"

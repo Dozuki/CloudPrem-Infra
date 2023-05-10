@@ -31,10 +31,11 @@ No modules.
 | Name | Type |
 |------|------|
 | [aws_autoscaling_lifecycle_hook.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/4.57.0/docs/resources/autoscaling_lifecycle_hook) | resource |
+| [helm_release.adot_exporter](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.cert_manager](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.cluster_autoscaler](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
-| [helm_release.container_insights](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
+| [helm_release.fluent_bit_log_exporter](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.frontegg](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.grafana](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
 | [helm_release.metrics_server](https://registry.terraform.io/providers/hashicorp/helm/2.9.0/docs/resources/release) | resource |
