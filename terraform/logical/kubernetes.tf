@@ -230,6 +230,25 @@ resource "helm_release" "adot_exporter" {
   }
 }
 
+resource "helm_release" "fluent_bit_log_exporter" {
+  depends_on = [helm_release.adot_exporter]
+
+  chart = "${path.module}/charts/aws-for-fluent-bit"
+  name  = "aws-for-fluent-bit"
+
+  namespace = "amazon-metrics"
+
+  set {
+    name  = "cloudWatchLogs.region"
+    value = data.aws_region.current.name
+  }
+
+  set {
+    name  = "global.namespaceOverride"
+    value = "amazon-metrics"
+  }
+}
+
 resource "kubernetes_namespace" "cert_manager" {
   metadata {
     name = "cert-manager"
