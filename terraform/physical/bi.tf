@@ -125,9 +125,9 @@ resource "aws_dms_endpoint" "target" {
   port                        = 3306
   kms_key_arn                 = aws_kms_key.bi[0].arn
 
-  username    = module.replica_database[0].db_instance_username
-  password    = module.replica_database[0].db_instance_password
-  server_name = module.replica_database[0].db_instance_address
+  username    = module.dms_replica_database[0].db_instance_username
+  password    = module.dms_replica_database[0].db_instance_password
+  server_name = module.dms_replica_database[0].db_instance_address
 
   tags = local.tags
 }
@@ -167,4 +167,124 @@ resource "null_resource" "replication_control" {
     when    = destroy
     command = "/usr/bin/env bash ./util/dms-stop.sh ${self.triggers["dms_task_arn"]} ${self.triggers["aws_region"]} ${self.triggers["aws_profile"]}"
   }
+}
+
+# We use 2 separate replica database modules here for backwards compatibility. Instead of morphing one resource as
+# necessary for DMS or RDS Read Replica, which would make transitioning between the two settings on one stack impossible,
+# we have two resources that can be created and deleted separately.
+
+#tfsec:ignore:general-secrets-sensitive-in-variable
+module "rds_replica_database" {
+  source  = "terraform-aws-modules/rds/aws"
+  version = "5.6.0"
+
+  count = local.dms_enabled ? 0 : 1
+
+  identifier = "${local.identifier}-rds-replica"
+
+  engine         = "mysql"
+  engine_version = "8.0"
+
+  port                  = 3306
+  instance_class        = var.rds_instance_type
+  max_allocated_storage = var.rds_max_allocated_storage
+  replicate_source_db   = module.primary_database.db_instance_id
+  storage_encrypted     = true
+  kms_key_id            = data.aws_kms_key.rds.arn
+  apply_immediately     = !var.protect_resources
+  publicly_accessible   = false
+
+  create_random_password = false
+
+  multi_az           = var.rds_multi_az
+  ca_cert_identifier = local.ca_cert_identifier
+
+  vpc_security_group_ids = [module.bi_database_sg.security_group_id]
+
+  # Snapshot configuration
+  deletion_protection = false
+  skip_final_snapshot = true
+
+  # DB parameter group
+  create_db_parameter_group = false
+  parameter_group_name      = aws_db_parameter_group.default.name
+
+  create_db_option_group = false
+
+  tags = local.tags
+}
+
+#tfsec:ignore:general-secrets-sensitive-in-variable
+module "dms_replica_database" {
+  source  = "terraform-aws-modules/rds/aws"
+  version = "5.6.0"
+
+  count = local.dms_enabled ? 1 : 0
+
+  identifier = "${local.identifier}-dms-replica"
+
+  engine         = "mysql"
+  engine_version = "8.0"
+
+  port                  = 3306
+  instance_class        = var.rds_instance_type
+  allocated_storage     = var.rds_allocated_storage
+  max_allocated_storage = var.rds_max_allocated_storage
+  storage_encrypted     = true
+  kms_key_id            = data.aws_kms_key.rds.arn
+  apply_immediately     = !var.protect_resources
+  publicly_accessible   = var.bi_public_access
+
+  username               = "dozuki"
+  random_password_length = 40
+  create_random_password = true
+
+  multi_az           = var.rds_multi_az
+  ca_cert_identifier = local.ca_cert_identifier
+
+  maintenance_window = "Sun:19:00-Sun:23:00"
+  backup_window      = "17:00-19:00"
+
+  vpc_security_group_ids = [module.bi_database_sg.security_group_id]
+
+  # Snapshot configuration
+  deletion_protection              = var.protect_resources
+  skip_final_snapshot              = !var.protect_resources
+  final_snapshot_identifier_prefix = "${local.identifier}-dms-replica" #Snapshot name upon DB deletion
+  copy_tags_to_snapshot            = true
+
+  # DB subnet group
+  subnet_ids             = local.bi_subnet_ids
+  create_db_subnet_group = true
+
+  # DB parameter group
+  create_db_parameter_group = false
+  parameter_group_name      = aws_db_parameter_group.default.name
+
+  create_db_option_group = false
+
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret" "replica_database_credentials" {
+  count = var.enable_bi ? 1 : 0
+
+  name = "${local.identifier}-replica-database"
+
+  recovery_window_in_days = var.protect_resources ? 7 : 0
+}
+
+resource "aws_secretsmanager_secret_version" "replica_database_credentials" {
+  count = var.enable_bi ? 1 : 0
+
+  secret_id = aws_secretsmanager_secret.replica_database_credentials[0].id
+  secret_string = jsonencode({
+    dbInstanceIdentifier = local.bi_db.db_instance_id
+    resourceId           = local.bi_db.db_instance_resource_id
+    host                 = local.bi_db.db_instance_address
+    port                 = local.bi_db.db_instance_port
+    engine               = "mysql"
+    username             = local.dms_enabled ? module.dms_replica_database[0].db_instance_username : module.primary_database.db_instance_username
+    password             = local.dms_enabled ? module.dms_replica_database[0].db_instance_password : module.primary_database.db_instance_password
+  })
 }

@@ -32,13 +32,14 @@
 | <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-assumable-role | 5.11.2 |
 | <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_disk_alarm"></a> [disk\_alarm](#module\_disk\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
+| <a name="module_dms_replica_database"></a> [dms\_replica\_database](#module\_dms\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.24.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 8.4.0 |
 | <a name="module_nodes_alarm"></a> [nodes\_alarm](#module\_nodes\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_primary_database"></a> [primary\_database](#module\_primary\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_primary_database_sg"></a> [primary\_database\_sg](#module\_primary\_database\_sg) | terraform-aws-modules/security-group/aws | 4.17.1 |
-| <a name="module_replica_database"></a> [replica\_database](#module\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
+| <a name="module_rds_replica_database"></a> [rds\_replica\_database](#module\_rds\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_sns"></a> [sns](#module\_sns) | terraform-aws-modules/sns/aws | 5.1.0 |
 | <a name="module_status_alarm"></a> [status\_alarm](#module\_status\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 3.19.0 |
@@ -213,6 +214,7 @@
 | <a name="output_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#output\_bi\_database\_credential\_secret) | If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database. |
 | <a name="output_bi_vpn_configuration_bucket"></a> [bi\_vpn\_configuration\_bucket](#output\_bi\_vpn\_configuration\_bucket) | If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet. |
 | <a name="output_cluster_primary_sg"></a> [cluster\_primary\_sg](#output\_cluster\_primary\_sg) | Primary security group for EKS cluster |
+| <a name="output_dms_enabled"></a> [dms\_enabled](#output\_dms\_enabled) | Whether DMS was enabled or not via combination of other input variables or directly |
 | <a name="output_dms_task_arn"></a> [dms\_task\_arn](#output\_dms\_task\_arn) | DMS Replication Task ARN for BI |
 | <a name="output_dns_domain_name"></a> [dns\_domain\_name](#output\_dns\_domain\_name) | URL to deployed application |
 | <a name="output_documents_bucket"></a> [documents\_bucket](#output\_documents\_bucket) | n/a |

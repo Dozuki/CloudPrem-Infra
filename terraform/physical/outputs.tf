@@ -89,3 +89,7 @@ output "nlb_dns_name" {
   description = "The FQDN of the NLB."
   value       = module.nlb.lb_dns_name
 }
+output "dms_enabled" {
+  description = "Whether DMS was enabled or not via combination of other input variables or directly"
+  value       = local.dms_enabled
+}

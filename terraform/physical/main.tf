@@ -68,6 +68,7 @@ locals {
   // If true we will use an empty RDS instance and setup replication via DMS.
   // If false we will use an RDS Read Replica and let RDS manage the replication for us.
   dms_enabled = var.enable_bi ? (var.bi_dms_enabled || var.bi_public_access) : false
+  bi_db       = local.dms_enabled ? module.dms_replica_database[0] : module.rds_replica_database[0]
 
   # --Access Config--
   secure_default_bi_access_cidrs = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs
