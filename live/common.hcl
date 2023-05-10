@@ -117,6 +117,7 @@ dependency "physical" {
     memcached_cluster_address = "dummy-memcache"
     dms_task_arn = "dummy-dms-arn"
     bi_database_credential_secret = "dummy-secret"
+    dms_enabled = "false"
   }
   mock_outputs_merge_strategy_with_state = "shallow"
 }
@@ -147,4 +148,5 @@ inputs = {
   s3_replicate_buckets = dependency.physical.outputs.s3_replicate_buckets
   memcached_cluster_address = dependency.physical.outputs.memcached_cluster_address
   dms_task_arn = dependency.physical.outputs.dms_task_arn
+  dms_enabled = dependency.physical.outputs.dms_enabled
 }
