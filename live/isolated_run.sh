@@ -27,15 +27,7 @@ cleanup() {
 
   git worktree remove "${WORKTREE_DIR}" --force
 
-  if git rev-parse --verify "${TEST_BRANCH}" >/dev/null 2>&1; then
-    git branch -D "${TEST_BRANCH}"
-  fi
-
-  if git rev-parse --verify "${TEMP_BRANCH}" >/dev/null 2>&1; then
-    git branch -D "${TEMP_BRANCH}"
-  fi
-
-  rm -fr "${TEMP_DIR}"
+  rm -fr "${WORKTREE_DIR}"
 
   echo "Cleanup complete."
 }
@@ -47,17 +39,20 @@ TERRAGRUNT_COMMAND=""
 BRANCH_NAME=""
 COPY_LIVE=true
 CLEAR_TF=false
+AWS_PROFILE="${TG_AWS_PROFILE}"
+ADDL_ENV=""
+
 
 # Define a function to display the usage
 usage() {
-  echo "Usage: ./isolated-run.sh (-r|--region) <region> (-e|--env) <env> (-c|--command) <terragrunt-command> [-b|--branch <branchname>] [-l|--copy_live <true|false>] [-f|--clear_tf <true|false>]"
+  echo "Usage (defaults in stars (*)): ./isolated-run.sh (-r|--region) <region> (-e|--env) <env> (-c|--command) <terragrunt-command> [-b|--branch <branchname>] [-l|--copy_live <*true*|false>] [-f|--clear_tf <true|*false*>]"
 }
 
 # Parse command-line arguments using shift for both short and long options
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     -r|--region)
-      AWS_REGION="${2:-}"
+      AWS_REGION="${2:-${TG_AWS_REGION:-}}"
       shift
       ;;
     -e|--env)
@@ -93,54 +88,41 @@ if [ -z "$AWS_REGION" ] || [ -z "$ENV" ] || [ -z "$TERRAGRUNT_COMMAND" ]; then
   usage
   exit 1
 fi
+if [ -n "$TG_AWS_ACCT_ID" ]; then
+  ADDL_ENV="-e TG_AWS_ACCT_ID=$TG_AWS_ACCT_ID"
+fi;
 
 # Capture script error or exit command and run the cleanup function to ensure resources are deleted in a failure.
 trap cleanup EXIT
 
-TIMESTAMP=$(date "+%Y-%m-%d_%H:%M:%S")
+TIMESTAMP=$(date "+%Y-%m-%d_%H-%M-%S")
 
 # Replace spaces in the command with dashes so its file/directory safe.
 COMMAND_SUFFIX="${TERRAGRUNT_COMMAND// /-}"
 
 TEMP_DIR=$(mktemp -d)
 
-WORKTREE_DIR="${TEMP_DIR}/worktree"
+WORKTREE_DIR="${TEMP_DIR}/${TIMESTAMP}/worktree"
 
 # If no branch is provided, we assume you want a copy of the currently checked out branch.
-if [ "$BRANCH_NAME" == "" ]; then
+if [ -z "$BRANCH_NAME" ]; then
   BRANCH_NAME=$(git branch --show-current)
-  TEMP_BRANCH="temp-${BRANCH_NAME}"
-  TEST_BRANCH="test-${AWS_REGION}-$ENV"
 
-  # Save uncommitted changes and create the temp branch
-  git stash save "temp-changes" > /dev/null 2>&1
-  git checkout -b "${TEMP_BRANCH}" > /dev/null 2>&1
-  git stash apply > /dev/null 2>&1
-  git commit -am 'committing working changes to temp branch' > /dev/null 2>&1
+  git worktree add "${WORKTREE_DIR}"
 
-  # Get the commit hash of the last commit in TEMP_BRANCH
-  TEMP_COMMIT_HASH=$(git rev-parse HEAD)
-
-  # Create the test branch, cherry-pick the temp branch commit, and delete the temp branch
-  git checkout -b "${TEST_BRANCH}" "${BRANCH_NAME}" > /dev/null 2>&1
-  git cherry-pick "${TEMP_COMMIT_HASH}" > /dev/null 2>&1
-  git branch -D "${TEMP_BRANCH}" > /dev/null 2>&1
-
-  # Go back to the original branch and pop the stash
-  git checkout "${BRANCH_NAME}" > /dev/null 2>&1
-  git stash pop > /dev/null 2>&1
-
-  # Add the worktree with the test branch
-  git worktree add "${WORKTREE_DIR}" "${TEST_BRANCH}" > /dev/null
+  pushd ..
+  rsync -avq --exclude '.git' ./ "${WORKTREE_DIR}"/
+  popd || exit
 else
   # Set to true when deploying a different branch since we will likely need to refresh the terraform folders.
   CLEAR_TF="true"
-  git worktree add "${WORKTREE_DIR}" "${BRANCH_NAME}" > /dev/null
+  git worktree add "${WORKTREE_DIR}" "${BRANCH_NAME}"
 fi
 
 if [ "${COPY_LIVE}" == "true" ]; then
-  rsync -av --progress --exclude '.git' ./ "${WORKTREE_DIR}"/live > /dev/null 2>&1
-  INITIAL_CMD=""
+  if [ -n "${BRANCH_NAME}" ]; then
+    rsync -avq ./ "${WORKTREE_DIR}"/live/
+  fi
   if [ "${CLEAR_TF}" == "true" ]; then
     find "${WORKTREE_DIR}" -name '.terra*' -exec rm -rf {} +
   fi
@@ -152,16 +134,17 @@ LOG_DIR="logs/${BRANCH_NAME}/${AWS_REGION}/${ENV}/${COMMAND_SUFFIX}"
 LOG_FILE="${LOG_DIR}/${TIMESTAMP}.log"
 CONTAINER_NAME="${BRANCH_NAME}_${AWS_REGION}_${ENV}_${COMMAND_SUFFIX}"
 
-mkdir -p "${LOG_DIR}"
+mkdir -p "$LOG_DIR"
 
-docker build -t terraform-live-env . > /dev/null 2>&1
+docker build -t terraform-live-env:latest .
 
 # Run the Terragrunt command in the Docker container
 container_id=$(docker run -d \
-  -e AWS_PROFILE=default \
+  -e AWS_PROFILE="$AWS_PROFILE" \
   -e AWS_REGION="$AWS_REGION" \
+  $ADDL_ENV \
   --name "${CONTAINER_NAME}" \
-  -v "$WORKTREE_DIR:/data" \
+  -v "${WORKTREE_DIR}:/data" \
   -v ~/.aws:/root/.aws \
   terraform-live-env:latest sh -c "${INITIAL_CMD} cd live/standard/${AWS_REGION}/${ENV} && terragrunt ${TERRAGRUNT_COMMAND} --terragrunt-non-interactive")
 
@@ -169,3 +152,4 @@ container_id=$(docker run -d \
 docker logs -f "$container_id" > "$LOG_FILE" 2>&1 &
 echo "To follow logs:"
 echo "tail -f \"$LOG_FILE\""
+echo "tail -f \"$LOG_FILE\"" | pbcopy
