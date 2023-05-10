@@ -270,6 +270,7 @@ resource "aws_lambda_function" "sns_to_slack" {
     variables = {
       SLACK_WEBHOOK_URL = var.slack_webhook_url
       IDENTIFIER        = local.identifier
+      AWS_ACCOUNT_ID    = data.aws_caller_identity.current.account_id
     }
   }
 }

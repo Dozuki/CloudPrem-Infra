@@ -22,7 +22,7 @@ def get_task_name(task_arn):
 
 def lambda_handler(event, context):
     message_json = json.loads(event['Records'][0]['Sns']['Message'])
-    account_id = os.environ['AWS_LAMBDA_FUNCTION_ARN'].split(':')[4]
+    account_id = os.environ["AWS_ACCOUNT_ID"]
     account_alias = get_account_alias() or 'N/A'
 
     identifier = os.environ["IDENTIFIER"]
