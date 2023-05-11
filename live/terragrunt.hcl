@@ -12,6 +12,8 @@ locals {
   account_id   = get_env("TG_AWS_ACCT_ID", local.account_vars.locals.aws_account_id)
   aws_region   = get_env("TG_AWS_REGION", local.region_vars.locals.aws_region)
   aws_profile  = get_env("TG_AWS_PROFILE", local.account_vars.locals.aws_profile)
+
+  dns_role = local.aws_region == "us-gov-west-1" ? "arn:aws-us-gov:iam::446787640263:role/Route53AccessRole" : "arn:aws:iam::010601635461:role/Route53AccessRole"
 }
 
 # Generate an AWS provider block
@@ -24,6 +26,15 @@ provider "aws" {
   # Only these AWS Account IDs may be operated on by this template
   allowed_account_ids = ["${local.account_id}"]
   profile = "${local.aws_profile}"
+}
+provider "aws" {
+  alias  = "dns"
+  region = "${local.aws_region}"
+  profile = "${local.aws_profile}"
+
+  assume_role {
+    role_arn = "${local.dns_role}"
+  }
 }
 EOF
 }

@@ -12,4 +12,6 @@ locals {
   bi_access_cidrs = ["0.0.0.0/0"]
   bi_vpn_access = false
   grafana_access_cidrs = ["0.0.0.0/0"]
+  alarm_email = "ddv@dozuki.com"
+  bi_dms_enabled = false //will still use DMS if public access is enabled regardless of this setting
 }

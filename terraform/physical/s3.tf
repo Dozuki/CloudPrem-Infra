@@ -295,13 +295,14 @@ resource "null_resource" "s3_replication_job_init" {
   triggers = {
     aws_account      = data.aws_caller_identity.current.account_id
     aws_profile      = var.aws_profile
+    aws_partition    = data.aws_partition.current.partition
     logging_bucket   = aws_s3_bucket.logging_bucket.arn
     source_bucket    = each.value.source
     replication_role = aws_iam_role.s3_replication[0].arn
   }
 
   provisioner "local-exec" {
-    command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_account"]} ${self.triggers["aws_profile"]}"
+    command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_account"]} ${self.triggers["aws_partition"]} ${self.triggers["aws_profile"]}"
   }
 }
 
@@ -342,6 +343,8 @@ resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
 
 resource "aws_s3_bucket_acl" "logging_bucket_acl" {
 
+  depends_on = [aws_s3_bucket_ownership_controls.logging_bucket]
+
   bucket = aws_s3_bucket.logging_bucket.id
 
   acl = "log-delivery-write"
@@ -353,6 +356,13 @@ resource "aws_s3_bucket_versioning" "logging_bucket_versioning_block" {
 
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_ownership_controls" "logging_bucket" {
+  bucket = aws_s3_bucket.logging_bucket.id
+  rule {
+    object_ownership = "BucketOwnerPreferred"
   }
 }
 
@@ -417,12 +427,6 @@ resource "aws_s3_bucket_public_access_block" "guide_buckets_acl_block" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-resource "aws_s3_bucket_acl" "guide_buckets_acl" {
-  for_each = aws_s3_bucket.guide_buckets
-
-  bucket = each.value.id
-  acl    = "private"
 }
 resource "aws_s3_bucket_versioning" "guide_buckets_versioning" {
   for_each = aws_s3_bucket.guide_buckets

@@ -174,7 +174,8 @@ data "aws_iam_policy_document" "eks_worker" {
   statement {
     actions = [
       "rds:CreateDBSnapshot",
-      "rds:DescribeDBSnapshots"
+      "rds:DescribeDBSnapshots",
+      "rds:AddTagsToResource"
     ]
 
     resources = ["*"]
@@ -217,7 +218,7 @@ resource "aws_kms_key" "eks" {
 }
 
 resource "aws_iam_policy" "assume_cross_account_role" {
-  name        = "AssumeCrossAccountRole"
+  name        = "${local.identifier}-${data.aws_region.current.name}-AssumeCrossAccountRole"
   description = "Policy to assume the cross-account role for Route 53 hosted zone access"
 
   policy = jsonencode({

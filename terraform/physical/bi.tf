@@ -22,7 +22,7 @@ resource "aws_iam_role" "dms-cloudwatch-logs-role" {
 resource "aws_iam_role_policy_attachment" "dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole" {
   count = var.enable_bi ? 1 : 0
 
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
   role       = aws_iam_role.dms-cloudwatch-logs-role[0].name
 }
 

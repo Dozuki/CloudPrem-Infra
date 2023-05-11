@@ -12,4 +12,5 @@ locals {
   bi_access_cidrs = ["0.0.0.0/0"]
   bi_vpn_access = false
   grafana_access_cidrs = ["0.0.0.0/0"]
+  alarm_email = "ddv@dozuki.com"
 }
