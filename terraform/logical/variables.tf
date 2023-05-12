@@ -185,4 +185,10 @@ variable "dms_task_arn" {
   type        = string
   description = "If BI is enabled, the DMS replication task arn."
 }
+
+variable "dms_enabled" {
+  description = "If BI is enabled, whether or not to use DMS for conditional replication if true or a basic RDS read replica if false."
+  type        = bool
+  default     = false
+}
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #

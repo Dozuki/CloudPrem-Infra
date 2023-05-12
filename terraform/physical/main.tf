@@ -64,7 +64,13 @@ locals {
   ca_cert_pem_file   = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
   bi_subnet_ids      = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
 
-  # Access Config
+  // If DMS is explicitly enabled for conditional replication purposes OR if public access is desired. (RDS RR is not appropriate for public access)
+  // If true we will use an empty RDS instance and setup replication via DMS.
+  // If false we will use an RDS Read Replica and let RDS manage the replication for us.
+  dms_enabled = var.enable_bi ? (var.bi_dms_enabled || var.bi_public_access) : false
+  bi_db       = local.dms_enabled ? module.dms_replica_database[0] : module.rds_replica_database[0]
+
+  # --Access Config--
   secure_default_bi_access_cidrs = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs
 
   // If the secure default BI CIDRs computed above equals neither a default route (0.0.0.0/0) NOR the local VPC CIDR

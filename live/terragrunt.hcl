@@ -12,7 +12,7 @@ locals {
   account_id   = get_env("TG_AWS_ACCT_ID", local.account_vars.locals.aws_account_id)
   aws_region   = get_env("TG_AWS_REGION", local.region_vars.locals.aws_region)
   aws_profile  = get_env("TG_AWS_PROFILE", local.account_vars.locals.aws_profile)
-
+  
   dns_role = local.aws_region == "us-gov-west-1" ? "arn:aws-us-gov:iam::446787640263:role/Route53AccessRole" : "arn:aws:iam::010601635461:role/Route53AccessRole"
 }
 
