@@ -178,7 +178,7 @@ module "rds_replica_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "5.6.0"
 
-  count = local.dms_enabled ? 0 : 1
+  count = var.enable_bi ? local.dms_enabled ? 0 : 1 : 0
 
   identifier = "${local.identifier}-rds-replica"
 
