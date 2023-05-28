@@ -43,6 +43,28 @@
       },
       "rule-action": "exclude",
       "filters": []
+    },
+    {
+      "rule-type": "selection",
+      "rule-id": "5",
+      "rule-name": "5",
+      "object-locator": {
+        "schema-name": "%",
+        "table-name": "sessions"
+      },
+      "rule-action": "exclude",
+      "filters": []
+    },
+    {
+      "rule-type": "selection",
+      "rule-id": "6",
+      "rule-name": "6",
+      "object-locator": {
+        "schema-name": "%",
+        "table-name": "user_password_reset"
+      },
+      "rule-action": "exclude",
+      "filters": []
     }
   ]
 }
