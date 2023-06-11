@@ -44,6 +44,7 @@ locals {
     "%CUSTOMER%"    = local.customer_name
     "%ENVIRONMENT%" = var.environment
     "%REGION%"      = data.aws_region.current.name
+    "%ACCOUNT%"     = data.aws_caller_identity.current.account_id
   }
   subdomain = join("-", [for part in var.subdomain_format : local.subdomain_parts[part] if local.subdomain_parts[part] != ""])
 
