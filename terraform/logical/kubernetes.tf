@@ -47,6 +47,26 @@ resource "kubernetes_role_binding" "dozuki_list_role_binding" {
   }
 }
 
+resource "kubernetes_secret" "dozuki_infra_credentials" {
+
+  metadata {
+    name      = "dozuki-infra-credentials"
+    namespace = local.k8s_namespace_name
+  }
+  type = "Opaque"
+
+  data = {
+    master_host     = local.db_master_host
+    master_user     = local.db_master_username
+    master_password = local.db_master_password
+    bi_host         = local.db_bi_host
+    bi_user         = local.db_master_username
+    bi_password     = local.db_bi_password
+    memcached_host  = var.memcached_cluster_address
+  }
+}
+
+
 resource "kubernetes_config_map" "dozuki_resources" {
 
   metadata {
