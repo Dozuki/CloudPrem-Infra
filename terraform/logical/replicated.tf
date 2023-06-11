@@ -92,7 +92,9 @@ ${local.aws_profile_prefix} aws --region ${data.aws_region.current.name} eks upd
 
 kubectl config set-context --current --namespace=${kubernetes_namespace.kots_app.metadata[0].name}
 
-[[ -x $(which kubectl-kots) ]] || curl https://kots.io/install | bash
+chmod 755 ./vendor/kots-install.sh
+
+[[ -x $(which kubectl-kots) ]] || ./vendor/kots-install.sh
 
 set -v
 
