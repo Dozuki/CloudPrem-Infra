@@ -69,6 +69,27 @@ locals {
   k8s_namespace_name = "dozuki"
   app_and_channel    = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
 
+  base_config_values = {
+    hostname   = { value = var.dns_domain_name }
+    bi_enabled = { value = var.enable_bi ? "1" : "0" }
+  }
+
+  grafana_config_values = var.enable_bi ? {
+    grafana_admin_username      = { value = local.grafana_admin_username }
+    grafana_admin_password      = { value = random_password.grafana_admin[0].result }
+    grafana_datasource_hostname = { value = local.db_bi_host }
+    grafana_datasource_password = { value = local.db_bi_password }
+    grafana_settings_hostname   = { value = local.db_master_host }
+    grafana_settings_username   = { value = local.db_master_username }
+    grafana_settings_password   = { value = local.db_master_password }
+  } : {}
+
+  #  app_feature_values = { for feature in var.feature_flags_enabled : feature => 1 }
+
+  all_config_values = merge(local.base_config_values, local.grafana_config_values)
+
+
+
 }
 
 data "aws_eks_cluster" "main" {
