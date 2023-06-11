@@ -19,6 +19,25 @@ moved {
   to   = module.primary_database.random_password.master_password[0]
 }
 
+data "aws_rds_orderable_db_instance" "default" {
+  engine         = "mysql"
+  engine_version = "8.0.32"
+
+  supports_enhanced_monitoring = true
+  supports_storage_autoscaling = true
+  supports_storage_encryption  = true
+  vpc                          = true
+
+  preferred_instance_classes = var.rds_preferred_instance_classes
+
+  lifecycle {
+    postcondition {
+      condition     = contains(keys(local.rds_instance_memory), self.instance_class)
+      error_message = "RDS instance type not supported. Please adjust the var.rds_preferred_instance_classes. All values must exist in local.rds_instance_memory."
+    }
+  }
+}
+
 data "aws_kms_key" "rds" {
   key_id = var.rds_kms_key_id
 }
@@ -125,7 +144,7 @@ module "primary_database" {
   engine_version = "8.0"
 
   port                  = 3306
-  instance_class        = var.rds_instance_type
+  instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
   allocated_storage     = var.rds_allocated_storage
   max_allocated_storage = var.rds_max_allocated_storage
   storage_encrypted     = true
