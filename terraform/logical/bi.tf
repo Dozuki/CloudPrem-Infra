@@ -62,8 +62,8 @@ resource "kubernetes_job" "grafana_db_create" {
             name = "MYSQL_HOST"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret.grafana_mysql_credentials[0].metadata[0].name
-                key  = "host"
+                name = kubernetes_secret.dozuki_infra_credentials.metadata[0].name
+                key  = "master_host"
               }
             }
           }
@@ -71,8 +71,8 @@ resource "kubernetes_job" "grafana_db_create" {
             name = "MYSQL_USER"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret.grafana_mysql_credentials[0].metadata[0].name
-                key  = "user"
+                name = kubernetes_secret.dozuki_infra_credentials.metadata[0].name
+                key  = "master_user"
               }
             }
           }
@@ -80,8 +80,8 @@ resource "kubernetes_job" "grafana_db_create" {
             name = "MYSQL_PASSWORD"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret.grafana_mysql_credentials[0].metadata[0].name
-                key  = "password"
+                name = kubernetes_secret.dozuki_infra_credentials.metadata[0].name
+                key  = "master_password"
               }
             }
           }
