@@ -4,16 +4,47 @@ resource "kubernetes_namespace" "kots_app" {
   }
 }
 
-resource "kubernetes_role" "dozuki_list_role" {
-
+resource "kubernetes_role" "dozuki_subsite_role" {
   metadata {
-    name      = "dozuki_list_role"
+    name      = "dozuki_subsite_role"
     namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   rule {
+    api_groups = ["infra.dozuki.com"]
+    resources  = ["subsites"]
+    verbs      = ["get", "list", "watch", "create", "delete"]
+  }
+}
+
+
+resource "kubernetes_role_binding" "dozuki_subsite_role_binding" {
+
+  metadata {
+    name      = "dozuki_subsite_role_binding"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role.dozuki_subsite_role.metadata[0].name
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "default"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
+  }
+}
+
+resource "kubernetes_cluster_role" "dozuki_list_role" {
+
+  metadata {
+    name = "dozuki_list_role"
+  }
+
+  rule {
     api_groups = ["apps"]
-    resources  = ["deployments"]
+    resources  = ["deployments", "daemonsets"]
     verbs      = ["get", "list", "watch"]
   }
   rule {
@@ -21,24 +52,17 @@ resource "kubernetes_role" "dozuki_list_role" {
     resources  = ["pods"]
     verbs      = ["list"]
   }
-  rule {
-    api_groups = ["networking.k8s.io"]
-    resources  = ["ingresses"]
-    verbs      = ["get", "list", "watch", "create"]
-  }
-
 }
 
-resource "kubernetes_role_binding" "dozuki_list_role_binding" {
+resource "kubernetes_cluster_role_binding" "dozuki_list_role_binding" {
 
   metadata {
-    name      = "dozuki_list_role_binding"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    name = "dozuki_list_role_binding"
   }
   role_ref {
     api_group = "rbac.authorization.k8s.io"
-    kind      = "Role"
-    name      = kubernetes_role.dozuki_list_role.metadata[0].name
+    kind      = "ClusterRole"
+    name      = kubernetes_cluster_role.dozuki_list_role.metadata[0].name
   }
   subject {
     kind      = "ServiceAccount"
