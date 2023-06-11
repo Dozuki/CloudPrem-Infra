@@ -1,7 +1,7 @@
 resource "kubernetes_job" "dms_start" {
   count = var.dms_enabled ? 1 : 0
 
-  depends_on = [local_file.replicated_install, kubernetes_role_binding.dozuki_list_role_binding]
+  depends_on = [local_file.replicated_install, kubernetes_cluster_role_binding.dozuki_list_role_binding]
 
   metadata {
     name      = "dms-start"
