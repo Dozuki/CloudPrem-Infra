@@ -222,6 +222,210 @@ module "nodes_alarm" {
   ]
 }
 
+module "rds_cpu_alarm" {
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  version = "4.2.1"
+
+  alarm_name        = "${local.identifier}-rds-cpu-usage"
+  alarm_description = "CPU usage for RDS instance ${local.identifier}"
+
+  namespace   = "AWS/RDS"
+  metric_name = "CPUUtilization"
+  statistic   = "Average"
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  threshold           = 70
+  period              = 300
+
+  dimensions = {
+    DBInstanceIdentifier = module.primary_database.db_instance_id
+  }
+
+  alarm_actions = [
+    module.sns.topic_arn
+  ]
+
+  ok_actions = [
+    module.sns.topic_arn
+  ]
+}
+
+module "rds_free_memory_alarm" {
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  version = "4.2.1"
+
+  alarm_name        = "${local.identifier}-rds-free-memory"
+  alarm_description = "Freeable Memory for RDS instance ${local.identifier}"
+  actions_enabled   = true
+
+  alarm_actions             = [module.sns.topic_arn]
+  ok_actions                = [module.sns.topic_arn]
+  insufficient_data_actions = [module.sns.topic_arn]
+
+  comparison_operator = "LessThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  threshold           = local.rds_instance_memory[data.aws_rds_orderable_db_instance.default.instance_class] * 0.20
+  unit                = "Bytes"
+
+  datapoints_to_alarm = "2"
+  treat_missing_data  = "missing"
+
+  metric_name = "FreeableMemory"
+  namespace   = "AWS/RDS"
+  period      = "300"
+  statistic   = "Average"
+
+  dimensions = {
+    DBInstanceIdentifier = module.primary_database.db_instance_id
+  }
+
+  tags = {
+    Name = "${local.identifier}-rds-free-memory"
+  }
+}
+
+
+
+
+module "rds_swap_usage_alarm" {
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  version = "4.2.1"
+
+  alarm_name        = "${local.identifier}-rds-swap-usage"
+  alarm_description = "Swap Usage for RDS instance ${local.identifier}"
+
+  namespace   = "AWS/RDS"
+  metric_name = "SwapUsage"
+  statistic   = "Average"
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  threshold           = "1000000000" # 1gb
+  period              = "300"
+
+  dimensions = {
+    DBInstanceIdentifier = module.primary_database.db_instance_id
+  }
+
+  alarm_actions = [
+    module.sns.topic_arn
+  ]
+
+  ok_actions = [
+    module.sns.topic_arn
+  ]
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_storage_space_alarm" {
+  alarm_name          = "${local.identifier}-rds-storage-space"
+  alarm_description   = "Storage space usage for RDS instance ${local.identifier}"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  threshold           = 0.8 # 80% of used storage space
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+
+  metric_query {
+    id          = "e1"
+    expression  = "1 - m1 / ${var.rds_max_allocated_storage} * 1.0e+9"
+    label       = "Storage space used"
+    return_data = true
+  }
+
+  metric_query {
+    id = "m1"
+    metric {
+      metric_name = "FreeStorageSpace"
+      namespace   = "AWS/RDS"
+      period      = "300"
+      stat        = "Average"
+      dimensions = {
+        DBInstanceIdentifier = module.primary_database.db_instance_id
+      }
+    }
+  }
+}
+
+
+
+module "rds_connections_alarm" {
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  version = "4.2.1"
+
+  alarm_name        = "${local.identifier}-rds-connections"
+  alarm_description = "Connection count for RDS instance ${local.identifier}"
+
+  namespace   = "AWS/RDS"
+  metric_name = "DatabaseConnections"
+  statistic   = "Average"
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  threshold           = 250
+  period              = 60
+
+  dimensions = {
+    DBInstanceIdentifier = module.primary_database.db_instance_id
+  }
+
+  alarm_actions = [
+    module.sns.topic_arn
+  ]
+
+  ok_actions = [
+    module.sns.topic_arn
+  ]
+}
+
+module "rds_read_latency_alarm" {
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  version = "4.2.1"
+
+  alarm_name          = "${local.identifier}-rds-read-latency"
+  alarm_description   = "Read latency for RDS instance ${local.identifier}"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 0.1 # Change as per your requirements, measured in seconds
+  evaluation_periods  = "2"
+  period              = "300"
+
+  namespace   = "AWS/RDS"
+  metric_name = "ReadLatency"
+  statistic   = "Average"
+
+  dimensions = {
+    DBInstanceIdentifier = module.primary_database.db_instance_id
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+}
+
+module "rds_write_latency_alarm" {
+  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
+  version = "4.2.1"
+
+  alarm_name          = "${local.identifier}-rds-write-latency"
+  alarm_description   = "Write latency for RDS instance ${local.identifier}"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 0.1 # Change as per your requirements, measured in seconds
+  evaluation_periods  = "2"
+  period              = "300"
+
+  namespace   = "AWS/RDS"
+  metric_name = "WriteLatency"
+  statistic   = "Average"
+
+  dimensions = {
+    DBInstanceIdentifier = module.primary_database.db_instance_id
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+}
+
+
+
 resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
   count = var.enable_bi ? 1 : 0
 

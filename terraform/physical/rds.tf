@@ -161,6 +161,10 @@ module "primary_database" {
   backup_window           = "17:00-19:00"
   backup_retention_period = var.rds_backup_retention_period
 
+  monitoring_interval             = 30
+  create_monitoring_role          = true
+  monitoring_role_use_name_prefix = true
+
   vpc_security_group_ids = [module.primary_database_sg.security_group_id]
 
   # Snapshot configuration
