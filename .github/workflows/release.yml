@@ -22,7 +22,13 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            S3 Migration Support Fix
-            - Ignore bucket name and prefix changes on stack upgrade to prevent re-create.
+            App Ingress, LetsEncrypt certs, & Monitoring Overhaul
+            - We now use ingress for the admin dashboard, main app, and grafana (at /dashboards).
+            - All SSL certs are managed automatically via cert-manager and LetsEncrypt.
+            - New DNS subdomains auto-provisioning for dozuki.cloud.
+            - Grafana refactor to use MySQL for settings and user persistence.
+            - Slack & email notifications for monitoring alarms.
+            - New monitoring alarms for EKS.
+            - RDS Read Replica for BI now available and set as default over DMS.
           draft: false
           prerelease: false
