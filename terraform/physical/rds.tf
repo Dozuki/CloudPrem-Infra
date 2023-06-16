@@ -167,7 +167,7 @@ module "primary_database" {
 
 #tfsec:ignore:aws-ssm-secret-use-customer-key
 resource "aws_secretsmanager_secret" "primary_database_credentials" {
-  name = "${local.identifier}-database"
+  name_prefix = "${local.identifier}-database"
 
   recovery_window_in_days = 0
   //  kms_key_id              = data.aws_kms_key.rds.arn
