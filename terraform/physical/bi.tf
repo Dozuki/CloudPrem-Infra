@@ -272,6 +272,13 @@ resource "aws_secretsmanager_secret" "replica_database_credentials" {
   name_prefix = "${local.identifier}-replica-database"
 
   recovery_window_in_days = var.protect_resources ? 7 : 0
+
+  lifecycle {
+    ignore_changes = [
+      name,
+      name_prefix
+    ]
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "replica_database_credentials" {

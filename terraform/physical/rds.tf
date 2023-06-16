@@ -169,8 +169,14 @@ module "primary_database" {
 resource "aws_secretsmanager_secret" "primary_database_credentials" {
   name_prefix = "${local.identifier}-database"
 
-  recovery_window_in_days = 0
-  //  kms_key_id              = data.aws_kms_key.rds.arn
+  recovery_window_in_days = var.protect_resources ? 7 : 0
+
+  lifecycle {
+    ignore_changes = [
+      name,
+      name_prefix
+    ]
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "primary_database_credentials" {
