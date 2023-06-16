@@ -12,7 +12,7 @@ data "kubernetes_secret" "frontegg" {
 resource "kubernetes_job" "wait_for_app" {
   count = var.enable_webhooks ? 1 : 0
 
-  depends_on = [local_file.replicated_install, kubernetes_role_binding.dozuki_list_role_binding]
+  depends_on = [local_file.replicated_install, kubernetes_cluster_role_binding.dozuki_list_role_binding]
 
   metadata {
     name      = "wait-for-app"

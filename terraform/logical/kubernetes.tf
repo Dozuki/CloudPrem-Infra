@@ -4,41 +4,30 @@ resource "kubernetes_namespace" "kots_app" {
   }
 }
 
-resource "kubernetes_role" "dozuki_list_role" {
-
+resource "kubernetes_role" "dozuki_subsite_role" {
   metadata {
-    name      = "dozuki_list_role"
+    name      = "dozuki_subsite_role"
     namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   rule {
-    api_groups = ["apps"]
-    resources  = ["deployments"]
-    verbs      = ["get", "list", "watch"]
+    api_groups = ["infra.dozuki.com"]
+    resources  = ["subsites"]
+    verbs      = ["get", "list", "watch", "create", "delete"]
   }
-  rule {
-    api_groups = [""]
-    resources  = ["pods"]
-    verbs      = ["list"]
-  }
-  rule {
-    api_groups = ["networking.k8s.io"]
-    resources  = ["ingresses"]
-    verbs      = ["get", "list", "watch", "create"]
-  }
-
 }
 
-resource "kubernetes_role_binding" "dozuki_list_role_binding" {
+
+resource "kubernetes_role_binding" "dozuki_subsite_role_binding" {
 
   metadata {
-    name      = "dozuki_list_role_binding"
+    name      = "dozuki_subsite_role_binding"
     namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   role_ref {
     api_group = "rbac.authorization.k8s.io"
     kind      = "Role"
-    name      = kubernetes_role.dozuki_list_role.metadata[0].name
+    name      = kubernetes_role.dozuki_subsite_role.metadata[0].name
   }
   subject {
     kind      = "ServiceAccount"
@@ -46,6 +35,61 @@ resource "kubernetes_role_binding" "dozuki_list_role_binding" {
     namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 }
+
+resource "kubernetes_cluster_role" "dozuki_list_role" {
+
+  metadata {
+    name = "dozuki_list_role"
+  }
+
+  rule {
+    api_groups = ["apps"]
+    resources  = ["deployments", "daemonsets"]
+    verbs      = ["get", "list", "watch"]
+  }
+  rule {
+    api_groups = [""]
+    resources  = ["pods"]
+    verbs      = ["list"]
+  }
+}
+
+resource "kubernetes_cluster_role_binding" "dozuki_list_role_binding" {
+
+  metadata {
+    name = "dozuki_list_role_binding"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = kubernetes_cluster_role.dozuki_list_role.metadata[0].name
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "default"
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
+  }
+}
+
+resource "kubernetes_secret" "dozuki_infra_credentials" {
+
+  metadata {
+    name      = "dozuki-infra-credentials"
+    namespace = local.k8s_namespace_name
+  }
+  type = "Opaque"
+
+  data = {
+    master_host     = local.db_master_host
+    master_user     = local.db_master_username
+    master_password = local.db_master_password
+    bi_host         = local.db_bi_host
+    bi_user         = local.db_master_username
+    bi_password     = local.db_bi_password
+    memcached_host  = var.memcached_cluster_address
+  }
+}
+
 
 resource "kubernetes_config_map" "dozuki_resources" {
 

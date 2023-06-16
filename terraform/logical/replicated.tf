@@ -23,17 +23,60 @@ resource "null_resource" "pull_replicated_license" {
 
 resource "local_file" "replicated_bootstrap_config" {
   filename = "./replicated_config.yaml"
-  content  = <<EOT
-apiVersion: kots.io/v1beta1
-kind: ConfigValues
-metadata:
-  name: replicated_bootstrap_config
-spec:
-  values:
-    hostname:
-      value: ${var.dns_domain_name}
-status: {}
-EOT
+  content = yamlencode({
+    apiVersion = "kots.io/v1beta1"
+    kind       = "ConfigValues"
+    metadata = {
+      name = "replicated_bootstrap_config"
+    }
+    spec = {
+      values = local.all_config_values
+    }
+    status = {}
+  })
+}
+
+# We create the ingress for the dashboard in terraform to ensure that even if the app deploy fails, we can still access the dashboard.
+resource "kubernetes_ingress_v1" "dash" {
+  depends_on = [helm_release.cert_manager]
+
+  metadata {
+    name      = "dash-tf"
+    namespace = local.k8s_namespace_name
+    annotations = {
+      "cert-manager.io/cluster-issuer"                 = "cert-issuer"
+      "nginx.ingress.kubernetes.io/ssl-redirect"       = "true"
+      "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
+      "nginx.ingress.kubernetes.io/rewrite-target"     = "/"
+    }
+  }
+
+  spec {
+    ingress_class_name = "nginx-dash"
+    rule {
+      host = var.dns_domain_name
+
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "kotsadm"
+              port {
+                number = 3000
+              }
+            }
+          }
+        }
+      }
+    }
+
+    tls {
+      hosts       = [var.dns_domain_name]
+      secret_name = "tls-secret"
+    }
+  }
 }
 
 
@@ -49,7 +92,9 @@ ${local.aws_profile_prefix} aws --region ${data.aws_region.current.name} eks upd
 
 kubectl config set-context --current --namespace=${kubernetes_namespace.kots_app.metadata[0].name}
 
-[[ -x $(which kubectl-kots) ]] || curl https://kots.io/install | bash
+chmod 755 ./vendor/kots-install.sh
+
+[[ -x $(which kubectl-kots) ]] || ./vendor/kots-install.sh
 
 set -v
 

@@ -193,7 +193,9 @@ data "aws_iam_policy_document" "s3_replication" {
       "s3:GetObject",
       "s3:GetObjectVersion",
       "s3:GetObjectVersionForReplication",
-      "s3:PutObject"
+      "s3:PutObject",
+      "s3:PutObjectVersionTagging",
+      "s3:PutObjectTagging",
     ]
 
     resources = local.s3_destination_bucket_arn_list_with_objects

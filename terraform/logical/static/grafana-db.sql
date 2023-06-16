@@ -1,1 +1,1 @@
-create database if not exists grafana;
+create database if not exists grafana_primary;
