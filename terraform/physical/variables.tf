@@ -72,7 +72,7 @@ variable "cf_template_version" {
 variable "subdomain_format" {
   type        = list(string)
   description = "Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%])"
-  default     = ["%CUSTOMER%", "%ENVIRONMENT%", "%REGION%"]
+  default     = ["%CUSTOMER%", "%ENVIRONMENT%", "%REGION%", "%ACCOUNT%"]
 
   validation {
     condition     = contains(var.subdomain_format, "%CUSTOMER%")
