@@ -171,10 +171,10 @@ variable "rds_snapshot_identifier" {
   default     = ""
 }
 
-variable "rds_instance_type" {
-  description = "The instance type to use for your database. See this page for a breakdown of the performance and cost differences between the different instance types: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.DBInstanceClass.html"
-  type        = string
-  default     = "db.m4.large"
+variable "rds_preferred_instance_classes" {
+  description = "A list of preferred RDS instance classes, the first available in the list will be used. See this page for a breakdown of the performance and cost differences between the different instance types: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.DBInstanceClass.html"
+  type        = list(string)
+  default     = ["db.m4.large", "db.m5.large"]
 }
 
 variable "rds_multi_az" {

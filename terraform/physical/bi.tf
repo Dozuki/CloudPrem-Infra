@@ -186,7 +186,7 @@ module "rds_replica_database" {
   engine_version = "8.0"
 
   port                  = 3306
-  instance_class        = var.rds_instance_type
+  instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
   max_allocated_storage = var.rds_max_allocated_storage
   replicate_source_db   = module.primary_database.db_instance_id
   storage_encrypted     = true
@@ -227,7 +227,7 @@ module "dms_replica_database" {
   engine_version = "8.0"
 
   port                  = 3306
-  instance_class        = var.rds_instance_type
+  instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
   allocated_storage     = var.rds_allocated_storage
   max_allocated_storage = var.rds_max_allocated_storage
   storage_encrypted     = true
