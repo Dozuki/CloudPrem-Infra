@@ -2,13 +2,30 @@ terraform {
   required_version = ">= 1.3.9"
 
   required_providers {
-    aws        = "4.57.0"
-    kubernetes = "2.18.1"
-    helm       = "2.9.0"
-    null       = "3.2.1"
-    # This provider needs to stay for awhile to maintain backwards compatibility with older infra versions (<=2.5.4)
-    local  = "2.2.3"
-    random = "3.4.3"
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.0"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 

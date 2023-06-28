@@ -1,17 +1,4 @@
-data "aws_iam_policy_document" "dms_assume_role" {
-  count = local.dms_enabled ? 1 : 0
 
-  statement {
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["dms.${data.aws_partition.current.dns_suffix}"]
-    }
-
-    actions = ["sts:AssumeRole"]
-  }
-}
 data "aws_iam_role" "dms-vpc-role" {
   count = local.dms_enabled ? try(length(data.aws_iam_roles.dms-vpc-roles.arns), 0) > 0 ? 1 : 0 : 0
 
@@ -20,6 +7,16 @@ data "aws_iam_role" "dms-vpc-role" {
 data "aws_iam_roles" "dms-vpc-roles" {
   name_regex = "dms-vpc-role"
 }
+data "aws_iam_role" "dms-cloudwatch-role" {
+  count = local.dms_enabled ? try(length(data.aws_iam_roles.dms-cloudwatch-roles.arns), 0) > 0 ? 1 : 0 : 0
+
+  name = "dms-cloudwatch-logs-role"
+}
+data "aws_iam_roles" "dms-cloudwatch-roles" {
+  name_regex = "dms-cloudwatch-logs-role"
+}
+# We create the dms-vpc-role and dms-cloudwatch-logs-role using a null_resource to prevent the removal of the
+# account-wide role should this stack be deleted. In other words, to keep the role out of the state.
 resource "null_resource" "create_dms_vpc_role" {
   count = local.dms_enabled ? length(data.aws_iam_role.dms-vpc-role) > 0 ? 0 : 1 : 0
 
@@ -27,25 +24,26 @@ resource "null_resource" "create_dms_vpc_role" {
     command = <<-EOT
       aws iam create-role \
         --role-name dms-vpc-role \
-        --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"dms.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+        --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"dms.${data.aws_partition.current.dns_suffix}"},"Action":"sts:AssumeRole"}]}'
       aws iam attach-role-policy \
         --role-name dms-vpc-role \
         --policy-arn arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSVPCManagementRole
     EOT
   }
 }
-resource "aws_iam_role" "dms-cloudwatch-logs-role" {
-  count = local.dms_enabled ? 1 : 0
+resource "null_resource" "create_dms_cloudwatch_role" {
+  count = local.dms_enabled ? length(data.aws_iam_role.dms-cloudwatch-role) > 0 ? 0 : 1 : 0
 
-  assume_role_policy = data.aws_iam_policy_document.dms_assume_role[0].json
-  name               = "${local.identifier}-${data.aws_region.current.name}-dms-cloudwatch-logs-role"
-}
-
-resource "aws_iam_role_policy_attachment" "dms-cloudwatch-logs-role-AmazonDMSCloudWatchLogsRole" {
-  count = local.dms_enabled ? 1 : 0
-
-  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
-  role       = aws_iam_role.dms-cloudwatch-logs-role[0].name
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws iam create-role \
+        --role-name dms-cloudwatch-logs-role \
+        --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"dms.${data.aws_partition.current.dns_suffix}"},"Action":"sts:AssumeRole"}]}'
+      aws iam attach-role-policy \
+        --role-name dms-cloudwatch-logs-role \
+        --policy-arn arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole
+    EOT
+  }
 }
 
 resource "aws_dms_replication_subnet_group" "this" {
