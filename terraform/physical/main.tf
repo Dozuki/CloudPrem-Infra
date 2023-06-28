@@ -2,11 +2,26 @@ terraform {
   required_version = ">= 1.3.9"
 
   required_providers {
-    aws        = "4.57.0"
-    random     = "3.4.3"
-    kubernetes = "2.18.1"
-    null       = "3.2.1"
-    archive    = "2.3.0"
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
   }
 }
 provider "kubernetes" {
