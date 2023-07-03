@@ -83,6 +83,17 @@ variable "google_translate_api_token" {
   default     = ""
 }
 
+variable "grafana_subpath" {
+  description = "Subpath to serve Grafana from"
+  type        = string
+  default     = "dashboards"
+
+  validation {
+    condition     = can(regex("^[^/\\\\].*[^/\\\\]$", var.grafana_subpath))
+    error_message = "The grafana_subpath must not start or end with a forward or backward slash."
+  }
+}
+
 # --- END App Configuration --- #
 
 # --- BEGIN Physical Module Passthrough Configuration (do not set or modify) --- #

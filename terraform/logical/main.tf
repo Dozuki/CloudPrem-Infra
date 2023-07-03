@@ -70,7 +70,7 @@ locals {
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
   # Grafana
-  grafana_url            = var.enable_bi ? format("https://%s/dashboards", var.dns_domain_name) : null
+  grafana_url            = var.enable_bi ? format("https://%s/%s", var.dns_domain_name, var.grafana_subpath) : null
   grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : null
   grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
 
@@ -111,6 +111,7 @@ locals {
     grafana_settings_hostname   = { value = local.db_master_host }
     grafana_settings_username   = { value = local.db_master_username }
     grafana_settings_password   = { value = local.db_master_password }
+    grafana_subpath             = { value = var.grafana_subpath }
   } : {}
 
   all_config_values = merge(local.base_config_values, local.grafana_config_values)
