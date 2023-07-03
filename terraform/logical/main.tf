@@ -69,13 +69,6 @@ locals {
   db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
-  # Webhooks
-  frontegg_clientid = try(data.kubernetes_secret.frontegg[0].data.clientid, "")
-  frontegg_apikey   = try(data.kubernetes_secret.frontegg[0].data.apikey, "")
-  frontegg_pub_key  = try(data.kubernetes_secret.frontegg[0].data.pubkey, "")
-  frontegg_username = try(data.kubernetes_secret.frontegg[0].data.username, "")
-  frontegg_password = try(data.kubernetes_secret.frontegg[0].data.password, "") #tfsec:ignore:general-secrets-no-plaintext-exposure
-
   # Grafana
   grafana_url            = var.enable_bi ? format("https://%s/dashboards", var.dns_domain_name) : null
   grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : null
@@ -87,8 +80,25 @@ locals {
   app_and_channel    = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
 
   base_config_values = {
-    hostname   = { value = var.dns_domain_name }
-    bi_enabled = { value = var.enable_bi ? "1" : "0" }
+    customer               = { value = coalesce(var.customer, "Dozuki") }
+    environment            = { value = var.environment }
+    aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
+    aws_region             = { value = data.aws_region.current.name }
+    hostname               = { value = var.dns_domain_name }
+    bi_enabled             = { value = var.enable_bi ? "1" : "0" }
+    webhooks_enabled       = { value = var.enable_webhooks ? "1" : "0" }
+    memcached_host         = { value = var.memcached_cluster_address }
+    s3_kms_key             = { value = data.aws_kms_key.s3.arn }
+    s3_images_bucket       = { value = var.s3_images_bucket }
+    s3_objects_bucket      = { value = var.s3_objects_bucket }
+    s3_documents_bucket    = { value = var.s3_documents_bucket }
+    s3_pdfs_bucket         = { value = var.s3_pdfs_bucket }
+    db_host                = { value = local.db_master_host }
+    db_user                = { value = local.db_master_username }
+    db_password            = { value = local.db_master_password }
+    rds_ca_cert            = { value = base64encode(file(local.ca_cert_pem_file)) }
+    msk_bootstrap_brokers  = { value = var.msk_bootstrap_brokers }
+    google_translate_token = { value = var.google_translate_api_token }
   }
 
   grafana_config_values = var.enable_bi ? {

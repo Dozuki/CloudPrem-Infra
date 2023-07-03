@@ -1,6 +1,6 @@
 output "msk_bootstrap_brokers" {
   description = "Kafka bootstrap broker list"
-  value       = try(replace(aws_msk_cluster.this[0].bootstrap_brokers, ",", "\\,"), "")
+  value       = try(aws_msk_cluster.this[0].bootstrap_brokers, "")
 }
 output "eks_worker_asg_arns" {
   description = "EKS worker autoscaling group ARNs"
