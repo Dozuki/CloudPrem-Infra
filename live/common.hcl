@@ -80,11 +80,6 @@ generate "metrics_server_helmignore" {
   if_exists = "overwrite_terragrunt"
   contents  = local.helmignore
 }
-generate "grafana_helmignore" {
-  path      = "charts/grafana/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
 generate "adotexporter_helmignore" {
   path      = "charts/adot-exporter-for-eks-on-ec2/.helmignore"
   if_exists = "overwrite_terragrunt"
