@@ -79,6 +79,7 @@ locals {
   k8s_namespace_name = "dozuki"
   app_and_channel    = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
 
+  // Map for app config passed to Replicated
   base_config_values = {
     customer               = { value = coalesce(var.customer, "Dozuki") }
     environment            = { value = var.environment }
@@ -101,6 +102,7 @@ locals {
     google_translate_token = { value = var.google_translate_api_token }
   }
 
+  // Optional add-on for Grafana config
   grafana_config_values = var.enable_bi ? {
     grafana_admin_username      = { value = local.grafana_admin_username }
     grafana_admin_password      = { value = random_password.grafana_admin[0].result }
@@ -111,11 +113,7 @@ locals {
     grafana_settings_password   = { value = local.db_master_password }
   } : {}
 
-  #  app_feature_values = { for feature in var.feature_flags_enabled : feature => 1 }
-
   all_config_values = merge(local.base_config_values, local.grafana_config_values)
-
-
 
 }
 
