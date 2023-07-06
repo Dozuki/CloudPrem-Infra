@@ -19,7 +19,7 @@ READ_TIMEOUT=15
 DEFAULT_DIR="/usr/local/bin"
 INSECURE="false"
 PROG="kots"
-RELEASE="v1.100.0"
+RELEASE="v1.100.3"
 TMP_DIR=$(mktemp -d -t replicated-XXXXXX)
 USER="replicatedhq"
 

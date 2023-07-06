@@ -25,46 +25,6 @@ locals {
   EOF
 }
 
-generate "webhooks_default_helmignore" {
-  path      = "charts/connectivity/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "webhooks_event_helmignore" {
-  path      = "charts/connectivity/charts/event-service/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "webhooks_api_helmignore" {
-  path      = "charts/connectivity/charts/api-gateway/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "webhooks_webhook_helmignore" {
-  path      = "charts/connectivity/charts/webhook-service/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "webhooks_connectors_helmignore" {
-  path      = "charts/connectivity/charts/connectors-worker/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "webhooks_integrations_helmignore" {
-  path      = "charts/connectivity/charts/integrations-service/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "webhooks_mongodb_helmignore" {
-  path      = "charts/mongodb/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "webhooks_redis_helmignore" {
-  path      = "charts/redis/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
 generate "aws_node_termination_handler_helmignore" {
   path      = "charts/aws-node-termination-handler/.helmignore"
   if_exists = "overwrite_terragrunt"

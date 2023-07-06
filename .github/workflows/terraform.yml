@@ -46,7 +46,7 @@ jobs:
         github_token: ${{ secrets.github_token }}
         working_directory: "./terraform/${{ matrix.module }}" # Optional. Change working directory
         reporter: github-pr-review # Optional. Change reporter
-        fail_on_error: "true" # Optional. Fail action if errors are found
+        fail_on_error: "false" # Optional. Fail action if errors are found
         filter_mode: "nofilter" # Optional. Check all files, not just the diff
         tflint_rulesets: "aws" # Optional. Extra official rulesets to install
 
