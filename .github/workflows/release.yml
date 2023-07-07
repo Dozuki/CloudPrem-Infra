@@ -25,6 +25,8 @@ jobs:
             RDS Monitoring & KOTS Support Changes
             - Added monitoring alarms for RDS instances.
             - Removed Grafana from logical module in favor of deploying via KOTS.
+            - Removed Frontegg and dependencies from logical module in favor of deploying via KOTS.
+            - Removed Dozuki settings ConfigMap from logical module in favor of deploying via KOTS.
             - Added new K8 RBAC to support the new Dozuki Operator deployed via KOTS.
             - Refactored some naming conventions to prevent collisions.
           draft: false
