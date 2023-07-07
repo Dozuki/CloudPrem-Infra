@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Installer script for kots version v1.100.2.
+# Installer script for kots version v1.100.3.
 #
 # This script will verify that the environment is suitable for installation before downloading
 # and installing kots.
@@ -164,17 +164,17 @@ function check_env {
 	case "${OS}_${ARCH}" in
 
 		darwin_*)
-			URL="https://github.com/replicatedhq/kots/releases/download/v1.100.2/kots_darwin_all.tar.gz"
+			URL="https://github.com/replicatedhq/kots/releases/download/$RELEASE/kots_darwin_all.tar.gz"
 			FTYPE=".tar.gz"
 			;;
 
 		linux_amd64)
-			URL="https://github.com/replicatedhq/kots/releases/download/v1.100.2/kots_linux_amd64.tar.gz"
+			URL="https://github.com/replicatedhq/kots/releases/download/$RELEASE/kots_linux_amd64.tar.gz"
 			FTYPE=".tar.gz"
 			;;
 
 		linux_arm)
-			URL="https://github.com/replicatedhq/kots/releases/download/v1.100.2/kots_linux_arm64.tar.gz"
+			URL="https://github.com/replicatedhq/kots/releases/download/$RELEASE/kots_linux_arm64.tar.gz"
 			FTYPE=".tar.gz"
 			;;
 
