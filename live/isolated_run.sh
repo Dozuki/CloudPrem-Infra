@@ -111,7 +111,7 @@ if [ -z "$BRANCH_NAME" ]; then
   git worktree add "${WORKTREE_DIR}"
 
   pushd ..
-  rsync -avq --exclude '.git' ./ "${WORKTREE_DIR}"/
+  rsync -avq --delete --exclude '.git' ./ "${WORKTREE_DIR}"/
   popd || exit
 else
   # Set to true when deploying a different branch since we will likely need to refresh the terraform folders.
