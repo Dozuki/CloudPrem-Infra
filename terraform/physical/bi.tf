@@ -119,7 +119,7 @@ resource "aws_dms_endpoint" "target" {
   ssl_mode                    = "verify-full"
   endpoint_type               = "target"
   engine_name                 = "mysql"
-  extra_connection_attributes = "afterConnectScript=call mysql.rds_set_configuration('binlog retention hours', 24);"
+  extra_connection_attributes = "afterConnectScript=call mysql.rds_set_configuration('binlog retention hours', 24);Initstmt=SET FOREIGN_KEY_CHECKS=0;"
   port                        = 3306
   kms_key_arn                 = aws_kms_key.bi[0].arn
 
@@ -194,7 +194,8 @@ module "rds_replica_database" {
 
   create_random_password = false
 
-  multi_az           = var.rds_multi_az
+  // No need for multi-az for a read replica
+  multi_az           = false
   ca_cert_identifier = local.ca_cert_identifier
 
   vpc_security_group_ids = [module.bi_database_sg.security_group_id]
@@ -237,7 +238,8 @@ module "dms_replica_database" {
   random_password_length = 40
   create_random_password = true
 
-  multi_az           = var.rds_multi_az
+  // Multi-az causes issues with DMS so we disable it.
+  multi_az           = false
   ca_cert_identifier = local.ca_cert_identifier
 
   maintenance_window = "Sun:19:00-Sun:23:00"
