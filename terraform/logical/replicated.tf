@@ -111,7 +111,7 @@ if ! kubectl kots get apps -n ${kubernetes_namespace.kots_app.metadata[0].name} 
     --wait-duration=10m
 else
   # If app is already installed, update the config with any changed values from this run.
-  kubectl kots set config ${local.app_slug} --config-file ${local_file.replicated_bootstrap_config.filename}
+  kubectl kots set config ${local.app_slug} --merge --config-file ${local_file.replicated_bootstrap_config.filename}
 fi
 
 EOT
