@@ -355,6 +355,11 @@ module "eks_cluster" {
       username = "admin"
       groups   = ["system:masters"]
     },
+    {
+      rolearn  = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/AWSReservedSSO_AWSAdministratorAccess_*"
+      username = "admin"
+      groups   = ["system:masters"]
+    }
   ]
 
   tags = local.tags
