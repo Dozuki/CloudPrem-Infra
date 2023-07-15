@@ -1,5 +1,5 @@
 data "aws_iam_policy_document" "lambda_execution" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
   statement {
     effect = "Allow"
@@ -14,38 +14,39 @@ data "aws_iam_policy_document" "lambda_execution" {
 }
 
 data "aws_iam_policy_document" "lambda_permissions" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
   statement {
     actions = [
       "iam:ListAccountAliases",
-      "dms:DescribeReplicationTasks"
+      "dms:DescribeReplicationTasks",
+      "dms:StartReplicationTask"
     ]
     resources = ["*"]
   }
 }
 
 resource "aws_iam_policy" "lambda_permissions" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
   name   = "${local.identifier}-${data.aws_region.current.name}-lambda-alias"
   policy = data.aws_iam_policy_document.lambda_permissions[0].json
 }
 
 resource "aws_iam_role" "lambda_execution" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
   name               = "${local.identifier}-${data.aws_region.current.name}-lambda-execution"
   assume_role_policy = data.aws_iam_policy_document.lambda_execution[0].json
 }
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   role       = aws_iam_role.lambda_execution[0].name
 }
 resource "aws_iam_role_policy_attachment" "lambda_iam_alias" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
   policy_arn = aws_iam_policy.lambda_permissions[0].arn
   role       = aws_iam_role.lambda_execution[0].name
@@ -285,9 +286,6 @@ module "rds_free_memory_alarm" {
   }
 }
 
-
-
-
 module "rds_swap_usage_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "4.2.1"
@@ -346,8 +344,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_space_alarm" {
     }
   }
 }
-
-
 
 module "rds_connections_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
@@ -425,7 +421,6 @@ module "rds_write_latency_alarm" {
 }
 
 
-
 resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
   count = var.enable_bi ? 1 : 0
 
@@ -450,6 +445,7 @@ resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
   arn       = module.sns.topic_arn
 }
 
+// -- Slack Notification Lambda
 
 data "archive_file" "slack_sns_lambda" {
   count = var.slack_webhook_url != "" ? 1 : 0
@@ -493,6 +489,47 @@ resource "aws_lambda_permission" "sns_to_slack_permission" {
   statement_id  = "AllowSNSInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.sns_to_slack[0].function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = module.sns.topic_arn
+}
+
+// -- DMS Restart Lambda
+
+data "archive_file" "dms_restart_lambda" {
+  count = local.dms_enabled ? 1 : 0
+
+  type        = "zip"
+  source_file = "util/dms_restart.py"
+  output_path = "dms_restart_lambda_payload.zip"
+}
+
+resource "aws_lambda_function" "dms_restart" {
+  count = local.dms_enabled ? 1 : 0
+
+  filename      = "dms_restart_lambda_payload.zip"
+  function_name = "${local.identifier}-dms_restart"
+  handler       = "dms_restart.lambda_handler"
+  runtime       = "python3.8"
+  role          = aws_iam_role.lambda_execution[0].arn
+
+  source_code_hash = data.archive_file.dms_restart_lambda[0].output_base64sha256
+
+}
+
+resource "aws_sns_topic_subscription" "dms_restart_subscription" {
+  count = local.dms_enabled ? 1 : 0
+
+  topic_arn = module.sns.topic_arn
+  protocol  = "lambda"
+  endpoint  = aws_lambda_function.dms_restart[0].arn
+}
+
+resource "aws_lambda_permission" "dms_restart_permission" {
+  count = local.dms_enabled ? 1 : 0
+
+  statement_id  = "AllowSNSInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dms_restart[0].function_name
   principal     = "sns.amazonaws.com"
   source_arn    = module.sns.topic_arn
 }
