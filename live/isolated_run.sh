@@ -25,7 +25,6 @@ cleanup() {
 
   docker rm "$container_id"
 
-  git worktree remove "${WORKTREE_DIR}" --force
 
   rm -fr "${WORKTREE_DIR}"
 
@@ -108,7 +107,7 @@ WORKTREE_DIR="${TEMP_DIR}/${TIMESTAMP}/worktree"
 if [ -z "$BRANCH_NAME" ]; then
   BRANCH_NAME=$(git branch --show-current)
 
-  git worktree add "${WORKTREE_DIR}"
+  mkdir -p $WORKTREE_DIR
 
   pushd ..
   rsync -avq --delete --exclude '.git' ./ "${WORKTREE_DIR}"/
