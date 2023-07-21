@@ -22,12 +22,11 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            RDS Monitoring & KOTS Support Changes
-            - Added monitoring alarms for RDS instances.
-            - Removed Grafana from logical module in favor of deploying via KOTS.
-            - Removed Frontegg and dependencies from logical module in favor of deploying via KOTS.
-            - Removed Dozuki settings ConfigMap from logical module in favor of deploying via KOTS.
-            - Added new K8 RBAC to support the new Dozuki Operator deployed via KOTS.
-            - Refactored some naming conventions to prevent collisions.
+            DMS Auto Restart & KOTS Config Update
+            - DMS tasks will now auto-restart on failure.
+            - DMS schema mapping has been updated to be more targeted and exclude schemas we don't need.
+            - DMS task config update to disable foreign key checks during replication.
+            - KOTS ConfigValues will be updated on each logical module run.
+            - Added EKS cluster access to any admin user on the account.
           draft: false
           prerelease: false
