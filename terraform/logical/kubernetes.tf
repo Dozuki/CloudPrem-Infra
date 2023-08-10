@@ -157,3 +157,16 @@ resource "helm_release" "cert_manager" {
     value = "true"
   }
 }
+
+resource "helm_release" "ebs_csi_driver" {
+  name  = "ebs-csi-driver"
+  chart = "${path.module}/charts/aws-ebs-csi-driver"
+
+  values = [
+    file("static/ebs-csi-driver-values.yaml")
+  ]
+
+  namespace = "kube-system"
+
+  wait = true
+}

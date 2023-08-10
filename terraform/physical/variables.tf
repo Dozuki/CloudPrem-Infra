@@ -342,6 +342,12 @@ variable "eks_desired_capacity" {
   }
 }
 
+variable "eks_k8s_version" {
+  description = "Version of Kubernetes to launch or upgrade to. EKS does not support rolling back versions or upgrade version skipping."
+  type        = string
+  default     = "1.27"
+}
+
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
   type        = bool

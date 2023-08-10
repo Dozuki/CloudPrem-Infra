@@ -1,0 +1,9 @@
+storageClasses:
+  - name: ebs-gp3
+    annotations:
+      storageclass.kubernetes.io/is-default-class: "true"
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Delete
+    parameters:
+      fsType: ext4
+      type: gp3
