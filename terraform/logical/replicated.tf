@@ -81,7 +81,7 @@ resource "kubernetes_ingress_v1" "dash" {
 
 
 resource "local_file" "replicated_install" {
-  depends_on = [null_resource.pull_replicated_license, helm_release.cert_manager]
+  depends_on = [null_resource.pull_replicated_license, helm_release.cert_manager, helm_release.ebs_csi_driver]
 
   filename = "./kots_install.sh"
   content  = <<EOT

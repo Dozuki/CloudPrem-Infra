@@ -250,7 +250,7 @@ module "eks_cluster" {
 
   # EKS cofigurations
   cluster_name    = local.identifier
-  cluster_version = "1.22"
+  cluster_version = var.eks_k8s_version
   enable_irsa     = true
   # Need public access even when deploying from AWS due to the occasional inability to access private endpoints.
   cluster_endpoint_public_access                 = true
@@ -271,7 +271,8 @@ module "eks_cluster" {
   workers_additional_policies = [
     aws_iam_policy.eks_worker.arn,
     aws_iam_policy.eks_worker_kms.arn,
-    aws_iam_policy.assume_cross_account_role.arn
+    aws_iam_policy.assume_cross_account_role.arn,
+    "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
   ]
 
   worker_groups_launch_template = [
@@ -315,6 +316,13 @@ module "eks_cluster" {
         "WarmPoolWarmedCapacity"
       ]
       target_group_arns = module.nlb.target_group_arns
+      taints = [
+        {
+          key    = "ebs.csi.aws.com/agent-not-ready"
+          value  = "NoExecute"
+          effect = "NO_SCHEDULE"
+        }
+      ]
       tags = [
         {
           key                 = "aws-node-termination-handler/managed"
