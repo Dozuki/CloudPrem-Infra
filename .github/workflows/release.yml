@@ -22,11 +22,11 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            DMS Auto Restart & KOTS Config Update
-            - DMS tasks will now auto-restart on failure.
-            - DMS schema mapping has been updated to be more targeted and exclude schemas we don't need.
-            - DMS task config update to disable foreign key checks during replication.
-            - KOTS ConfigValues will be updated on each logical module run.
-            - Added EKS cluster access to any admin user on the account.
+            Kubernetes Upgrade Transitional Release
+            - Version 1.22 of Kubernetes is being fully deprecated by AWS, this release facilitates upgrading.
+            - Bare minimum changes to support upgrading K8s from 1.22 to 1.27.
+            - Parameterizes K8s version in env.hcl.
+            - Installs ebs-csi-driver helm chart and required IAM policies.
+            - Deletes K8s resources that are no longer using valid api groups.
           draft: false
           prerelease: false
