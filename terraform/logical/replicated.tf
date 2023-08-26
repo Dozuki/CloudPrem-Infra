@@ -94,7 +94,7 @@ kubectl config set-context --current --namespace=${kubernetes_namespace.kots_app
 
 chmod 755 ./vendor/kots-install.sh
 
-[[ -x $(which kubectl-kots) ]] || ./vendor/kots-install.sh
+[[ -x $(which kubectl-kots) ]] || REPL_INSTALL_PATH=/usr/local/bin ./vendor/kots-install.sh
 
 set -v
 
