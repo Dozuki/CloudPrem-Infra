@@ -294,8 +294,9 @@ variable "eks_kms_key_id" {
 
 variable "eks_instance_types" {
   description = "The instance type of each node in the application's EKS worker node group."
-  default     = ["m5.large", "m5a.large", "m5d.large", "m5ad.large"]
-  type        = list(string)
+  // For Govcloud ["m5.large", "m5a.large", "m5d.large", "m5ad.large"]
+  default = ["m7i-flex.xlarge", "m7i.xlarge"]
+  type    = list(string)
 }
 
 variable "eks_volume_size" {
