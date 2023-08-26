@@ -272,6 +272,7 @@ module "eks_cluster" {
     aws_iam_policy.eks_worker.arn,
     aws_iam_policy.eks_worker_kms.arn,
     aws_iam_policy.assume_cross_account_role.arn,
+    "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore",
     "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
   ]
 
