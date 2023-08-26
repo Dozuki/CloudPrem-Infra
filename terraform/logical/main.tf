@@ -100,6 +100,8 @@ locals {
     rds_ca_cert            = { value = base64encode(file(local.ca_cert_pem_file)) }
     msk_bootstrap_brokers  = { value = var.msk_bootstrap_brokers }
     google_translate_token = { value = var.google_translate_api_token }
+    nth_role_arn           = { value = var.termination_handler_role_arn }
+    nth_sqs_queue_id       = { value = var.termination_handler_sqs_queue_id }
   }
 
   // Optional add-on for Grafana config
