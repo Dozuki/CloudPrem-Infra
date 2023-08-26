@@ -36,7 +36,7 @@ resource "kubernetes_config_map" "grafana_create_db_script" {
   count = var.enable_bi ? 1 : 0
   metadata {
     name      = "grafana-create-db-script"
-    namespace = local.k8s_namespace_name
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
 
   data = {
