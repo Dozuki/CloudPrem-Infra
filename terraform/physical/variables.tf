@@ -97,6 +97,12 @@ variable "slack_webhook_url" {
   default     = ""
 }
 
+variable "managed_private_cloud" {
+  description = "Whether or not this is a managed private cloud customer."
+  type        = bool
+  default     = true
+}
+
 # --- END General Configuration --- #
 
 # --- BEGIN Network Configuration --- #

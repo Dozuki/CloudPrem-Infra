@@ -201,6 +201,7 @@
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
+| <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
 | <a name="input_rds_allocated_storage"></a> [rds\_allocated\_storage](#input\_rds\_allocated\_storage) | The initial size of the database (Gb) | `number` | `100` | no |
 | <a name="input_rds_backup_retention_period"></a> [rds\_backup\_retention\_period](#input\_rds\_backup\_retention\_period) | The number of days to keep automatic database backups. Setting this value to 0 disables automatic backups. | `number` | `30` | no |
