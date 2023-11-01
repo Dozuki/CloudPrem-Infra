@@ -21,7 +21,7 @@ moved {
 
 data "aws_rds_orderable_db_instance" "default" {
   engine         = "mysql"
-  engine_version = var.rds_engine_version == "8.0" ? "8.0.32" : "5.7.22"
+  engine_version = var.rds_engine_version == "8.0" ? "8.0.32" : "5.7.44"
 
   supports_enhanced_monitoring = true
   supports_storage_autoscaling = true
