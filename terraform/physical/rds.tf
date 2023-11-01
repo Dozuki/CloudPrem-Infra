@@ -21,7 +21,7 @@ moved {
 
 data "aws_rds_orderable_db_instance" "default" {
   engine         = "mysql"
-  engine_version = "8.0.32"
+  engine_version = var.rds_engine_version == "8.0" ? "8.0.32" : "5.7.22"
 
   supports_enhanced_monitoring = true
   supports_storage_autoscaling = true
@@ -113,7 +113,7 @@ module "bi_database_sg" {
 resource "aws_db_parameter_group" "default" {
 
   name_prefix = local.identifier
-  family      = "mysql8.0"
+  family      = "mysql${var.rds_engine_version}"
 
   parameter {
     name  = "binlog_format"
@@ -141,7 +141,7 @@ module "primary_database" {
   identifier = local.identifier
 
   engine         = "mysql"
-  engine_version = "8.0"
+  engine_version = var.rds_engine_version
 
   port                  = 3306
   instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
