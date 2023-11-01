@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Unmanaged Private Cloud Support
-            - Add support for unmanaged private cloud customers by disabling required managed DNS provider.
+            Legacy MySQL 5.7 Support
+            - Add support for deploying RDS instances on MySQL 5.7 engine using a new rds_engine_version variable.
           draft: false
           prerelease: false
