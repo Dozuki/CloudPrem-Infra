@@ -183,14 +183,15 @@ module "rds_replica_database" {
   engine         = "mysql"
   engine_version = "8.0"
 
-  port                  = 3306
-  instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
-  max_allocated_storage = var.rds_max_allocated_storage
-  replicate_source_db   = module.primary_database.db_instance_id
-  storage_encrypted     = true
-  kms_key_id            = data.aws_kms_key.rds.arn
-  apply_immediately     = !var.protect_resources
-  publicly_accessible   = false
+  port                        = 3306
+  instance_class              = data.aws_rds_orderable_db_instance.default.instance_class
+  max_allocated_storage       = var.rds_max_allocated_storage
+  replicate_source_db         = module.primary_database.db_instance_id
+  storage_encrypted           = true
+  kms_key_id                  = data.aws_kms_key.rds.arn
+  apply_immediately           = !var.protect_resources
+  publicly_accessible         = false
+  allow_major_version_upgrade = true
 
   create_random_password = false
 
