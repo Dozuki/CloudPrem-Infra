@@ -146,6 +146,12 @@ variable "s3_kms_key_id" {
   default     = ""
 }
 
+variable "use_existing_s3_kms" {
+  description = "To use the s3_kms_key_id provided for the new s3 buckets as well, set this to true."
+  type        = bool
+  default     = false
+}
+
 variable "s3_existing_buckets" {
   description = "List of the existing Dozuki buckets to use. Do not include the logging bucket."
   type = list(object({
@@ -315,16 +321,6 @@ variable "eks_instance_types" {
   type        = list(string)
 }
 
-variable "eks_volume_size" {
-  description = "The amount of local storage (in gigabytes) to allocate to each kubernetes node. Keep in mind you will be billed for this amount of storage multiplied by how many nodes you spin up (i.e. 50GB * 4 nodes = 200GB on your bill). For production installations 50GB should be the minimum. This local storage is used as a temporary holding area for uploaded and in-process assets like videos and images."
-  default     = 50
-  type        = number
-
-  validation {
-    condition     = var.eks_volume_size >= 20
-    error_message = "Less than 20GB can cause problems even on testing instances."
-  }
-}
 
 variable "eks_min_size" {
   description = "The minimum amount of nodes we will autoscale to."

@@ -117,6 +117,8 @@ locals {
   # --S3 Buckets--
   // If all 4 guide buckets are specified we use them as a replication source.
   use_existing_buckets = length(var.s3_existing_buckets) == 4 ? true : false
+  use_provided_s3_kms  = var.use_existing_s3_kms && var.s3_kms_key_id != "" ? true : false
+  s3_kms_key_id        = local.use_provided_s3_kms ? var.s3_kms_key_id : aws_kms_key.s3[0].arn
 
   // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
   // The format of the s3_existing_buckets object is important and described in the variables.tf file.
@@ -141,6 +143,8 @@ locals {
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
   public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnets.public[0].ids
   private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnets.private[0].ids
+
+  cf_template_version = var.cf_template_version
 }
 
 # Provider and global data resources
@@ -155,7 +159,7 @@ data "aws_caller_identity" "current" {
   lifecycle {
     precondition {
       condition     = var.slack_webhook_url != "" || var.alarm_email != ""
-      error_message = "Please configure either Slack or Email notifications via the slack_webhook_url or alarm_email variables. "
+      error_message = "${local.cf_template_version}Please configure either Slack or Email notifications via the slack_webhook_url or alarm_email variables. "
     }
   }
 }

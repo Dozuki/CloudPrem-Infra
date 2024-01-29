@@ -102,13 +102,17 @@ data "aws_iam_policy_document" "s3_kms_key_policy" {
 }
 
 resource "aws_kms_key" "s3" {
+  count = local.use_provided_s3_kms ? 0 : 1
+
   description             = "KMS key to encrypt S3 bucket contents"
   deletion_window_in_days = 7
   policy                  = data.aws_iam_policy_document.s3_kms_key_policy.json
 }
 resource "aws_kms_alias" "s3" {
+  count = local.use_provided_s3_kms ? 0 : 1
+
   name_prefix   = "alias/${local.identifier}/${data.aws_region.current.name}/s3/"
-  target_key_id = aws_kms_key.s3.id
+  target_key_id = aws_kms_key.s3[0].id
 }
 
 // If using existing buckets
@@ -248,7 +252,7 @@ data "aws_iam_policy_document" "s3_replication" {
       values   = local.s3_destination_bucket_arn_list_with_objects
     }
 
-    resources = [aws_kms_key.s3.arn]
+    resources = [local.s3_kms_key_id]
   }
 }
 
@@ -285,7 +289,7 @@ resource "aws_s3_bucket_replication_configuration" "replication" {
       bucket        = each.value.destination
       storage_class = "STANDARD"
       encryption_configuration {
-        replica_kms_key_id = aws_kms_key.s3.arn
+        replica_kms_key_id = local.s3_kms_key_id
       }
     }
   }
@@ -390,7 +394,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_en
   rule {
     bucket_key_enabled = false
     apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.s3.arn
+      kms_master_key_id = local.s3_kms_key_id
       sse_algorithm     = "aws:kms"
     }
   }
@@ -415,7 +419,7 @@ resource "aws_s3_bucket" "guide_buckets" {
 resource "aws_s3_bucket_logging" "guide_buckets_logging" {
   for_each = toset(local.create_s3_bucket_names)
 
-  bucket = lookup(lookup(aws_s3_bucket.guide_buckets, each.key), "bucket")
+  bucket = lookup(lookup(aws_s3_bucket.guide_buckets, each.key, null), "bucket", null)
 
   target_bucket = aws_s3_bucket.logging_bucket.bucket
   target_prefix = "${each.key}/"
@@ -448,7 +452,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "guide_buckets_enc
   rule {
     bucket_key_enabled = false
     apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.s3.arn
+      kms_master_key_id = local.s3_kms_key_id
       sse_algorithm     = "aws:kms"
     }
   }

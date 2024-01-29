@@ -193,7 +193,6 @@
 | <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_eks_max_size"></a> [eks\_max\_size](#input\_eks\_max\_size) | The maximum amount of nodes we will autoscale to. | `number` | `"10"` | no |
 | <a name="input_eks_min_size"></a> [eks\_min\_size](#input\_eks\_min\_size) | The minimum amount of nodes we will autoscale to. | `number` | `"3"` | no |
-| <a name="input_eks_volume_size"></a> [eks\_volume\_size](#input\_eks\_volume\_size) | The amount of local storage (in gigabytes) to allocate to each kubernetes node. Keep in mind you will be billed for this amount of storage multiplied by how many nodes you spin up (i.e. 50GB * 4 nodes = 200GB on your bill). For production installations 50GB should be the minimum. This local storage is used as a temporary holding area for uploaded and in-process assets like videos and images. | `number` | `50` | no |
 | <a name="input_elasticache_cluster_size"></a> [elasticache\_cluster\_size](#input\_elasticache\_cluster\_size) | Cluster size | `number` | `1` | no |
 | <a name="input_elasticache_instance_type"></a> [elasticache\_instance\_type](#input\_elasticache\_instance\_type) | Elastic cache instance type | `string` | `"cache.t2.micro"` | no |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users). | `bool` | `false` | no |
@@ -217,6 +216,7 @@
 | <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | URL to an optional Slack webhook for SNS alerts. | `string` | `""` | no |
 | <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br>  "%CUSTOMER%",<br>  "%ENVIRONMENT%",<br>  "%REGION%",<br>  "%ACCOUNT%"<br>]</pre> | no |
 | <a name="input_subdomain_override"></a> [subdomain\_override](#input\_subdomain\_override) | For upgrades only, new stacks use `customer`. If the previous version used an identifier but you want the subdomain to be different, add it here. | `string` | `""` | no |
+| <a name="input_use_existing_s3_kms"></a> [use\_existing\_s3\_kms](#input\_use\_existing\_s3\_kms) | To use the s3\_kms\_key\_id provided for the new s3 buckets as well, set this to true. | `bool` | `false` | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | `"172.16.0.0/16"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private | `string` | `""` | no |
 

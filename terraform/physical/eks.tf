@@ -128,7 +128,7 @@ data "aws_iam_policy_document" "eks_worker_kms" {
     ]
 
     resources = [
-      aws_kms_key.s3.arn,
+      local.s3_kms_key_id,
     ]
   }
 }
