@@ -227,11 +227,6 @@ data "aws_iam_policy_document" "s3_replication" {
       variable = "kms:ViaService"
       values   = ["s3.${data.aws_region.current.name}.${data.aws_partition.current.dns_suffix}"]
     }
-    condition {
-      test     = "StringLike"
-      variable = "kms:EncryptionContext:${data.aws_partition.current.partition}:s3:arn"
-      values   = local.s3_source_bucket_arn_list_with_objects
-    }
 
     resources = [data.aws_kms_key.s3_migration[0].arn]
   }
@@ -245,11 +240,6 @@ data "aws_iam_policy_document" "s3_replication" {
       test     = "StringLike"
       variable = "kms:ViaService"
       values   = ["s3.${data.aws_region.current.name}.${data.aws_partition.current.dns_suffix}"]
-    }
-    condition {
-      test     = "StringLike"
-      variable = "kms:EncryptionContext:${data.aws_partition.current.partition}:s3:arn"
-      values   = local.s3_destination_bucket_arn_list_with_objects
     }
 
     resources = [local.s3_kms_key_id]
