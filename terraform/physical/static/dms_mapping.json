@@ -65,6 +65,17 @@
       },
       "rule-action": "exclude",
       "filters": []
+    },
+    {
+      "rule-type": "selection",
+      "rule-id": "7",
+      "rule-name": "include-sites",
+      "object-locator": {
+        "schema-name": "sites",
+        "table-name": "%"
+      },
+      "rule-action": "include",
+      "filters": []
     }
   ]
 }
