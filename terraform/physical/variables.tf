@@ -311,13 +311,14 @@ variable "eks_kms_key_id" {
 
 variable "eks_instance_types" {
   description = "The instance type of each node in the application's EKS worker node group."
-  default     = ["m5.large", "m5a.large", "m5d.large", "m5ad.large"]
-  type        = list(string)
+  // For Govcloud ["m5.large", "m5a.large", "m5d.large", "m5ad.large"]
+  default = ["m7i-flex.xlarge", "m7i.xlarge"]
+  type    = list(string)
 }
 
 variable "eks_volume_size" {
   description = "The amount of local storage (in gigabytes) to allocate to each kubernetes node. Keep in mind you will be billed for this amount of storage multiplied by how many nodes you spin up (i.e. 50GB * 4 nodes = 200GB on your bill). For production installations 50GB should be the minimum. This local storage is used as a temporary holding area for uploaded and in-process assets like videos and images."
-  default     = 50
+  default     = 100
   type        = number
 
   validation {

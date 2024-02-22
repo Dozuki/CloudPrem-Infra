@@ -1,3 +1,34 @@
+"""
+AWS SNS to Slack Notification Lambda Function
+
+Purpose:
+This AWS Lambda function acts as a bridge between AWS SNS notifications and Slack.
+It processes incoming SNS notifications related to CloudWatch Alarms and DMS Replication Task State Changes,
+formats them, and sends formatted alerts to a designated Slack channel.
+
+Main Functionality:
+1. Extracts and formats details from CloudWatch Alarm messages.
+2. Extracts and formats details from DMS Replication Task State Change messages.
+3. Sends the processed messages to Slack using a predefined webhook URL.
+
+Functions:
+- get_account_alias(): Fetches the AWS account alias using the IAM client.
+- get_task_name(task_arn): Retrieves the name of a DMS replication task given its ARN.
+- lambda_handler(event, context): Entry point for the Lambda function. Processes the event and sends an alert to Slack.
+
+Environment Variables:
+- SLACK_WEBHOOK_URL: The Slack incoming webhook URL for sending notifications.
+- AWS_REGION: The AWS region where the Lambda function operates.
+- AWS_ACCOUNT_ID: The AWS account ID.
+- IDENTIFIER: A custom identifier for the AWS setup.
+
+Usage:
+This script is intended to be deployed as an AWS Lambda function and triggered by relevant SNS notifications.
+
+Note: Ensure the AWS Lambda function has necessary IAM permissions to fetch account alias, describe replication
+tasks, and any other AWS-related operations. Ensure the Slack webhook URL is properly set up and has permissions to
+post messages to the designated Slack channel."""
+
 import json
 import os
 import urllib.request

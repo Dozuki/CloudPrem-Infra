@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Installer script for kots version v1.100.3.
+# Installer script for kots version v1.101.1.
 #
 # This script will verify that the environment is suitable for installation before downloading
 # and installing kots.
@@ -19,7 +19,7 @@ READ_TIMEOUT=15
 DEFAULT_DIR="/usr/local/bin"
 INSECURE="false"
 PROG="kots"
-RELEASE="v1.100.3"
+RELEASE="v1.101.1"
 TMP_DIR=$(mktemp -d -t replicated-XXXXXX)
 USER="replicatedhq"
 

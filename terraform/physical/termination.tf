@@ -35,54 +35,106 @@ resource "aws_iam_policy" "aws_node_termination_handler" {
 
 module "aws_node_termination_handler_sqs" {
   source                    = "terraform-aws-modules/sqs/aws"
-  version                   = "~> 4.0.1"
+  version                   = "~> 4.0.2"
   name                      = local.identifier
   message_retention_seconds = 300
-}
+  sqs_managed_sse_enabled   = true
 
-resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_asg" {
-  name        = "${local.identifier}-asg-termination"
-  description = "Node termination event rule"
-  event_pattern = jsonencode(
-    {
-      "source" : [
-        "aws.autoscaling"
-      ],
-      "detail-type" : [
-        "EC2 Instance-terminate Lifecycle Action"
+  create_queue_policy = true
+  queue_policy_statements = {
+    account = {
+      sid = "ServiceWrite"
+      actions = [
+        "sqs:SendMessage"
       ]
-      "resources" : module.eks_cluster.workers_asg_arns
+      principals = [
+        {
+          type        = "Service"
+          identifiers = ["sqs.amazonaws.com", "events.amazonaws.com"]
+        }
+      ]
     }
-  )
+  }
 }
 
-resource "aws_cloudwatch_event_target" "aws_node_termination_handler_asg" {
-  target_id = "${local.identifier}-asg-termination"
-  rule      = aws_cloudwatch_event_rule.aws_node_termination_handler_asg.name
+resource "aws_cloudwatch_event_rule" "k8s_asg_term_rule" {
+  name = "${local.identifier}-asg-termination-rule"
+  event_pattern = jsonencode({
+    "source" : ["aws.autoscaling"],
+    "detail-type" : ["EC2 Instance-terminate Lifecycle Action"]
+  })
+}
+
+resource "aws_cloudwatch_event_target" "k8s_asg_term_rule_target" {
+  rule      = aws_cloudwatch_event_rule.k8s_asg_term_rule.name
+  target_id = "1"
   arn       = module.aws_node_termination_handler_sqs.queue_arn
 }
 
-resource "aws_cloudwatch_event_rule" "aws_node_termination_handler_spot" {
-  name        = "${local.identifier}-spot-termination"
-  description = "Node termination event rule"
-  event_pattern = jsonencode(
-    {
-      "source" : [
-        "aws.ec2"
-      ],
-      "detail-type" : [
-        "EC2 Spot Instance Interruption Warning"
-      ]
-      "resources" : module.eks_cluster.workers_asg_arns
-    }
-  )
+resource "aws_cloudwatch_event_rule" "k8s_spot_term_rule" {
+  name = "${local.identifier}-spot-termination-rule"
+  event_pattern = jsonencode({
+    "source" : ["aws.ec2"],
+    "detail-type" : ["EC2 Spot Instance Interruption Warning"]
+  })
 }
 
-resource "aws_cloudwatch_event_target" "aws_node_termination_handler_spot" {
-  target_id = "${local.identifier}-spot-termination"
-  rule      = aws_cloudwatch_event_rule.aws_node_termination_handler_spot.name
+resource "aws_cloudwatch_event_target" "k8s_spot_term_rule_target" {
+  rule      = aws_cloudwatch_event_rule.k8s_spot_term_rule.name
+  target_id = "1"
   arn       = module.aws_node_termination_handler_sqs.queue_arn
 }
+
+# The following CloudWatch event rules have been temporarily disabled due to an issue where the Node Termination Handler (NTH)
+# would cordon nodes but not proceed with workload execution for extended periods. These resources will be re-enabled upon
+# resolving the underlying issue. They remain as comments for reference.
+#
+#resource "aws_cloudwatch_event_rule" "k8s_rebalance_rule" {
+#  name        = "${local.identifier}-rebalance-termination-rule"
+#  event_pattern = jsonencode({
+#    "source" : ["aws.ec2"],
+#    "detail-type" : ["EC2 Instance Rebalance Recommendation"]
+#  })
+#}
+#
+#resource "aws_cloudwatch_event_target" "k8s_rebalance_rule_target" {
+#  rule      = aws_cloudwatch_event_rule.k8s_rebalance_rule.name
+#  target_id = "1"
+#  arn       = module.aws_node_termination_handler_sqs.queue_arn
+#}
+
+resource "aws_cloudwatch_event_rule" "k8s_instance_state_change_rule" {
+  name = "${local.identifier}-instance-state-termination-rule"
+  event_pattern = jsonencode({
+    "source" : ["aws.ec2"],
+    "detail-type" : ["EC2 Instance State-change Notification"]
+  })
+}
+
+resource "aws_cloudwatch_event_target" "k8s_instance_state_change_rule_target" {
+  rule      = aws_cloudwatch_event_rule.k8s_instance_state_change_rule.name
+  target_id = "1"
+  arn       = module.aws_node_termination_handler_sqs.queue_arn
+}
+
+resource "aws_cloudwatch_event_rule" "k8s_scheduled_change_rule" {
+  name = "${local.identifier}-scheduled-change-termination-rule"
+  event_pattern = jsonencode({
+    "source" : ["aws.health"],
+    "detail-type" : ["AWS Health Event"],
+    "detail" : {
+      "service" : ["EC2"],
+      "eventTypeCategory" : ["scheduledChange"]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "k8s_scheduled_change_rule_target" {
+  rule      = aws_cloudwatch_event_rule.k8s_scheduled_change_rule.name
+  target_id = "1"
+  arn       = module.aws_node_termination_handler_sqs.queue_arn
+}
+
 
 module "aws_node_termination_handler_role" {
   source                        = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"

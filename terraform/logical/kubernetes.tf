@@ -1,4 +1,5 @@
 resource "kubernetes_namespace" "kots_app" {
+  depends_on = [helm_release.ebs_csi_driver]
   metadata {
     name = local.k8s_namespace_name
   }
@@ -75,7 +76,7 @@ resource "kubernetes_secret" "dozuki_infra_credentials" {
 
   metadata {
     name      = "dozuki-infra-credentials"
-    namespace = local.k8s_namespace_name
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
   }
   type = "Opaque"
 

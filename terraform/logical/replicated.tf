@@ -42,7 +42,7 @@ resource "kubernetes_ingress_v1" "dash" {
 
   metadata {
     name      = "dash-tf"
-    namespace = local.k8s_namespace_name
+    namespace = kubernetes_namespace.kots_app.metadata[0].name
     annotations = {
       "cert-manager.io/cluster-issuer"                 = "cert-issuer"
       "nginx.ingress.kubernetes.io/ssl-redirect"       = "true"
@@ -94,7 +94,7 @@ kubectl config set-context --current --namespace=${kubernetes_namespace.kots_app
 
 chmod 755 ./vendor/kots-install.sh
 
-[[ -x $(which kubectl-kots) ]] || ./vendor/kots-install.sh
+[[ -x $(which kubectl-kots) ]] || REPL_INSTALL_PATH=/usr/local/bin ./vendor/kots-install.sh
 
 set -v
 
