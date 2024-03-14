@@ -172,7 +172,7 @@ variable "s3_existing_buckets" {
 }
 
 variable "s3_block_public_access" {
-  description = "To comform with SCP we can disable adding a public access block to the S3 buckets. This should only be disabled if absolutely necessary."
+  description = "To conform with SCP we can disable adding a public access block to the S3 buckets. This should only be disabled if absolutely necessary."
   type        = bool
   default     = true
 }
