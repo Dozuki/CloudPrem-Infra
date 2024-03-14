@@ -131,6 +131,10 @@ resource "aws_db_parameter_group" "default" {
     name  = "group_concat_max_len"
     value = "33554432"
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 #tfsec:ignore:general-secrets-sensitive-in-variable

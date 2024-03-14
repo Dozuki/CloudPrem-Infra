@@ -117,6 +117,8 @@ locals {
   # --S3 Buckets--
   // If all 4 guide buckets are specified we use them as a replication source.
   use_existing_buckets = length(var.s3_existing_buckets) == 4 ? true : false
+  use_provided_s3_kms  = var.use_existing_s3_kms && var.s3_kms_key_id != "" ? true : false
+  s3_kms_key_id        = local.use_provided_s3_kms ? var.s3_kms_key_id : aws_kms_key.s3[0].arn
 
   // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
   // The format of the s3_existing_buckets object is important and described in the variables.tf file.
@@ -133,6 +135,9 @@ locals {
   s3_source_bucket_arn_list                   = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : bucket.arn] : []
   s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"] : []
   s3_destination_bucket_arn_list_with_objects = [for _, bucket in one(flatten(toset(aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"]
+
+  // Conditional public access block to conform with unmanaged SCP
+  s3_public_access_block_buckets = var.s3_block_public_access ? aws_s3_bucket.guide_buckets : {}
 
   # --VPC--
   azs_count          = var.azs_count
