@@ -221,6 +221,7 @@
 | <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | URL to an optional Slack webhook for SNS alerts. | `string` | `""` | no |
 | <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br>  "%CUSTOMER%",<br>  "%ENVIRONMENT%",<br>  "%REGION%",<br>  "%ACCOUNT%"<br>]</pre> | no |
 | <a name="input_subdomain_override"></a> [subdomain\_override](#input\_subdomain\_override) | For upgrades only, new stacks use `customer`. If the previous version used an identifier but you want the subdomain to be different, add it here. | `string` | `""` | no |
+| <a name="input_use_existing_s3_kms"></a> [use\_existing\_s3\_kms](#input\_use\_existing\_s3\_kms) | To use the s3\_kms\_key\_id provided for the new s3 buckets as well, set this to true. | `bool` | `false` | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | `"172.16.0.0/16"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private | `string` | `""` | no |
 

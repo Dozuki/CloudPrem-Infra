@@ -146,6 +146,12 @@ variable "s3_kms_key_id" {
   default     = ""
 }
 
+variable "use_existing_s3_kms" {
+  description = "To use the s3_kms_key_id provided for the new s3 buckets as well, set this to true."
+  type        = bool
+  default     = false
+}
+
 variable "s3_existing_buckets" {
   description = "List of the existing Dozuki buckets to use. Do not include the logging bucket."
   type = list(object({

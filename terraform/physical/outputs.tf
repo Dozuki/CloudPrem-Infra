@@ -55,7 +55,7 @@ output "documents_bucket" {
   value = lookup(aws_s3_bucket.guide_buckets["doc"], "bucket", null)
 }
 output "s3_kms_key_id" {
-  value = aws_kms_key.s3.arn
+  value = local.s3_kms_key_id
 }
 output "s3_replicate_buckets" {
   value = local.use_existing_buckets

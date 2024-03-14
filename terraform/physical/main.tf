@@ -117,6 +117,8 @@ locals {
   # --S3 Buckets--
   // If all 4 guide buckets are specified we use them as a replication source.
   use_existing_buckets = length(var.s3_existing_buckets) == 4 ? true : false
+  use_provided_s3_kms  = var.use_existing_s3_kms && var.s3_kms_key_id != "" ? true : false
+  s3_kms_key_id        = local.use_provided_s3_kms ? var.s3_kms_key_id : aws_kms_key.s3[0].arn
 
   // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
   // The format of the s3_existing_buckets object is important and described in the variables.tf file.
