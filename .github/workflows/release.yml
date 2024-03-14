@@ -22,7 +22,9 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Legacy MySQL 5.7 Support
-            - Add support for deploying RDS instances on MySQL 5.7 engine using a new rds_engine_version variable.
+            Unmanaged Support Improvement
+            - Allow conditional creation of s3 public access blocks to conform with SCP
+            - Allow use of account-wide KMS key for all new resources instead of creating new ones.
+            - Add sites database to the DMS replica schema map
           draft: false
           prerelease: false
