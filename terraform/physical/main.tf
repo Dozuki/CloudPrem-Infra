@@ -136,6 +136,9 @@ locals {
   s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"] : []
   s3_destination_bucket_arn_list_with_objects = [for _, bucket in one(flatten(toset(aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"]
 
+  // Conditional public access block to conform with unmanaged SCP
+  s3_public_access_block_buckets = var.s3_block_public_access ? aws_s3_bucket.guide_buckets : {}
+
   # --VPC--
   azs_count          = var.azs_count
   create_vpc         = var.vpc_id == "" ? true : false

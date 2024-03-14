@@ -328,6 +328,7 @@ data "aws_iam_policy_document" "logging_policy" {
 }
 
 resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
+  count = var.s3_block_public_access ? 1 : 0
 
   bucket = aws_s3_bucket.logging_bucket.id
 
@@ -415,7 +416,7 @@ resource "aws_s3_bucket_logging" "guide_buckets_logging" {
   target_prefix = "${each.key}/"
 }
 resource "aws_s3_bucket_public_access_block" "guide_buckets_acl_block" {
-  for_each = aws_s3_bucket.guide_buckets
+  for_each = local.s3_public_access_block_buckets
 
   bucket = each.value.id
 

@@ -171,6 +171,12 @@ variable "s3_existing_buckets" {
   }
 }
 
+variable "s3_block_public_access" {
+  description = "To comform with SCP we can disable adding a public access block to the S3 buckets. This should only be disabled if absolutely necessary."
+  type        = bool
+  default     = true
+}
+
 variable "rds_kms_key_id" {
   description = "AWS KMS key identifier for RDS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
   type        = string
