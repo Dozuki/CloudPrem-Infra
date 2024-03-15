@@ -136,6 +136,12 @@ variable "highly_available_nat_gateway" {
   default     = true
 }
 
+variable "create_igw" {
+  description = "For those customers who do not want an internet gateway"
+  type        = bool
+  default     = true
+}
+
 # --- END Network Configuration --- #
 
 # --- BEGIN Storage Configuration --- #

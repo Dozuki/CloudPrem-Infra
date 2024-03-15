@@ -37,6 +37,8 @@ module "vpc" {
   cidr = var.vpc_cidr
   azs  = slice(data.aws_availability_zones.available.names, 0, 3)
 
+  create_igw = var.create_igw
+
   enable_nat_gateway   = true
   single_nat_gateway   = !var.highly_available_nat_gateway
   enable_dns_hostnames = true
