@@ -39,7 +39,7 @@ module "vpc" {
 
   create_igw = var.create_igw
 
-  enable_nat_gateway   = true
+  enable_nat_gateway   = var.create_igw
   single_nat_gateway   = !var.highly_available_nat_gateway
   enable_dns_hostnames = true
   enable_dns_support   = true
