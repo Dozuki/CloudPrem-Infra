@@ -68,8 +68,8 @@ resource "aws_dms_replication_instance" "this" {
   count = local.dms_enabled ? 1 : 0
 
   replication_instance_id    = local.identifier
-  replication_instance_class = "dms.r5.large"
-  allocated_storage          = var.rds_allocated_storage
+  replication_instance_class = var.dms_instance_type
+  allocated_storage          = var.dms_allocated_storage
   kms_key_arn                = aws_kms_key.bi[0].arn
   auto_minor_version_upgrade = true
 

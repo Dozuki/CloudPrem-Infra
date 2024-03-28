@@ -275,6 +275,16 @@ variable "bi_access_cidrs" {
   default     = []
 }
 
+variable "dms_instance_type" {
+  type    = string
+  default = "dms.r5.large"
+}
+
+variable "dms_allocated_storage" {
+  type    = string
+  default = 100
+}
+
 # --- END Storage Configuration --- #
 
 # --- BEGIN App Configuration --- #
