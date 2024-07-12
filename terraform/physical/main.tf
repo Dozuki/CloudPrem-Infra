@@ -146,6 +146,8 @@ locals {
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
   public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnets.public[0].ids
   private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnets.private[0].ids
+
+  cf_template_version = var.cf_template_version
 }
 
 # Provider and global data resources
@@ -160,7 +162,7 @@ data "aws_caller_identity" "current" {
   lifecycle {
     precondition {
       condition     = var.slack_webhook_url != "" || var.alarm_email != ""
-      error_message = "Please configure either Slack or Email notifications via the slack_webhook_url or alarm_email variables. "
+      error_message = "${local.cf_template_version}Please configure either Slack or Email notifications via the slack_webhook_url or alarm_email variables. "
     }
   }
 }

@@ -281,6 +281,18 @@ variable "bi_access_cidrs" {
   default     = []
 }
 
+variable "dms_instance_type" {
+  description = "The instance type for the DMS replication instance"
+  type        = string
+  default     = "dms.r5.large"
+}
+
+variable "dms_allocated_storage" {
+  description = "How many GB to allocate for the DMS replication instance"
+  type        = string
+  default     = 100
+}
+
 # --- END Storage Configuration --- #
 
 # --- BEGIN App Configuration --- #

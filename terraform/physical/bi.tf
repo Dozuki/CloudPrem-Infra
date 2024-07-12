@@ -68,8 +68,8 @@ resource "aws_dms_replication_instance" "this" {
   count = local.dms_enabled ? 1 : 0
 
   replication_instance_id    = local.identifier
-  replication_instance_class = "dms.r5.large"
-  allocated_storage          = var.rds_allocated_storage
+  replication_instance_class = var.dms_instance_type
+  allocated_storage          = var.dms_allocated_storage
   kms_key_arn                = aws_kms_key.bi[0].arn
   auto_minor_version_upgrade = true
 
@@ -183,14 +183,15 @@ module "rds_replica_database" {
   engine         = "mysql"
   engine_version = "8.0"
 
-  port                  = 3306
-  instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
-  max_allocated_storage = var.rds_max_allocated_storage
-  replicate_source_db   = module.primary_database.db_instance_id
-  storage_encrypted     = true
-  kms_key_id            = data.aws_kms_key.rds.arn
-  apply_immediately     = !var.protect_resources
-  publicly_accessible   = false
+  port                        = 3306
+  instance_class              = data.aws_rds_orderable_db_instance.default.instance_class
+  max_allocated_storage       = var.rds_max_allocated_storage
+  replicate_source_db         = module.primary_database.db_instance_id
+  storage_encrypted           = true
+  kms_key_id                  = data.aws_kms_key.rds.arn
+  apply_immediately           = !var.protect_resources
+  publicly_accessible         = false
+  allow_major_version_upgrade = true
 
   create_random_password = false
 
