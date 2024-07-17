@@ -371,4 +371,4 @@ module "eks_cluster" {
   #]
   #
   # tags = local.tags
-  #}
+}
