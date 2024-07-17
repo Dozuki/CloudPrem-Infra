@@ -244,7 +244,7 @@ resource "aws_iam_policy" "assume_cross_account_role" {
 #tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "17.24.0"
+  version = "20.19.0"
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
