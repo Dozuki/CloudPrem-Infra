@@ -4,7 +4,7 @@ resource "aws_security_group_rule" "replicated_ui_access" {
   to_port           = 32001
   protocol          = "tcp"
   cidr_blocks       = local.replicated_ui_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.worker_security_group_id
+  security_group_id = module.eks_cluster.cluster_security_group_id
   description       = "Access to the replicated UI"
 }
 
