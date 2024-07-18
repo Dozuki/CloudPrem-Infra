@@ -14,7 +14,7 @@ resource "aws_security_group_rule" "app_access_https" {
   to_port           = 32005
   protocol          = "tcp"
   cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.worker_security_group_id
+  security_group_id = module.eks_cluster.cluster_security_group_id
   description       = "Access to application"
 }
 
@@ -24,7 +24,7 @@ resource "aws_security_group_rule" "acme_access_http" {
   to_port           = 32010
   protocol          = "tcp"
   cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.worker_security_group_id
+  security_group_id = module.eks_cluster.cluster_security_group_id
   description       = "Access to port 80 for ACME http01 certificate challenges"
 }
 
