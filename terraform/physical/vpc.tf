@@ -29,7 +29,7 @@ data "aws_subnets" "private" {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "3.19.0"
+  version = "5.0.0"
 
   count = local.create_vpc ? 1 : 0
 
