@@ -94,7 +94,7 @@ module "cpu_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    AutoScalingGroupName = module.eks_cluster.self_managed_node_groups_autoscaling_group_names[0]
   }
 
   alarm_actions = [
@@ -182,7 +182,7 @@ module "status_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    AutoScalingGroupName = module.eks_cluster.self_managed_node_groups_autoscaling_group_names[0]
   }
 
   alarm_actions = [

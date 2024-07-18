@@ -8,7 +8,7 @@ output "eks_worker_asg_arns" {
 }
 output "eks_worker_asg_names" {
   description = "EKS worker autoscaling group names"
-  value       = module.eks_cluster.workers_asg_names
+  value       = module.eks_cluster.self_managed_node_groups_autoscaling_group_names
 }
 output "eks_cluster_id" {
   description = "EKS Cluster Name"

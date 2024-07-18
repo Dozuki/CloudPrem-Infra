@@ -279,10 +279,6 @@ module "eks_cluster" {
   #  "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
   #]
 
-  self_managed_node_group_defaults = {
-    vpc_security_group_ids = [aws_security_group.additional.id]
-  }
-
   self_managed_node_groups = {
     worker_group = {
       name = "workers"
