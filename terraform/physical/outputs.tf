@@ -4,7 +4,7 @@ output "msk_bootstrap_brokers" {
 }
 output "eks_worker_asg_arns" {
   description = "EKS worker autoscaling group ARNs"
-  value       = module.eks_cluster.workers_asg_arns
+  value       = module.eks_cluster.cluster_security_group_arn
 }
 output "eks_worker_asg_names" {
   description = "EKS worker autoscaling group names"

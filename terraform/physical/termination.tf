@@ -15,7 +15,7 @@ data "aws_iam_policy_document" "aws_node_termination_handler" {
     actions = [
       "autoscaling:CompleteLifecycleAction",
     ]
-    resources = module.eks_cluster.workers_asg_arns
+    resources = module.eks_cluster.cluster_security_group_arn
   }
   statement {
     effect = "Allow"
