@@ -152,7 +152,7 @@ locals {
 
 # Provider and global data resources
 data "aws_eks_cluster" "main" {
-  name = module.eks_cluster.cluster_id
+  name = module.eks_al2.cluster_name
 }
 data "aws_partition" "current" {}
 data "aws_availability_zones" "available" {}

@@ -71,7 +71,7 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
   document_version = aws_ssm_document.bastion_kubernetes_config.latest_version
 
   parameters = {
-    EKSClusterName : module.eks_cluster.cluster_id
+    EKSClusterName : module.eks_al2.cluster_name
     EKSClusterRole : module.cluster_access_role_assumable.iam_role_arn
     Region : data.aws_region.current.name
   }
