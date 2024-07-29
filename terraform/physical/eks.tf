@@ -83,7 +83,7 @@ module "cluster_access_role" {
   create_role = true
   role_name   = local.cluster_access_role_name
 
-  provider_url = replace(module.module.eks_al2.cluster_oidc_issuer_url, "https://", "")
+  provider_url = replace(module.eks_al2.cluster_oidc_issuer_url, "https://", "")
   role_policy_arns = [
     "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
     aws_iam_policy.cluster_access.arn,
