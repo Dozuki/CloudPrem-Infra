@@ -282,7 +282,7 @@ module "eks_cluster" {
       asg_max_size                            = var.eks_max_size
       asg_desired_capacity                    = var.eks_desired_capacity
       asg_min_size                            = var.eks_min_size
-      spot_allocation_strategy                = "lowest-price"
+      spot_allocation_strategy                = "price-capacity-optimized"
       root_volume_type                        = "gp3"
       root_volume_size                        = var.eks_volume_size
       instance_refresh_enabled                = true
