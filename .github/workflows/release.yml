@@ -22,11 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Unmanaged and Edge Case Upgrdes
-            - Add ability to disable S3 public access block to comply with strict SCP.
-            - Add configuration for DMS replication instance.
-            - Double default EKS node volume size to 100GB.
-            - Add ability to configure MySQL engine type for backwards compatibility.
-            - Add ability to use existing KMS key for new S3 buckets.
+            Updating the spot instance allocation strategy
+            Updating the RDS TLS certificates
           draft: false
           prerelease: false
