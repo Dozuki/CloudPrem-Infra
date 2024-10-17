@@ -22,9 +22,8 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Unmanaged Support Improvement
-            - Allow conditional creation of s3 public access blocks to conform with SCP
-            - Allow use of account-wide KMS key for all new resources instead of creating new ones.
-            - Add sites database to the DMS replica schema map
+            EKS & Helm Updates
+            - Remove unneeded helm chart for AWS NTH
+            - Change spot pricing strategy to be more compatible with regions used
           draft: false
           prerelease: false

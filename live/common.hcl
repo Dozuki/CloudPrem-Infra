@@ -25,11 +25,6 @@ locals {
   EOF
 }
 
-generate "aws_node_termination_handler_helmignore" {
-  path      = "charts/aws-node-termination-handler/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
 generate "cluster_autoscaler_helmignore" {
   path      = "charts/cluster-autoscaler/.helmignore"
   if_exists = "overwrite_terragrunt"
