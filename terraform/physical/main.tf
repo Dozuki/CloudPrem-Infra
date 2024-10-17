@@ -76,8 +76,8 @@ locals {
   autogenerate_domain = var.managed_private_cloud ? local.is_us_gov ? "" : "dozuki.cloud" : ""
 
   # --Database--
-  ca_cert_identifier = local.is_us_gov ? "rds-ca-rsa4096-g1" : "rds-ca-2019"
-  ca_cert_pem_file   = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/rds-ca-2019-root.pem"
+  ca_cert_identifier = local.is_us_gov ? "rds-ca-rsa4096-g1" : "global-bundle"
+  ca_cert_pem_file   = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
   bi_subnet_ids      = var.bi_public_access ? local.public_subnet_ids : local.private_subnet_ids
 
   // If DMS is explicitly enabled for conditional replication purposes OR if public access is desired. (RDS RR is not appropriate for public access)
