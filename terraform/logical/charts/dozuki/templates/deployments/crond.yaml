@@ -1,0 +1,70 @@
+{{- /* Helm template for crond deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-crond-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+    kots.io/config-hash: "{{ .Values.deployments.app.configHash }}"
+  labels:
+    app: crond
+spec:
+  replicas: {{ .Values.deployments.crond.replicaCount }}
+  selector:
+    matchLabels:
+      app: crond
+  template:
+    metadata:
+      labels:
+        app: crond
+    spec:
+      hostAliases:
+        {{- range .Values.hostAliases }}
+        - ip: {{ .ip }}
+          hostnames:
+            {{- range .hostnames }}
+            - {{ . }}
+            {{- end }}
+        {{- end }}
+      initContainers:
+        - name: wait-for-beanstalkd
+          image: busybox:1.28
+          command:
+            - /bin/sh
+            - -c
+            - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
+      containers:
+        - name: crond
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - bash
+            - "/bootstrap/entrypoints/crond.sh"
+          env:
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: dozuki-config
+              mountPath: "/etc/dozuki"
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "nc -z beanstalkd 11300 || exit 1"
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: dozuki-config
+          configMap:
+            name: "dozuki-resources-configmap"
+      restartPolicy: Always

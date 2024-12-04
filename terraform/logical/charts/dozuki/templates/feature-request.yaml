@@ -1,0 +1,16 @@
+{{- range .Values.featureRequests }}
+{{- if .enabled }}
+apiVersion: infra.dozuki.com/v1alpha1
+kind: FeatureRequest
+metadata:
+  name: {{ .name }}
+  annotations:
+    kots.io/creation-phase: "{{ .creationPhase }}"
+spec:
+  flag:
+    name: "{{ .flagName }}"
+    enabled_value: "{{ .enabledValue }}"
+    disabled_value: "{{ .disabledValue }}"
+---
+{{- end }}
+{{- end }}

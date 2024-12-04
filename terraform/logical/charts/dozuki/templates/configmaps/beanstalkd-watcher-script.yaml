@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: beanstalkd-watcher-script
+data:
+  sidecar.sh: |
+    #!/bin/sh
+
+    set -e
+
+    BEANSTALKD_LABEL="app=beanstalkd"
+    NAMESPACE="dozuki"
+    TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+    CA_CERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    KUBE_API_SERVER="https://kubernetes.default.svc"
+
+    previous_pod_name=""
+
+    while true; do
+      current_pod_name=$(curl -s --cacert $CA_CERT --header "Authorization: Bearer $TOKEN" \
+      "${KUBE_API_SERVER}/api/v1/namespaces/${NAMESPACE}/pods?labelSelector=${BEANSTALKD_LABEL}" \
+      | jq -r '.items[0].metadata.name')
+
+      echo "Current pod name: $current_pod_name, previous pod name: $previous_pod_name"
+
+      if [ -n "$previous_pod_name" ] && [ -n "$current_pod_name" ] && [ "$current_pod_name" != "$previous_pod_name" ]; then
+        echo "Beanstalkd pod name changed. Restarting the main container..."
+        pkill -f "queueworkerd"
+      fi
+
+      previous_pod_name=$current_pod_name
+      sleep 60
+    done

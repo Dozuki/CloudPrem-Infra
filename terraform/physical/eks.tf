@@ -200,6 +200,17 @@ data "aws_iam_policy_document" "eks_worker" {
 
     resources = ["*"]
   }
+
+  statement {
+    actions = [
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:ListImages"
+    ]
+
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_policy" "eks_worker" {

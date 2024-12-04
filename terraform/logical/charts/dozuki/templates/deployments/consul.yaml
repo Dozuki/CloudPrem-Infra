@@ -1,0 +1,62 @@
+{{- /* Helm template for consul deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-consul-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: {{ .Values.deployments.consul.name }}
+spec:
+  replicas: {{ .Values.deployments.consul.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.deployments.consul.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.deployments.consul.name }}
+    spec:
+      hostAliases:
+        {{- range .Values.hostAliases }}
+        - ip: {{ .ip }}
+          hostnames:
+            {{- range .hostnames }}
+            - {{ . }}
+            {{- end }}
+        {{- end }}
+      containers:
+        - name: {{ .Values.deployments.consul.name }}
+          image: "{{ .Values.deployments.consul.image.repository }}:{{ .Values.deployments.consul.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- range .Values.deployments.consul.command }}
+            - "{{ . }}"
+            {{- end }}
+          env:
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            {{- range .Values.deployments.consul.volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.consul.resources.requests.cpu }}
+              memory: {{ .Values.deployments.consul.resources.requests.memory }}
+          ports:
+            {{- range .Values.deployments.consul.ports }}
+            - containerPort: {{ .containerPort }}
+            {{- end }}
+      volumes:
+        {{- range .Values.deployments.consul.volumes }}
+        - name: {{ .name }}
+          configMap:
+            name: {{ .configMap }}
+        {{- end }}
+      restartPolicy: {{ .Values.deployments.consul.restartPolicy }}

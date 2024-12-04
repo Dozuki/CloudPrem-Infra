@@ -1,0 +1,104 @@
+{{- /* Helm template for queueworkerd deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-queueworkerd-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: {{ .Values.deployments.queueworkerd.name }}
+spec:
+  replicas: {{ .Values.deployments.queueworkerd.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.deployments.queueworkerd.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.deployments.queueworkerd.name }}
+    spec:
+      hostAliases:
+        {{- range .Values.hostAliases }}
+        - ip: {{ .ip }}
+          hostnames:
+            {{- range .hostnames }}
+            - {{ . }}
+            {{- end }}
+        {{- end }}
+      initContainers:
+        - name: wait-for-beanstalkd
+          image: busybox:1.28
+          command:
+            - /bin/sh
+            - -c
+            - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
+      shareProcessNamespace: true
+      containers:
+        - name: {{ .Values.deployments.queueworkerd.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- range .Values.deployments.queueworkerd.command }}
+            - "{{ . }}"
+            {{- end }}
+          env:
+            {{- range $key, $value := .Values.deployments.queueworkerd.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            {{- range .Values.deployments.queueworkerd.volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.queueworkerd.resources.requests.cpu }}
+              memory: {{ .Values.deployments.queueworkerd.resources.requests.memory }}
+          livenessProbe:
+            exec:
+              command:
+                {{- range .Values.deployments.queueworkerd.livenessProbe.command }}
+                - {{ . }}
+                {{- end }}
+            initialDelaySeconds: {{ .Values.deployments.queueworkerd.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.deployments.queueworkerd.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.deployments.queueworkerd.livenessProbe.failureThreshold }}
+        - name: beanstalkd-watcher
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["/bin/sh", "/sidecar/sidecar.sh"]
+          volumeMounts:
+            - name: sidecar-script
+              mountPath: /sidecar
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.queueworkerd.watcher.resources.requests.cpu }}
+              memory: {{ .Values.deployments.queueworkerd.watcher.resources.requests.memory }}
+      volumes:
+        {{- range .Values.deployments.queueworkerd.volumes }}
+        - name: {{ .name }}
+          configMap:
+            name: {{ .configMap }}
+        {{- end }}
+      restartPolicy: {{ .Values.deployments.queueworkerd.restartPolicy }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - {{ .Values.deployments.queueworkerd.name }}
+                topologyKey: "kubernetes.io/hostname"

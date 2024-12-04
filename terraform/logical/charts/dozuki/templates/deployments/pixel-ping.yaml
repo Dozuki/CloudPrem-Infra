@@ -1,0 +1,74 @@
+{{- /* Helm template for pixel-ping deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-pixel-ping-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: {{ .Values.deployments.pixelPing.name }}
+spec:
+  replicas: {{ .Values.deployments.pixelPing.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.deployments.pixelPing.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.deployments.pixelPing.name }}
+    spec:
+      hostAliases:
+        {{- range .Values.hostAliases }}
+        - ip: {{ .ip }}
+          hostnames:
+            {{- range .hostnames }}
+            - {{ . }}
+            {{- end }}
+        {{- end }}
+      containers:
+        - name: {{ .Values.deployments.pixelPing.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- range .Values.deployments.pixelPing.command }}
+            - "{{ . }}"
+            {{- end }}
+          env:
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            {{- range .Values.deployments.pixelPing.volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.pixelPing.resources.requests.cpu }}
+              memory: {{ .Values.deployments.pixelPing.resources.requests.memory }}
+          ports:
+            {{- range .Values.deployments.pixelPing.ports }}
+            - containerPort: {{ .containerPort }}
+            {{- end }}
+      volumes:
+        {{- range .Values.deployments.pixelPing.volumes }}
+        - name: {{ .name }}
+          configMap:
+            name: {{ .configMap }}
+        {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - {{ .Values.deployments.pixelPing.name }}
+                topologyKey: "kubernetes.io/hostname"
+      restartPolicy: {{ .Values.deployments.pixelPing.restartPolicy }}

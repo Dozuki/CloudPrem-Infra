@@ -1,0 +1,984 @@
+# Values.yaml for Helm Chart using nested structure for multiple deployments
+
+aws:
+  region: "${aws_region}"
+  accountId: "${aws_acct_id}"
+
+hostname: "${hostname}"
+dns_validation: true #set true if using a domain we control the dns for
+environment: "${environment}"
+customer: "${customer}"
+
+webhooks:
+  enabled: ${webhooks_enabled}
+
+grafana:
+  enabled: ${bi_enabled}
+  path: "dashboards"
+  security:
+    admin_user: "${grafana_admin_username}"
+    admin_password: "${grafana_admin_password}"
+  datasource:
+    host: "${grafana_datasource_hostname}"
+    user: "dozuki"
+    password: "${grafana_datasource_password}"
+
+memcached:
+  host: "${memcached_host}"
+s3:
+  kmsKey: "${s3_kms_key}"
+  imagesBucket: "${s3_images_bucket}"
+  pdfsBucket: "${s3_pdfs_bucket}"
+  documentsBucket: "${s3_documents_bucket}"
+  objectsBucket: "${s3_objects_bucket}"
+
+smtp:
+  enabled: ${smtp_enabled}
+  host: "${smtp_host}"
+  auth:
+    enabled: ${smtp_auth_enabled}
+    username: "${smtp_username}"
+    password: "${smtp_password}"
+
+db:
+  host: "${db_host}"
+  user: "${db_user}"
+  password: "${db_password}"
+  rdsCaCert: |
+    ${rds_ca_cert}
+
+sentry:
+  dsn: "${sentry_dsn}"
+  customerName: "${customer}"
+  versionLabel: "1.0.0"
+
+frontegg:
+  clientId: "${frontegg_client_id}"
+  apiToken: "${frontegg_api_token}"
+
+surveyjs:
+  licenseKey: "${surveyjs_license_key}"
+googleTranslate:
+  token: "${google_translate_token}"
+hostAliases:
+  - ip: "168.0.0.0"
+    hostnames:
+      - "ping.dozuki.com"
+      - "dozuki.com"
+      - "www.dozuki.com"
+image:
+  repository: "${image_repository}"
+  tag: "${image_tag}"
+  pullPolicy: "IfNotPresent"
+
+
+featureRequests:
+  - name: "courses"
+    enabled: true
+    creationPhase: "10"
+    flagName: "feature-courses"
+    enabledValue: "true"
+    disabledValue: "false"
+  - name: "guides"
+    enabled: false
+    creationPhase: "20"
+    flagName: "feature-guides"
+    enabledValue: "true"
+    disabledValue: "false"
+  - name: "notifications"
+    enabled: true
+    creationPhase: "15"
+    flagName: "feature-notifications"
+    enabledValue: "enabled"
+    disabledValue: "disabled"
+
+ingress:
+  name: "app"
+  certIssuer: "cert-issuer"
+  sslRedirect: "true"
+  forceSslRedirect: "true"
+  configurationSnippet: "proxy_set_header X-Forwarded-Proto $scheme;"
+  proxyBodySize: "0"
+  ingressClassName: "nginx"
+  hostname: "${hostname}"
+  tlsSecretName: "tls-secret"
+  paths:
+    - path: "/_next"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/Courses"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/Skills"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/external-training-modules"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/User/Signoffs"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/Quizzes"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/v2"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/Guide/intro/periodic-review"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/JIB"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/bff-api"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
+    - path: "/"
+      pathType: "Prefix"
+      service:
+        name: "app"
+        port: 80
+# Values.yaml for Services Template
+
+service:
+  - name: app
+    creationPhase: "-1"
+    appLabel: "app"
+    ports:
+      - name: "app-port-80"
+        protocol: "TCP"
+        port: 80
+        targetPort: 80
+  - name: searchd
+    creationPhase: "-1"
+    appLabel: "searchd"
+    ports:
+      - name: "searchd-port-3312"
+        protocol: "TCP"
+        port: 3312
+        targetPort: 3312
+  - name: pixelping
+    creationPhase: "-1"
+    appLabel: "pixel-ping"
+    ports:
+      - name: "pixel-ping-port-9187"
+        protocol: "TCP"
+        port: 9187
+        targetPort: 9187
+  - name: blessyou
+    creationPhase: "-1"
+    appLabel: "blessyou"
+    ports:
+      - name: "blessyou-port-7355"
+        protocol: "TCP"
+        port: 7355
+        targetPort: 7355
+  - name: beanstalkd
+    creationPhase: "-1"
+    appLabel: "beanstalkd"
+    ports:
+      - name: "beanstalkd-port-11300"
+        protocol: "TCP"
+        port: 11300
+        targetPort: 11300
+  - name: syslog
+    creationPhase: "-1"
+    appLabel: "syslog"
+    ports:
+      - name: "syslog-port-514"
+        protocol: "UDP"
+        port: 514
+        targetPort: 514
+  - name: consul
+    creationPhase: "-1"
+    appLabel: "consul"
+    ports:
+      - name: "consul-port-8500"
+        protocol: "TCP"
+        port: 8500
+        targetPort: 8500
+  - name: nextjs
+    creationPhase: "-1"
+    appLabel: "nextjs"
+    ports:
+      - name: "nextjs-port-3210"
+        protocol: "TCP"
+        port: 3210
+        targetPort: 3210
+
+# Values.yaml for Secrets Template
+secrets:
+  - name: tls-secret
+    enabled: false # set true if manual tls is enabled
+    stringData:
+      tls.key: "${manual_tls_private_key}"
+      tls.crt: "${manual_tls_certificate}"
+  - name: le-tls-cert
+    enabled: false # set true if manual tls is enabled
+    stringData:
+      tls.key: "${manual_tls_private_key}"
+      tls.crt: "${manual_tls_certificate}"
+  - name: grafana-common-config
+    enabled: true # set true if BI is enabled
+    stringData:
+      GRAFANA_SUBPATH: "/dashboards"
+      GF_SERVER_SERVE_FROM_SUBPATH: "true"
+      GF_USERS_DEFAULT_THEME: "light"
+      GF_DATABASE_TYPE: "mysql"
+      GF_DATABASE_HOST: "${grafana_settings_hostname}"
+      GF_DATABASE_USER: "${grafana_settings_username}"
+      GF_DATABASE_PASSWORD: "${grafana_settings_password}"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_METRICS_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: "${grafana_admin_password}"
+      GF_SECURITY_ADMIN_USER: "${grafana_admin_username}"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_DATA_SOURCE_PROXY_WHITELIST: "1.1.1.1:1"
+      GF_SECURITY_COOKIE_SAMESITE: "strict"
+      GF_SECURITY_X_XSS_PROTECTION: "true"
+      GF_SMTP_ENABLED: "${grafana_smtp_enabled}"
+      GF_SMTP_HOST: "${grafana_smtp_host}"
+      GF_SMTP_USER: "${grafana_smtp_user}"
+      GF_SMTP_PASSWORD: "${grafana_smtp_password}"
+      GF_SMTP_FROM_ADDRESS: "${grafana_smtp_from_address}"
+      GF_SMTP_FROM_NAME: "Dozuki Grafana Dashboard"
+      GF_SMTP_STARTTLS_POLICY: "${grafana_smtp_starttls}"
+  - name: ops-basic-auth
+    enabled: true
+    stringData:
+      auth: "${ops_basic_auth}"
+
+hpas:
+  - name: app-hpa
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 300
+          - type: Pods
+            value: 2
+            periodSeconds: 300
+    scaleTargetRef:
+      name: app-deployment
+    minReplicas: 4
+    maxReplicas: 30
+    metrics:
+      - type: Resource
+        resource:
+          name: memory
+          target:
+            type: Utilization
+            averageUtilization: 80
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 80
+
+  - name: queueworkerd-hpa
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 120
+          - type: Pods
+            value: 2
+            periodSeconds: 120
+    scaleTargetRef:
+      name: queueworkerd-deployment
+    minReplicas: 2
+    maxReplicas: 50
+    metrics:
+      - type: Resource
+        resource:
+          name: memory
+          target:
+            type: Utilization
+            averageUtilization: 80
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 80
+
+  - name: nextjs-hpa
+    scaleTargetRef:
+      name: web-nextjs-deployment
+    minReplicas: 2
+    maxReplicas: 20
+    metrics:
+      - type: Resource
+        resource:
+          name: memory
+          target:
+            type: Utilization
+            averageUtilization: 80
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 80
+
+connectivity:
+  frontegg:
+    images:
+      username: "${frontegg_docker_username}"
+      password: "${frontegg_docker_password}"
+
+  api-gateway:
+    frontegg:
+      authenticationPublicKey: "${frontegg_auth_pubkey}"
+
+  webhook-service:
+    messageBroker:
+      brokerList: "${msk_bootstrap_brokers}"
+    mysql:
+      host: "${db_host}"
+      username: "${db_user}"
+      password: "${db_password}"
+    mongo:
+      connectionString: "mongodb://frontegg-documents-mongodb/webhooks"
+
+  integrations-service:
+    messageBroker:
+      brokerList: "${msk_bootstrap_brokers}"
+    mongo:
+      connectionString: "mongodb://frontegg-documents-mongodb/integrations"
+    frontegg:
+      slack:
+        encryptionKey: "dummyval"
+
+  event-service:
+    database:
+      host: "${db_host}"
+      username: "${db_user}"
+      password: "${db_password}"
+    messageBroker:
+      brokerList: "${msk_bootstrap_brokers}"
+    redis:
+      host: "frontegg-kvstore-redis-master"
+      tls: "false"
+    frontegg:
+      clientId: "${frontegg_client_id}"
+      apiKey: "${frontegg_api_token}"
+      sync:
+        enabled: "false"
+      authenticationUrl: "https://api.frontegg.com/auth/vendor"
+
+  connectors-worker:
+    messageBroker:
+      brokerList: "${msk_bootstrap_brokers}"
+    redis:
+      host: "frontegg-kvstore-redis-master"
+      tls: "false"
+    frontegg:
+      channels: "slack"
+      emails:
+        provider: "sendgrid"
+        sendgrid:
+          apiKey: "dummyval"
+
+# values.yaml
+
+minio:
+  # Set the deployment mode to 'standalone' to use a single MinIO server
+  mode: standalone
+
+  # Set the number of replicas to 1
+  replicas: 1
+
+  # Disable the MinIO Console to prevent additional pods
+  console:
+    enabled: false
+
+  # Disable Prometheus metrics exporters to prevent extra pods
+  prometheus:
+    enabled: true
+
+  # Disable tracing to prevent extra pods
+  tracing:
+    enabled: false
+
+  # Configure persistence (optional)
+  persistence:
+    enabled: true          # Set to 'false' if you don't need data persistence
+    size: 10Gi  # Adjust based on your cluster's storage classes
+    storageClass: ebs-gp3
+
+  # Provide your access and secret keys
+  accessKey: myminioaccesskey
+  secretKey: myminiosecretkey
+
+  # Adjust resource requests and limits (optional)
+  resources:
+    limits:
+      cpu: 100m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+  # Disable other features that may spawn additional pods
+  metrics:
+    enabled: false
+  update:
+    enabled: false
+
+deployments:
+  app:
+    name: app
+    replicaCount: 4
+    creationPhase: "10"
+    configHash: "{{ .Release.Revision }}-{{ .Release.Time.Seconds }}"
+    hostAliases: "{{ .Values.hostAliases }}"
+    image:
+      repository: "{{ .Values.image.repository }}"
+      tag: "{{ .Values.image.tag }}"
+      pullPolicy: "{{ .Values.image.pullPolicy }}"
+    command:
+      - "bash"
+      - "/bootstrap/entrypoints/app.sh"
+    env:
+      - name: "USER_SMTP_AUTH_ENABLED"
+        value: "true"
+      - name: "USER_SMTP_STARTTLS"
+        value: "true"
+      - name: "USER_SMTP_AUTH"
+        value: "PLAIN"
+      - name: "USER_SMTP_HOST"
+        value: "${smtp_host}"
+      - name: "USER_SMTP_USER"
+        value: "${smtp_username}"
+      - name: "USER_SMTP_PASS"
+        value: "${smtp_password}"
+      - name: "USER_SMTP_FROM"
+        value: "${smtp_from_address}"
+      - name: "SSL_PROTOCOL"
+        value: "all -SSLv3 -TLSv1 -TLSv1.1"
+      - name: "SSL_CIPHER_SUITE"
+        value: "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+      - name: "HTTPS"
+        value: "on"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+      - name: "le-tls-cert"
+        mountPath: "/var/www/key"
+        readOnly: true
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+    ports:
+      - containerPort: 80
+      - containerPort: 443
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+      - name: "le-tls-cert"
+        secret: "tls-secret"
+    restartPolicy: "Always"
+    initContainers:
+      - name: db-startup-check
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "/bootstrap/entrypoints/db_startup_check.sh"
+        env:
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      - name: db-initialize
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "-e"
+          - "/bootstrap/db_initialize.sh"
+        env:
+          - name: USER_DOMAIN_NAME
+            value: '${hostname}'
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      - name: db-rds-snapshot
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "/bootstrap/entrypoints/db_rds_snapshot.sh"
+        env:
+          - name: APPLICATION_RELEASE_NUMBER
+            value: ''
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      - name: db-migrations
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "/bootstrap/entrypoints/db_migrations.sh"
+        env:
+          - name: APPLICATION_RELEASE_NUMBER
+            value: ''
+          - name: USER_DOMAIN_NAME
+            value: '${hostname}'
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+     # - name: webhook-sync
+     #   image: ${image_repository}:${image_tag}
+     #   command:
+     #     - "/usr/bin/php"
+     #     - '/home/ifixit/Code/Exec/syncWebhookConfigWithFrontegg.php'
+     #   env:
+     #     - name: USER_USERHOSTNAME
+     #       value: '${hostname}'
+     #   volumeMounts:
+     #     - name: dozuki-config
+     #       mountPath: "/etc/dozuki"
+     #   resources:
+     #     requests:
+     #       cpu: 200m
+     #       memory: 256Mi
+  beanstalkd:
+    name: beanstalkd
+    replicaCount: 1
+    hostAliases: "{{ .Values.hostAliases }}"
+    command:
+      - "/usr/local/bin/beanstalkd"
+      - "-p"
+      - "11300"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+    ports:
+      - containerPort: 11300
+    readinessProbe:
+      tcpSocket:
+        port: 11300
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+    restartPolicy: "Always"
+  blessyou:
+    name: blessyou
+    replicaCount: 1
+    command:
+      - "/opt/blessyou/bin/blessyou"
+      - "--port=7355"
+      - "--host=0.0.0.0"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+    resources:
+      requests:
+        cpu: "5m"
+        memory: "64Mi"
+    ports:
+      - containerPort: 7355
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+    restartPolicy: "Always"
+
+  consul:
+    name: consul
+    replicaCount: 1
+    image:
+      repository: "${consul_repository}"
+      tag: "${consul_tag}"
+    command:
+      - "/usr/local/bin/docker-entrypoint.sh"
+      - "agent"
+      - "-dev"
+      - "-client"
+      - "0.0.0.0"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+    resources:
+      requests:
+        cpu: "15m"
+        memory: "16Mi"
+    ports:
+      - containerPort: 8500
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+    restartPolicy: "Always"
+
+  crond:
+    name: crond
+    replicaCount: 1
+    configHash: "{{ .Values.deployments.app.configHash }}"
+    hostAliases: "{{ .Values.hostAliases }}"
+    command:
+      - "bash"
+      - "/bootstrap/entrypoints/crond.sh"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+    resources:
+      requests:
+        cpu: "10m"
+        memory: "32Mi"
+    livenessProbe:
+      command:
+        - /bin/sh
+        - -c
+        - "nc -z beanstalkd 11300 || exit 1"
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      failureThreshold: 3
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+    restartPolicy: "Always"
+    initContainers:
+      - name: wait-for-beanstalkd
+        image: busybox:1.28
+        command:
+          - /bin/sh
+          - -c
+          - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
+
+  pixelPing:
+    name: pixel-ping
+    replicaCount: 2
+    hostAliases: "{{ .Values.hostAliases }}"
+    command:
+      - "/bin/node"
+      - "/opt/pixel-ping/bin/pixel-ping"
+      - "/opt/pixel-ping/config.json"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+    resources:
+      requests:
+        cpu: "1m"
+        memory: "32Mi"
+    ports:
+      - containerPort: 9187
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+    restartPolicy: "Always"
+
+  queueworkerd:
+    name: queueworker
+    creationPhase: "10"
+    replicaCount: 2
+    hostAliases: "{{ .Values.hostAliases }}"
+    command:
+      - "bash"
+      - "/bootstrap/entrypoints/queueworkerd.sh"
+    env:
+      USER_SMTP_AUTH_ENABLED: "true"
+      USER_SMTP_STARTTLS: "true"
+      USER_SMTP_AUTH: "PLAIN"
+      USER_SMTP_HOST: "${smtp_host}"
+      USER_SMTP_USER: "${smtp_username}"
+      USER_SMTP_PASS: "${smtp_password}"
+      USER_SMTP_FROM: "${smtp_from_address}"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+      - name: "sidecar-script"
+        mountPath: "/sidecar"
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+    livenessProbe:
+      command:
+        - /bin/sh
+        - -c
+        - "nc -z beanstalkd 11300 || exit 1"
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      failureThreshold: 3
+    watcher:
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "32Mi"
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+      - name: "sidecar-script"
+        configMap: "beanstalkd-watcher-script"
+    restartPolicy: "Always"
+    initContainers:
+      - name: wait-for-beanstalkd
+        image: busybox:1.28
+        command:
+          - /bin/sh
+          - -c
+          - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
+
+  searchd:
+    name: searchd
+    replicaCount: 2
+    hostAliases: "{{ .Values.hostAliases }}"
+    command:
+      - "bash"
+      - "/bootstrap/entrypoints/searchd.sh"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "512Mi"
+    ports:
+      - containerPort: 3312
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+    restartPolicy: "Always"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - searchd
+                topologyKey: "kubernetes.io/hostname"
+
+  syslog:
+    name: syslog
+    replicaCount: 1
+    hostAliases: "{{ .Values.hostAliases }}"
+    command:
+      - "/usr/sbin/syslog-ng"
+      - "-F"
+    volumeMounts:
+      - name: "dozuki-config"
+        mountPath: "/etc/dozuki"
+    resources:
+      requests:
+        cpu: "1m"
+        memory: "8Mi"
+    ports:
+      - containerPort: 514
+    volumes:
+      - name: "dozuki-config"
+        configMap: "dozuki-resources-configmap"
+    restartPolicy: "Always"
+
+  webNextjs:
+    name: nextjs
+    replicaCount: 2
+    image: "${nextjs_repository}:${nextjs_tag}"
+    imagePullPolicy: "IfNotPresent"
+    command:
+      - "node"
+      - "server.js"
+    env:
+      SERVER_SIDE_MONOLITH_API_URL: "http://app"
+    hostAliases: "{{ .Values.hostAliases }}"
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+    ports:
+      - containerPort: 3210
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - nextjs
+                topologyKey: "kubernetes.io/hostname"
+    restartPolicy: "Always"
+
+aws-node-termination-handler:
+  enableSqsTerminationDraining: true
+  queueURL: '${nth_sqs_queue_id}'
+  webhookURL: '${slack_webhook_url}'
+  enablePrometheusServer: true
+  emitKubernetesEvents: true
+  completeLifecycleActionDelaySeconds: 30
+  serviceAccount:
+    name: aws-node-termination-handler
+    annotations:
+      "eks.amazonaws.com/role-arn": "${nth_role_arn}"
+
+kube-prometheus-stack:
+  defaultRules:
+    rule:
+      kubeControllerManager: false
+      kubeSchedulerAlerting: false
+      kubeSchedulerRecording: false
+      windows: false
+  alertmanager:
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        cert-manager.io/cluster-issuer: "cert-issuer"
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/auth-type: basic
+        nginx.ingress.kubernetes.io/auth-secret: ops-basic-auth
+        nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required'
+      hosts:
+        - 'alertmanager.${hostname}'
+      paths:
+        - /
+      pathType: ImplementationSpecific
+      tls:
+        - secretName: alertmanager-general-tls
+          hosts:
+            - 'alertmanager.${hostname}'
+    alertmanagerSpec:
+      storage:
+        volumeClaimTemplate:
+          spec:
+            accessModes: [ "ReadWriteOnce" ]
+            resources:
+              requests:
+                storage: 50Gi
+      alertmanagerConfigNamespaceSelector:
+        matchLabels:
+          "kubernetes.io/metadata.name": dozuki
+  grafana:
+    defaultDashboardsTimezone: America/Los_Angeles
+    adminPassword: '${infra_auth_password}'
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        cert-manager.io/cluster-issuer: "cert-issuer"
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/auth-type: basic
+        nginx.ingress.kubernetes.io/auth-secret: ops-basic-auth
+        nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required'
+      hosts:
+        - 'grafana.${hostname}'
+      tls:
+        - secretName: grafana-general-tls
+          hosts:
+            - 'grafana.${hostname}'
+  kubeScheduler:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  prometheus:
+    prometheusSpec:
+      retention: 90d
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: [ "ReadWriteOnce" ]
+            resources:
+              requests:
+                storage: 50Gi
+
+ingress-nginx:
+  defaultBackend:
+    enabled: true
+    image:
+      image: ingress-nginx/nginx-errors
+      tag: v20230312-helm-chart-4.5.2-28-g66a760794@sha256:332be6ff8c4e93e8845963932f98839dfd52ae49829c29e06475368a3e4fbd9e
+    extraVolumes:
+      - name: custom-error-pages
+        configMap:
+          name: custom-error-pages
+          items:
+            - key: "503.html"
+              path: "5xx.html"
+            - key: "503.json"
+              path: "5xx.json"
+    extraVolumeMounts:
+      - name: custom-error-pages
+        mountPath: /www
+  controller:
+    kind: "DaemonSet"
+    admissionWebhooks:
+      enabled: false
+    hostPort:
+      enabled: false
+    ingressClass: "nginx"
+    service:
+      type: "NodePort"
+      nodePorts:
+        http: "32010"
+        https: "32005"
+    config:
+      keep-alive: "65"                 # Keep-alive timeout in seconds
+      ssl-session-cache-size: "10m"      # SSL session cache size
+      ssl-session-timeout: "1d"          # SSL session timeout
+      ssl-session-tickets: "on"
+      upstream-keepalive-connections: "32"      # Number of keepalive connections per worker
+      upstream-keepalive-timeout: "75"        # Timeout in seconds for keepalive connections
+      upstream-keepalive-requests: "100"
+      worker-processes: "auto"
+      custom-http-errors: "503"

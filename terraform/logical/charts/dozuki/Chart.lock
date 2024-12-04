@@ -1,0 +1,30 @@
+dependencies:
+- name: ingress-nginx
+  repository: https://kubernetes.github.io/ingress-nginx
+  version: 4.6.1
+- name: minio
+  repository: https://charts.min.io/
+  version: 5.3.0
+- name: redis
+  repository: https://charts.bitnami.com/bitnami
+  version: 20.3.0
+- name: mongodb
+  repository: https://charts.bitnami.com/bitnami
+  version: 16.3.0
+- name: grafana-operator
+  repository: https://grafana.github.io/helm-charts
+  version: v5.15.1
+- name: aws-node-termination-handler
+  repository: https://aws.github.io/eks-charts
+  version: 0.21.0
+- name: cert-manager
+  repository: https://charts.jetstack.io
+  version: v1.16.1
+- name: kube-prometheus-stack
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 66.2.1
+- name: reloader
+  repository: https://stakater.github.io/stakater-charts
+  version: 1.1.0
+digest: sha256:425ecdf77b3519d67dc6f6f700da91c068333db9da9616d5f9a23316e54d2243
+generated: "2024-11-19T09:19:56.00699-05:00"

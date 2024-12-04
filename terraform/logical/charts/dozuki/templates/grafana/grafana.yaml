@@ -1,0 +1,60 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: Grafana
+metadata:
+  name: grafana-primary
+  labels:
+    dashboards: "grafana-primary"
+spec:
+  config:
+    log:
+      mode: "console"
+    auth:
+      disable_login_form: "false"
+    database:
+      name: "grafana_primary"
+    server:
+      root_url: 'https://{{ .Values.hostname }}/{{ .Values.grafana.path }}'
+    security:
+      admin_user: '{{ .Values.grafana.security.admin_user }}'
+      admin_password: '{{ .Values.grafana.security.admin_password }}'
+  persistentVolumeClaim:
+    spec:
+      resources:
+        requests:
+          storage: 10Gi
+      accessModes:
+        - ReadWriteOnce
+  deployment:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: grafana
+              image: grafana/grafana:7.5.16
+              envFrom:
+                - secretRef:
+                    name: grafana-common-config
+  ingress:
+    metadata:
+      annotations:
+        cert-manager.io/cluster-issuer: "cert-issuer"
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/rewrite-target: "/$2"
+    spec:
+      ingressClassName: nginx
+      rules:
+        - host: '{{ .Values.hostname }}'
+          http:
+            paths:
+              - backend:
+                  service:
+                    name: grafana-primary-service
+                    port:
+                      number: 3000
+                path: '/{{ .Values.grafana.path }}(/|$)(.*)'
+                pathType: Prefix
+      tls:
+        - hosts:
+            - '{{ .Values.hostname }}'
+          secretName: tls-secret

@@ -1,0 +1,62 @@
+{{- /* Helm template for syslog deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-syslog-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: {{ .Values.deployments.syslog.name }}
+spec:
+  replicas: {{ .Values.deployments.syslog.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.deployments.syslog.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.deployments.syslog.name }}
+    spec:
+      hostAliases:
+        {{- range .Values.hostAliases }}
+        - ip: {{ .ip }}
+          hostnames:
+            {{- range .hostnames }}
+            - {{ . }}
+            {{- end }}
+        {{- end }}
+      containers:
+        - name: {{ .Values.deployments.syslog.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- range .Values.deployments.syslog.command }}
+            - "{{ . }}"
+            {{- end }}
+          env:
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            {{- range .Values.deployments.syslog.volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.syslog.resources.requests.cpu }}
+              memory: {{ .Values.deployments.syslog.resources.requests.memory }}
+          ports:
+            {{- range .Values.deployments.syslog.ports }}
+            - containerPort: {{ .containerPort }}
+            {{- end }}
+      volumes:
+        {{- range .Values.deployments.syslog.volumes }}
+        - name: {{ .name }}
+          configMap:
+            name: {{ .configMap }}
+        {{- end }}
+      restartPolicy: {{ .Values.deployments.syslog.restartPolicy }}

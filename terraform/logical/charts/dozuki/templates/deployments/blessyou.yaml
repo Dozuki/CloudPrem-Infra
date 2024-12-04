@@ -1,0 +1,63 @@
+{{- /* Helm template for blessyou deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-blessyou-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+    kots.io/config-hash: "{{ .Values.deployments.app.configHash }}"
+  labels:
+    app: {{ .Values.deployments.blessyou.name }}
+spec:
+  replicas: {{ .Values.deployments.blessyou.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.deployments.blessyou.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.deployments.blessyou.name }}
+    spec:
+      hostAliases:
+        {{- range .Values.hostAliases }}
+        - ip: {{ .ip }}
+          hostnames:
+            {{- range .hostnames }}
+            - {{ . }}
+            {{- end }}
+        {{- end }}
+      containers:
+        - name: {{ .Values.deployments.blessyou.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- range .Values.deployments.blessyou.command }}
+            - "{{ . }}"
+            {{- end }}
+          env:
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            {{- range .Values.deployments.blessyou.volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.blessyou.resources.requests.cpu }}
+              memory: {{ .Values.deployments.blessyou.resources.requests.memory }}
+          ports:
+            {{- range .Values.deployments.blessyou.ports }}
+            - containerPort: {{ .containerPort }}
+            {{- end }}
+      volumes:
+        {{- range .Values.deployments.blessyou.volumes }}
+        - name: {{ .name }}
+          configMap:
+            name: {{ .configMap }}
+        {{- end }}
+      restartPolicy: {{ .Values.deployments.blessyou.restartPolicy }}

@@ -1,0 +1,21 @@
+{{- range .Values.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  annotations:
+    kots.io/creation-phase: "{{ .creationPhase }}"
+  labels:
+    app: {{ .appLabel }}
+spec:
+  selector:
+    app: {{ .appLabel }}
+  ports:
+    {{- range .ports }}
+    - name: {{ .name }}
+      protocol: {{ .protocol }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort }}
+    {{- end }}
+---
+{{- end }}

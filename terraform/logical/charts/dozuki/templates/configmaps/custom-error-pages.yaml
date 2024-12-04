@@ -1,0 +1,299 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-error-pages
+data:
+  "503.json": >-
+    {
+        "status": 503,
+        "error": "Service Unavailable",
+        "message": "The server is currently down for scheduled maintenance. Please try again later."
+    }
+  "503.html": >-
+    <!doctype html>
+
+    <html lang="en">
+
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+        <title>Scheduled Maintenance</title>
+        <meta name="description"
+              content="We're currently undergoing scheduled maintenance. We'll be back up ASAP!">
+        <meta http-equiv="expires" content="0">
+        <meta http-equiv="Cache-control" content="no-store">
+        <style type="text/css">
+            body {
+                background: #ddd;
+                color: #333;
+            }
+
+            h1, h2, h3, h4, p {
+                font-family:"Lato", "Trebuchet MS", sans-serif;
+                font-weight:normal;
+                font-style:normal;
+            }
+
+            h1 {
+                width: 750px;
+                font-size: 48px;
+                color: #dd4124;
+                height: 70px;
+                line-height: 70px;
+                margin: 0 0 15px 20px;
+                padding-left: 10px;
+                border-bottom: 1px solid #ddd;
+            }
+
+            h2 {
+                font-size: 56px;
+                color: #333;
+                text-align: center;
+                margin: 0 0 58px 0;
+            }
+
+            h3 {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 770px;
+                height: 70px;
+                line-height: 70px;
+                margin: 0;
+                font-size: 24px;
+                color: #aaa;
+                text-align: right;
+            }
+
+            h4 {
+                font-size: 24px;
+                text-align: center;
+                margin: 10px 0 24px 0;
+            }
+
+            img {
+                margin: 0 0 20px 0;
+            }
+
+            p {
+                font-size: 18px;
+                color: #828282;
+                margin: 0 30px 20px 30px;
+                text-align: center;
+                line-height: 30px;
+                font-weight: 200;
+            }
+
+            a {
+                font-weight: bold;
+                color: #dd4124;
+                text-decoration: none;
+            }
+
+            #page {
+                position: absolute;
+                left: 50%;
+                margin: 15px 0 0 -300px;
+                width: 600px;
+            }
+
+            #container {
+                background: #fff;
+                border-radius: 15px;
+                padding: 0 0 60px 0;
+                margin: 0 0 15px 0;
+            }
+
+            #info {
+                margin: 0 20px 0px 20px;
+            }
+
+            .headlessTop {
+                padding-top: 55px;
+            }
+
+            .description {
+                font-size: 18px;
+                line-height: 28px;
+                margin: 0 30px;
+            }
+
+            .helpText {
+                font-size: 18px;
+                line-height: 28px;
+                margin: 0 81px 25px;
+            }
+
+            .extraHelp {
+                font-size: 14px;
+                line-height: 23px;
+                margin: 0 81px 20px;
+            }
+
+            .text-center {
+                text-align: center;
+            }
+
+            /* Tighten the spacing up for mobile. */
+            @media (max-width: 768px) {
+                h2 {
+                    margin-bottom: 28px;
+                }
+
+                /* Go full screen with a little margin. */
+                #page {
+                    position: relative;
+                    left: 0;
+                    margin: 15px auto;
+                    width: 100%;
+                }
+
+                #container {
+                    background: #fff;
+                    border-radius: 15px;
+                    padding: 0 0 5px 0;
+                    margin: 0 0 15px 0;
+                }
+
+                .headlessTop {
+                    padding-top: 5px;
+                }
+
+                .description {
+                    margin: 0;
+                }
+
+                .helpText {
+                    margin: 0 0 20px;
+                }
+
+                .extraHelp {
+                    margin: 25px 0 20px;
+                }
+            }
+
+            .icon {
+                -webkit-animation-name: spin;
+                -webkit-animation-duration: 1s;
+                -webkit-animation-iteration-count: 1;
+                -webkit-animation-timing-function: linear;
+                -moz-animation-name: spin;
+                -moz-animation-duration: 1s;
+                -moz-animation-iteration-count: 1;
+                -moz-animation-timing-function: linear;
+                -ms-animation-name: spin;
+                -ms-animation-duration: 1s;
+                -ms-animation-iteration-count: 1;
+                -ms-animation-timing-function: linear;
+
+                animation-name: spin;
+                animation-duration: 1s;
+                animation-iteration-count: 1;
+                animation-timing-function: linear;
+            }
+
+            @-ms-keyframes spin {
+                from { -ms-transform: rotate(0deg); }
+                to { -ms-transform: rotate(360deg); }
+            }
+
+            @-moz-keyframes spin {
+                from { -moz-transform: rotate(0deg); }
+                to { -moz-transform: rotate(360deg); }
+            }
+
+            @-webkit-keyframes spin {
+                from { -webkit-transform: rotate(0deg); }
+                to { -webkit-transform: rotate(360deg); }
+            }
+
+            @keyframes spin {
+                from {
+                    transform:rotate(0deg);
+                }
+                to {
+                    transform:rotate(360deg);
+                }
+            }
+
+            #container {
+                -webkit-animation: fadein 1s;
+                -moz-animation: fadein 1s;
+                -ms-animation: fadein 1s;
+                -o-animation: fadein 1s;
+                animation: fadein 1s;
+            }
+
+            @keyframes fadein {
+                from { opacity: 0; }
+                to   { opacity: 1; }
+            }
+
+            @-moz-keyframes fadein {
+                from { opacity: 0; }
+                to   { opacity: 1; }
+            }
+
+            @-webkit-keyframes fadein {
+                from { opacity: 0; }
+                to   { opacity: 1; }
+            }
+
+            @-ms-keyframes fadein {
+                from { opacity: 0; }
+                to   { opacity: 1; }
+            }
+
+            @-o-keyframes fadein {
+                from { opacity: 0; }
+                to   { opacity: 1; }
+            }
+        </style>
+    </head>
+
+
+    <body id='error_page_body'>
+    <div id="page">
+        <div id="container">
+            <div class="headlessTop">
+                <h2 id="logo">
+                    <svg width="200" height="26" viewBox="0 0 200 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6.21154 5.4158V19.8042H11.0196C15.0868 19.8042 17.8613 17.2465 17.8613 12.6462C17.8613 7.97347 15.0868 5.4158 11.0196 5.4158H6.21154ZM8.26853e-09 -7.41071e-09H11.2764C18.7099 0.0370033 24.2573 4.45076 24.2573 12.6462C24.2573 20.7663 18.7099 25.22 11.2764 25.22H8.26853e-09V-7.41071e-09Z" transform="translate(0 0.371506)" fill="#EB5757"/>
+                        <path d="M12.9425 20.1017C17.0098 20.1017 19.7842 17.023 19.7842 13.0178C19.7842 8.93852 17.0098 5.89685 12.9425 5.89685C8.98599 5.89685 6.1038 8.93852 6.1038 13.0178C6.1038 17.023 8.98599 20.1017 12.9425 20.1017ZM12.9057 -1.04103e-08C20.3391 -1.04103e-08 25.8851 5.56382 25.8851 13.0178C25.8851 20.3992 20.3391 25.9615 12.9057 25.9615C5.54744 25.9615 -3.82815e-07 20.3992 -3.82815e-07 13.0178C-3.82815e-07 5.56382 5.54744 -1.04103e-08 12.9057 -1.04103e-08Z" transform="translate(38.4159)" fill="#EB5757"/>
+                        <path d="M11.9803 5.4158H1.08089e-06V-7.41071e-09H20.0056V4.30126L8.06216 19.8042H20.0056V25.22H1.08089e-06V20.9172L11.9803 5.4158Z" transform="translate(78.3873 0.371506)" fill="#EB5757"/>
+                        <path d="M6.21153 13.9813C6.21153 17.6165 8.06069 19.8412 11.6483 19.8412C15.3451 19.8412 17.1943 17.541 17.1943 13.9813V-7.41071e-09H23.4073V14.3884C23.4073 20.4332 19.2662 25.6285 11.6483 25.6285C4.14103 25.6285 -3.60297e-06 20.9172 -3.60297e-06 14.3884V-7.41071e-09H6.21153V13.9813Z" transform="translate(113.958 0.371506)" fill="#EB5757"/>
+                        <path d="M-4.50371e-07 -7.41071e-09H6.21154V10.1271H10.54L16.8238 -7.41071e-09H23.2198V0.926563L15.1606 12.9808C16.8238 14.9834 18.9696 20.2112 22.0392 20.2112C22.8509 20.2112 23.9253 20.0647 24.6631 19.7302L25.2918 24.6264C24.2573 25.1445 22.4451 25.59 20.7435 25.59C14.5703 25.59 11.9803 18.0606 9.83604 15.5044H6.21154V25.22H-4.50371e-07V-7.41071e-09Z" transform="translate(154.188 0.371506)" fill="#EB5757"/>
+                        <path d="M6.21154 0H1.02684e-05V25.22H6.21154V0Z" transform="translate(193.788 0.371506)" fill="#EB5757"/>
+                    </svg>
+                </h2>
+
+                <div id="icon" class="text-center">
+                    <svg class="icon" width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="32" cy="32" r="32" fill="#FCE6E6"/>
+                        <path d="M3 12C1.34316 12 0 10.6568 0 9V3C0 1.34316 1.34316 0 3 0H27C28.6568 0 30 1.34316 30 3V9C30 10.6568 28.6568 12 27 12H3Z" transform="translate(17 17)" stroke="#EB5757" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 12C1.34316 12 0 10.6568 0 9V3C0 1.34316 1.34316 0 3 0H27C28.6568 0 30 1.34316 30 3V9C30 10.6568 28.6568 12 27 12H3Z" transform="translate(17 35)" stroke="#EB5757" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="1" cy="1" r="1.5" transform="translate(22 22)" fill="#EB5757" stroke="#EB5757"/>
+                        <circle cx="1" cy="1" r="1.5" transform="translate(22 40)" fill="#EB5757" stroke="#EB5757"/>
+                    </svg>
+                </div>
+                <h4>Scheduled Maintenance</h4>
+                <p class="description">
+                    We are currently down for maintenance.
+                </p>
+                <p id="guideLink" class="helpText">
+                    Our engineers are working to update and improve the system.
+                </p>
+                <p class="extraHelp">
+                    We apologize for this inconvenience. If you need to speak to one of our support team members, please reach out to us.
+                </p>
+                <p class="extraHelp">
+                    <a href="https://www.dozuki.com/contact">
+                        Contact the support team
+                    </a>
+                </p>
+            </div>
+        </div>
+    </div>
+    </body>
+
+    </html>

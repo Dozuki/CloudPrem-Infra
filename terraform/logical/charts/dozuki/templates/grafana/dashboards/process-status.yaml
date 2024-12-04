@@ -1,0 +1,1423 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: process-status-primary
+spec:
+  resyncPeriod: "24h"
+  folder: "Primary"
+  plugins:
+    - name: grafana-piechart-panel
+      version: 1.3.9
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana-primary"
+  jsonnet: >
+    local DATASOURCE = 'MySQL';
+    
+    {
+       "annotations": {
+          "list": [
+             {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+             }
+          ]
+       },
+       "editable": true,
+       "gnetId": null,
+       "graphTooltip": 0,
+       "id": null,
+       "iteration": 1547770702164,
+       "links": [],
+       "panels": [
+          {
+             "content": "# Process Status\nSelect the process you'd like to monitor in real time.",
+             "gridPos": {
+                "h": 2,
+                "w": 24,
+                "x": 0,
+                "y": 0
+             },
+             "id": 39,
+             "links": [],
+             "mode": "markdown",
+             "title": "",
+             "transparent": true,
+             "type": "text"
+          },
+          {
+             "collapsed": false,
+             "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 2
+             },
+             "id": 31,
+             "panels": [],
+             "title": "",
+             "type": "row"
+          },
+          {
+             "content": "<h2>Process Overview\n<hr>",
+             "gridPos": {
+                "h": 3,
+                "w": 23,
+                "x": 0,
+                "y": 3
+             },
+             "id": 43,
+             "links": [],
+             "mode": "html",
+             "title": "",
+             "transparent": true,
+             "type": "text"
+          },
+          {
+             "cacheTimeout": null,
+             "colorBackground": false,
+             "colorValue": false,
+             "colors": [
+                "#299c46",
+                "rgba(237, 129, 40, 0.89)",
+                "#d44a3a"
+             ],
+             "datasource": DATASOURCE,
+             "format": "none",
+             "gauge": {
+                "maxValue": 100,
+                "minValue": 0,
+                "show": false,
+                "thresholdLabels": false,
+                "thresholdMarkers": true
+             },
+             "gridPos": {
+                "h": 3,
+                "w": 5,
+                "x": 0,
+                "y": 6
+             },
+             "id": 14,
+             "interval": null,
+             "links": [],
+             "mappingType": 1,
+             "mappingTypes": [
+                {
+                   "name": "value to text",
+                   "value": 1
+                },
+                {
+                   "name": "range to text",
+                   "value": 2
+                }
+             ],
+             "maxDataPoints": 100,
+             "nullPointMode": "connected",
+             "nullText": null,
+             "postfix": "",
+             "postfixFontSize": "70%",
+             "prefix": "",
+             "prefixFontSize": "70%",
+             "rangeMaps": [
+                {
+                   "from": "null",
+                   "text": "N/A",
+                   "to": "null"
+                }
+             ],
+             "sparkline": {
+                "fillColor": "rgba(31, 118, 189, 0.18)",
+                "full": false,
+                "lineColor": "rgb(31, 120, 193)",
+                "show": false
+             },
+             "tableColumn": "metric",
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select count(work_log.entryid) as metric\nfrom work_log\nWhere work_log.endtime is not null\nand work_log.cancelled!=1\nand FROM_UNIXTIME(work_log.starttime) >= $__timeFrom()\nand work_log.guideid=$GUIDE_ID\norder by work_log.starttime desc",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": "",
+             "title": "Completed",
+             "transparent": true,
+             "type": "singlestat",
+             "valueFontSize": "100%",
+             "valueMaps": [
+                {
+                   "op": "=",
+                   "text": "N/A",
+                   "value": "null"
+                }
+             ],
+             "valueName": "avg"
+          },
+          {
+             "cacheTimeout": null,
+             "colorBackground": false,
+             "colorValue": false,
+             "colors": [
+                "#299c46",
+                "rgba(237, 129, 40, 0.89)",
+                "#d44a3a"
+             ],
+             "datasource": DATASOURCE,
+             "format": "none",
+             "gauge": {
+                "maxValue": 100,
+                "minValue": 0,
+                "show": false,
+                "thresholdLabels": false,
+                "thresholdMarkers": true
+             },
+             "gridPos": {
+                "h": 3,
+                "w": 4,
+                "x": 5,
+                "y": 6
+             },
+             "id": 16,
+             "interval": null,
+             "links": [],
+             "mappingType": 1,
+             "mappingTypes": [
+                {
+                   "name": "value to text",
+                   "value": 1
+                },
+                {
+                   "name": "range to text",
+                   "value": 2
+                }
+             ],
+             "maxDataPoints": 100,
+             "nullPointMode": "connected",
+             "nullText": null,
+             "postfix": "",
+             "postfixFontSize": "70%",
+             "prefix": "",
+             "prefixFontSize": "70%",
+             "rangeMaps": [
+                {
+                   "from": "null",
+                   "text": "N/A",
+                   "to": "null"
+                }
+             ],
+             "sparkline": {
+                "fillColor": "rgba(31, 118, 189, 0.18)",
+                "full": false,
+                "lineColor": "rgb(31, 120, 193)",
+                "show": false
+             },
+             "tableColumn": "metric",
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select count(work_log.entryid) as metric\nfrom work_log\nWhere work_log.endtime is null\nand FROM_UNIXTIME(work_log.starttime) >= $__timeFrom()\n-- and work_log.cancelled!=1\nand work_log.guideid=$GUIDE_ID\norder by work_log.starttime desc",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": "",
+             "title": "In Progress",
+             "transparent": true,
+             "type": "singlestat",
+             "valueFontSize": "100%",
+             "valueMaps": [
+                {
+                   "op": "=",
+                   "text": "N/A",
+                   "value": "null"
+                }
+             ],
+             "valueName": "avg"
+          },
+          {
+             "cacheTimeout": null,
+             "colorBackground": false,
+             "colorValue": false,
+             "colors": [
+                "#299c46",
+                "rgba(237, 129, 40, 0.89)",
+                "#d44a3a"
+             ],
+             "datasource": DATASOURCE,
+             "decimals": 1,
+             "format": "dtdurations",
+             "gauge": {
+                "maxValue": 100,
+                "minValue": 0,
+                "show": false,
+                "thresholdLabels": false,
+                "thresholdMarkers": false
+             },
+             "gridPos": {
+                "h": 3,
+                "w": 6,
+                "x": 9,
+                "y": 6
+             },
+             "id": 18,
+             "interval": null,
+             "links": [],
+             "mappingType": 1,
+             "mappingTypes": [
+                {
+                   "name": "value to text",
+                   "value": 1
+                },
+                {
+                   "name": "range to text",
+                   "value": 2
+                }
+             ],
+             "maxDataPoints": 100,
+             "nullPointMode": "connected",
+             "nullText": null,
+             "postfix": "",
+             "postfixFontSize": "70%",
+             "prefix": "",
+             "prefixFontSize": "70%",
+             "rangeMaps": [
+                {
+                   "from": "null",
+                   "text": "N/A",
+                   "to": "null"
+                }
+             ],
+             "sparkline": {
+                "fillColor": "rgba(31, 118, 189, 0.18)",
+                "full": true,
+                "lineColor": "rgb(31, 120, 193)",
+                "show": true
+             },
+             "tableColumn": "av_duration_sec",
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select avg(work_log.endtime-work_log.starttime) as av_duration_sec\nfrom work_log\nwhere work_log.endtime is not null\nand work_log.cancelled!=1\nand work_log.guideid = $GUIDE_ID\nand FROM_UNIXTIME(work_log.starttime) >= $__timeFrom()\norder by av_duration_sec desc\nlimit 1",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": "",
+             "title": "Average Completion Time",
+             "transparent": true,
+             "type": "singlestat",
+             "valueFontSize": "100%",
+             "valueMaps": [
+                {
+                   "op": "=",
+                   "text": "N/A",
+                   "value": "null"
+                }
+             ],
+             "valueName": "avg"
+          },
+          {
+             "collapsed": false,
+             "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 9
+             },
+             "id": 33,
+             "panels": [],
+             "title": "",
+             "type": "row"
+          },
+          {
+             "content": "<h2>Worker Performance\n<hr>",
+             "gridPos": {
+                "h": 3,
+                "w": 23,
+                "x": 0,
+                "y": 10
+             },
+             "id": 44,
+             "links": [],
+             "mode": "html",
+             "title": "",
+             "transparent": true,
+             "type": "text"
+          },
+          {
+             "cacheTimeout": null,
+             "colorBackground": false,
+             "colorValue": false,
+             "colors": [
+                "#299c46",
+                "rgba(237, 129, 40, 0.89)",
+                "#d44a3a"
+             ],
+             "datasource": DATASOURCE,
+             "format": "none",
+             "gauge": {
+                "maxValue": 100,
+                "minValue": 0,
+                "show": false,
+                "thresholdLabels": false,
+                "thresholdMarkers": true
+             },
+             "gridPos": {
+                "h": 3,
+                "w": 6,
+                "x": 0,
+                "y": 13
+             },
+             "id": 20,
+             "interval": null,
+             "links": [],
+             "mappingType": 1,
+             "mappingTypes": [
+                {
+                   "name": "value to text",
+                   "value": 1
+                },
+                {
+                   "name": "range to text",
+                   "value": 2
+                }
+             ],
+             "maxDataPoints": 100,
+             "nullPointMode": "connected",
+             "nullText": null,
+             "postfix": "",
+             "postfixFontSize": "50%",
+             "prefix": "",
+             "prefixFontSize": "50%",
+             "rangeMaps": [
+                {
+                   "from": "null",
+                   "text": "N/A",
+                   "to": "null"
+                }
+             ],
+             "sparkline": {
+                "fillColor": "rgba(31, 118, 189, 0.18)",
+                "full": false,
+                "lineColor": "rgb(31, 120, 193)",
+                "show": false
+             },
+             "tableColumn": "username",
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select global_users.username, avg(work_log.endtime-work_log.starttime) as av_duration_sec\nfrom work_log\nINNER JOIN global_users on work_log.userid=global_users.userid  \n\nwhere work_log.endtime is not null\nand FROM_UNIXTIME(work_log.starttime) >= $__timeFrom()\nand work_log.cancelled!=1\nand work_log.guideid=$GUIDE_ID\ngroup by global_users.username\norder by av_duration_sec desc\nlimit 1\n",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": "",
+             "title": "Slowest Worker",
+             "transparent": true,
+             "type": "singlestat",
+             "valueFontSize": "80%",
+             "valueMaps": [
+                {
+                   "op": "=",
+                   "text": "N/A",
+                   "value": "null"
+                }
+             ],
+             "valueName": "avg"
+          },
+          {
+             "cacheTimeout": null,
+             "colorBackground": false,
+             "colorValue": false,
+             "colors": [
+                "#299c46",
+                "rgba(237, 129, 40, 0.89)",
+                "#d44a3a"
+             ],
+             "datasource": DATASOURCE,
+             "decimals": 2,
+             "format": "dtdurations",
+             "gauge": {
+                "maxValue": 100,
+                "minValue": 0,
+                "show": false,
+                "thresholdLabels": false,
+                "thresholdMarkers": true
+             },
+             "gridPos": {
+                "h": 3,
+                "w": 6,
+                "x": 6,
+                "y": 13
+             },
+             "id": 22,
+             "interval": null,
+             "links": [],
+             "mappingType": 1,
+             "mappingTypes": [
+                {
+                   "name": "value to text",
+                   "value": 1
+                },
+                {
+                   "name": "range to text",
+                   "value": 2
+                }
+             ],
+             "maxDataPoints": 100,
+             "nullPointMode": "connected",
+             "nullText": null,
+             "postfix": "",
+             "postfixFontSize": "50%",
+             "prefix": "",
+             "prefixFontSize": "50%",
+             "rangeMaps": [
+                {
+                   "from": "null",
+                   "text": "N/A",
+                   "to": "null"
+                }
+             ],
+             "sparkline": {
+                "fillColor": "rgba(31, 118, 189, 0.18)",
+                "full": false,
+                "lineColor": "rgb(31, 120, 193)",
+                "show": false
+             },
+             "tableColumn": "av_duration_sec",
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select avg(work_log.endtime-work_log.starttime) as av_duration_sec\nfrom work_log\nwhere work_log.endtime is not null\nand work_log.cancelled!=1\nand work_log.guideid = $GUIDE_ID\nand FROM_UNIXTIME(work_log.starttime) >= $__timeFrom()\ngroup by work_log.userid\norder by av_duration_sec desc\nlimit 1",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": "",
+             "title": "Average Completion Time",
+             "transparent": true,
+             "type": "singlestat",
+             "valueFontSize": "80%",
+             "valueMaps": [
+                {
+                   "op": "=",
+                   "text": "N/A",
+                   "value": "null"
+                }
+             ],
+             "valueName": "avg"
+          },
+          {
+             "cacheTimeout": null,
+             "colorBackground": false,
+             "colorValue": false,
+             "colors": [
+                "#299c46",
+                "rgba(237, 129, 40, 0.89)",
+                "#d44a3a"
+             ],
+             "datasource": DATASOURCE,
+             "format": "none",
+             "gauge": {
+                "maxValue": 100,
+                "minValue": 0,
+                "show": false,
+                "thresholdLabels": false,
+                "thresholdMarkers": true
+             },
+             "gridPos": {
+                "h": 3,
+                "w": 5,
+                "x": 12,
+                "y": 13
+             },
+             "id": 23,
+             "interval": null,
+             "links": [],
+             "mappingType": 1,
+             "mappingTypes": [
+                {
+                   "name": "value to text",
+                   "value": 1
+                },
+                {
+                   "name": "range to text",
+                   "value": 2
+                }
+             ],
+             "maxDataPoints": 100,
+             "nullPointMode": "connected",
+             "nullText": null,
+             "postfix": "",
+             "postfixFontSize": "50%",
+             "prefix": "",
+             "prefixFontSize": "50%",
+             "rangeMaps": [
+                {
+                   "from": "null",
+                   "text": "N/A",
+                   "to": "null"
+                }
+             ],
+             "sparkline": {
+                "fillColor": "rgba(31, 118, 189, 0.18)",
+                "full": false,
+                "lineColor": "rgb(31, 120, 193)",
+                "show": false
+             },
+             "tableColumn": "username",
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "hide": false,
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select global_users.username, avg(work_log.endtime-work_log.starttime) as av_duration_sec\nfrom work_log\nINNER JOIN global_users on work_log.userid=global_users.userid  \n\nwhere work_log.endtime is not null\nand FROM_UNIXTIME(work_log.starttime) >= $__timeFrom()\nand work_log.cancelled!=1\nand work_log.guideid=$GUIDE_ID\ngroup by global_users.username\norder by av_duration_sec asc\nlimit 1\n",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": "",
+             "title": "Fastest Worker",
+             "transparent": true,
+             "type": "singlestat",
+             "valueFontSize": "80%",
+             "valueMaps": [
+                {
+                   "op": "=",
+                   "text": "N/A",
+                   "value": "null"
+                }
+             ],
+             "valueName": "avg"
+          },
+          {
+             "cacheTimeout": null,
+             "colorBackground": false,
+             "colorValue": false,
+             "colors": [
+                "#299c46",
+                "rgba(237, 129, 40, 0.89)",
+                "#d44a3a"
+             ],
+             "datasource": DATASOURCE,
+             "decimals": 1,
+             "format": "dtdurations",
+             "gauge": {
+                "maxValue": 100,
+                "minValue": 0,
+                "show": false,
+                "thresholdLabels": false,
+                "thresholdMarkers": true
+             },
+             "gridPos": {
+                "h": 3,
+                "w": 5,
+                "x": 18,
+                "y": 13
+             },
+             "id": 24,
+             "interval": null,
+             "links": [],
+             "mappingType": 1,
+             "mappingTypes": [
+                {
+                   "name": "value to text",
+                   "value": 1
+                },
+                {
+                   "name": "range to text",
+                   "value": 2
+                }
+             ],
+             "maxDataPoints": 100,
+             "nullPointMode": "connected",
+             "nullText": null,
+             "postfix": "",
+             "postfixFontSize": "50%",
+             "prefix": "",
+             "prefixFontSize": "50%",
+             "rangeMaps": [
+                {
+                   "from": "null",
+                   "text": "N/A",
+                   "to": "null"
+                }
+             ],
+             "sparkline": {
+                "fillColor": "rgba(31, 118, 189, 0.18)",
+                "full": false,
+                "lineColor": "rgb(31, 120, 193)",
+                "show": false
+             },
+             "tableColumn": "av_duration_sec",
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select avg(work_log.endtime-work_log.starttime) as av_duration_sec\nfrom work_log\nwhere work_log.endtime is not null\nand work_log.cancelled!=1\nand work_log.guideid = $GUIDE_ID\nand FROM_UNIXTIME(work_log.starttime) >= $__timeFrom()\ngroup by work_log.userid\norder by av_duration_sec asc\nlimit 1",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": "",
+             "title": "Average Completion Time",
+             "transparent": true,
+             "type": "singlestat",
+             "valueFontSize": "80%",
+             "valueMaps": [
+                {
+                   "op": "=",
+                   "text": "N/A",
+                   "value": "null"
+                }
+             ],
+             "valueName": "avg"
+          },
+          {
+             "content": "<hr>",
+             "gridPos": {
+                "h": 3,
+                "w": 23,
+                "x": 0,
+                "y": 16
+             },
+             "id": 45,
+             "links": [],
+             "mode": "html",
+             "title": "",
+             "transparent": true,
+             "type": "text"
+          },
+          {
+             "collapsed": false,
+             "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 19
+             },
+             "id": 37,
+             "panels": [],
+             "title": "",
+             "type": "row"
+          },
+          {
+             "content": "<h3>Cycle Times vs Goal Times Trend",
+             "gridPos": {
+                "h": 2,
+                "w": 23,
+                "x": 0,
+                "y": 20
+             },
+             "id": 46,
+             "links": [],
+             "mode": "html",
+             "title": "",
+             "transparent": true,
+             "type": "text"
+          },
+          {
+             "aliasColors": {},
+             "bars": false,
+             "dashLength": 10,
+             "dashes": false,
+             "datasource": DATASOURCE,
+             "fill": 1,
+             "gridPos": {
+                "h": 9,
+                "w": 23,
+                "x": 1,
+                "y": 22
+             },
+             "id": 27,
+             "legend": {
+                "avg": false,
+                "current": false,
+                "hideEmpty": true,
+                "hideZero": true,
+                "max": false,
+                "min": false,
+                "rightSide": false,
+                "show": true,
+                "total": false,
+                "values": false
+             },
+             "lines": true,
+             "linewidth": 1,
+             "links": [],
+             "nullPointMode": "null as zero",
+             "percentage": false,
+             "pointradius": 0.5,
+             "points": false,
+             "renderer": "flot",
+             "seriesOverrides": [],
+             "spaceLength": 10,
+             "stack": false,
+             "steppedLine": true,
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "time_series",
+                   "group": [],
+                   "hide": false,
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "select y.endingtime as time_sec, \"Median Duration\" as metric,\n-- wl.entryid, \n-- wl.guideid, \n-- wl.starttime, \n-- endtime, \n(wl.endtime - wl.starttime) as value \n-- ' (x.time_required_max -(y.endingtime - wl.starttime)) as past_due, \n-- x.time_required_max as \"Goal Time Max\", \n-- x.time_required_min as \"Goal Time Min\"    \n\nfrom work_log wl\n \njoin (select gc.guideid, gm.time_required_max, gm.time_required_min\nFROM guide_current gc\nJOIN guide_revisions gr USING (guide_revisionid)\nJOIN guide_meta gm ON (gr.gtr_revisionid = gm.revisionid)\nwhere gc.guideid = $GUIDE_ID) x\nusing (guideid)\n \nJOIN (select entryid,\nCASE \n    WHEN endtime is NOT NULL \n\tthen endtime\n    ELSE 1 != 1\nEND as endingtime\nfrom work_log\nwhere guideid = $GUIDE_ID\nand work_log.cancelled!=1\nand date(from_unixtime(starttime)) >= $__timeFrom()\nand date(from_unixtime(endtime)) <= $__timeTo()\n\t ) y\nusing (entryid)\nwhere date(from_unixtime(wl.starttime)) >= $__timeFrom()\nand date(from_unixtime(wl.endtime)) <= $__timeTo()\nand (x.time_required_max is not null or x.time_required_max != 0)\nand (x.time_required_min is not null or x.time_required_min != 0)\ngroup by date_format(FROM_UNIXTIME(y.endingtime),\"%y-%m-%d\")\norder by date_format(FROM_UNIXTIME(y.endingtime),\"%y-%m-%d\")",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                },
+                {
+                   "alias": "",
+                   "format": "time_series",
+                   "group": [],
+                   "hide": false,
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "select y.endingtime as time_sec, \n-- wl.entryid, \n-- wl.guideid, \n-- wl.starttime, \n-- endtime, \n-- (wl.endtime - wl.starttime) as duration, \n-- (x.time_required_max -(y.endingtime - wl.starttime)) as past_due, \nMax(x.time_required_max) as value,\n\"Goal Time Max\" as metric \n-- , x.time_required_min as \"Goal Time Min\"    \n\nfrom work_log wl\n \njoin (select gc.guideid, gm.time_required_max, gm.time_required_min\nFROM guide_current gc\nJOIN guide_revisions gr USING (guide_revisionid)\nJOIN guide_meta gm ON (gr.gtr_revisionid = gm.revisionid)\nwhere gc.guideid = $GUIDE_ID) x\nusing (guideid)\n \nJOIN (select entryid,\nCASE \n    WHEN endtime is NOT NULL \n\tthen endtime\n    ELSE 1 != 1\nEND as endingtime\nfrom work_log\nwhere guideid = $GUIDE_ID\nand work_log.cancelled!=1\nand date(from_unixtime(starttime)) >= $__timeFrom()\nand date(from_unixtime(endtime)) <= $__timeTo()\n\t ) y\nusing (entryid)\nwhere date(from_unixtime(wl.starttime)) >= $__timeFrom()\nand date(from_unixtime(wl.endtime)) <= $__timeTo()\nand (x.time_required_max is not null or x.time_required_max != 0)\nand (x.time_required_min is not null or x.time_required_min != 0)\ngroup by date_format(FROM_UNIXTIME(y.endingtime),\"%y-%m-%d\")\norder by date_format(FROM_UNIXTIME(y.endingtime),\"%y-%m-%d\")",
+                   "refId": "B",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                },
+                {
+                   "alias": "",
+                   "format": "time_series",
+                   "group": [],
+                   "hide": false,
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "select y.endingtime as time_sec, \n-- wl.entryid, \n-- wl.guideid, \n-- wl.starttime, \n-- endtime, \n-- (wl.endtime - wl.starttime) as duration, \n-- (x.time_required_max -(y.endingtime - wl.starttime)) as past_due, \n-- x.time_required_max as \"Goal Time Max\", \nMIN(x.time_required_min) as value,\n\"Goal Time Min\" as metric   \n\nfrom work_log wl\n \njoin (select gc.guideid, gm.time_required_max, gm.time_required_min\nFROM guide_current gc\nJOIN guide_revisions gr USING (guide_revisionid)\nJOIN guide_meta gm ON (gr.gtr_revisionid = gm.revisionid)\nwhere gc.guideid = $GUIDE_ID) x\nusing (guideid)\n \nJOIN (select entryid,\nCASE \n    WHEN endtime is NOT NULL \n\tthen endtime\n    ELSE 1 != 1\nEND as endingtime\nfrom work_log\nwhere guideid = $GUIDE_ID\nand work_log.cancelled!=1\nand date(from_unixtime(starttime)) >= $__timeFrom()\nand date(from_unixtime(endtime)) <= $__timeTo()\n\t ) y\nusing (entryid)\nwhere date(from_unixtime(wl.starttime)) >= $__timeFrom()\nand date(from_unixtime(wl.endtime)) <= $__timeTo()\nand (x.time_required_max is not null or x.time_required_max != 0)\nand (x.time_required_min is not null or x.time_required_min != 0)\ngroup by date_format(FROM_UNIXTIME(y.endingtime),\"%y-%m-%d\")\norder by date_format(FROM_UNIXTIME(y.endingtime),\"%y-%m-%d\")",
+                   "refId": "C",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": [],
+             "timeFrom": null,
+             "timeRegions": [],
+             "timeShift": null,
+             "title": "",
+             "tooltip": {
+                "shared": true,
+                "sort": 0,
+                "value_type": "individual"
+             },
+             "transparent": true,
+             "type": "graph",
+             "xaxis": {
+                "buckets": null,
+                "mode": "time",
+                "name": null,
+                "show": true,
+                "values": []
+             },
+             "yaxes": [
+                {
+                   "format": "dtdurations",
+                   "label": null,
+                   "logBase": 10,
+                   "max": null,
+                   "min": null,
+                   "show": true
+                },
+                {
+                   "format": "short",
+                   "label": null,
+                   "logBase": 1,
+                   "max": null,
+                   "min": null,
+                   "show": false
+                }
+             ],
+             "yaxis": {
+                "align": false,
+                "alignLevel": null
+             }
+          },
+          {
+             "collapsed": false,
+             "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 31
+             },
+             "id": 50,
+             "panels": [],
+             "title": "",
+             "type": "row"
+          },
+          {
+             "content": " \n \n<h3>Process Time Distribution (Per Step)",
+             "gridPos": {
+                "h": 2,
+                "w": 23,
+                "x": 0,
+                "y": 32
+             },
+             "id": 47,
+             "links": [],
+             "mode": "html",
+             "title": "",
+             "transparent": true,
+             "type": "text"
+          },
+          {
+             "aliasColors": {
+                "1": "#82b5d8",
+                "2": "#82b5d8",
+                "3": "#82b5d8",
+                "4": "#82b5d8",
+                "5": "#82b5d8",
+                "6": "#82b5d8",
+                "7": "#82b5d8",
+                "8": "#82b5d8",
+                "9": "#82b5d8",
+                "10": "#82b5d8",
+                "11": "#82b5d8",
+                "12": "#82b5d8",
+                "13": "#82b5d8",
+                "14": "#82b5d8",
+                "15": "#82b5d8",
+                "16": "#82b5d8",
+                "17": "#82b5d8",
+                "18": "#82b5d8",
+                "20": "#82b5d8",
+                "21": "#82b5d8",
+                "22": "#82b5d8",
+                "23": "#82b5d8"
+             },
+             "bars": true,
+             "dashLength": 10,
+             "dashes": false,
+             "datasource": DATASOURCE,
+             "fill": 1,
+             "gridPos": {
+                "h": 8,
+                "w": 23,
+                "x": 0,
+                "y": 34
+             },
+             "id": 29,
+             "legend": {
+                "alignAsTable": false,
+                "avg": false,
+                "current": false,
+                "hideEmpty": false,
+                "hideZero": false,
+                "max": false,
+                "min": false,
+                "rightSide": false,
+                "show": false,
+                "total": false,
+                "values": false
+             },
+             "lines": false,
+             "linewidth": 1,
+             "links": [],
+             "nullPointMode": "null",
+             "percentage": false,
+             "pointradius": 5,
+             "points": false,
+             "renderer": "flot",
+             "seriesOverrides": [
+                {
+                   "alias": "1",
+                   "yaxis": 1
+                }
+             ],
+             "spaceLength": 10,
+             "stack": false,
+             "steppedLine": false,
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "time_series",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "select \n-- wlt.entryid, \n-- wlt.stepid, \ncast(y.orderby AS CHAR) as metric, \nAVG((wlt.date_end - wlt.date_start)/60.00) as value, \nstarttime as time_sec\nfrom work_log_timing wlt \njoin (select entryid, userid, starttime, endtime\nfrom work_log\nwhere date(from_unixtime(starttime)) >= $__timeFrom()\nand date(from_unixtime(endtime)) <= $__timeTo()\nand guideid = $GUIDE_ID) x using (entryid)\njoin (SELECT gsor.stepid, gsor.orderby\nFROM guide_current gc\nJOIN guide_revisions gr USING (guide_revisionid)\nJOIN guide_meta gm ON (gr.gtr_revisionid = gm.revisionid)\nJOIN guide_step_order_revisions gsor USING (gtr_revisionid)\nWHERE gc.guideid = $GUIDE_ID\nand gc.langid = 'en'\norder by gsor.orderby asc) y on (wlt.stepid = y.stepid)\nwhere wlt.stepid is not null\nand wlt.date_end is not null\nand wlt.date_start is not null\ngroup by wlt.stepid",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "thresholds": [],
+             "timeFrom": null,
+             "timeRegions": [],
+             "timeShift": null,
+             "title": "",
+             "tooltip": {
+                "shared": false,
+                "sort": 0,
+                "value_type": "individual"
+             },
+             "transparent": true,
+             "type": "graph",
+             "xaxis": {
+                "buckets": null,
+                "mode": "series",
+                "name": null,
+                "show": true,
+                "values": [
+                   "total"
+                ]
+             },
+             "yaxes": [
+                {
+                   "format": "none",
+                   "label": "Step Duration",
+                   "logBase": 1,
+                   "max": null,
+                   "min": null,
+                   "show": true
+                },
+                {
+                   "format": "short",
+                   "label": "",
+                   "logBase": 1,
+                   "max": null,
+                   "min": null,
+                   "show": false
+                }
+             ],
+             "yaxis": {
+                "align": false,
+                "alignLevel": null
+             }
+          },
+          {
+             "collapsed": false,
+             "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 42
+             },
+             "id": 35,
+             "panels": [],
+             "title": "",
+             "type": "row"
+          },
+          {
+             "content": " \n \n<h3>Work Order Details",
+             "gridPos": {
+                "h": 2,
+                "w": 23,
+                "x": 0,
+                "y": 43
+             },
+             "id": 48,
+             "links": [],
+             "mode": "html",
+             "title": "",
+             "transparent": true,
+             "type": "text"
+          },
+          {
+             "columns": [],
+             "datasource": DATASOURCE,
+             "fontSize": "100%",
+             "gridPos": {
+                "h": 9,
+                "w": 22,
+                "x": 1,
+                "y": 45
+             },
+             "id": 41,
+             "links": [],
+             "pageSize": null,
+             "scroll": true,
+             "showHeader": true,
+             "sort": {
+                "col": 0,
+                "desc": true
+             },
+             "styles": [
+                {
+                   "alias": "Start Time",
+                   "dateFormat": "MMMM D, YYYY LT",
+                   "pattern": "Start Time",
+                   "type": "date"
+                },
+                {
+                   "alias": "",
+                   "colorMode": null,
+                   "colors": [
+                      "rgba(245, 54, 54, 0.9)",
+                      "rgba(237, 129, 40, 0.89)",
+                      "rgba(50, 172, 45, 0.97)"
+                   ],
+                   "dateFormat": "YYYY-MM-DD HH:mm:ss",
+                   "decimals": 2,
+                   "pattern": "Duration",
+                   "thresholds": [],
+                   "type": "number",
+                   "unit": "m"
+                },
+                {
+                   "alias": "",
+                   "colorMode": null,
+                   "colors": [
+                      "rgba(245, 54, 54, 0.9)",
+                      "rgba(237, 129, 40, 0.89)",
+                      "rgba(50, 172, 45, 0.97)"
+                   ],
+                   "dateFormat": "YYYY-MM-DD HH:mm:ss",
+                   "decimals": 2,
+                   "pattern": "Goal Time Minutes",
+                   "thresholds": [],
+                   "type": "number",
+                   "unit": "m"
+                },
+                {
+                   "alias": "",
+                   "colorMode": null,
+                   "colors": [
+                      "rgba(245, 54, 54, 0.9)",
+                      "rgba(237, 129, 40, 0.89)",
+                      "rgba(50, 172, 45, 0.97)"
+                   ],
+                   "decimals": 2,
+                   "pattern": "/.*/",
+                   "thresholds": [],
+                   "type": "number",
+                   "unit": "short"
+                }
+             ],
+             "targets": [
+                {
+                   "alias": "",
+                   "format": "table",
+                   "group": [],
+                   "metricColumn": "none",
+                   "rawQuery": true,
+                   "rawSql": "Select \r\nwork_log.workorderid as \"Workorder ID\", \r\nFROM_UNIXTIME(work_log.starttime) as \"Start Time\",\r\nguide_text.title as \"Guide Name\", \r\nglobal_users.username as \"User\",\r\n(work_log.endtime-work_log.starttime)/60.00 as 'Duration',\r\nguide_meta.time_required_max/60.00 as \"Goal Time Minutes\"\r\n-- CASE \r\n    -- WHEN work_log.starttime is NULL then \"In Progress\"\r\n    -- ELSE SEC_TO_TIME(work_log.endtime - work_log.starttime)\r\n-- END as \"Duration\",\r\n\r\nFrom work_log\r\n\r\nINNER JOIN global_users on work_log.userid=global_users.userid  \r\n\r\n\r\nINNER JOIN (\r\n    SELECT gtr_revisionid, guideid, MAX(guide_revisionid) AS maxrevision FROM guide_revisions GROUP BY guideid\r\n  ) maxrev ON maxrev.guideid = work_log.guideid \r\n\r\nJOIN guide_revisions ON guide_revisions.guide_revisionid = maxrev.maxrevision\r\n\r\n\r\nJOIN guide_meta ON guide_revisions.gtr_revisionid = guide_meta.revisionid\r\nJOIN guide_text ON guide_text.gt_revisionid = guide_revisions.gt_revisionid\r\n\r\n\r\nwhere date(FROM_UNIXTIME(work_log.starttime)) >= $__timeFrom()\r\nand date(FROM_UNIXTIME(work_log.endtime)) <= $__timeTo()\r\nand work_log.guideid=$GUIDE_ID\r\nand work_log.cancelled!=1\r\n\r\norder by work_log.starttime desc\r\n\r\n",
+                   "refId": "A",
+                   "select": [
+                      [
+                         {
+                            "params": [
+                               "value"
+                            ],
+                            "type": "column"
+                         }
+                      ]
+                   ],
+                   "timeColumn": "time",
+                   "where": [
+                      {
+                         "name": "$__timeFilter",
+                         "params": [],
+                         "type": "macro"
+                      }
+                   ]
+                }
+             ],
+             "title": "",
+             "transform": "table",
+             "transparent": true,
+             "type": "table"
+          }
+       ],
+       "refresh": false,
+       "schemaVersion": 16,
+       "style": "dark",
+       "tags": [
+          "Work Orders",
+          "Process Status"
+       ],
+       "templating": {
+          "list": [
+             {
+                "current": {
+                   "text": "Dozuki",
+                   "value": "Dozuki"
+                },
+                "hide": 2,
+                "label": "Guide Database",
+                "name": "GUIDE_DB",
+                "options": [],
+                "query": "mysql",
+                "refresh": 1,
+                "regex": "",
+                "skipUrlSync": false,
+                "type": "datasource"
+             },
+             {
+                "allValue": "'All Guides'",
+                "current": {
+                   "text": "Advanced Seat Assembly — Guide ID:4",
+                   "value": "4"
+                },
+                "datasource": DATASOURCE,
+                "definition": "select guide_text.guideid AS __value,  CONCAT(guide_text.title, \" — \", \"Guide ID:\", guide_text.guideid) AS __text   from (select max(gt_revisionid) as gt_revisionid, guideid from guide_text group by guideid) x  left join guide_text on guide_text.gt_revisionid=x.gt_revisionid",
+                "hide": 0,
+                "includeAll": false,
+                "label": "Guide",
+                "multi": false,
+                "name": "GUIDE_ID",
+                "options": [],
+                "query": "select guide_text.guideid AS __value,  CONCAT(guide_text.title, \" — \", \"Guide ID:\", guide_text.guideid) AS __text   from (select max(gt_revisionid) as gt_revisionid, guideid from guide_text group by guideid) x  left join guide_text on guide_text.gt_revisionid=x.gt_revisionid",
+                "refresh": 1,
+                "regex": "",
+                "skipUrlSync": false,
+                "sort": 0,
+                "tagValuesQuery": "",
+                "tags": [],
+                "tagsQuery": "",
+                "type": "query",
+                "useTags": false
+             }
+          ]
+       },
+       "time": {
+          "from": "now-2y",
+          "to": "now"
+       },
+       "timepicker": {
+          "hidden": false,
+          "refresh_intervals": [
+             "5s",
+             "10s",
+             "30s",
+             "1m",
+             "5m",
+             "15m",
+             "30m",
+             "1h",
+             "2h",
+             "1d"
+          ],
+          "time_options": [
+             "5m",
+             "15m",
+             "1h",
+             "6h",
+             "12h",
+             "24h",
+             "2d",
+             "7d",
+             "30d"
+          ]
+       },
+       "timezone": "utc",
+       "title": "Process Status",
+       "uid": null,
+       "version": 21
+    }

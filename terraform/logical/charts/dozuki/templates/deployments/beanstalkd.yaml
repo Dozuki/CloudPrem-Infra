@@ -1,0 +1,68 @@
+{{- /* Helm template for beanstalkd deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-beanstalkd-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+    kots.io/config-hash: "{{ .Values.deployments.app.configHash }}"
+  labels:
+    app: {{ .Values.deployments.beanstalkd.name }}
+spec:
+  replicas: {{ .Values.deployments.beanstalkd.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.deployments.beanstalkd.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.deployments.beanstalkd.name }}
+    spec:
+      hostAliases:
+        {{- range .Values.hostAliases }}
+        - ip: {{ .ip }}
+          hostnames:
+            {{- range .hostnames }}
+            - {{ . }}
+            {{- end }}
+        {{- end }}
+      containers:
+        - name: {{ .Values.deployments.beanstalkd.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- range .Values.deployments.beanstalkd.command }}
+            - "{{ . }}"
+            {{- end }}
+          env:
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            {{- range .Values.deployments.beanstalkd.volumeMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.beanstalkd.resources.requests.cpu }}
+              memory: {{ .Values.deployments.beanstalkd.resources.requests.memory }}
+          ports:
+            {{- range .Values.deployments.beanstalkd.ports }}
+            - containerPort: {{ .containerPort }}
+            {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.deployments.beanstalkd.readinessProbe.tcpSocket.port }}
+            initialDelaySeconds: {{ .Values.deployments.beanstalkd.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.deployments.beanstalkd.readinessProbe.periodSeconds }}
+      volumes:
+        {{- range .Values.deployments.beanstalkd.volumes }}
+        - name: {{ .name }}
+          configMap:
+            name: {{ .configMap }}
+        {{- end }}
+      restartPolicy: {{ .Values.deployments.beanstalkd.restartPolicy }}

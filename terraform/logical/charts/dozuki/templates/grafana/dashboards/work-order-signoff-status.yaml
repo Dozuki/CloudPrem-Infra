@@ -1,0 +1,1489 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: work-order-signoff-status-primary
+spec:
+  resyncPeriod: "24h"
+  folder: "Primary"
+  plugins:
+    - name: grafana-piechart-panel
+      version: 1.3.9
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana-primary"
+  jsonnet: |
+    local SITE_NAME = 'onprem';
+    local SITE_URL = '{{ .Values.hostname }}';
+    local DATASOURCE = 'MySQL';
+    
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "gnetId": null,
+      "graphTooltip": 0,
+      "id": null,
+      "iteration": 1585170355762,
+      "links": [],
+      "panels": [
+        {
+          "content": "# Work Order Signoff Status\nLook up the current \"route\" and signoff status of a given work order.",
+          "datasource": null,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 17,
+            "x": 0,
+            "y": 0
+          },
+          "id": 5,
+          "links": [],
+          "mode": "markdown",
+          "options": {
+            "content": "# Work Order Signoff Status\nLook up the current \"route\" and signoff status of a given work order.",
+            "mode": "markdown"
+          },
+          "pluginVersion": "7.1.0",
+          "title": "",
+          "transparent": true,
+          "type": "text"
+        },
+        {
+          "collapsed": false,
+          "datasource": null,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 3
+          },
+          "id": 7,
+          "panels": [],
+          "title": "",
+          "type": "row"
+        },
+        {
+          "content": "<h1>Current Route Selected\n<hr>",
+          "datasource": null,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 4
+          },
+          "id": 17,
+          "links": [],
+          "mode": "html",
+          "options": {
+            "content": "<h1>Current Route Selected\n<hr>",
+            "mode": "html"
+          },
+          "pluginVersion": "7.1.0",
+          "title": "",
+          "transparent": true,
+          "type": "text"
+        },
+        {
+          "columns": [],
+          "datasource": DATASOURCE,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fontSize": "100%",
+          "gridPos": {
+            "h": 10,
+            "w": 11,
+            "x": 0,
+            "y": 7
+          },
+          "id": 9,
+          "links": [],
+          "pageSize": 8,
+          "scroll": false,
+          "showHeader": true,
+          "sort": {
+            "col": 0,
+            "desc": false
+          },
+          "styles": [
+            {
+              "$$hashKey": "object:785",
+              "alias": "Time",
+              "align": "auto",
+              "dateFormat": "MMMM D, YYYY LT",
+              "pattern": "Time",
+              "type": "date"
+            },
+            {
+              "$$hashKey": "object:786",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Minimum Time",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:787",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Maximum Time",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:788",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "Route Step",
+              "preserveFormat": true,
+              "sanitize": true,
+              "thresholds": [],
+              "type": "number",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:789",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": true,
+              "linkTooltip": "https://" + SITE_URL + "/guide/${__cell:raw}/${__cell_3:raw}",
+              "linkUrl": "https://" + SITE_URL + "/guide/${__cell:raw}/${__cell_3:raw}",
+              "mappingType": 1,
+              "pattern": "Guide Title",
+              "preserveFormat": false,
+              "sanitize": true,
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:790",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Category",
+              "preserveFormat": false,
+              "sanitize": true,
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:791",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "Guide ID",
+              "thresholds": [],
+              "type": "number",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:792",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "decimals": 2,
+              "pattern": "/.*/",
+              "thresholds": [],
+              "type": "number",
+              "unit": "short"
+            }
+          ],
+          "targets": [
+            {
+              "alias": "",
+              "format": "table",
+              "group": [],
+              "hide": false,
+              "metricColumn": "none",
+              "rawQuery": true,
+              "rawSql": "SELECT  \r\n       @rownum := @rownum + 1 AS \"Route Step\", t.*\r\n  FROM (SELECT DISTINCT  `gt`.`title`  As \"Guide Title\", `gm`.`device` as \"Category\", `gc`.`guideid` As \"Guide ID\" ,\r\n\t\tCASE\r\n\t\t WHEN gm.time_required_min is not null \r\n\t\t THEN SEC_TO_TIME(gm.time_required_min) \r\n\t\t ELSE 0\r\n\t\tEND as \"Minimum Time\", \r\n\t\tCASE\r\n\t\t WHEN gm.time_required_max is not null \r\n\t\t THEN SEC_TO_TIME(gm.time_required_max) \r\n\t\t ELSE 0\r\n\t\tEND as \"Maximum Time\"\r\nFROM `guide_current` `gc`\r\nJOIN `guide_revisions` `gr` USING (`guide_revisionid`)\r\nJOIN `guide_meta` `gm` ON `gm`.`revisionid` = `gr`.`gtr_revisionid`\r\nJOIN `guide_text` `gt` ON `gr`.`gt_revisionid` = `gt`.`gt_revisionid`\r\nLEFT JOIN `work_log` `wl` ON `gc`.`guideid` = `wl`.`guideid`\r\n\r\nWHERE \r\nCASE \r\n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID = 'All Categories'\r\n\tTHEN 1 = 1\r\n\t\r\n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID != 'All Categories'\r\n\tTHEN gm.device = $CATEGORYID\r\n\t\r\n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID = 'All Categories'\r\n\tTHEN wl.workorderid = $WORKORDERID\r\n\t\t  \r\n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID != 'All Categories'\r\n\tTHEN gm.device = $CATEGORYID\r\n\r\nEND\r\n\r\nORDER BY `gc`.`guideid` ASC) t, \r\n       (SELECT @rownum := 0) r\r\norder by \"Route Step\" asc",
+              "refId": "A",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "value"
+                    ],
+                    "type": "column"
+                  }
+                ]
+              ],
+              "timeColumn": "time",
+              "where": [
+                {
+                  "name": "$__timeFilter",
+                  "params": [],
+                  "type": "macro"
+                }
+              ]
+            }
+          ],
+          "title": "Work Order Route",
+          "transform": "table",
+          "transparent": true,
+          "type": "table-old"
+        },
+        {
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+          ],
+          "datasource": DATASOURCE,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "format": "none",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 7,
+            "x": 11,
+            "y": 7
+          },
+          "id": 12,
+          "interval": null,
+          "links": [],
+          "mappingType": 1,
+          "mappingTypes": [
+            {
+              "name": "value to text",
+              "value": 1
+            },
+            {
+              "name": "range to text",
+              "value": 2
+            }
+          ],
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+          },
+          "tableColumn": "",
+          "targets": [
+            {
+              "alias": "",
+              "format": "table",
+              "group": [],
+              "metricColumn": "none",
+              "rawQuery": true,
+              "rawSql": "select \nCASE\n\tWHEN SUM(gm.time_required_min) <= 3020400\n\tTHEN SEC_TO_TIME(SUM(gm.time_required_min)) \t\n\tWHEN SUM(gm.time_required_min) > 3020400\n\tTHEN \"838:59:59+\"\n\tELSE \"None\"\nEND as \"Minimum Time\"\nFROM guide_current gc\nJOIN guide_revisions gr USING (guide_revisionid)\nJOIN guide_meta gm ON (gr.gtr_revisionid = gm.revisionid)\nwhere gc.guideid in (SELECT DISTINCT `gc`.`guideid` As \"Guide ID\"\nFROM `guide_current` `gc`\nJOIN `guide_revisions` `gr` USING (`guide_revisionid`)\nJOIN `guide_meta` `gm` ON `gm`.`revisionid` = `gr`.`gtr_revisionid`\nJOIN `guide_text` `gt` ON `gr`.`gt_revisionid` = `gt`.`gt_revisionid`\nLEFT JOIN `work_log` `wl` ON `gc`.`guideid` = `wl`.`guideid`\nWHERE \nCASE \n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID = 'All Categories'\n\tTHEN 1 = 1\n\t\n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID != 'All Categories'\n\tTHEN gm.device = $CATEGORYID\n\t\n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID = 'All Categories'\n\tTHEN wl.workorderid = $WORKORDERID\n\t\t  \n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID != 'All Categories'\n\tTHEN gm.device = $CATEGORYID\n\nEND\nORDER BY `gc`.`guideid` ASC)\n",
+              "refId": "A",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "value"
+                    ],
+                    "type": "column"
+                  }
+                ]
+              ],
+              "timeColumn": "time",
+              "where": [
+                {
+                  "name": "$__timeFilter",
+                  "params": [],
+                  "type": "macro"
+                }
+              ]
+            }
+          ],
+          "thresholds": "",
+          "title": "Minimum Route Time",
+          "transparent": true,
+          "type": "singlestat",
+          "valueFontSize": "170%",
+          "valueMaps": [
+            {
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
+            }
+          ],
+          "valueName": "first"
+        },
+        {
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+          ],
+          "datasource": DATASOURCE,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "format": "none",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 7
+          },
+          "id": 13,
+          "interval": null,
+          "links": [],
+          "mappingType": 1,
+          "mappingTypes": [
+            {
+              "name": "value to text",
+              "value": 1
+            },
+            {
+              "name": "range to text",
+              "value": 2
+            }
+          ],
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "steps",
+          "postfixFontSize": "80%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+          },
+          "tableColumn": "",
+          "targets": [
+            {
+              "alias": "",
+              "format": "table",
+              "group": [],
+              "metricColumn": "none",
+              "rawQuery": true,
+              "rawSql": "select max(x.Route_Step) as \"Step Count\"\nFROM (SELECT  \n       @rownum := @rownum + 1 AS \"Route_Step\", t.*\n  FROM (SELECT DISTINCT  `gt`.`title`  As \"Guide Title\", `gm`.`device` as \"Category\", `gc`.`guideid` As \"Guide ID\"\nFROM `guide_current` `gc`\nJOIN `guide_revisions` `gr` USING (`guide_revisionid`)\nJOIN `guide_meta` `gm` ON `gm`.`revisionid` = `gr`.`gtr_revisionid`\nJOIN `guide_text` `gt` ON `gr`.`gt_revisionid` = `gt`.`gt_revisionid`\nLEFT JOIN `work_log` `wl` ON `gc`.`guideid` = `wl`.`guideid`\nWHERE \nCASE \n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID = 'All Categories'\n\tTHEN 1 = 1\n\t\n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID != 'All Categories'\n\tTHEN gm.device = $CATEGORYID\n\t\n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID = 'All Categories'\n\tTHEN wl.workorderid = $WORKORDERID\n\t\t  \n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID != 'All Categories'\n\tTHEN gm.device = $CATEGORYID\n\nEND\nORDER BY `gc`.`guideid` ASC) t, \n       (SELECT @rownum := 0) r) x\n",
+              "refId": "A",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "value"
+                    ],
+                    "type": "column"
+                  }
+                ]
+              ],
+              "timeColumn": "time",
+              "where": [
+                {
+                  "name": "$__timeFilter",
+                  "params": [],
+                  "type": "macro"
+                }
+              ]
+            }
+          ],
+          "thresholds": "",
+          "title": "# of Route Steps",
+          "transparent": true,
+          "type": "singlestat",
+          "valueFontSize": "170%",
+          "valueMaps": [
+            {
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
+            }
+          ],
+          "valueName": "avg"
+        },
+        {
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+          ],
+          "datasource": DATASOURCE,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "format": "none",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 7,
+            "x": 11,
+            "y": 11
+          },
+          "id": 11,
+          "interval": null,
+          "links": [],
+          "mappingType": 1,
+          "mappingTypes": [
+            {
+              "name": "value to text",
+              "value": 1
+            },
+            {
+              "name": "range to text",
+              "value": 2
+            }
+          ],
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+          },
+          "tableColumn": "",
+          "targets": [
+            {
+              "alias": "",
+              "format": "table",
+              "group": [],
+              "metricColumn": "none",
+              "rawQuery": true,
+              "rawSql": "select CASE\n\tWHEN SUM(gm.time_required_max) <= 3020400\n\tTHEN SEC_TO_TIME(SUM(gm.time_required_max)) \t\n\tWHEN SUM(gm.time_required_max) > 3020400\n\tTHEN \"838:59:59+\"\n\tELSE \"None\"\nEND as \"Maximum Time\"\nFROM guide_current gc\nJOIN guide_revisions gr USING (guide_revisionid)\nJOIN guide_meta gm ON (gr.gtr_revisionid = gm.revisionid)\nwhere gc.guideid in (SELECT DISTINCT `gc`.`guideid` As \"Guide ID\"\nFROM `guide_current` `gc`\nJOIN `guide_revisions` `gr` USING (`guide_revisionid`)\nJOIN `guide_meta` `gm` ON `gm`.`revisionid` = `gr`.`gtr_revisionid`\nJOIN `guide_text` `gt` ON `gr`.`gt_revisionid` = `gt`.`gt_revisionid`\nLEFT JOIN `work_log` `wl` ON `gc`.`guideid` = `wl`.`guideid`\nWHERE \nCASE \n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID = 'All Categories'\n\tTHEN 1 = 1\n\t\n\tWHEN $WORKORDERID = 'All Work Orders' AND $CATEGORYID != 'All Categories'\n\tTHEN gm.device = $CATEGORYID\n\t\n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID = 'All Categories'\n\tTHEN wl.workorderid = $WORKORDERID\n\t\t  \n\tWHEN $WORKORDERID != 'All Work Orders' AND $CATEGORYID != 'All Categories'\n\tTHEN gm.device = $CATEGORYID\n\nEND\n\nORDER BY `gc`.`guideid` ASC)\n",
+              "refId": "A",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "value"
+                    ],
+                    "type": "column"
+                  }
+                ]
+              ],
+              "timeColumn": "time",
+              "where": [
+                {
+                  "name": "$__timeFilter",
+                  "params": [],
+                  "type": "macro"
+                }
+              ]
+            }
+          ],
+          "thresholds": "",
+          "title": "Maximum Route Time",
+          "transparent": true,
+          "type": "singlestat",
+          "valueFontSize": "170%",
+          "valueMaps": [
+            {
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
+            }
+          ],
+          "valueName": "first"
+        },
+        {
+          "content": "<h1>Work Order Signoffs\n<hr>",
+          "datasource": null,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 17
+          },
+          "id": 18,
+          "links": [],
+          "mode": "html",
+          "options": {
+            "content": "<h1>Work Order Signoffs\n<hr>",
+            "mode": "html"
+          },
+          "pluginVersion": "7.1.0",
+          "title": " ",
+          "transparent": true,
+          "type": "text"
+        },
+        {
+          "columns": [],
+          "datasource": DATASOURCE,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fontSize": "100%",
+          "gridPos": {
+            "h": 13,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          },
+          "id": 15,
+          "links": [],
+          "pageSize": 20,
+          "scroll": true,
+          "showHeader": true,
+          "sort": {
+            "col": 7,
+            "desc": true
+          },
+          "styles": [
+            {
+              "$$hashKey": "object:147",
+              "alias": "Work Order",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "workorderid",
+              "preserveFormat": false,
+              "sanitize": true,
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:148",
+              "alias": "Guide ID",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "guideid",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:149",
+              "alias": "Guide Title",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": true,
+              "linkTargetBlank": true,
+              "linkTooltip": "https://" + SITE_URL + "/guide/${__cell:raw}/${__cell_1:raw}",
+              "linkUrl": "https://" + SITE_URL + "/guide/${__cell:raw}/${__cell_1:raw}",
+              "mappingType": 1,
+              "pattern": "title",
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:150",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "userid",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:151",
+              "alias": "Worker",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "username",
+              "sanitize": false,
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:152",
+              "alias": "Step #",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "orderby",
+              "thresholds": [],
+              "type": "number",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:153",
+              "alias": "Signoff Date",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD hh:mm a",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Date",
+              "thresholds": [],
+              "type": "date",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:154",
+              "alias": "Signoff Status",
+              "align": "auto",
+              "colorMode": "cell",
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgb(229, 210, 14)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Status",
+              "thresholds": [
+                "0",
+                "1"
+              ],
+              "type": "string",
+              "unit": "short",
+              "valueMaps": [
+                {
+                  "$$hashKey": "object:293",
+                  "text": "Rejected",
+                  "value": "-1"
+                },
+                {
+                  "$$hashKey": "object:294",
+                  "text": "Pending",
+                  "value": "0"
+                },
+                {
+                  "$$hashKey": "object:295",
+                  "text": "Accepted",
+                  "value": "1"
+                }
+              ]
+            },
+            {
+              "$$hashKey": "object:155",
+              "alias": "Approver",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "so_username",
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:156",
+              "alias": "Signoff Type",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "type",
+              "preserveFormat": false,
+              "sanitize": false,
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:157",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": true,
+              "linkTooltip": "",
+              "linkUrl": "https://" + SITE_URL + "/Manage/work_log/view/${__cell_1:raw}/${__cell_3:raw}/PDF",
+              "mappingType": 1,
+              "pattern": "PDF Log",
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:158",
+              "alias": "Entry ID",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "entryid",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:159",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "decimals": 0,
+              "pattern": "/.*/",
+              "thresholds": [],
+              "type": "number",
+              "unit": "none"
+            }
+          ],
+          "targets": [
+            {
+              "alias": "",
+              "format": "table",
+              "group": [],
+              "metricColumn": "none",
+              "rawQuery": true,
+              "rawSql": "SELECT wl.workorderid, \nwl.guideid, \ngt.title, \nso.entryid, \n-- wl.userid, \nu.username, \n-- so.signoffid, \n-- so.stepid, \n-- gr.guide_revisionid, \n-- gr.gst_revisionid, \n-- gstt.newest_gst_revisionid, \ngtr.orderby, \ngst.title as \"Step Title\", \n\nCONVERT_TZ(from_unixtime(so.date), @@session.time_zone, '+00:00') as \"Date\", \n\n\nCASE \n  WHEN so.status = \"approved\" THEN \"1\"\n  WHEN so.status = \"pending\"  THEN \"0\"\n  WHEN so.status = \"rejected\" THEN \"-1\"\nEND as \"Status\", \n\n-- so.status, \n\n\nso.type, \n-- su.so_userid, \nsu.so_username,  \n-- gm.device, \n\"PDF Log\" as \"PDF Log\"\n\nfrom supervisor_signoffs so\nleft join work_log wl on wl.entryid=so.entryid \n\n\nleft join guide_revisions gr on gr.guide_revisionid=wl.guide_revisionid\n\nleft join guide_meta gm on gm.revisionid=gr.gtr_revisionid\nleft join guide_text gt on gt.gt_revisionid=gr.gt_revisionid\n\n-- Add step titles\n\n\n\nleft JOIN (SELECT stepid, max(gst_revisionid) as newest_gst_revisionid\nFROM guide_step_text\ngroup by stepid order by newest_gst_revisionid) gstt on gstt.stepid=so.stepid\n\nleft JOIN guide_step_text gst on gst.gst_revisionid=gstt.newest_gst_revisionid\n\n\n-- Add user IDs\n\nleft join global_users u on u.userid=wl.userid \n\n-- Add user names\n\nLEFT join (select sso.userid  as so_userid, ssu.username as so_username, sso.signoffid as so_signoffid \n  from supervisor_signoffs sso\n  left join global_users ssu on sso.userid=ssu.userid ) su on so.signoffid=su.so_signoffid\n\n-- Add step numbers\n\n\n\n\n\nLEFT JOIN (SELECT orderby, stepid, max(gtr_revisionid) as newest_gtr_revisionid\n\nFROM guide_step_order_revisions\n\t\t   \ngroup by stepid order by newest_gtr_revisionid ) gsor on gsor.stepid=so.stepid \n\nleft JOIN guide_step_order_revisions gtr on gtr.gtr_revisionid =gsor.newest_gtr_revisionid and gtr.stepid=gsor.stepid \n\n\n  \n-- Conditions for filters\n\nWHERE\n($WORKORDERID = 'All Work Orders' OR wl.workorderid = $WORKORDERID)\n\t\nAND\n($GUIDE_ID = 'All Guides' OR gm.guideid = $GUIDE_ID)\n\n\n-- group by so.signoffid",
+              "refId": "A",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "value"
+                    ],
+                    "type": "column"
+                  }
+                ]
+              ],
+              "timeColumn": "time",
+              "where": [
+                {
+                  "name": "$__timeFilter",
+                  "params": [],
+                  "type": "macro"
+                }
+              ]
+            }
+          ],
+          "title": " ",
+          "transform": "table",
+          "transparent": true,
+          "type": "table-old"
+        },
+        {
+          "content": "<h1>Work Order Route Details\n<hr>",
+          "datasource": null,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 3,
+            "w": 24,
+            "x": 0,
+            "y": 33
+          },
+          "id": 19,
+          "links": [],
+          "mode": "html",
+          "options": {
+            "content": "<h1>Work Order Route Details\n<hr>",
+            "mode": "html"
+          },
+          "pluginVersion": "7.1.0",
+          "title": " ",
+          "transparent": true,
+          "type": "text"
+        },
+        {
+          "columns": [],
+          "datasource": DATASOURCE,
+          "fieldConfig": {
+            "defaults": {
+              "custom": {}
+            },
+            "overrides": []
+          },
+          "fontSize": "100%",
+          "gridPos": {
+            "h": 15,
+            "w": 24,
+            "x": 0,
+            "y": 36
+          },
+          "id": 3,
+          "links": [],
+          "pageSize": 16,
+          "scroll": false,
+          "showHeader": true,
+          "sort": {
+            "col": 6,
+            "desc": true
+          },
+          "styles": [
+            {
+              "$$hashKey": "object:482",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": true,
+              "linkTargetBlank": true,
+              "linkUrl": "${__cell}",
+              "mappingType": 1,
+              "pattern": "Link",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:483",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Duration",
+              "thresholds": [],
+              "type": "number",
+              "unit": "dthms"
+            },
+            {
+              "$$hashKey": "object:484",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "Guide ID",
+              "thresholds": [],
+              "type": "number",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:485",
+              "alias": "",
+              "align": "auto",
+              "colorMode": "cell",
+              "colors": [
+                "rgba(176, 172, 172, 0.9)",
+                "rgb(229, 210, 14)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Status",
+              "thresholds": [
+                "1",
+                "2"
+              ],
+              "type": "string",
+              "unit": "short",
+              "valueMaps": [
+                {
+                  "$$hashKey": "object:576",
+                  "text": "Canceled",
+                  "value": "-1"
+                },
+                {
+                  "$$hashKey": "object:577",
+                  "text": "Not Started",
+                  "value": "0"
+                },
+                {
+                  "$$hashKey": "object:578",
+                  "text": "In Progress",
+                  "value": "1"
+                },
+                {
+                  "$$hashKey": "object:579",
+                  "text": "Completed",
+                  "value": "2"
+                }
+              ]
+            },
+            {
+              "$$hashKey": "object:486",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD hh:mm a",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Started",
+              "thresholds": [],
+              "type": "date",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:487",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD hh:mm a",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "Ended",
+              "thresholds": [],
+              "type": "date",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:488",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "User ID",
+              "thresholds": [],
+              "type": "number",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:489",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": true,
+              "linkTargetBlank": true,
+              "linkTooltip": "https://" + SITE_URL + "/guide/${__cell:raw}/${__cell_1:raw}",
+              "linkUrl": "https://" + SITE_URL + "/guide/${__cell:raw}/${__cell_1:raw}",
+              "mappingType": 1,
+              "pattern": "Guide Title",
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:490",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": true,
+              "linkTargetBlank": true,
+              "linkTooltip": "",
+              "linkUrl": "https://" + SITE_URL + "/Manage/work_log/view/${__cell_1:raw}/${__cell_3:raw}/PDF",
+              "mappingType": 1,
+              "pattern": "PDF Log",
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:491",
+              "alias": "Work Log ID",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 0,
+              "mappingType": 1,
+              "pattern": "entryid",
+              "thresholds": [],
+              "type": "hidden",
+              "unit": "none"
+            },
+            {
+              "$$hashKey": "object:492",
+              "alias": "Work Order",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "mappingType": 1,
+              "pattern": "workorderid",
+              "thresholds": [],
+              "type": "string",
+              "unit": "short"
+            },
+            {
+              "$$hashKey": "object:493",
+              "alias": "",
+              "align": "auto",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "decimals": 0,
+              "pattern": "/.*/",
+              "thresholds": [],
+              "type": "number",
+              "unit": "none"
+            }
+          ],
+          "targets": [
+            {
+              "alias": "",
+              "format": "table",
+              "group": [],
+              "hide": false,
+              "metricColumn": "none",
+              "rawQuery": true,
+              "rawSql": "SELECT \r\nb.Category,\r\nb.guideid as \"Guide ID\", \r\nb.title as \"Guide Title\",\r\nwl.entryid,\r\n\r\n\r\n-- CASE \r\n  -- WHEN wl.workorderid is NOT NULL THEN wl.workorderid\r\n --  ELSE '--'\r\n-- END \r\nwl.workorderid,\r\n\r\nwl.userid as \"User ID\",\r\n \r\nCONVERT_TZ(from_unixtime(wl.starttime), @@session.time_zone, '+00:00')  as \"Started\", \r\n\r\nCONVERT_TZ(from_unixtime(wl.endtime), @@session.time_zone, '+00:00') as \"Ended\", \r\n\r\nCASE \r\n  WHEN wl.cancelled = 0 AND endtime is NOT NULL THEN '2'\r\n  WHEN wl.cancelled = 0 AND endtime is NULL THEN '1'\r\n  WHEN wl.cancelled = 1 THEN '-1'\r\n  WHEN wl.starttime IS NULL THEN '0'\r\nEND as \"Status\", \r\n\r\nCASE \r\n    WHEN wl.endtime is NULL and wl.starttime is not NULL then \"In Progress\"\r\n    WHEN wl.endtime is NULL and wl.starttime is NULL then \"--\"\r\n    ELSE SEC_TO_TIME(wl.endtime - wl.starttime) \r\nEND as Duration\r\n\r\n, \"PDF Log\" as \"PDF Log\"\r\n\r\nFROM work_log wl\r\n\r\nleft JOIN \r\n\r\n(SELECT DISTINCT gc.guideid, gt.title, gm.device as \"Category\", gr.gsr_revisionid\r\nFROM guide_current gc\r\nJOIN guide_revisions gr USING (guide_revisionid)\r\nJOIN guide_meta gm ON gm.revisionid = gr.gtr_revisionid\r\nJOIN guide_text gt ON gr.gt_revisionid = gt.gt_revisionid\r\n\r\nORDER BY gc.guideid ASC) b\r\n\r\nON wl.guideid = b.guideid \r\n\r\n\r\n-- Find Current Step\r\nleft join guide_step_revisions gsr on gsr.revisionid=b.gsr_revisionid\t\t\t\r\nleft join (select work_log_timing.timingid, work_log_timing.stepid, work_log_timing.entryid \r\n\t\t   from work_log_timing\r\n\t\t   inner join (select stepid, entryid, max(timingid) as maxtime\r\n\t\t\t\t\t   from work_log_timing\r\n\t\t\t\t\t   group by work_log_timing.entryid) maxt\r\n\t\t   on work_log_timing.timingid=maxt.maxtime and work_log_timing.entryid=maxt.entryid) current_step\r\n\t\t\t\r\n\t\t\ton current_step.entryid=wl.entryid\r\n\r\n-- Find step number\r\nleft join (select guide_step_order_revisions.gtr_revisionid, guide_step_order_revisions.stepid, guide_step_order_revisions.orderby\r\n\r\nfrom guide_step_order_revisions\r\n\r\ninner join (Select stepid, max(gtr_revisionid) as maxrev\r\nfrom guide_step_order_revisions\r\ngroup by guide_step_order_revisions.stepid) mrv\r\n\r\non guide_step_order_revisions.gtr_revisionid=mrv.maxrev and guide_step_order_revisions.stepid=mrv.stepid) step_number on step_number.stepid = current_step.stepid\r\n\r\n-- \t\t\t\r\n\r\n\r\n\r\nWHERE \r\n\r\n/* Case statement to use WHERE clause appropriate to which filters were selected  */\r\n\r\n\r\n($WORKORDERID = 'All Work Orders' OR wl.workorderid = $WORKORDERID)\r\n\r\nAND ($CATEGORYID = 'All Categories' OR b.category = $CATEGORYID)\r\n\r\n\t\r\n\tgroup by wl.entryid",
+              "refId": "A",
+              "select": [
+                [
+                  {
+                    "params": [
+                      "value"
+                    ],
+                    "type": "column"
+                  }
+                ]
+              ],
+              "timeColumn": "time",
+              "where": [
+                {
+                  "name": "$__timeFilter",
+                  "params": [],
+                  "type": "macro"
+                }
+              ]
+            }
+          ],
+          "title": " ",
+          "transform": "table",
+          "transparent": true,
+          "type": "table-old"
+        }
+      ],
+      "refresh": false,
+      "schemaVersion": 26,
+      "style": "dark",
+      "tags": [
+        "Work Orders",
+        "Work Order Signoff Status"
+      ],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "Dozuki",
+              "value": "Dozuki"
+            },
+            "hide": 2,
+            "includeAll": false,
+            "label": "Guide Database",
+            "multi": false,
+            "name": "GUIDE_DB",
+            "options": [],
+            "query": "mysql",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+          },
+          {
+            "allValue": "'All Work Orders'",
+            "current": {
+              "selected": false,
+              "text": "All",
+              "value": "$__all"
+            },
+            "datasource": DATASOURCE,
+            "definition": "select  work_log.workorderid  from work_log",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Work Order ID",
+            "multi": false,
+            "name": "WORKORDERID",
+            "options": [],
+            "query": "select  work_log.workorderid  from work_log",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 0,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+          },
+          {
+            "allValue": "'All Categories'",
+            "current": {
+              "selected": false,
+              "text": "All",
+              "value": "$__all"
+            },
+            "datasource": DATASOURCE,
+            "definition": "select  list.title as \"Category\" from (select distinct title from wikis where wikis.namespace=\"TOPIC\") list order by 'All Categories', title ASC",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Category",
+            "multi": false,
+            "name": "CATEGORYID",
+            "options": [],
+            "query": "select  list.title as \"Category\" from (select distinct title from wikis where wikis.namespace=\"TOPIC\") list order by 'All Categories', title ASC",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 0,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+          },
+          {
+            "allValue": "'All Guides'",
+            "current": {
+              "selected": false,
+              "text": "All",
+              "value": "$__all"
+            },
+            "datasource": DATASOURCE,
+            "definition": "select guide_text.guideid AS __value,  CONCAT(guide_text.title, \" — \", \"Guide ID:\", guide_text.guideid) AS __text   from (select max(gt_revisionid) as gt_revisionid, guideid from guide_text group by guideid) x  left join guide_text on guide_text.gt_revisionid=x.gt_revisionid",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Guide",
+            "multi": false,
+            "name": "GUIDE_ID",
+            "options": [],
+            "query": "select guide_text.guideid AS __value,  CONCAT(guide_text.title, \" — \", \"Guide ID:\", guide_text.guideid) AS __text   from (select max(gt_revisionid) as gt_revisionid, guideid from guide_text group by guideid) x  left join guide_text on guide_text.gt_revisionid=x.gt_revisionid",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 0,
+            "tagValuesQuery": "",
+            "tags": [],
+            "tagsQuery": "",
+            "type": "query",
+            "useTags": false
+          },
+          {
+            "allValue": null,
+            "current": {
+              "text": SITE_NAME,
+              "value": SITE_NAME
+            },
+            "hide": 2,
+            "includeAll": false,
+            "label": "Site Name",
+            "multi": false,
+            "name": "SITE_NAME",
+            "options": [
+              {
+                "selected": true,
+                "text": SITE_NAME,
+                "value": SITE_NAME
+              }
+            ],
+            "query": SITE_NAME,
+            "skipUrlSync": false,
+            "type": "custom"
+          }
+        ]
+      },
+      "time": {
+        "from": "now-30d",
+        "to": "now"
+      },
+      "timepicker": {
+        "refresh_intervals": [
+          "5s",
+          "10s",
+          "30s",
+          "1m",
+          "5m",
+          "15m",
+          "30m",
+          "1h",
+          "2h",
+          "1d"
+        ],
+        "time_options": [
+          "5m",
+          "15m",
+          "1h",
+          "6h",
+          "12h",
+          "24h",
+          "2d",
+          "7d",
+          "30d"
+        ]
+      },
+      "timezone": "browser",
+      "title": "Work Order Signoff Status",
+      "uid": null,
+      "version": 41
+    }

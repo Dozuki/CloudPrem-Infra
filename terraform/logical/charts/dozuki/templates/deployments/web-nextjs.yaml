@@ -1,0 +1,57 @@
+{{- /* Helm template for web-nextjs deployment */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-web-nextjs-deployment
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: {{ .Values.deployments.webNextjs.name }}
+spec:
+  replicas: {{ .Values.deployments.webNextjs.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.deployments.webNextjs.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.deployments.webNextjs.name }}
+    spec:
+      containers:
+        - name: {{ .Values.deployments.webNextjs.name }}
+          image: "{{ .Values.deployments.webNextjs.image }}"
+          imagePullPolicy: {{ .Values.deployments.webNextjs.imagePullPolicy }}
+          command:
+            {{- range .Values.deployments.webNextjs.command }}
+            - "{{ . }}"
+            {{- end }}
+          env:
+            - name: SERVER_SIDE_MONOLITH_API_URL
+              value: "{{ .Values.deployments.webNextjs.env.SERVER_SIDE_MONOLITH_API_URL }}"
+            - name: USER_USERHOSTNAME
+              value: {{ .Values.hostname | quote }}
+            - name: K8_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: {{ .Values.deployments.webNextjs.resources.requests.cpu }}
+              memory: {{ .Values.deployments.webNextjs.resources.requests.memory }}
+          ports:
+            {{- range .Values.deployments.webNextjs.ports }}
+            - containerPort: {{ .containerPort }}
+            {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - {{ .Values.deployments.webNextjs.name }}
+                topologyKey: "kubernetes.io/hostname"
+      restartPolicy: {{ .Values.deployments.webNextjs.restartPolicy }}
