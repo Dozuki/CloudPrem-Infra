@@ -577,21 +577,21 @@ deployments:
           requests:
             cpu: 200m
             memory: 256Mi
-     # - name: webhook-sync
-     #   image: ${image_repository}:${image_tag}
-     #   command:
-     #     - "/usr/bin/php"
-     #     - '/home/ifixit/Code/Exec/syncWebhookConfigWithFrontegg.php'
-     #   env:
-     #     - name: USER_USERHOSTNAME
-     #       value: '${hostname}'
-     #   volumeMounts:
-     #     - name: dozuki-config
-     #       mountPath: "/etc/dozuki"
-     #   resources:
-     #     requests:
-     #       cpu: 200m
-     #       memory: 256Mi
+      - name: webhook-sync
+        image: ${image_repository}:${image_tag}
+        command:
+          - "/usr/bin/php"
+          - '/home/ifixit/Code/Exec/syncWebhookConfigWithFrontegg.php'
+        env:
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
   beanstalkd:
     name: beanstalkd
     replicaCount: 1
