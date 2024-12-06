@@ -1,0 +1,102 @@
+# Default values for webhook-service.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Provide the amount of pods if HPA is not enabled
+replicaCount: 2
+
+# -- Provide the image docker tag default: latest
+appVersion: latest
+
+# -- Manage docker image properties
+image:
+  # -- Provide docker repository hub
+  repository: frontegg/hybrid-webhook-service
+  # -- Provide image pull policy
+  pullPolicy: Always
+
+# -- Provide secret name for frontegg's repository
+imagePullSecrets:
+  - name: regcred
+
+# -- Provide a name in place of webhook-service for `app:` labels
+nameOverride: ""
+# -- Provide a name in place of {releaseName}-webhook-service
+fullnameOverride: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+# fsGroup: 2000
+
+# -- Setup Service properties for webhook-service (open only one port)
+service:
+  # -- Set service type
+  type: ClusterIP
+  # -- Set service port
+  protocol: TCP
+  # -- Set service target port to map
+  port: 80
+  # -- Set port protocol default: TCP
+  targetPort: 3013
+  # -- Set port name
+  name: http
+
+# -- Set webhook-service resources
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 250m
+    memory: 1024Mi
+
+# -- HPA properties for webhook-service
+# -- If autoscaling is enabled it will monitor the service and raise or lower pods amount based upon usage
+# -- If autoscaling is disabled webhook-service will be managed by replicaset with `replicaCount` determine pod amount
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 75
+  targetMemoryUtilizationPercentage: 75
+
+nodeSelector:
+  "beta.kubernetes.io/os": linux
+
+# -- Provide deployment tolerations
+tolerations: []
+
+affinity: {}
+
+configuration:
+  secrets: {}
+  map: {}
+
+mongo:
+  # -- Set MongoDB connection string
+  connectionString: ""
+  # -- Set MongoDB connection retry attempts
+  retryAttempts: "3"
+  # -- Set MongoDB connection retry attempts delay in milliseconds
+  retryDelay: "1000"
+
+# -- Set Message Broker (Kafka) properties.
+messageBroker:
+  # -- Set broker list (host)
+  brokerList: ""
+  # -- Set broker list password
+  password: ""
+  # -- Set broker list topic
+  topic: "events"
+
+# -- Set mysql properties.
+mysql:
+  # -- Set mysql schema name.
+  name: "frontegg_webhooks"
+  # -- Set mysql host.
+  host: ""
+  # -- Set mysql user name.
+  username: ""
+  # -- Set mysql password.
+  password: ""

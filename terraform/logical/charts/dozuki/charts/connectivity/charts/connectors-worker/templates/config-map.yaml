@@ -1,0 +1,13 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{ include "connectors-worker.fullname" . }}-configmap
+  labels:
+  {{- include "connectors-worker.labels" . | nindent 4 }}
+data:
+  CLOUD_ENVIRONMENT: production
+  NODE_ENV: production
+  PORT: "3015"
+  FRONTEGG_SERVICE_NAME: connectors-worker
+  FRONTEGG_INTEGRATIONS_SERVICE_URL: http://frontegg-integrations-service
+  FRONTEGG_INTEGRATIONS_SERVICE_API_KEY: "frontegg-api-key"

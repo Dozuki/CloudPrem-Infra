@@ -1,0 +1,8 @@
+apiVersion: v2
+description: A Helm chart for Kubernetes
+maintainers:
+- email: guy@frontegg.com
+  name: Guy Ludvig
+name: integrations-service
+type: application
+version: 0.1.9

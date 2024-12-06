@@ -10,10 +10,10 @@ environment: "production"
 customer: "example-customer"
 
 webhooks:
-  enabled: true
+  enabled: false
 
 grafana:
-  enabled: true
+  enabled: false
   path: "dashboards"
   security:
     admin_user: "admin"
@@ -39,7 +39,7 @@ smtp:
     enabled: false
     username: "foo"
     password: "bar"
-    
+
 db:
   host: "db.example.com"
   user: "dbuser"
@@ -49,7 +49,7 @@ db:
     MIIDXTCCAkWgAwIBAgIJAO9qT4jHzpTqMA0GCSqGSIb3DQEBCwUAMEUxCzAJBgNV
     ...
     -----END CERTIFICATE-----
-    
+
 sentry:
   dsn: "https://sentry-dsn.example.com"
   customerName: "example-customer"
@@ -97,7 +97,6 @@ featureRequests:
 
 ingress:
   name: "app"
-  creationPhase: "5"
   certIssuer: "cert-issuer"
   sslRedirect: "true"
   forceSslRedirect: "true"
@@ -413,6 +412,7 @@ connectivity:
 # values.yaml
 
 minio:
+  enabled: false
   # Set the deployment mode to 'standalone' to use a single MinIO server
   mode: standalone
 
@@ -434,8 +434,8 @@ minio:
   # Configure persistence (optional)
   persistence:
     enabled: true          # Set to 'false' if you don't need data persistence
-    size: 10Gi
-    storageClass: default  # Adjust based on your cluster's storage classes
+    size: 10Gi  # Adjust based on your cluster's storage classes
+    storageClass: ebs-gp3
 
   # Provide your access and secret keys
   accessKey: myminioaccesskey
@@ -510,6 +510,91 @@ deployments:
       - name: "le-tls-cert"
         secret: "tls-secret"
     restartPolicy: "Always"
+    initContainers:
+      - name: db-startup-check
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "/bootstrap/entrypoints/db_startup_check.sh"
+        env:
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      - name: db-initialize
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "-e"
+          - "/bootstrap/db_initialize.sh"
+        env:
+          - name: USER_DOMAIN_NAME
+            value: '${hostname}'
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      - name: db-rds-snapshot
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "/bootstrap/entrypoints/db_rds_snapshot.sh"
+        env:
+          - name: APPLICATION_RELEASE_NUMBER
+            value: ''
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      - name: db-migrations
+        image: ${image_repository}:${image_tag}
+        command:
+          - bash
+          - "/bootstrap/entrypoints/db_migrations.sh"
+        env:
+          - name: APPLICATION_RELEASE_NUMBER
+            value: ''
+          - name: USER_DOMAIN_NAME
+            value: '${hostname}'
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      # - name: webhook-sync
+      #   image: ${image_repository}:${image_tag}
+      #   command:
+      #     - "/usr/bin/php"
+      #     - '/home/ifixit/Code/Exec/syncWebhookConfigWithFrontegg.php'
+      #   env:
+      #     - name: USER_USERHOSTNAME
+      #       value: '${hostname}'
+      #   volumeMounts:
+      #     - name: dozuki-config
+      #       mountPath: "/etc/dozuki"
+      #   resources:
+      #     requests:
+      #       cpu: 200m
+      #       memory: 256Mi
   beanstalkd:
     name: beanstalkd
     replicaCount: 1
@@ -610,6 +695,13 @@ deployments:
       - name: "dozuki-config"
         configMap: "dozuki-resources-configmap"
     restartPolicy: "Always"
+    initContainers:
+      - name: wait-for-beanstalkd
+        image: busybox:1.28
+        command:
+          - /bin/sh
+          - -c
+          - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
 
   pixelPing:
     name: pixel-ping
@@ -677,6 +769,13 @@ deployments:
       - name: "sidecar-script"
         configMap: "beanstalkd-watcher-script"
     restartPolicy: "Always"
+    initContainers:
+      - name: wait-for-beanstalkd
+        image: busybox:1.28
+        command:
+          - /bin/sh
+          - -c
+          - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
 
   searchd:
     name: searchd

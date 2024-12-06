@@ -30,6 +30,7 @@ dependencies:
   - name: minio
     version: 5.3.0  # Replace with the desired MinIO chart version
     repository: "https://charts.min.io/"
+    condition: minio.enabled
   - name: redis
     version: 20.3.0
     repository: https://charts.bitnami.com/bitnami
@@ -41,22 +42,18 @@ dependencies:
   - name: grafana-operator
     version: 5.15.1
     repository: https://grafana.github.io/helm-charts
-    condition: grafana.enabled
   - name: aws-node-termination-handler
     version: 0.21.0
     repository: https://aws.github.io/eks-charts
-  - name: cert-manager
-    version: 1.16.1
-    repository: https://charts.jetstack.io
   - name: kube-prometheus-stack
     version: 66.2.1
     repository: https://prometheus-community.github.io/helm-charts
   - name: reloader
     version: 1.1.0
     repository: https://stakater.github.io/stakater-charts
-#  - name: connectivity
-#    condition: grafana.enabled
-#    version: "0.2.1"
-#    repository: "file://charts/connectivity"
+  - name: connectivity
+    condition: webhooks.enabled
+    version: "0.2.1"
+    repository: "file://charts/connectivity"
 
 

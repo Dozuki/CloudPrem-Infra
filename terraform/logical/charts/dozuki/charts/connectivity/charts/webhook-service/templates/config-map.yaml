@@ -1,0 +1,15 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: {{ include "webhook-service.fullname" . }}-configmap
+  labels:
+  {{- include "webhook-service.labels" . | nindent 4 }}
+data:
+  NODE_ENV: production
+  CLOUD_ENVIRONMENT: prod
+  PORT: "3013"
+  FRONTEGG_SERVICE_NAME: webhook-service
+  FRONTEGG_EVENT_SERVICE_URL: http://frontegg-event-service
+  FRONTEGG_WEBHOOK_SERVICE_API_KEY: "frontegg-api-key"
+  FRONTEGG_EVENT_SERVICE_API_KEY: "frontegg-api-key"
+

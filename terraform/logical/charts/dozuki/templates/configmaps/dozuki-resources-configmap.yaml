@@ -41,8 +41,10 @@ data:
   s3.json: |
     {
       "region": "{{ .Values.aws.region }}",
-      "encryptionKeyId": "{{ .Values.s3.kmsKey }}",
-      "endpoint": "http://dozuki-minio.{{ .Release.Namespace }}.svc.cluster.local
+      "encryptionKeyId": "{{ .Values.s3.kmsKey }}"
+      {{- if .Values.minio.enabled }}
+      ,"endpoint": "http://dozuki-minio.{{ .Release.Namespace }}.svc.cluster.local"
+      {{- end }}
     }
   buckets.json: |
     {

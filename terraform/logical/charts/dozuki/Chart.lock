@@ -17,14 +17,14 @@ dependencies:
 - name: aws-node-termination-handler
   repository: https://aws.github.io/eks-charts
   version: 0.21.0
-- name: cert-manager
-  repository: https://charts.jetstack.io
-  version: v1.16.1
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 66.2.1
 - name: reloader
   repository: https://stakater.github.io/stakater-charts
   version: 1.1.0
-digest: sha256:425ecdf77b3519d67dc6f6f700da91c068333db9da9616d5f9a23316e54d2243
-generated: "2024-11-19T09:19:56.00699-05:00"
+- name: connectivity
+  repository: file://charts/connectivity
+  version: 0.2.1
+digest: sha256:9682fab5ab3d20271893d40154989a25d7f185c09fe5e1df1067687036e426f0
+generated: "2024-12-06T18:05:49.062-05:00"

@@ -84,8 +84,8 @@ locals {
     aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
     aws_region             = { value = data.aws_region.current.name }
     hostname               = { value = var.dns_domain_name }
-    bi_enabled             = { value = var.enable_bi ? "1" : "0" }
-    webhooks_enabled       = { value = var.enable_webhooks ? "1" : "0" }
+    bi_enabled             = { value = var.enable_bi ? "true" : "false" }
+    webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
     memcached_host         = { value = var.memcached_cluster_address }
     s3_kms_key             = { value = data.aws_kms_key.s3.arn }
     s3_images_bucket       = { value = var.s3_images_bucket }

@@ -409,6 +409,7 @@ connectivity:
 # values.yaml
 
 minio:
+  enabled: false
   # Set the deployment mode to 'standalone' to use a single MinIO server
   mode: standalone
 
