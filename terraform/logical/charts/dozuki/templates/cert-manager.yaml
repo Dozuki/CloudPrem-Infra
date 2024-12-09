@@ -12,6 +12,7 @@ spec:
     solvers:
       - selector:
           dnsZones:
+            - "dozuki.com"
             - "dozuki.guide"
             - "dozuki.cloud"
             - "dozuki.app"
