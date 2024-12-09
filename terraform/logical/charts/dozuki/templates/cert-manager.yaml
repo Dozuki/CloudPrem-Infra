@@ -15,6 +15,7 @@ spec:
             - "dozuki.guide"
             - "dozuki.cloud"
             - "dozuki.app"
+            - "dozuki.com"
         dns01:
           route53:
             region: us-east-1
