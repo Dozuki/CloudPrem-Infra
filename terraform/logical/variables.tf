@@ -67,6 +67,12 @@ variable "grafana_subpath" {
   }
 }
 
+variable "devops_secret_name" {
+  description = "Name of the secret which houses app configuration"
+  type        = string
+  default     = "devops/app/config"
+}
+
 # --- END App Configuration --- #
 
 # --- BEGIN Physical Module Passthrough Configuration (do not set or modify) --- #

@@ -120,7 +120,7 @@ locals {
 }
 
 data "aws_secretsmanager_secret" "devops_secret" {
-  name = "devops/app/config"
+  name = var.devops_secret_name
 }
 
 data "aws_secretsmanager_secret_version" "devops_secret_version" {
