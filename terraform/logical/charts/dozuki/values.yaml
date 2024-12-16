@@ -971,3 +971,14 @@ ingress-nginx:
       upstream-keepalive-requests: "100"
       worker-processes: "auto"
       custom-http-errors: "503"
+
+redis:
+  architecture: "standalone"
+  tls:
+    authClients: false
+  auth:
+    enabled: false
+
+mongodb:
+  auth:
+    enabled: false
