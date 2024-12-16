@@ -365,13 +365,13 @@ connectivity:
       username: "${db_user}"
       password: "${db_password}"
     mongo:
-      connectionString: "mongodb://frontegg-documents-mongodb/webhooks"
+      connectionString: "mongodb://dozuki-mongodb/webhooks"
 
   integrations-service:
     messageBroker:
       brokerList: "${msk_bootstrap_brokers}"
     mongo:
-      connectionString: "mongodb://frontegg-documents-mongodb/integrations"
+      connectionString: "mongodb://dozuki-mongodb/integrations"
     frontegg:
       slack:
         encryptionKey: "dummyval"
@@ -384,7 +384,7 @@ connectivity:
     messageBroker:
       brokerList: "${msk_bootstrap_brokers}"
     redis:
-      host: "frontegg-kvstore-redis-master"
+      host: "dozuki-redis-master"
       tls: "false"
     frontegg:
       clientId: "${frontegg_client_id}"
@@ -397,7 +397,7 @@ connectivity:
     messageBroker:
       brokerList: "${msk_bootstrap_brokers}"
     redis:
-      host: "frontegg-kvstore-redis-master"
+      host: "dozuki-redis-master"
       tls: "false"
     frontegg:
       channels: "slack"
