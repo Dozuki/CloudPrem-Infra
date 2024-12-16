@@ -460,13 +460,6 @@ deployments:
   app:
     name: app
     replicaCount: 4
-    creationPhase: "10"
-    configHash: "{{ .Release.Revision }}-{{ .Release.Time.Seconds }}"
-    hostAliases: "{{ .Values.hostAliases }}"
-    image:
-      repository: "{{ .Values.image.repository }}"
-      tag: "{{ .Values.image.tag }}"
-      pullPolicy: "{{ .Values.image.pullPolicy }}"
     command:
       - "bash"
       - "/bootstrap/entrypoints/app.sh"
@@ -580,25 +573,24 @@ deployments:
           requests:
             cpu: 200m
             memory: 256Mi
-      # - name: webhook-sync
-      #   image: ${image_repository}:${image_tag}
-      #   command:
-      #     - "/usr/bin/php"
-      #     - '/home/ifixit/Code/Exec/syncWebhookConfigWithFrontegg.php'
-      #   env:
-      #     - name: USER_USERHOSTNAME
-      #       value: '${hostname}'
-      #   volumeMounts:
-      #     - name: dozuki-config
-      #       mountPath: "/etc/dozuki"
-      #   resources:
-      #     requests:
-      #       cpu: 200m
-      #       memory: 256Mi
+      - name: webhook-sync
+        image: ${image_repository}:${image_tag}
+        command:
+          - "/usr/bin/php"
+          - '/home/ifixit/Code/Exec/syncWebhookConfigWithFrontegg.php'
+        env:
+          - name: USER_USERHOSTNAME
+            value: '${hostname}'
+        volumeMounts:
+          - name: dozuki-config
+            mountPath: "/etc/dozuki"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
   beanstalkd:
     name: beanstalkd
     replicaCount: 1
-    hostAliases: "{{ .Values.hostAliases }}"
     command:
       - "/usr/local/bin/beanstalkd"
       - "-p"
@@ -671,8 +663,6 @@ deployments:
   crond:
     name: crond
     replicaCount: 1
-    configHash: "{{ .Values.deployments.app.configHash }}"
-    hostAliases: "{{ .Values.hostAliases }}"
     command:
       - "bash"
       - "/bootstrap/entrypoints/crond.sh"
@@ -706,7 +696,6 @@ deployments:
   pixelPing:
     name: pixel-ping
     replicaCount: 2
-    hostAliases: "{{ .Values.hostAliases }}"
     command:
       - "/bin/node"
       - "/opt/pixel-ping/bin/pixel-ping"
@@ -729,7 +718,6 @@ deployments:
     name: queueworker
     creationPhase: "10"
     replicaCount: 2
-    hostAliases: "{{ .Values.hostAliases }}"
     command:
       - "bash"
       - "/bootstrap/entrypoints/queueworkerd.sh"
@@ -780,7 +768,6 @@ deployments:
   searchd:
     name: searchd
     replicaCount: 2
-    hostAliases: "{{ .Values.hostAliases }}"
     command:
       - "bash"
       - "/bootstrap/entrypoints/searchd.sh"
@@ -813,7 +800,6 @@ deployments:
   syslog:
     name: syslog
     replicaCount: 1
-    hostAliases: "{{ .Values.hostAliases }}"
     command:
       - "/usr/sbin/syslog-ng"
       - "-F"
@@ -841,7 +827,6 @@ deployments:
       - "server.js"
     env:
       SERVER_SIDE_MONOLITH_API_URL: "http://app"
-    hostAliases: "{{ .Values.hostAliases }}"
     resources:
       requests:
         cpu: "200m"
