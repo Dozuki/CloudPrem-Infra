@@ -100,6 +100,7 @@ locals {
     google_translate_token = { value = var.google_translate_api_token }
     nth_role_arn           = { value = var.termination_handler_role_arn }
     nth_sqs_queue_id       = { value = var.termination_handler_sqs_queue_id }
+    dns_validation         = { value = contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) }
   }
 
   // Optional add-on for Grafana config
