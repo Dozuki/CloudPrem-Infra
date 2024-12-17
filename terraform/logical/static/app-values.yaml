@@ -5,7 +5,7 @@ aws:
   accountId: "${aws_acct_id}"
 
 hostname: "${hostname}"
-dns_validation: true #set true if using a domain we control the dns for
+dns_validation: ${dns_validation} #set true if using a domain we control the dns for
 environment: "${environment}"
 customer: "${customer}"
 
