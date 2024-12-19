@@ -35,8 +35,9 @@ module "nlb" {
 
   name = local.identifier
 
-  load_balancer_type = "network"
-  internal           = !var.app_public_access
+  load_balancer_type               = "network"
+  internal                         = !var.app_public_access
+  enable_cross_zone_load_balancing = true
 
   vpc_id  = local.vpc_id
   subnets = local.public_subnet_ids
