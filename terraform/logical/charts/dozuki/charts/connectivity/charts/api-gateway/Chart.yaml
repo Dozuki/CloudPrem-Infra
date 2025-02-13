@@ -1,8 +1,0 @@
-apiVersion: v2
-description: Frontegg Api Gateway Helm Chart
-maintainers:
-- email: guy@frontegg.com
-  name: Guy Ludvig
-name: api-gateway
-type: application
-version: 0.4.38

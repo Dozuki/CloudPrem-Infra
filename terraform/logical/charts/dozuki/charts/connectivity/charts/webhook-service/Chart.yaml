@@ -1,8 +1,0 @@
-apiVersion: v2
-description: Frontegg Webhook Service Helm chart for Kubernetes
-maintainers:
-- email: guy@frontegg.com
-  name: Guy Ludvig
-name: webhook-service
-type: application
-version: 0.2.8
