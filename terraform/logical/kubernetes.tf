@@ -176,7 +176,7 @@ resource "helm_release" "app" {
   name      = "dozuki"
   namespace = kubernetes_namespace.app.metadata[0].name
 
-  chart = "${path.module}/charts/dozuki"
+  chart = "${path.module}/charts/dozuki/chart"
 
   wait = false
 
