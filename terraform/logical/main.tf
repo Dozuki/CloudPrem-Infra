@@ -52,12 +52,8 @@ provider "helm" {
 }
 
 locals {
-  dozuki_customer_id_parameter_name = var.dozuki_customer_id_parameter_name == "" ? (var.customer == "" ? "/dozuki/${var.environment}/customer_id" : "/${var.customer}/dozuki/${var.environment}/customer_id") : var.dozuki_customer_id_parameter_name
-
   is_us_gov        = data.aws_partition.current.partition == "aws-us-gov"
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
-
-  aws_profile_prefix = var.aws_profile != "" ? "AWS_PROFILE=${var.aws_profile}" : ""
 
   # Database
   db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
@@ -71,23 +67,25 @@ locals {
 
   # Grafana
   grafana_url            = var.enable_bi ? format("https://%s/%s", var.dns_domain_name, var.grafana_subpath) : null
-  grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : null
-  grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : null
+  grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : "dozuki"
+  grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : ""
 
-  # Replicated
-  app_slug           = "dozukikots"
+  # Kubernetes
   k8s_namespace_name = "dozuki"
-  app_and_channel    = "${local.app_slug}${var.replicated_channel != "" ? "/" : ""}${var.replicated_channel}"
 
-  // Map for app config passed to Replicated
+  // Map for app config
+
+  secret_values            = jsondecode(data.aws_secretsmanager_secret_version.devops_secret_version.secret_string)
+  secret_values_structured = { for key, value in local.secret_values : key => { value = value } }
+
   base_config_values = {
     customer               = { value = coalesce(var.customer, "Dozuki") }
     environment            = { value = var.environment }
     aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
     aws_region             = { value = data.aws_region.current.name }
     hostname               = { value = var.dns_domain_name }
-    bi_enabled             = { value = var.enable_bi ? "1" : "0" }
-    webhooks_enabled       = { value = var.enable_webhooks ? "1" : "0" }
+    bi_enabled             = { value = var.enable_bi ? "true" : "false" }
+    webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
     memcached_host         = { value = var.memcached_cluster_address }
     s3_kms_key             = { value = data.aws_kms_key.s3.arn }
     s3_images_bucket       = { value = var.s3_images_bucket }
@@ -102,22 +100,32 @@ locals {
     google_translate_token = { value = var.google_translate_api_token }
     nth_role_arn           = { value = var.termination_handler_role_arn }
     nth_sqs_queue_id       = { value = var.termination_handler_sqs_queue_id }
+    dns_validation         = { value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" }
   }
 
   // Optional add-on for Grafana config
-  grafana_config_values = var.enable_bi ? {
+  grafana_config_values = {
     grafana_admin_username      = { value = local.grafana_admin_username }
-    grafana_admin_password      = { value = random_password.grafana_admin[0].result }
+    grafana_admin_password      = { value = local.grafana_admin_password }
     grafana_datasource_hostname = { value = local.db_bi_host }
     grafana_datasource_password = { value = local.db_bi_password }
     grafana_settings_hostname   = { value = local.db_master_host }
     grafana_settings_username   = { value = local.db_master_username }
     grafana_settings_password   = { value = local.db_master_password }
-    grafana_subpath             = { value = var.grafana_subpath }
-  } : {}
+    grafana_subpath             = { value = try(var.grafana_subpath, "") }
+  }
 
-  all_config_values = merge(local.base_config_values, local.grafana_config_values)
+  all_config_values      = merge(local.base_config_values, local.grafana_config_values, local.secret_values_structured)
+  all_config_values_flat = { for key, value in local.all_config_values : key => value.value }
 
+}
+
+data "aws_secretsmanager_secret" "devops_secret" {
+  name = var.devops_secret_name
+}
+
+data "aws_secretsmanager_secret_version" "devops_secret_version" {
+  secret_id = data.aws_secretsmanager_secret.devops_secret.id
 }
 
 data "aws_eks_cluster" "main" {

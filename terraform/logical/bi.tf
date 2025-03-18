@@ -1,11 +1,11 @@
 resource "kubernetes_job" "dms_start" {
   count = var.dms_enabled ? 1 : 0
 
-  depends_on = [local_file.replicated_install, kubernetes_cluster_role_binding.dozuki_list_role_binding]
+  depends_on = [kubernetes_cluster_role_binding.dozuki_list_role_binding]
 
   metadata {
     name      = "dms-start"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
   spec {
     template {
@@ -36,7 +36,7 @@ resource "kubernetes_config_map" "grafana_create_db_script" {
   count = var.enable_bi ? 1 : 0
   metadata {
     name      = "grafana-create-db-script"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
 
   data = {
@@ -49,7 +49,7 @@ resource "kubernetes_job" "grafana_db_create" {
 
   metadata {
     name      = "grafana-db-create"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
   spec {
     template {

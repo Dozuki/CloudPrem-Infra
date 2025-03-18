@@ -200,6 +200,17 @@ data "aws_iam_policy_document" "eks_worker" {
 
     resources = ["*"]
   }
+
+  statement {
+    actions = [
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:ListImages"
+    ]
+
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_policy" "eks_worker" {
@@ -289,7 +300,7 @@ module "eks_cluster" {
       instance_refresh_instance_warmup        = 60
       public_ip                               = false
       metadata_http_put_response_hop_limit    = 3
-      spot_instance_pools                     = null
+      spot_instance_pools                     = 0
       update_default_version                  = true
       instance_refresh_triggers               = ["tag"]
       instance_refresh_min_healthy_percentage = 50

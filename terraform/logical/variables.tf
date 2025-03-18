@@ -35,28 +35,7 @@ variable "aws_profile" {
 }
 # --- END General Configuration --- #
 
-# --- BEGIN Network Configuration --- #
-
-variable "azs_count" {
-  default     = 3
-  type        = number
-  description = "The number of availability zones we should use for deployment."
-
-  validation {
-    condition     = var.azs_count >= 3 && var.azs_count <= 10
-    error_message = "AZ count must be between 3 and 10."
-  }
-}
-
-# --- END Network Configuration --- #
-
 # --- BEGIN App Configuration --- #
-
-variable "dozuki_customer_id_parameter_name" {
-  type        = string
-  description = "Parameter name for dozuki customer id in AWS Parameter store."
-  default     = ""
-}
 
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
@@ -68,12 +47,6 @@ variable "enable_bi" {
   description = "Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster"
   type        = string
   default     = false
-}
-
-variable "replicated_channel" {
-  description = "If specifying an app sequence for a fresh install, this is the channel that sequence was deployed to. You only need to set this if the sequence you configured was not released on the default channel associated with your customer license."
-  default     = ""
-  type        = string
 }
 
 #tfsec:ignore:general-secrets-no-plaintext-exposure
@@ -94,6 +67,12 @@ variable "grafana_subpath" {
   }
 }
 
+variable "devops_secret_name" {
+  description = "Name of the secret which houses app configuration"
+  type        = string
+  default     = "devops/app/config"
+}
+
 # --- END App Configuration --- #
 
 # --- BEGIN Physical Module Passthrough Configuration (do not set or modify) --- #
@@ -105,11 +84,6 @@ variable "eks_cluster_id" {
 
 variable "eks_oidc_cluster_access_role_name" {
   description = "ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler"
-  type        = string
-}
-
-variable "eks_cluster_access_role_arn" {
-  description = "ARN for the IAM Role for API-based EKS cluster access."
   type        = string
 }
 

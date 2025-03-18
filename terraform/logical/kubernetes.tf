@@ -1,4 +1,4 @@
-resource "kubernetes_namespace" "kots_app" {
+resource "kubernetes_namespace" "app" {
   depends_on = [helm_release.ebs_csi_driver]
   metadata {
     name = local.k8s_namespace_name
@@ -8,7 +8,7 @@ resource "kubernetes_namespace" "kots_app" {
 resource "kubernetes_role" "dozuki_subsite_role" {
   metadata {
     name      = "dozuki_subsite_role"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
 
   rule {
@@ -23,7 +23,7 @@ resource "kubernetes_role_binding" "dozuki_subsite_role_binding" {
 
   metadata {
     name      = "dozuki_subsite_role_binding"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
   role_ref {
     api_group = "rbac.authorization.k8s.io"
@@ -33,7 +33,7 @@ resource "kubernetes_role_binding" "dozuki_subsite_role_binding" {
   subject {
     kind      = "ServiceAccount"
     name      = "default"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
 }
 
@@ -68,7 +68,7 @@ resource "kubernetes_cluster_role_binding" "dozuki_list_role_binding" {
   subject {
     kind      = "ServiceAccount"
     name      = "default"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
 }
 
@@ -76,7 +76,7 @@ resource "kubernetes_secret" "dozuki_infra_credentials" {
 
   metadata {
     name      = "dozuki-infra-credentials"
-    namespace = kubernetes_namespace.kots_app.metadata[0].name
+    namespace = kubernetes_namespace.app.metadata[0].name
   }
   type = "Opaque"
 
@@ -170,4 +170,18 @@ resource "helm_release" "ebs_csi_driver" {
   namespace = "kube-system"
 
   wait = true
+}
+
+resource "helm_release" "app" {
+  name      = "dozuki"
+  namespace = kubernetes_namespace.app.metadata[0].name
+
+  chart = "${path.module}/charts/dozuki/chart"
+
+  wait = false
+
+  values = [
+    templatefile("static/app-values.yaml", local.all_config_values_flat)
+  ]
+
 }

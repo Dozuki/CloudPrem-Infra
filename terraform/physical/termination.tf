@@ -144,5 +144,5 @@ module "aws_node_termination_handler_role" {
   role_name_prefix              = local.identifier
   provider_url                  = replace(module.eks_cluster.cluster_oidc_issuer_url, "https://", "")
   role_policy_arns              = [aws_iam_policy.aws_node_termination_handler.arn]
-  oidc_fully_qualified_subjects = ["system:serviceaccount:kube-system:aws-node-termination-handler"]
+  oidc_fully_qualified_subjects = ["system:serviceaccount:dozuki:aws-node-termination-handler"]
 }
