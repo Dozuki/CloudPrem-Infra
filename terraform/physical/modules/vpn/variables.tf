@@ -30,16 +30,6 @@ variable "vpc_id" {
   description = "The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private"
   type        = string
 }
-variable "azs_count" {
-  description = "The number of availability zones we should use for deployment."
-  type        = number
-  default     = 3
-
-  validation {
-    condition     = var.azs_count >= 3 && var.azs_count <= 10
-    error_message = "AZ count must be between 3 and 10."
-  }
-}
 variable "client_cidr_block" {
   description = "AWS VPN client cidr block"
   type        = string
