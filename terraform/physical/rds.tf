@@ -147,16 +147,16 @@ module "primary_database" {
   engine         = "mysql"
   engine_version = var.rds_engine_version
 
-  port                                = 3306
-  instance_class                      = data.aws_rds_orderable_db_instance.default.instance_class
-  allocated_storage                   = var.rds_allocated_storage
-  max_allocated_storage               = var.rds_max_allocated_storage
-  storage_encrypted                   = true
-  kms_key_id                          = data.aws_kms_key.rds.arn
-  apply_immediately                   = !var.protect_resources
-  allow_major_version_upgrade         = true
-  performance_insights_enabled        = true
-  iam_database_authentication_enabled = true
+  port                         = 3306
+  instance_class               = data.aws_rds_orderable_db_instance.default.instance_class
+  allocated_storage            = var.rds_allocated_storage
+  max_allocated_storage        = var.rds_max_allocated_storage
+  storage_encrypted            = true
+  kms_key_id                   = data.aws_kms_key.rds.arn
+  apply_immediately            = !var.protect_resources
+  allow_major_version_upgrade  = true
+  performance_insights_enabled = true
+  # iam_database_authentication_enabled = true
 
   username               = "dozuki"
   random_password_length = 40
