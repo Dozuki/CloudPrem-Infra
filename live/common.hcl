@@ -25,6 +25,16 @@ locals {
   EOF
 }
 
+generate "ebs_helmignore" {
+  path      = "charts/aws-ebs-csi-driver/.helmignore"
+  if_exists = "overwrite_terragrunt"
+  contents  = local.helmignore
+}
+generate "dozuki_helmignore" {
+  path      = "charts/dozuki/chart/.helmignore"
+  if_exists = "overwrite_terragrunt"
+  contents  = local.helmignore
+}
 generate "cluster_autoscaler_helmignore" {
   path      = "charts/cluster-autoscaler/.helmignore"
   if_exists = "overwrite_terragrunt"

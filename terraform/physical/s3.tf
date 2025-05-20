@@ -101,6 +101,7 @@ data "aws_iam_policy_document" "s3_kms_key_policy" {
   }
 }
 
+#tfsec:ignore:aws-kms-auto-rotate-keys
 resource "aws_kms_key" "s3" {
   count = local.use_provided_s3_kms ? 0 : 1
 
@@ -392,8 +393,13 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_en
 }
 
 # Begin creating buckets and associated bucket resources dynamically
-# Ignore bucket logging error as tfsec is unable to figure out we *are* adding logging resources.
+# Ignore bucket logging/public block errors as tfsec is unable to figure out we *are* adding these things.
 #tfsec:ignore:aws-s3-enable-bucket-logging
+#tfsec:ignore:aws-s3-no-public-buckets
+#tfsec:ignore:aws-s3-ignore-public-acls
+#tfsec:ignore:aws-s3-block-public-acls
+#tfsec:ignore:aws-s3-block-public-policy
+#tfsec:ignore:aws-s3-specify-public-access-block
 resource "aws_s3_bucket" "guide_buckets" {
   for_each = toset(local.create_s3_bucket_names)
 

@@ -178,7 +178,8 @@ resource "helm_release" "app" {
 
   chart = "${path.module}/charts/dozuki/chart"
 
-  wait = false
+  wait              = false
+  dependency_update = true
 
   values = [
     templatefile("static/app-values.yaml", local.all_config_values_flat)
