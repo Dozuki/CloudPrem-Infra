@@ -133,6 +133,11 @@ ingress:
       service:
         name: "nextjs"
         port: 3210
+    - path: "/Apps"
+      pathType: "Prefix"
+      service:
+        name: "nextjs"
+        port: 3210
     - path: "/v2"
       pathType: "Prefix"
       service:
@@ -979,3 +984,7 @@ redis:
 mongodb:
   auth:
     enabled: false
+
+rustici:
+  password: '${rustici_password}'
+  managedPassword: '${rustici_managed_password}'
