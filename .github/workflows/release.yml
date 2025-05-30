@@ -22,7 +22,8 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Updating the spot instance allocation strategy
-            Updating the RDS TLS certificates
+            Deploy monolith via Helm instead of KOTS
+            Implement Rustici
+            Add CORS policy for image bucket
           draft: false
           prerelease: false
