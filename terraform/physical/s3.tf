@@ -469,4 +469,14 @@ resource "aws_s3_bucket_cors_configuration" "guide_documents" {
   }
 }
 
+resource "aws_s3_bucket_cors_configuration" "guide_images" {
+
+  bucket = aws_s3_bucket.guide_buckets["image"].id
+
+  cors_rule {
+    allowed_methods = ["GET"]
+    allowed_origins = ["*"]
+  }
+}
+
 # - End dynamic S3 resource creation
