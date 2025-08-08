@@ -22,8 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Deploy monolith via Helm instead of KOTS
-            Implement Rustici
-            Add CORS policy for image bucket
+            Fix old version of MySQL engine version
+            Allow for updating MySQL engine minor version via environmental config
           draft: false
           prerelease: false
