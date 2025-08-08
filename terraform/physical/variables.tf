@@ -234,16 +234,27 @@ variable "rds_backup_retention_period" {
   }
 }
 
-variable "rds_engine_version" {
+variable "rds_engine_family" {
   description = "To support legacy systems on mysql5.7 we allow setting the engine version here. Only 5.7 or 8.0 are allowed."
   type        = string
   default     = "8.0"
 
   validation {
-    condition     = contains(["5.7", "8.0"], var.rds_engine_version)
+    condition     = contains(["5.7", "8.0"], var.rds_engine_family)
+    error_message = "Only 5.7 or 8.0 are allowed mysql engine family"
+  }
+}
+variable "rds_engine_version" {
+  description = "To support legacy systems on mysql5.7 we allow setting the engine version here. Only 5.7 or 8.0 are allowed."
+  type        = string
+  default     = "8.0.43"
+
+  validation {
+    condition     = startswith(var.rds_engine_version, "5") || startswith(var.rds_engine_version, "8")
     error_message = "Only 5.7 or 8.0 are allowed mysql engine versions"
   }
 }
+
 
 variable "enable_bi" {
   description = "This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users)."
