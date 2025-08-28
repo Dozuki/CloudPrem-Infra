@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           body: |
-            Fix old version of MySQL engine version
-            Allow for updating MySQL engine minor version via environmental config
+            Update helm chart submodule version
+            Fix race condition in s3 batch job creation
           draft: false
           prerelease: false
