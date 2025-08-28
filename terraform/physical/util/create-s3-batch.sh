@@ -42,6 +42,8 @@ if [ "${6:-}" != "" ]; then
   AWS_PREFIX="AWS_PROFILE=$6"
 fi
 
+sleep 30 # Cheap insurance against a race condition caused by the batch job being created before the IAM role is ready.
+
 $AWS_PREFIX aws s3control create-job \
   --account-id "$AWS_ACCOUNT" \
   --operation '{"S3ReplicateObject":{}}' \
