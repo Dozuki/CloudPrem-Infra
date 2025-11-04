@@ -1,51 +1,70 @@
 # Values.yaml for Helm Chart using nested structure for multiple deployments
 
+# hostname: the fully-qualified domain name for this Dozuki deployment. This is the
+#   DNS name that the users will use to connect
+hostname: "${hostname}"
+
+# dns_validation: Set to true if you control the DNS for the FQDN above, or false if not.
+dns_validation: ${dns_validation}
+
+# customer: This is the name of the deployment. This value will be prefixed to all kubernetes
+#   resources created.
+customer: "${customer}"
+environment: "${environment}"
+
+# Deployment SSL configuration (manual tls)
+tls:
+  enabled: false
+  # The base64-encoded string of the SSL certificate that the app will use. Must
+  #   be the full certificate chain. The CN must match the value for the `hostname` stanza above.
+  cert: ""
+  # The base64-encoded private key that matches the certificate above.
+  key: ""
+
+# If the customer is using a private CA for SSL, specify the configmap housing the ca crt here and set enabled: true
+customCA:
+  enabled: false
+  # Name of existing ConfigMap containing CA certificates
+  configMapName: "customer-ca-cert"
+
 aws:
   region: "${aws_region}"
   accountId: "${aws_acct_id}"
+  enabled: true
 
-hostname: "${hostname}"
-dns_validation: ${dns_validation} #set true if using a domain we control the dns for
-environment: "${environment}"
-customer: "${customer}"
-
-webhooks:
-  enabled: ${webhooks_enabled}
-
-grafana:
-  enabled: ${bi_enabled}
-  path: "dashboards"
-  security:
-    admin_user: "${grafana_admin_username}"
-    admin_password: "${grafana_admin_password}"
-  datasource:
-    host: "${grafana_datasource_hostname}"
-    user: "dozuki"
-    password: "${grafana_datasource_password}"
-
-memcached:
-  host: "${memcached_host}"
-s3:
-  kmsKey: "${s3_kms_key}"
-  imagesBucket: "${s3_images_bucket}"
-  pdfsBucket: "${s3_pdfs_bucket}"
-  documentsBucket: "${s3_documents_bucket}"
-  objectsBucket: "${s3_objects_bucket}"
-
-smtp:
-  enabled: ${smtp_enabled}
-  host: "${smtp_host}"
-  auth:
-    enabled: ${smtp_auth_enabled}
-    username: "${smtp_username}"
-    password: "${smtp_password}"
-
+# Deployment DB configuration
+#   This stanza contains information pertaining to the MySQL database that this deployment
+#   will use.
 db:
+  # host: the IP, or FQDN, of the MySQL Instance host.
   host: "${db_host}"
+  # user: the MySQL username
   user: "${db_user}"
+  # password: the MySQL password
   password: "${db_password}"
+  # use_pod: If you do not have a separate DB host, you can run MySQL in a pod. This should
+  #   only be used for testing purposes as it is ephemeral and may lead to data loss.
+  #   This value should generally be left as 'false'
+  use_pod: false
   rdsCaCert: |
     ${rds_ca_cert}
+
+# SMTP configuration
+smtp:
+  # enabled: true/false; do you want to send emails from this deployment?
+  enabled: ${smtp_enabled}
+  # host: The SMTP hostname
+  host: "${smtp_host}"
+  starttls: true
+  from: "${smtp_from_address}"
+  auth:
+    # auth: true/false: do you want to use SMTP auth?
+    enabled: ${smtp_auth_enabled}
+    method: "PLAIN"
+    # username: if using SMTP auth, what is the username
+    username: "${smtp_username}"
+    # password: if using SMTP auth, what is the password?
+    password: "${smtp_password}"
 
 sentry:
   dsn: "${sentry_dsn}"
@@ -60,16 +79,27 @@ surveyjs:
   licenseKey: "${surveyjs_license_key}"
 googleTranslate:
   token: "${google_translate_token}"
+
+cert_manager:
+  enabled: true
+
 hostAliases:
   - ip: "168.0.0.0"
     hostnames:
       - "ping.dozuki.com"
       - "dozuki.com"
       - "www.dozuki.com"
-image:
-  repository: "${image_repository}"
-  tag: "${image_tag}"
-  pullPolicy: "IfNotPresent"
+
+images:
+  app:
+    repository: "${image_repository}"
+    path: "app"
+    tag: "${image_tag}"
+    pullPolicy: "IfNotPresent"
+  webnextjs:
+    path: "${nextjs_repository}"
+    tag: "${nextjs_tag}"
+    pullPolicy: "IfNotPresent"
 
 
 featureRequests:
@@ -100,69 +130,70 @@ ingress:
   configurationSnippet: "proxy_set_header X-Forwarded-Proto $scheme;"
   proxyBodySize: "0"
   ingressClassName: "nginx"
-  hostname: "${hostname}"
-  tlsSecretName: "tls-secret"
-  paths:
-    - path: "/_next"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/Courses"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/Skills"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/external-training-modules"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/User/Signoffs"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/Quizzes"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/Apps"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/v2"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/Guide/intro/periodic-review"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/JIB"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/bff-api"
-      pathType: "Prefix"
-      service:
-        name: "nextjs"
-        port: 3210
-    - path: "/"
-      pathType: "Prefix"
-      service:
-        name: "app"
-        port: 80
+  hosts:
+    - hostname: "${hostname}"
+      tlsSecretName: "tls-secret"
+      paths:
+        - path: "/_next"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/Courses"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/Skills"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/external-training-modules"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/User/Signoffs"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/Quizzes"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/Apps"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/v2"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/Guide/intro/periodic-review"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/JIB"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/bff-api"
+          pathType: "Prefix"
+          service:
+            name: "nextjs"
+            port: 3210
+        - path: "/"
+          pathType: "Prefix"
+          service:
+            name: "app"
+            port: 80
 # Values.yaml for Services Template
 
 service:
@@ -233,18 +264,8 @@ service:
 
 # Values.yaml for Secrets Template
 secrets:
-  - name: tls-secret
-    enabled: false # set true if manual tls is enabled
-    stringData:
-      tls.key: "${manual_tls_private_key}"
-      tls.crt: "${manual_tls_certificate}"
-  - name: le-tls-cert
-    enabled: false # set true if manual tls is enabled
-    stringData:
-      tls.key: "${manual_tls_private_key}"
-      tls.crt: "${manual_tls_certificate}"
   - name: grafana-common-config
-    enabled: true # set true if BI is enabled
+    enabled: ${bi_enabled} # set true if BI is enabled
     stringData:
       GRAFANA_SUBPATH: "/dashboards"
       GF_SERVER_SERVE_FROM_SUBPATH: "true"
@@ -352,6 +373,9 @@ hpas:
             type: Utilization
             averageUtilization: 80
 
+webhooks:
+  enabled: ${webhooks_enabled}
+
 connectivity:
   frontegg:
     images:
@@ -413,50 +437,23 @@ connectivity:
 
 # values.yaml
 
-minio:
+# For S3 or S3-compatible services. If endpoint is empty, S3 assumed.
+objectStorage:
+  kmsKey: "${s3_kms_key}"
+  endpoint: ""
+  imagesBucket: "${s3_images_bucket}"
+  pdfsBucket: "${s3_pdfs_bucket}"
+  documentsBucket: "${s3_documents_bucket}"
+  objectsBucket: "${s3_objects_bucket}"
+  credentials:
+    accessKey: ""
+    secretKey: ""
+
+coredns:
   enabled: false
-  # Set the deployment mode to 'standalone' to use a single MinIO server
-  mode: standalone
-
-  # Set the number of replicas to 1
-  replicas: 1
-
-  # Disable the MinIO Console to prevent additional pods
-  console:
-    enabled: false
-
-  # Disable Prometheus metrics exporters to prevent extra pods
-  prometheus:
-    enabled: true
-
-  # Disable tracing to prevent extra pods
-  tracing:
-    enabled: false
-
-  # Configure persistence (optional)
-  persistence:
-    enabled: true          # Set to 'false' if you don't need data persistence
-    size: 10Gi  # Adjust based on your cluster's storage classes
-    storageClass: ebs-gp3
-
-  # Provide your access and secret keys
-  accessKey: myminioaccesskey
-  secretKey: myminiosecretkey
-
-  # Adjust resource requests and limits (optional)
-  resources:
-    limits:
-      cpu: 100m
-      memory: 256Mi
-    requests:
-      cpu: 50m
-      memory: 128Mi
-
-  # Disable other features that may spawn additional pods
-  metrics:
-    enabled: false
-  update:
-    enabled: false
+  customDomain: "onprem.dozuki"
+  # Ingress controller service for main app traffic
+  ingressService: "ingress-nginx-controller"
 
 deployments:
   app:
@@ -466,20 +463,6 @@ deployments:
       - "bash"
       - "/bootstrap/entrypoints/app.sh"
     env:
-      - name: "USER_SMTP_AUTH_ENABLED"
-        value: "true"
-      - name: "USER_SMTP_STARTTLS"
-        value: "true"
-      - name: "USER_SMTP_AUTH"
-        value: "PLAIN"
-      - name: "USER_SMTP_HOST"
-        value: "${smtp_host}"
-      - name: "USER_SMTP_USER"
-        value: "${smtp_username}"
-      - name: "USER_SMTP_PASS"
-        value: "${smtp_password}"
-      - name: "USER_SMTP_FROM"
-        value: "${smtp_from_address}"
       - name: "SSL_PROTOCOL"
         value: "all -SSLv3 -TLSv1 -TLSv1.1"
       - name: "SSL_CIPHER_SUITE"
@@ -507,13 +490,9 @@ deployments:
     restartPolicy: "Always"
     initContainers:
       - name: db-startup-check
-        image: ${image_repository}:${image_tag}
         command:
           - bash
           - "/bootstrap/entrypoints/db_startup_check.sh"
-        env:
-          - name: USER_USERHOSTNAME
-            value: '${hostname}'
         volumeMounts:
           - name: dozuki-config
             mountPath: "/etc/dozuki"
@@ -522,16 +501,10 @@ deployments:
             cpu: 200m
             memory: 256Mi
       - name: db-initialize
-        image: ${image_repository}:${image_tag}
         command:
           - bash
           - "-e"
           - "/bootstrap/db_initialize.sh"
-        env:
-          - name: USER_DOMAIN_NAME
-            value: '${hostname}'
-          - name: USER_USERHOSTNAME
-            value: '${hostname}'
         volumeMounts:
           - name: dozuki-config
             mountPath: "/etc/dozuki"
@@ -540,15 +513,12 @@ deployments:
             cpu: 200m
             memory: 256Mi
       - name: db-rds-snapshot
-        image: ${image_repository}:${image_tag}
         command:
           - bash
           - "/bootstrap/entrypoints/db_rds_snapshot.sh"
         env:
           - name: APPLICATION_RELEASE_NUMBER
             value: ''
-          - name: USER_USERHOSTNAME
-            value: '${hostname}'
         volumeMounts:
           - name: dozuki-config
             mountPath: "/etc/dozuki"
@@ -557,32 +527,12 @@ deployments:
             cpu: 200m
             memory: 256Mi
       - name: db-migrations
-        image: ${image_repository}:${image_tag}
         command:
           - bash
           - "/bootstrap/entrypoints/db_migrations.sh"
         env:
           - name: APPLICATION_RELEASE_NUMBER
             value: ''
-          - name: USER_DOMAIN_NAME
-            value: '${hostname}'
-          - name: USER_USERHOSTNAME
-            value: '${hostname}'
-        volumeMounts:
-          - name: dozuki-config
-            mountPath: "/etc/dozuki"
-        resources:
-          requests:
-            cpu: 200m
-            memory: 256Mi
-      - name: webhook-sync
-        image: ${image_repository}:${image_tag}
-        command:
-          - "/usr/bin/php"
-          - '/home/ifixit/Code/Exec/syncWebhookConfigWithFrontegg.php'
-        env:
-          - name: USER_USERHOSTNAME
-            value: '${hostname}'
         volumeMounts:
           - name: dozuki-config
             mountPath: "/etc/dozuki"
@@ -640,7 +590,7 @@ deployments:
     name: consul
     replicaCount: 1
     image:
-      repository: "${consul_repository}"
+      path: "consul"
       tag: "${consul_tag}"
     command:
       - "/usr/local/bin/docker-entrypoint.sh"
@@ -723,14 +673,6 @@ deployments:
     command:
       - "bash"
       - "/bootstrap/entrypoints/queueworkerd.sh"
-    env:
-      USER_SMTP_AUTH_ENABLED: "true"
-      USER_SMTP_STARTTLS: "true"
-      USER_SMTP_AUTH: "PLAIN"
-      USER_SMTP_HOST: "${smtp_host}"
-      USER_SMTP_USER: "${smtp_username}"
-      USER_SMTP_PASS: "${smtp_password}"
-      USER_SMTP_FROM: "${smtp_from_address}"
     volumeMounts:
       - name: "dozuki-config"
         mountPath: "/etc/dozuki"
@@ -822,7 +764,6 @@ deployments:
   webNextjs:
     name: nextjs
     replicaCount: 2
-    image: "${nextjs_repository}:${nextjs_tag}"
     imagePullPolicy: "IfNotPresent"
     command:
       - "node"
@@ -850,6 +791,7 @@ deployments:
     restartPolicy: "Always"
 
 aws-node-termination-handler:
+  enabled: true
   enableSqsTerminationDraining: true
   queueURL: '${nth_sqs_queue_id}'
   webhookURL: '${slack_webhook_url}'
@@ -860,6 +802,17 @@ aws-node-termination-handler:
     name: aws-node-termination-handler
     annotations:
       "eks.amazonaws.com/role-arn": "${nth_role_arn}"
+
+grafana:
+  enabled: ${bi_enabled}
+  path: "dashboards"
+  security:
+    admin_user: "${grafana_admin_username}"
+    admin_password: "${grafana_admin_password}"
+  datasource:
+    host: "${grafana_datasource_hostname}"
+    user: "username"
+    password: "${grafana_datasource_password}"
 
 kube-prometheus-stack:
   defaultRules:
@@ -967,7 +920,6 @@ ingress-nginx:
       keep-alive: "65"                 # Keep-alive timeout in seconds
       ssl-session-cache-size: "10m"      # SSL session cache size
       ssl-session-timeout: "1d"          # SSL session timeout
-      ssl-session-tickets: "on"
       upstream-keepalive-connections: "32"      # Number of keepalive connections per worker
       upstream-keepalive-timeout: "75"        # Timeout in seconds for keepalive connections
       upstream-keepalive-requests: "100"
@@ -988,3 +940,170 @@ mongodb:
 rustici:
   password: '${rustici_password}'
   managedPassword: '${rustici_managed_password}'
+
+# Memcached configuration
+memcached:
+  # Memcached server host - can be local service or remote ElastiCache cluster
+  host: "${memcached_host}"
+  # This enabled flag is for the local installation of memcache so true = install memcache on cluster (onprem)
+  enabled: false
+
+  # Use a specific image if needed for air-gapped
+  image:
+    registry: docker.io
+    repository: bitnami/memcached
+    tag: 1.6.21-debian-11-r0
+    pullPolicy: IfNotPresent
+
+  # Minimal single node configuration
+  replicaCount: 1
+
+  # Architecture: standalone for single node
+  architecture: standalone
+
+  # Minimal resource allocation
+  resources:
+    limits:
+      memory: 64Mi
+      cpu: 50m
+    requests:
+      memory: 32Mi
+      cpu: 25m
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 11211
+
+  # Disable persistence for minimal setup
+  persistence:
+    enabled: false
+
+  # Minimal memory allocation for cache (in MB)
+  memcachedMaxMemory: 32
+
+  # Connection limit
+  memcachedConnLimit: 1024
+
+  # Disable metrics for minimal setup
+  metrics:
+    enabled: false
+
+  # Security - disable SASL for simplicity
+  auth:
+    enabled: false
+
+# OpenSearch configuration
+opensearch:
+  enabled: true
+
+  # Single node configuration (set to false for production cluster)
+  singleNode: true
+
+  # Node group name
+  nodeGroup: "master"
+
+  # Number of master-eligible nodes (set to 3+ for HA production)
+  masterReplicas: 1
+
+  # Image configuration
+  image:
+    repository: "opensearchproject/opensearch"
+    tag: "2.18.0"
+    pullPolicy: "IfNotPresent"
+
+  # Security configuration
+  # When enabled, OpenSearch will use internal users database for authentication
+  security:
+    enabled: true
+    # Admin credentials - CHANGE THESE IN PRODUCTION
+    # These will be hashed and stored in internal_users.yml
+    adminUsername: "admin"
+    adminPassword: "Admin@123"  # Must be at least 8 characters with complexity
+
+    # Additional users can be defined here
+#    users:
+#      # Example: read-only user
+#      - username: "readonly"
+#        password: "ReadOnly@123"
+#        roles: ["readall"]
+#      # Example: application user
+#      - username: "dozuki"
+#        password: "Dozuki@123"
+#        roles: ["readall", "writeall"]
+
+  # Security plugin configuration
+  config:
+    opensearch.yml: |
+      network.host: 0.0.0.0
+      plugins:
+        security:
+          disabled: false
+          allow_unsafe_democertificates: true
+          allow_default_init_securityindex: true
+          authcz.admin_dn:
+            - "CN=A,OU=UNIT,O=ORG,L=TORONTO,ST=ONTARIO,C=CA"
+          nodes_dn:
+            - "CN=N,OU=UNIT,O=ORG,L=TORONTO,ST=ONTARIO,C=CA"
+          ssl:
+            transport:
+              enforce_hostname_verification: false
+              resolve_hostname: false
+            http:
+              enabled: false  # Set to true for HTTPS with custom certificates
+
+  # Resource allocation
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+
+  # Persistence configuration
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""  # Leave empty for default StorageClass
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9200
+
+  # Environment variables
+  extraEnvs:
+    - name: DISABLE_INSTALL_DEMO_CONFIG
+      value: "false"  # Keep demo config for development; set to true for production with custom certs
+    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: "Admin@123"  # Change this in production
+
+  # JVM heap size (should be ~50% of resources.requests.memory)
+  opensearchJavaOpts: "-Xms512m -Xmx512m"
+
+  # Pod disruption budget
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+
+  # Ingress configuration (if exposing externally)
+  ingress:
+    enabled: false
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"  # or HTTPS if SSL enabled
+    hosts:
+      - opensearch.onprem.dozuki
+    tls:
+      - secretName: opensearch-tls
+        hosts:
+          - opensearch.onprem.dozuki
+
+  # Secret for credentials (optional - use instead of inline passwords)
+  # secretMounts:
+  #   - name: opensearch-credentials
+  #     secretName: opensearch-admin-credentials
+  #     path: /usr/share/opensearch/config/opensearch-security
