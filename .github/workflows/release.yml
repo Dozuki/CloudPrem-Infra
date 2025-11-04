@@ -23,6 +23,6 @@ jobs:
           release_name: Release ${{ github.ref }}
           body: |
             Update helm chart submodule version
-            Fix race condition in s3 batch job creation
+            Update app-values.yaml to match submodule version requirements
           draft: false
           prerelease: false
