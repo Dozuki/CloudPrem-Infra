@@ -93,7 +93,6 @@ hostAliases:
 images:
   app:
     repository: "${image_repository}"
-    path: "app"
     tag: "${image_tag}"
     pullPolicy: "IfNotPresent"
   webnextjs:
