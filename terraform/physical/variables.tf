@@ -398,7 +398,7 @@ variable "eks_desired_capacity" {
 variable "eks_k8s_version" {
   description = "Version of Kubernetes to launch or upgrade to. EKS does not support rolling back versions or upgrade version skipping."
   type        = string
-  default     = "1.27"
+  default     = "1.32"
 }
 
 variable "enable_webhooks" {
