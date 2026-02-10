@@ -23,6 +23,6 @@ jobs:
           release_name: Release ${{ github.ref }}
           body: |
             Update helm chart submodule version
-            Update app-values.yaml to match submodule version requirements
+            Fix opensearch SSL configuration and resource limits
           draft: false
           prerelease: false
