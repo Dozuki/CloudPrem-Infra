@@ -1,12 +1,3 @@
-resource "aws_security_group_rule" "replicated_ui_access" {
-  type              = "ingress"
-  from_port         = 32001
-  to_port           = 32001
-  protocol          = "tcp"
-  cidr_blocks       = local.replicated_ui_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.worker_security_group_id
-  description       = "Access to the replicated UI"
-}
 
 resource "aws_security_group_rule" "app_access_https" {
   type              = "ingress"
@@ -44,31 +35,22 @@ module "nlb" {
 
   target_groups = [
     {
-      name_prefix      = "rep-"
-      backend_protocol = "TCP"
-      backend_port     = 32001
-      target_type      = "instance"
+      name_prefix       = "app-"
+      backend_protocol  = "TCP"
+      backend_port      = 32005
+      target_type       = "instance"
+      proxy_protocol_v2 = true
     },
     {
-      name_prefix      = "app-"
-      backend_protocol = "TCP"
-      backend_port     = 32005
-      target_type      = "instance"
-    },
-    {
-      name_prefix      = "acme-"
-      backend_protocol = "TCP"
-      backend_port     = 32010
-      target_type      = "instance"
+      name_prefix       = "acme-"
+      backend_protocol  = "TCP"
+      backend_port      = 32010
+      target_type       = "instance"
+      proxy_protocol_v2 = true
     }
   ]
 
   http_tcp_listeners = [
-    {
-      port               = 8800
-      protocol           = "TCP"
-      target_group_index = 0
-    },
     {
       port               = 443
       protocol           = "TCP"

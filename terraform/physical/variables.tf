@@ -314,12 +314,6 @@ variable "app_public_access" {
   default     = true
 }
 
-variable "replicated_ui_access_cidrs" {
-  description = "These CIDRs will be allowed to connect to the app dashboard. This is where you upgrade to new versions as well as view cluster status and start/stop the cluster. You probably want to lock this down to your company network CIDR, especially if you chose 'true' for public access."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
-
 variable "app_access_cidrs" {
   description = "These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR."
   type        = list(string)
