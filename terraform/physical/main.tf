@@ -110,9 +110,8 @@ locals {
   // If the secure default BI CIDRs computed above equals neither a default route (0.0.0.0/0) NOR the local VPC CIDR
   // then ensure the local VPC CIDR is included in the access list. This ensures that local VPC resources will always have
   // access even if the customer has a custom CIDR access list.
-  bi_access_cidrs            = local.secure_default_bi_access_cidrs != tolist(["0.0.0.0/0"]) && local.secure_default_bi_access_cidrs != [local.vpc_cidr] ? concat([local.vpc_cidr], var.bi_access_cidrs) : local.secure_default_bi_access_cidrs
-  app_access_cidrs           = var.app_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.app_access_cidrs) : var.app_access_cidrs
-  replicated_ui_access_cidrs = var.replicated_ui_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.replicated_ui_access_cidrs) : var.replicated_ui_access_cidrs
+  bi_access_cidrs  = local.secure_default_bi_access_cidrs != tolist(["0.0.0.0/0"]) && local.secure_default_bi_access_cidrs != [local.vpc_cidr] ? concat([local.vpc_cidr], var.bi_access_cidrs) : local.secure_default_bi_access_cidrs
+  app_access_cidrs = var.app_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.app_access_cidrs) : var.app_access_cidrs
 
   # --S3 Buckets--
   // If all 4 guide buckets are specified we use them as a replication source.
