@@ -1012,53 +1012,23 @@ opensearch:
     tag: "2.18.0"
     pullPolicy: "IfNotPresent"
 
-  # Security configuration
-  # When enabled, OpenSearch will use internal users database for authentication
+  # Security disabled for dev - no auth required
   security:
-    enabled: true
-    # Admin credentials - CHANGE THESE IN PRODUCTION
-    # These will be hashed and stored in internal_users.yml
-    adminUsername: "admin"
-    adminPassword: "Admin@123"  # Must be at least 8 characters with complexity
+    enabled: false
 
-    # Additional users can be defined here
-#    users:
-#      # Example: read-only user
-#      - username: "readonly"
-#        password: "ReadOnly@123"
-#        roles: ["readall"]
-#      # Example: application user
-#      - username: "dozuki"
-#        password: "Dozuki@123"
-#        roles: ["readall", "writeall"]
-
-  # Security plugin configuration
+  # OpenSearch configuration - security plugin disabled for dev
   config:
     opensearch.yml: |
       network.host: 0.0.0.0
-      plugins:
-        security:
-          disabled: false
-          allow_unsafe_democertificates: true
-          allow_default_init_securityindex: true
-          authcz.admin_dn:
-            - "CN=A,OU=UNIT,O=ORG,L=TORONTO,ST=ONTARIO,C=CA"
-          nodes_dn:
-            - "CN=N,OU=UNIT,O=ORG,L=TORONTO,ST=ONTARIO,C=CA"
-          ssl:
-            transport:
-              enforce_hostname_verification: false
-              resolve_hostname: false
-            http:
-              enabled: false  # Set to true for HTTPS with custom certificates
+      plugins.security.disabled: true
 
   # Resource allocation
   resources:
     requests:
-      cpu: "500m"
+      cpu: "1000m"
       memory: "1Gi"
     limits:
-      cpu: "1000m"
+      cpu: "1500m"
       memory: "2Gi"
 
   # Persistence configuration
@@ -1075,9 +1045,9 @@ opensearch:
   # Environment variables
   extraEnvs:
     - name: DISABLE_INSTALL_DEMO_CONFIG
-      value: "false"  # Keep demo config for development; set to true for production with custom certs
-    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
-      value: "Admin@123"  # Change this in production
+      value: "true"
+    - name: DISABLE_SECURITY_PLUGIN
+      value: "true"
 
   # JVM heap size (should be ~50% of resources.requests.memory)
   opensearchJavaOpts: "-Xms512m -Xmx512m"
@@ -1090,17 +1060,13 @@ opensearch:
   # Ingress configuration (if exposing externally)
   ingress:
     enabled: false
-    ingressClassName: nginx
-    annotations:
-      nginx.ingress.kubernetes.io/ssl-redirect: "true"
-      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"  # or HTTPS if SSL enabled
-    hosts:
-      - opensearch.onprem.dozuki
-    tls:
-      - secretName: opensearch-tls
-        hosts:
-          - opensearch.onprem.dozuki
+#    ingressClassName: nginx
+#    annotations:
+#      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+#      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+#    hosts:
+#      - opensearch.onprem.dozuki
+#    tls: []
 
   # Secret for credentials (optional - use instead of inline passwords)
   # secretMounts:
