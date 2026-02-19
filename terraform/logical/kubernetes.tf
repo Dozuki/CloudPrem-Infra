@@ -153,8 +153,15 @@ resource "helm_release" "cert_manager" {
 
   namespace = kubernetes_namespace.cert_manager.metadata[0].name
 
+  wait = true
+
   set {
-    name  = "installCRDs"
+    name  = "crds.enabled"
+    value = "true"
+  }
+
+  set {
+    name  = "crds.keep"
     value = "true"
   }
 }
@@ -173,6 +180,8 @@ resource "helm_release" "ebs_csi_driver" {
 }
 
 resource "helm_release" "app" {
+  depends_on = [helm_release.cert_manager]
+
   name      = "dozuki"
   namespace = kubernetes_namespace.app.metadata[0].name
 

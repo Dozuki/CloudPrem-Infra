@@ -917,6 +917,7 @@ ingress-nginx:
         http: "32010"
         https: "32005"
     config:
+      use-proxy-protocol: "true"
       keep-alive: "65"                 # Keep-alive timeout in seconds
       ssl-session-cache-size: "10m"      # SSL session cache size
       ssl-session-timeout: "1d"          # SSL session timeout
