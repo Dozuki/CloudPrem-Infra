@@ -23,6 +23,8 @@ jobs:
           release_name: Release ${{ github.ref }}
           body: |
             Update helm chart submodule version
-            Fix opensearch SSL configuration and resource limits
+            Fix opensearch hostname misconfiguration
+            Update cert-manager to latest version as well as necessary changes to the terraform to support it
+            Fix proxypass nlb configuration issue and mismatched target group
           draft: false
           prerelease: false
