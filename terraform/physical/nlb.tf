@@ -54,12 +54,12 @@ module "nlb" {
     {
       port               = 443
       protocol           = "TCP"
-      target_group_index = 1
+      target_group_index = 0
     },
     {
       port               = 80
       protocol           = "TCP"
-      target_group_index = 2
+      target_group_index = 1
     }
   ]
 
