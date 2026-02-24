@@ -97,7 +97,7 @@ images:
     tag: "${image_tag}"
     pullPolicy: "IfNotPresent"
   webnextjs:
-    path: "${nextjs_repository}"
+    path: "web-nextjs"
     tag: "${nextjs_tag}"
     pullPolicy: "IfNotPresent"
 
