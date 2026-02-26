@@ -118,6 +118,12 @@ variable "dns_domain_name" {
   description = "Auto-provisioned subdomain for this environment"
 }
 
+variable "ingress_hostname" {
+  type        = string
+  description = "Hostname for the app ingress. Set to a wildcard (e.g. *.customer.com) for customer-provided certs. Defaults to dns_domain_name."
+  default     = ""
+}
+
 variable "memcached_cluster_address" {
   type        = string
   description = "Address of the deployed memcached cluster"

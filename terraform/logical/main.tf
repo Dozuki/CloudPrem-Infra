@@ -84,6 +84,7 @@ locals {
     aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
     aws_region             = { value = data.aws_region.current.name }
     hostname               = { value = var.dns_domain_name }
+    ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
     bi_enabled             = { value = var.enable_bi ? "true" : "false" }
     webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
     memcached_host         = { value = var.memcached_cluster_address }
