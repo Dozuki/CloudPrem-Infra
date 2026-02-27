@@ -101,6 +101,8 @@
 | [aws_msk_configuration.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/msk_configuration) | resource |
 | [aws_route53_record.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.subsite_subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
+| [aws_route53_record.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
+| [aws_route53_zone.vault_private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_zone) | resource |
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket.logging_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_acl.logging_bucket_acl](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_acl) | resource |
@@ -122,6 +124,7 @@
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group_rule.acme_access_http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.app_access_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
@@ -136,6 +139,7 @@
 | [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_association) | resource |
 | [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
+| [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_vpc_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
@@ -203,6 +207,7 @@
 | <a name="input_elasticache_cluster_size"></a> [elasticache\_cluster\_size](#input\_elasticache\_cluster\_size) | Cluster size | `number` | `1` | no |
 | <a name="input_elasticache_instance_type"></a> [elasticache\_instance\_type](#input\_elasticache\_instance\_type) | Elastic cache instance type | `string` | `"cache.t2.micro"` | no |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users). | `bool` | `false` | no |
+| <a name="input_enable_vault"></a> [enable\_vault](#input\_enable\_vault) | Enable connectivity to a centrally managed HashiCorp Vault cluster via PrivateLink for secret management. | `bool` | `false` | no |
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
@@ -225,6 +230,7 @@
 | <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br>  "%CUSTOMER%",<br>  "%ENVIRONMENT%",<br>  "%REGION%",<br>  "%ACCOUNT%"<br>]</pre> | no |
 | <a name="input_subdomain_override"></a> [subdomain\_override](#input\_subdomain\_override) | For upgrades only, new stacks use `customer`. If the previous version used an identifier but you want the subdomain to be different, add it here. | `string` | `""` | no |
 | <a name="input_use_existing_s3_kms"></a> [use\_existing\_s3\_kms](#input\_use\_existing\_s3\_kms) | To use the s3\_kms\_key\_id provided for the new s3 buckets as well, set this to true. | `bool` | `false` | no |
+| <a name="input_vault_endpoint_service_name"></a> [vault\_endpoint\_service\_name](#input\_vault\_endpoint\_service\_name) | VPC Endpoint Service name for the Vault PrivateLink service. Required when enable\_vault is true. | `string` | `""` | no |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | The CIDR block for the VPC | `string` | `"172.16.0.0/16"` | no |
 | <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | The VPC ID where we'll be deploying our resources. (If creating a new VPC leave this field and subnets blank). When using an existing VPC be sure to tag at least 2 subnets with type = public and another 2 with tag type = private | `string` | `""` | no |
 
@@ -244,6 +250,7 @@
 | <a name="output_eks_cluster_access_role_arn"></a> [eks\_cluster\_access\_role\_arn](#output\_eks\_cluster\_access\_role\_arn) | IAM Role ARN for EKS cluster access |
 | <a name="output_eks_cluster_id"></a> [eks\_cluster\_id](#output\_eks\_cluster\_id) | EKS Cluster Name |
 | <a name="output_eks_oidc_cluster_access_role_name"></a> [eks\_oidc\_cluster\_access\_role\_name](#output\_eks\_oidc\_cluster\_access\_role\_name) | OIDC-compatible IAM role name for EKS cluster access |
+| <a name="output_eks_oidc_issuer_url"></a> [eks\_oidc\_issuer\_url](#output\_eks\_oidc\_issuer\_url) | OIDC issuer URL for the EKS cluster |
 | <a name="output_eks_worker_asg_arns"></a> [eks\_worker\_asg\_arns](#output\_eks\_worker\_asg\_arns) | EKS worker autoscaling group ARNs |
 | <a name="output_eks_worker_asg_names"></a> [eks\_worker\_asg\_names](#output\_eks\_worker\_asg\_names) | EKS worker autoscaling group names |
 | <a name="output_guide_images_bucket"></a> [guide\_images\_bucket](#output\_guide\_images\_bucket) | n/a |
@@ -253,9 +260,11 @@
 | <a name="output_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#output\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list |
 | <a name="output_nlb_dns_name"></a> [nlb\_dns\_name](#output\_nlb\_dns\_name) | The FQDN of the NLB. |
 | <a name="output_primary_db_secret"></a> [primary\_db\_secret](#output\_primary\_db\_secret) | Secretmanager ARN to MySQL credential storage |
+| <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs for the VPC |
 | <a name="output_s3_kms_key_id"></a> [s3\_kms\_key\_id](#output\_s3\_kms\_key\_id) | n/a |
 | <a name="output_s3_replicate_buckets"></a> [s3\_replicate\_buckets](#output\_s3\_replicate\_buckets) | n/a |
 | <a name="output_termination_handler_role_arn"></a> [termination\_handler\_role\_arn](#output\_termination\_handler\_role\_arn) | IAM Role arn for EKS node termination handler |
 | <a name="output_termination_handler_sqs_queue_id"></a> [termination\_handler\_sqs\_queue\_id](#output\_termination\_handler\_sqs\_queue\_id) | SQS Queue ID for EKS node termination handler |
+| <a name="output_vault_endpoint_dns"></a> [vault\_endpoint\_dns](#output\_vault\_endpoint\_dns) | Private DNS name for reaching Vault via PrivateLink |
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | VPC ID |
 <!-- END_TF_DOCS -->

@@ -73,6 +73,12 @@ variable "devops_secret_name" {
   default     = "devops/app/config"
 }
 
+variable "enable_vault" {
+  description = "Use HashiCorp Vault for secret management via External Secrets Operator instead of Terraform-managed Kubernetes secrets."
+  type        = bool
+  default     = false
+}
+
 # --- END App Configuration --- #
 
 # --- BEGIN Physical Module Passthrough Configuration (do not set or modify) --- #
@@ -176,4 +182,16 @@ variable "dms_enabled" {
   type        = bool
   default     = false
 }
+variable "vault_address" {
+  description = "Vault server address accessible from within the cluster (e.g. http://vault.internal.dozuki.com:8200)"
+  type        = string
+  default     = ""
+}
+
+variable "vault_auth_mount_path" {
+  description = "Vault Kubernetes auth mount path for this customer (e.g. k8s-customername)"
+  type        = string
+  default     = ""
+}
+
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #

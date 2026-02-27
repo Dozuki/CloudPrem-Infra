@@ -93,3 +93,15 @@ output "dms_enabled" {
   description = "Whether DMS was enabled or not via combination of other input variables or directly"
   value       = local.dms_enabled
 }
+output "eks_oidc_issuer_url" {
+  description = "OIDC issuer URL for the EKS cluster"
+  value       = module.eks_cluster.cluster_oidc_issuer_url
+}
+output "private_subnet_ids" {
+  description = "Private subnet IDs for the VPC"
+  value       = local.private_subnet_ids
+}
+output "vault_endpoint_dns" {
+  description = "Private DNS name for reaching Vault via PrivateLink"
+  value       = try(aws_route53_record.vault[0].fqdn, "")
+}

@@ -73,6 +73,7 @@ resource "kubernetes_cluster_role_binding" "dozuki_list_role_binding" {
 }
 
 resource "kubernetes_secret" "dozuki_infra_credentials" {
+  count = var.enable_vault ? 0 : 1
 
   metadata {
     name      = "dozuki-infra-credentials"

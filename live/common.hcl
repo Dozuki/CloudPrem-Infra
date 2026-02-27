@@ -78,6 +78,9 @@ dependency "physical" {
     dms_task_arn = "dummy-dms-arn"
     bi_database_credential_secret = "dummy-secret"
     dms_enabled = "false"
+    eks_oidc_issuer_url = "https://oidc.eks.us-east-1.amazonaws.com/id/DUMMY"
+    private_subnet_ids = ["subnet-dummy-a", "subnet-dummy-b", "subnet-dummy-c"]
+    vault_endpoint_dns = ""
   }
   mock_outputs_merge_strategy_with_state = "shallow"
 }
@@ -109,4 +112,5 @@ inputs = {
   memcached_cluster_address = dependency.physical.outputs.memcached_cluster_address
   dms_task_arn = dependency.physical.outputs.dms_task_arn
   dms_enabled = dependency.physical.outputs.dms_enabled
+  vault_address = dependency.physical.outputs.vault_endpoint_dns != "" ? "http://${dependency.physical.outputs.vault_endpoint_dns}:8200" : ""
 }
