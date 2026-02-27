@@ -131,7 +131,7 @@ ingress:
   proxyBodySize: "0"
   ingressClassName: "nginx"
   hosts:
-    - hostname: "${hostname}"
+    - hostname: "${ingress_hostname}"
       tlsSecretName: "tls-secret"
       paths:
         - path: "/_next"
