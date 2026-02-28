@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.0"
     }
+    vault = {
+      source  = "hashicorp/vault"
+      version = "~> 4.0"
+    }
     null = {
       source  = "hashicorp/null"
       version = "~> 3.0"
@@ -51,6 +55,15 @@ provider "helm" {
   }
 }
 
+provider "vault" {
+  address = var.vault_address
+
+  # Authentication is configured via environment variables:
+  #   VAULT_TOKEN or VAULT_ROLE_ID/VAULT_SECRET_ID for AppRole
+  # When vault is disabled, this provider is unused.
+  skip_child_token = true
+}
+
 locals {
   is_us_gov        = data.aws_partition.current.partition == "aws-us-gov"
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
@@ -75,7 +88,7 @@ locals {
 
   // Map for app config
 
-  secret_values            = jsondecode(data.aws_secretsmanager_secret_version.devops_secret_version.secret_string)
+  secret_values            = var.enable_vault ? {} : jsondecode(data.aws_secretsmanager_secret_version.devops_secret_version[0].secret_string)
   secret_values_structured = { for key, value in local.secret_values : key => { value = value } }
 
   base_config_values = {
@@ -101,6 +114,18 @@ locals {
     nth_role_arn           = { value = var.termination_handler_role_arn }
     nth_sqs_queue_id       = { value = var.termination_handler_sqs_queue_id }
     dns_validation         = { value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" }
+    vault_enabled          = { value = var.enable_vault ? "true" : "false" }
+    vault_address          = { value = var.vault_address }
+    image_repository       = { value = var.image_repository }
+    image_tag              = { value = var.image_tag }
+    nextjs_tag             = { value = var.nextjs_tag }
+    consul_tag             = { value = var.consul_tag }
+    smtp_enabled           = { value = var.smtp_enabled ? "true" : "false" }
+    smtp_host              = { value = var.smtp_host }
+    smtp_from_address      = { value = var.smtp_from_address }
+    smtp_auth_enabled      = { value = var.smtp_auth_enabled ? "true" : "false" }
+    smtp_username          = { value = var.smtp_username }
+    smtp_password          = { value = var.smtp_password }
   }
 
   // Optional add-on for Grafana config
@@ -115,17 +140,19 @@ locals {
     grafana_subpath             = { value = try(var.grafana_subpath, "") }
   }
 
-  all_config_values      = merge(local.base_config_values, local.grafana_config_values, local.secret_values_structured)
+  all_config_values      = merge(local.base_config_values, local.grafana_config_values, local.secret_values_structured, local.vault_config_values)
   all_config_values_flat = { for key, value in local.all_config_values : key => value.value }
 
 }
 
 data "aws_secretsmanager_secret" "devops_secret" {
-  name = var.devops_secret_name
+  count = var.enable_vault ? 0 : 1
+  name  = var.devops_secret_name
 }
 
 data "aws_secretsmanager_secret_version" "devops_secret_version" {
-  secret_id = data.aws_secretsmanager_secret.devops_secret.id
+  count     = var.enable_vault ? 0 : 1
+  secret_id = data.aws_secretsmanager_secret.devops_secret[0].id
 }
 
 data "aws_eks_cluster" "main" {

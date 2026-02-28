@@ -79,6 +79,66 @@ variable "enable_vault" {
   default     = false
 }
 
+variable "image_tag" {
+  description = "Docker image tag for the main Dozuki app container. Changes with every deploy."
+  type        = string
+}
+
+variable "nextjs_tag" {
+  description = "Docker image tag for the Next.js frontend container. Changes with every deploy."
+  type        = string
+}
+
+variable "consul_tag" {
+  description = "Docker image tag for the Consul container."
+  type        = string
+  default     = "1.6.0"
+}
+
+variable "image_repository" {
+  description = "Docker image repository (ECR) for app containers."
+  type        = string
+  default     = "069174876992.dkr.ecr.us-east-1.amazonaws.com"
+}
+
+variable "smtp_enabled" {
+  description = "Whether to enable SMTP email sending."
+  type        = bool
+  default     = true
+}
+
+variable "smtp_host" {
+  description = "SMTP server hostname."
+  type        = string
+  default     = "smtp.sendgrid.net"
+}
+
+variable "smtp_from_address" {
+  description = "SMTP from email address."
+  type        = string
+  default     = "noreply@dozuki.com"
+}
+
+variable "smtp_auth_enabled" {
+  description = "Whether to use SMTP authentication."
+  type        = bool
+  default     = true
+}
+
+variable "smtp_username" {
+  description = "SMTP authentication username."
+  type        = string
+  default     = "apikey"
+}
+
+#tfsec:ignore:general-secrets-no-plaintext-exposure
+variable "smtp_password" {
+  description = "SMTP authentication password."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 # --- END App Configuration --- #
 
 # --- BEGIN Physical Module Passthrough Configuration (do not set or modify) --- #
@@ -184,12 +244,6 @@ variable "dms_enabled" {
 }
 variable "vault_address" {
   description = "Vault server address accessible from within the cluster (e.g. http://vault.internal.dozuki.com:8200)"
-  type        = string
-  default     = ""
-}
-
-variable "vault_auth_mount_path" {
-  description = "Vault Kubernetes auth mount path for this customer (e.g. k8s-customername)"
   type        = string
   default     = ""
 }

@@ -1,146 +1,128 @@
-# ---------------------------------------------------------------------------
-# External Secrets Operator + Vault Integration
-# Deploys ESO and configures it to pull secrets from a centrally managed
-# Vault cluster, replacing Terraform-managed Kubernetes secrets.
-# ---------------------------------------------------------------------------
+# Vault secret seeding — writes per-environment secrets that Terraform manages
+# and reads system-wide secrets pre-seeded in vault-infrastructure.
+#
+# These resources only apply when vault is enabled. When vault is disabled,
+# secrets flow through the devops/app/config Secrets Manager secret instead.
 
 locals {
-  vault_customer_name = coalesce(var.customer, "dozuki")
+  vault_tenant     = coalesce(var.customer, "dozuki")
+  vault_env_prefix = "${local.vault_tenant}/${var.environment}"
 }
 
-resource "kubernetes_namespace" "external_secrets" {
-  count = var.enable_vault ? 1 : 0
+# --- Per-environment secrets (seeded by Terraform) --- #
 
-  metadata {
-    name = "external-secrets"
-  }
+resource "vault_kv_secret_v2" "db" {
+  count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "${local.vault_env_prefix}/db"
+
+  data_json = jsonencode({
+    host     = local.db_master_host
+    username = local.db_master_username
+    password = local.db_master_password
+  })
 }
 
-resource "helm_release" "external_secrets" {
-  count = var.enable_vault ? 1 : 0
+resource "vault_kv_secret_v2" "bi" {
+  count = var.enable_vault && var.enable_bi ? 1 : 0
+  mount = "secret"
+  name  = "${local.vault_env_prefix}/bi"
 
-  name       = "external-secrets"
-  repository = "https://charts.external-secrets.io"
-  chart      = "external-secrets"
-  version    = "0.10.7"
-  namespace  = kubernetes_namespace.external_secrets[0].metadata[0].name
-
-  wait    = true
-  timeout = 300
-
-  set {
-    name  = "installCRDs"
-    value = "true"
-  }
+  data_json = jsonencode({
+    host     = local.db_bi_host
+    password = local.db_bi_password
+  })
 }
 
-resource "kubernetes_manifest" "vault_secret_store" {
+resource "vault_kv_secret_v2" "cache" {
   count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "${local.vault_env_prefix}/cache"
 
-  depends_on = [helm_release.external_secrets]
-
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "SecretStore"
-    metadata = {
-      name      = "vault-backend"
-      namespace = local.k8s_namespace_name
-    }
-    spec = {
-      provider = {
-        vault = {
-          server  = var.vault_address
-          path    = "secret"
-          version = "v2"
-          auth = {
-            kubernetes = {
-              mountPath = var.vault_auth_mount_path
-              role      = "dozuki-app"
-              serviceAccountRef = {
-                name = "external-secrets"
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+  data_json = jsonencode({
+    host = var.memcached_cluster_address
+  })
 }
 
-resource "kubernetes_manifest" "vault_external_secret" {
+resource "vault_kv_secret_v2" "google_translate" {
+  count = var.enable_vault && var.google_translate_api_token != "" ? 1 : 0
+  mount = "secret"
+  name  = "${local.vault_env_prefix}/google-translate"
+
+  data_json = jsonencode({
+    token = var.google_translate_api_token
+  })
+}
+
+resource "vault_kv_secret_v2" "smtp" {
+  count = var.enable_vault && var.smtp_password != "" ? 1 : 0
+  mount = "secret"
+  name  = "${local.vault_env_prefix}/smtp"
+
+  data_json = jsonencode({
+    password = var.smtp_password
+  })
+}
+
+# --- System-wide secrets (read from Vault, pre-seeded by vault-infrastructure) --- #
+
+data "vault_kv_secret_v2" "global_sentry" {
   count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "dozuki/global/sentry"
+}
 
-  depends_on = [kubernetes_manifest.vault_secret_store]
+data "vault_kv_secret_v2" "global_frontegg" {
+  count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "dozuki/global/frontegg"
+}
 
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "ExternalSecret"
-    metadata = {
-      name      = "dozuki-infra-credentials"
-      namespace = local.k8s_namespace_name
-    }
-    spec = {
-      refreshInterval = "5m"
-      secretStoreRef = {
-        name = "vault-backend"
-        kind = "SecretStore"
-      }
-      target = {
-        name           = "dozuki-infra-credentials"
-        creationPolicy = "Owner"
-        deletionPolicy = "Retain"
-      }
-      data = [
-        {
-          secretKey = "master_host"
-          remoteRef = {
-            key      = "secret/${local.vault_customer_name}/db/primary"
-            property = "host"
-          }
-        },
-        {
-          secretKey = "master_user"
-          remoteRef = {
-            key      = "secret/${local.vault_customer_name}/db/primary"
-            property = "username"
-          }
-        },
-        {
-          secretKey = "master_password"
-          remoteRef = {
-            key      = "secret/${local.vault_customer_name}/db/primary"
-            property = "password"
-          }
-        },
-        {
-          secretKey = "bi_host"
-          remoteRef = {
-            key      = "secret/${local.vault_customer_name}/db/bi"
-            property = "host"
-          }
-        },
-        {
-          secretKey = "bi_user"
-          remoteRef = {
-            key      = "secret/${local.vault_customer_name}/db/bi"
-            property = "username"
-          }
-        },
-        {
-          secretKey = "bi_password"
-          remoteRef = {
-            key      = "secret/${local.vault_customer_name}/db/bi"
-            property = "password"
-          }
-        },
-        {
-          secretKey = "memcached_host"
-          remoteRef = {
-            key      = "secret/${local.vault_customer_name}/infra/cache"
-            property = "memcached_host"
-          }
-        },
-      ]
-    }
-  }
+data "vault_kv_secret_v2" "global_surveyjs" {
+  count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "dozuki/global/surveyjs"
+}
+
+data "vault_kv_secret_v2" "global_rustici" {
+  count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "dozuki/global/rustici"
+}
+
+data "vault_kv_secret_v2" "global_ops" {
+  count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "dozuki/global/ops"
+}
+
+data "vault_kv_secret_v2" "global_slack" {
+  count = var.enable_vault ? 1 : 0
+  mount = "secret"
+  name  = "dozuki/global/slack"
+}
+
+# --- Vault-sourced config values (replace devops/app/config SM when vault enabled) --- #
+
+locals {
+  vault_config_values = var.enable_vault ? {
+    sentry_dsn                = { value = data.vault_kv_secret_v2.global_sentry[0].data["dsn"] }
+    frontegg_client_id        = { value = data.vault_kv_secret_v2.global_frontegg[0].data["clientId"] }
+    frontegg_api_token        = { value = data.vault_kv_secret_v2.global_frontegg[0].data["apiToken"] }
+    frontegg_docker_username  = { value = data.vault_kv_secret_v2.global_frontegg[0].data["dockerUsername"] }
+    frontegg_docker_password  = { value = data.vault_kv_secret_v2.global_frontegg[0].data["dockerPassword"] }
+    frontegg_auth_pubkey      = { value = data.vault_kv_secret_v2.global_frontegg[0].data["authPubkey"] }
+    surveyjs_license_key      = { value = data.vault_kv_secret_v2.global_surveyjs[0].data["licenseKey"] }
+    rustici_password          = { value = data.vault_kv_secret_v2.global_rustici[0].data["password"] }
+    rustici_managed_password  = { value = data.vault_kv_secret_v2.global_rustici[0].data["managedPassword"] }
+    ops_basic_auth            = { value = data.vault_kv_secret_v2.global_ops[0].data["basicAuth"] }
+    infra_auth_password       = { value = data.vault_kv_secret_v2.global_ops[0].data["infraAuthPassword"] }
+    slack_webhook_url         = { value = data.vault_kv_secret_v2.global_slack[0].data["webhookUrl"] }
+    grafana_smtp_enabled      = { value = try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpEnabled"], "false") }
+    grafana_smtp_host         = { value = try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpHost"], "") }
+    grafana_smtp_user         = { value = try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpUser"], "") }
+    grafana_smtp_password     = { value = try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpPassword"], "") }
+    grafana_smtp_from_address = { value = try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpFromAddress"], "") }
+    grafana_smtp_starttls     = { value = try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpStarttls"], "OpportunisticStartTLS") }
+  } : {}
 }

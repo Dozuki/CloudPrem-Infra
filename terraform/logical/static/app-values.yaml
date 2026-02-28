@@ -80,6 +80,10 @@ surveyjs:
 googleTranslate:
   token: "${google_translate_token}"
 
+vault:
+  enabled: ${vault_enabled}
+  address: "${vault_address}"
+
 cert_manager:
   enabled: true
 
