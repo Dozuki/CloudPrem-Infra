@@ -1,35 +1,12 @@
 terraform {
-  required_version = ">= 1.3.9"
-
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 4.0"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.0"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.0"
-    }
-    vault = {
-      source  = "hashicorp/vault"
-      version = "~> 4.0"
-    }
-    null = {
-      source  = "hashicorp/null"
-      version = "~> 3.0"
-    }
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.0"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
-    }
+    aws        = { source = "hashicorp/aws" }
+    kubernetes = { source = "hashicorp/kubernetes" }
+    helm       = { source = "hashicorp/helm" }
+    vault      = { source = "hashicorp/vault" }
+    null       = { source = "hashicorp/null" }
+    local      = { source = "hashicorp/local" }
+    random     = { source = "hashicorp/random" }
   }
 }
 
@@ -56,11 +33,9 @@ provider "helm" {
 }
 
 provider "vault" {
-  address = var.vault_address
-
-  # Authentication is configured via environment variables:
-  #   VAULT_TOKEN or VAULT_ROLE_ID/VAULT_SECRET_ID for AppRole
-  # When vault is disabled, this provider is unused.
+  # Address set via VAULT_ADDR env var. The operator port-forwards to the
+  # Vault cluster (localhost:8200) when applying from a workstation.
+  # var.vault_address is the in-cluster PrivateLink address used by apps.
   skip_child_token = true
 }
 

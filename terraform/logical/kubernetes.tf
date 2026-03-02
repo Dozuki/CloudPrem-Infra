@@ -180,8 +180,40 @@ resource "helm_release" "ebs_csi_driver" {
   wait = true
 }
 
-resource "helm_release" "app" {
+resource "helm_release" "external_secrets" {
+  count      = var.enable_vault ? 1 : 0
   depends_on = [helm_release.cert_manager]
+
+  name       = "external-secrets"
+  namespace  = kubernetes_namespace.app.metadata[0].name
+  repository = "https://charts.external-secrets.io"
+  chart      = "external-secrets"
+
+  wait = true
+
+  set {
+    name  = "crds.createClusterExternalSecret"
+    value = "true"
+  }
+  set {
+    name  = "crds.createClusterSecretStore"
+    value = "true"
+  }
+}
+
+# Service account for ESO to authenticate to Vault via K8s auth.
+# The SecretStore template references this SA by name.
+resource "kubernetes_service_account" "eso_vault_auth" {
+  count = var.enable_vault ? 1 : 0
+
+  metadata {
+    name      = "dozuki-external-secrets"
+    namespace = kubernetes_namespace.app.metadata[0].name
+  }
+}
+
+resource "helm_release" "app" {
+  depends_on = [helm_release.cert_manager, helm_release.external_secrets, kubernetes_service_account.eso_vault_auth]
 
   name      = "dozuki"
   namespace = kubernetes_namespace.app.metadata[0].name

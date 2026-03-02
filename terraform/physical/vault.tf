@@ -4,6 +4,28 @@
 # managed Vault cluster via AWS PrivateLink.
 # ---------------------------------------------------------------------------
 
+data "aws_vpc_endpoint_service" "vault" {
+  count        = var.enable_vault ? 1 : 0
+  service_name = var.vault_endpoint_service_name
+}
+
+# Filter private subnets to only those in AZs supported by the endpoint
+# service. AZ name-to-ID mappings differ per account, so the service may
+# not cover every AZ the customer VPC uses.
+data "aws_subnets" "vault_compatible" {
+  count = var.enable_vault ? 1 : 0
+
+  filter {
+    name   = "subnet-id"
+    values = local.private_subnet_ids
+  }
+
+  filter {
+    name   = "availability-zone"
+    values = data.aws_vpc_endpoint_service.vault[0].availability_zones
+  }
+}
+
 resource "aws_security_group" "vault_endpoint" {
   count = var.enable_vault ? 1 : 0
 
@@ -42,7 +64,7 @@ resource "aws_vpc_endpoint" "vault" {
   vpc_id             = local.vpc_id
   service_name       = var.vault_endpoint_service_name
   vpc_endpoint_type  = "Interface"
-  subnet_ids         = local.private_subnet_ids
+  subnet_ids         = data.aws_subnets.vault_compatible[0].ids
   security_group_ids = [aws_security_group.vault_endpoint[0].id]
 
   private_dns_enabled = false
