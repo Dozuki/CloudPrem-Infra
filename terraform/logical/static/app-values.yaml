@@ -674,36 +674,21 @@ deployments:
     name: queueworker
     creationPhase: "10"
     replicaCount: 2
-    command:
-      - "bash"
-      - "/bootstrap/entrypoints/queueworkerd.sh"
     volumeMounts:
       - name: "dozuki-config"
         mountPath: "/etc/dozuki"
-      - name: "sidecar-script"
-        mountPath: "/sidecar"
+      - name: "watchdog-script"
+        mountPath: "/watchdog"
+        readOnly: true
     resources:
       requests:
         cpu: "200m"
         memory: "512Mi"
-    livenessProbe:
-      command:
-        - /bin/sh
-        - -c
-        - "nc -z beanstalkd 11300 || exit 1"
-      initialDelaySeconds: 15
-      periodSeconds: 20
-      failureThreshold: 3
-    watcher:
-      resources:
-        requests:
-          cpu: "50m"
-          memory: "32Mi"
     volumes:
       - name: "dozuki-config"
         configMap: "dozuki-resources-configmap"
-      - name: "sidecar-script"
-        configMap: "beanstalkd-watcher-script"
+      - name: "watchdog-script"
+        configMap: "beanstalkd-watchdog-script"
     restartPolicy: "Always"
     initContainers:
       - name: wait-for-beanstalkd
@@ -916,12 +901,9 @@ ingress-nginx:
       enabled: false
     ingressClass: "nginx"
     service:
-      type: "NodePort"
-      nodePorts:
-        http: "32010"
-        https: "32005"
+      type: "ClusterIP"
     config:
-      use-proxy-protocol: "true"
+      use-proxy-protocol: "false"
       keep-alive: "65"                 # Keep-alive timeout in seconds
       ssl-session-cache-size: "10m"      # SSL session cache size
       ssl-session-timeout: "1d"          # SSL session timeout

@@ -15,7 +15,7 @@ data "aws_iam_policy_document" "aws_node_termination_handler" {
     actions = [
       "autoscaling:CompleteLifecycleAction",
     ]
-    resources = module.eks_cluster.workers_asg_arns
+    resources = [for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_arn]
   }
   statement {
     effect = "Allow"
@@ -142,7 +142,7 @@ module "aws_node_termination_handler_role" {
   create_role                   = true
   role_description              = "IRSA role for ANTH, cluster ${local.identifier}"
   role_name_prefix              = local.identifier
-  provider_url                  = replace(module.eks_cluster.cluster_oidc_issuer_url, "https://", "")
+  provider_url                  = module.eks_cluster.oidc_provider
   role_policy_arns              = [aws_iam_policy.aws_node_termination_handler.arn]
   oidc_fully_qualified_subjects = ["system:serviceaccount:dozuki:aws-node-termination-handler"]
 }

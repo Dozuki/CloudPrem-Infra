@@ -94,7 +94,7 @@ module "cpu_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    AutoScalingGroupName = one([for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]])
   }
 
   alarm_actions = [
@@ -124,7 +124,7 @@ module "memory_alarm" {
   period              = 300
 
   dimensions = {
-    ClusterName = module.eks_cluster.cluster_id
+    ClusterName = module.eks_cluster.cluster_name
   }
 
   alarm_actions = [
@@ -153,7 +153,7 @@ module "disk_alarm" {
   period              = 300
 
   dimensions = {
-    ClusterName = module.eks_cluster.cluster_id
+    ClusterName = module.eks_cluster.cluster_name
   }
 
   alarm_actions = [
@@ -182,7 +182,7 @@ module "status_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    AutoScalingGroupName = one([for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]])
   }
 
   alarm_actions = [
@@ -211,7 +211,7 @@ module "nodes_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    AutoScalingGroupName = one([for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]])
   }
 
   alarm_actions = [

@@ -16,6 +16,7 @@ No requirements.
 
 | Name | Source | Version |
 |------|--------|---------|
+| <a name="module_aws_lb_controller_role"></a> [aws\_lb\_controller\_role](#module\_aws\_lb\_controller\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | ~> 5.0 |
 | <a name="module_aws_node_termination_handler_role"></a> [aws\_node\_termination\_handler\_role](#module\_aws\_node\_termination\_handler\_role) | terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc | 5.11.2 |
 | <a name="module_aws_node_termination_handler_sqs"></a> [aws\_node\_termination\_handler\_sqs](#module\_aws\_node\_termination\_handler\_sqs) | terraform-aws-modules/sqs/aws | ~> 4.0.2 |
 | <a name="module_bastion"></a> [bastion](#module\_bastion) | terraform-aws-modules/autoscaling/aws | 6.9.0 |
@@ -26,7 +27,7 @@ No requirements.
 | <a name="module_cpu_alarm"></a> [cpu\_alarm](#module\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_disk_alarm"></a> [disk\_alarm](#module\_disk\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_dms_replica_database"></a> [dms\_replica\_database](#module\_dms\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
-| <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 17.24.0 |
+| <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | ~> 20.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | 8.4.0 |
 | <a name="module_nodes_alarm"></a> [nodes\_alarm](#module\_nodes\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
@@ -41,7 +42,7 @@ No requirements.
 | <a name="module_rds_write_latency_alarm"></a> [rds\_write\_latency\_alarm](#module\_rds\_write\_latency\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
 | <a name="module_sns"></a> [sns](#module\_sns) | terraform-aws-modules/sns/aws | 5.1.0 |
 | <a name="module_status_alarm"></a> [status\_alarm](#module\_status\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | 4.2.1 |
-| <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 3.19.0 |
+| <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | ~> 5.0 |
 | <a name="module_vpn"></a> [vpn](#module\_vpn) | ./modules/vpn | n/a |
 
 ## Resources
@@ -118,13 +119,13 @@ No requirements.
 | [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
-| [aws_security_group_rule.acme_access_http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.app_access_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.nlb_to_nginx_http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.nlb_to_nginx_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_sns_topic_subscription.dms_restart_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_sns_topic_subscription.email_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_sns_topic_subscription.sns_to_slack_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
@@ -143,7 +144,6 @@ No requirements.
 | [aws_ami.amazon_linux_2023](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
-| [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/eks_cluster) | data source |
 | [aws_iam_policy_document.aws_node_termination_handler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cluster_autoscaler_pd](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
@@ -222,6 +222,7 @@ No requirements.
 | <a name="input_s3_existing_buckets"></a> [s3\_existing\_buckets](#input\_s3\_existing\_buckets) | List of the existing Dozuki buckets to use. Do not include the logging bucket. | <pre>list(object({<br>    type        = string<br>    bucket_name = string<br>  }))</pre> | `[]` | no |
 | <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | URL to an optional Slack webhook for SNS alerts. | `string` | `""` | no |
+| <a name="input_sso_admin_role_arn"></a> [sso\_admin\_role\_arn](#input\_sso\_admin\_role\_arn) | Exact IAM role ARN for the SSO AdministratorAccess permission set in this account. Required for kubectl/Lens access from workstations. Find it via: aws iam list-roles --query "Roles[?contains(RoleName,'AWSReservedSSO\_AWSAdministratorAccess')].Arn" | `string` | `""` | no |
 | <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br>  "%CUSTOMER%",<br>  "%ENVIRONMENT%",<br>  "%REGION%",<br>  "%ACCOUNT%"<br>]</pre> | no |
 | <a name="input_subdomain_override"></a> [subdomain\_override](#input\_subdomain\_override) | For upgrades only, new stacks use `customer`. If the previous version used an identifier but you want the subdomain to be different, add it here. | `string` | `""` | no |
 | <a name="input_use_existing_s3_kms"></a> [use\_existing\_s3\_kms](#input\_use\_existing\_s3\_kms) | To use the s3\_kms\_key\_id provided for the new s3 buckets as well, set this to true. | `bool` | `false` | no |
@@ -246,14 +247,17 @@ No requirements.
 | <a name="output_eks_cluster_id"></a> [eks\_cluster\_id](#output\_eks\_cluster\_id) | EKS Cluster Name |
 | <a name="output_eks_oidc_cluster_access_role_name"></a> [eks\_oidc\_cluster\_access\_role\_name](#output\_eks\_oidc\_cluster\_access\_role\_name) | OIDC-compatible IAM role name for EKS cluster access |
 | <a name="output_eks_oidc_issuer_url"></a> [eks\_oidc\_issuer\_url](#output\_eks\_oidc\_issuer\_url) | OIDC issuer URL for the EKS cluster |
-| <a name="output_eks_worker_asg_arns"></a> [eks\_worker\_asg\_arns](#output\_eks\_worker\_asg\_arns) | EKS worker autoscaling group ARNs |
-| <a name="output_eks_worker_asg_names"></a> [eks\_worker\_asg\_names](#output\_eks\_worker\_asg\_names) | EKS worker autoscaling group names |
+| <a name="output_eks_worker_asg_arns"></a> [eks\_worker\_asg\_arns](#output\_eks\_worker\_asg\_arns) | EKS managed node group autoscaling group ARNs |
+| <a name="output_eks_worker_asg_names"></a> [eks\_worker\_asg\_names](#output\_eks\_worker\_asg\_names) | EKS managed node group autoscaling group names |
 | <a name="output_guide_images_bucket"></a> [guide\_images\_bucket](#output\_guide\_images\_bucket) | n/a |
 | <a name="output_guide_objects_bucket"></a> [guide\_objects\_bucket](#output\_guide\_objects\_bucket) | n/a |
 | <a name="output_guide_pdfs_bucket"></a> [guide\_pdfs\_bucket](#output\_guide\_pdfs\_bucket) | n/a |
+| <a name="output_lb_controller_role_arn"></a> [lb\_controller\_role\_arn](#output\_lb\_controller\_role\_arn) | IAM role ARN for the AWS Load Balancer Controller |
 | <a name="output_memcached_cluster_address"></a> [memcached\_cluster\_address](#output\_memcached\_cluster\_address) | n/a |
 | <a name="output_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#output\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list |
 | <a name="output_nlb_dns_name"></a> [nlb\_dns\_name](#output\_nlb\_dns\_name) | The FQDN of the NLB. |
+| <a name="output_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#output\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding |
+| <a name="output_nlb_https_target_group_arn"></a> [nlb\_https\_target\_group\_arn](#output\_nlb\_https\_target\_group\_arn) | NLB HTTPS target group ARN for TargetGroupBinding |
 | <a name="output_primary_db_secret"></a> [primary\_db\_secret](#output\_primary\_db\_secret) | Secretmanager ARN to MySQL credential storage |
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs for the VPC |
 | <a name="output_s3_kms_key_id"></a> [s3\_kms\_key\_id](#output\_s3\_kms\_key\_id) | n/a |

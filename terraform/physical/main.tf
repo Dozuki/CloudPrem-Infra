@@ -8,11 +8,11 @@ terraform {
   }
 }
 provider "kubernetes" {
-  host                   = data.aws_eks_cluster.main.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
+  host                   = module.eks_cluster.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks_cluster.cluster_certificate_authority_data)
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
-    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
+    args        = ["eks", "get-token", "--cluster-name", module.eks_cluster.cluster_name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
     command     = "aws"
   }
 }
@@ -133,9 +133,6 @@ locals {
 }
 
 # Provider and global data resources
-data "aws_eks_cluster" "main" {
-  name = module.eks_cluster.cluster_id
-}
 data "aws_partition" "current" {}
 data "aws_availability_zones" "available" {}
 data "aws_region" "current" {}

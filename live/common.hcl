@@ -81,6 +81,9 @@ dependency "physical" {
     eks_oidc_issuer_url = "https://oidc.eks.us-east-1.amazonaws.com/id/DUMMY"
     private_subnet_ids = ["subnet-dummy-a", "subnet-dummy-b", "subnet-dummy-c"]
     vault_endpoint_dns = ""
+    nlb_https_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
+    nlb_http_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
+    lb_controller_role_arn = "arn:aws:iam::000000000000:role/dummy-lb-controller"
   }
   mock_outputs_merge_strategy_with_state = "shallow"
 }
@@ -113,4 +116,7 @@ inputs = {
   dms_task_arn = dependency.physical.outputs.dms_task_arn
   dms_enabled = dependency.physical.outputs.dms_enabled
   vault_address = dependency.physical.outputs.vault_endpoint_dns != "" ? "http://${dependency.physical.outputs.vault_endpoint_dns}:8200" : ""
+  nlb_https_target_group_arn = dependency.physical.outputs.nlb_https_target_group_arn
+  nlb_http_target_group_arn = dependency.physical.outputs.nlb_http_target_group_arn
+  lb_controller_role_arn = dependency.physical.outputs.lb_controller_role_arn
 }

@@ -13,12 +13,14 @@ resource "helm_release" "cluster_autoscaler" {
     })
   ]
 
-  set {
-    name  = "awsRegion"
-    value = data.aws_region.current.name
-  }
-  set {
-    name  = "autoDiscovery.clusterName"
-    value = var.eks_cluster_id
-  }
+  set = [
+    {
+      name  = "awsRegion"
+      value = data.aws_region.current.name
+    },
+    {
+      name  = "autoDiscovery.clusterName"
+      value = var.eks_cluster_id
+    },
+  ]
 }

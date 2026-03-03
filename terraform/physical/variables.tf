@@ -413,4 +413,10 @@ variable "vault_endpoint_service_name" {
   default     = ""
 }
 
+variable "sso_admin_role_arn" {
+  description = "Exact IAM role ARN for the SSO AdministratorAccess permission set in this account. Required for kubectl/Lens access from workstations. Find it via: aws iam list-roles --query \"Roles[?contains(RoleName,'AWSReservedSSO_AWSAdministratorAccess')].Arn\""
+  type        = string
+  default     = ""
+}
+
 # --- END App Configuration --- #

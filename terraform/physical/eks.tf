@@ -6,7 +6,7 @@ data "aws_kms_key" "eks" {
 
 resource "aws_iam_policy" "cluster_autoscaler_policy" {
   name_prefix = "cluster-autoscaler"
-  description = "EKS cluster-autoscaler policy for cluster ${module.eks_cluster.cluster_id}"
+  description = "EKS cluster-autoscaler policy for cluster ${module.eks_cluster.cluster_name}"
   policy      = data.aws_iam_policy_document.cluster_autoscaler_pd.json
 }
 
@@ -41,7 +41,7 @@ data "aws_iam_policy_document" "cluster_autoscaler_pd" {
 
     condition {
       test     = "StringEquals"
-      variable = "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/${module.eks_cluster.cluster_id}"
+      variable = "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/${module.eks_cluster.cluster_name}"
       values   = ["owned"]
     }
 
@@ -83,7 +83,7 @@ module "cluster_access_role" {
   create_role = true
   role_name   = local.cluster_access_role_name
 
-  provider_url = replace(module.eks_cluster.cluster_oidc_issuer_url, "https://", "")
+  provider_url = module.eks_cluster.oidc_provider
   role_policy_arns = [
     "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
     aws_iam_policy.cluster_access.arn,
@@ -255,135 +255,146 @@ resource "aws_iam_policy" "assume_cross_account_role" {
 #tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "17.24.0"
+  version = "~> 20.0"
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
-  # EKS cofigurations
   cluster_name    = local.identifier
   cluster_version = var.eks_k8s_version
   enable_irsa     = true
+
   # Need public access even when deploying from AWS due to the occasional inability to access private endpoints.
-  cluster_endpoint_public_access                 = true
-  cluster_endpoint_private_access                = true
-  cluster_endpoint_private_access_cidrs          = [local.vpc_cidr]
-  cluster_create_endpoint_private_access_sg_rule = true
+  cluster_endpoint_public_access  = true
+  cluster_endpoint_private_access = true
 
-  cluster_encryption_config = [
+  cluster_encryption_config = {
+    provider_key_arn = local.eks_kms_key
+    resources        = ["secrets"]
+  }
+
+  vpc_id     = local.vpc_id
+  subnet_ids = local.private_subnet_ids
+
+  # Access entries replace the old map_roles / aws-auth configmap management.
+  # EKS automatically adds managed node group roles — no manual entry needed.
+  authentication_mode                      = "API_AND_CONFIG_MAP"
+  enable_cluster_creator_admin_permissions = true
+
+  access_entries = merge(
     {
-      provider_key_arn = local.eks_kms_key
-      resources        = ["secrets"]
-    }
-  ]
+      cluster_access_oidc = {
+        principal_arn = module.cluster_access_role.iam_role_arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
+      cluster_access_assumable = {
+        principal_arn = module.cluster_access_role_assumable.iam_role_arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
+    },
+    # SSO admin access for kubectl/Lens from workstations.
+    # Access entries require an exact role ARN — wildcards are not supported.
+    var.sso_admin_role_arn != "" ? {
+      sso_admin = {
+        principal_arn = var.sso_admin_role_arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
+    } : {}
+  )
 
-  vpc_id  = local.vpc_id
-  subnets = local.private_subnet_ids
+  eks_managed_node_groups = {
+    workers = {
+      instance_types = var.eks_instance_types
+      capacity_type  = "SPOT"
+      ami_type       = "AL2023_x86_64_STANDARD"
 
-  workers_additional_policies = [
-    aws_iam_policy.eks_worker.arn,
-    aws_iam_policy.eks_worker_kms.arn,
-    aws_iam_policy.assume_cross_account_role.arn,
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore",
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-  ]
+      min_size     = var.eks_min_size
+      max_size     = var.eks_max_size
+      desired_size = var.eks_desired_capacity
 
-  worker_groups_launch_template = [
-    {
-      name                                    = "workers"
-      asg_max_size                            = var.eks_max_size
-      asg_desired_capacity                    = var.eks_desired_capacity
-      asg_min_size                            = var.eks_min_size
-      spot_allocation_strategy                = "price-capacity-optimized"
-      root_volume_type                        = "gp3"
-      root_volume_size                        = var.eks_volume_size
-      instance_refresh_enabled                = true
-      instance_refresh_instance_warmup        = 60
-      public_ip                               = false
-      metadata_http_put_response_hop_limit    = 3
-      spot_instance_pools                     = 0
-      update_default_version                  = true
-      instance_refresh_triggers               = ["tag"]
-      instance_refresh_min_healthy_percentage = 50
-      kubelet_extra_args                      = "--node-labels=node.kubernetes.io/lifecycle=spot"
-      override_instance_types                 = var.eks_instance_types
-      enable_monitoring                       = true
-      enabled_metrics = [
-        "GroupAndWarmPoolDesiredCapacity",
-        "GroupAndWarmPoolTotalCapacity",
-        "GroupDesiredCapacity",
-        "GroupInServiceCapacity",
-        "GroupInServiceInstances",
-        "GroupMaxSize",
-        "GroupMinSize",
-        "GroupPendingCapacity",
-        "GroupPendingInstances",
-        "GroupStandbyCapacity",
-        "GroupStandbyInstances",
-        "GroupTerminatingCapacity",
-        "GroupTerminatingInstances",
-        "GroupTotalCapacity",
-        "GroupTotalInstances",
-        "WarmPoolDesiredCapacity",
-        "WarmPoolMinSize",
-        "WarmPoolPendingCapacity",
-        "WarmPoolTerminatingCapacity",
-        "WarmPoolTotalCapacity",
-        "WarmPoolWarmedCapacity"
-      ]
-      target_group_arns = module.nlb.target_group_arns
-      taints = [
-        {
+      labels = {
+        "node.kubernetes.io/lifecycle" = "spot"
+      }
+
+      taints = {
+        ebs_not_ready = {
           key    = "ebs.csi.aws.com/agent-not-ready"
-          value  = "NoExecute"
+          value  = "true"
           effect = "NO_SCHEDULE"
         }
-      ]
-      tags = [
-        {
-          key                 = "aws-node-termination-handler/managed"
-          value               = true
-          propagate_at_launch = true
-        },
-        {
-          key                 = "Environment"
-          value               = var.environment
-          propagate_at_launch = true
-        },
-        {
-          key                 = "k8s.io/cluster-autoscaler/enabled"
-          value               = true
-          propagate_at_launch = true
-        },
-        {
-          key                 = "k8s.io/cluster-autoscaler/${local.identifier}"
-          value               = "owned"
-          propagate_at_launch = true
-        }
-      ]
-    }
-  ]
+      }
 
-  # Kubernetes configurations
-  write_kubeconfig = false
-  # Give both roles admin access due to the need for the OIDC assumable role and the basic assumable role. The bastion
-  # host does not seem to support the OIDC role at all so a second one was required.
-  map_roles = [ # aws-auth configmap
-    {
-      rolearn  = module.cluster_access_role.iam_role_arn
-      username = "admin"
-      groups   = ["system:masters"]
-    },
-    {
-      rolearn  = module.cluster_access_role_assumable.iam_role_arn
-      username = "admin"
-      groups   = ["system:masters"]
-    },
-    {
-      rolearn  = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/AWSReservedSSO_AWSAdministratorAccess_*"
-      username = "admin"
-      groups   = ["system:masters"]
+      block_device_mappings = {
+        xvda = {
+          device_name = "/dev/xvda"
+          ebs = {
+            volume_size           = var.eks_volume_size
+            volume_type           = "gp3"
+            encrypted             = true
+            delete_on_termination = true
+          }
+        }
+      }
+
+      iam_role_additional_policies = {
+        worker     = aws_iam_policy.eks_worker.arn
+        worker_kms = aws_iam_policy.eks_worker_kms.arn
+        cross_acct = aws_iam_policy.assume_cross_account_role.arn
+        ssm        = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        ebs_csi    = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+      }
+
+      update_config = {
+        max_unavailable_percentage = 50
+      }
+
+      metadata_options = {
+        http_endpoint               = "enabled"
+        http_tokens                 = "required"
+        http_put_response_hop_limit = 3
+      }
+
+      tags = {
+        "aws-node-termination-handler/managed"          = "true"
+        "Environment"                                   = var.environment
+        "k8s.io/cluster-autoscaler/enabled"             = "true"
+        "k8s.io/cluster-autoscaler/${local.identifier}" = "owned"
+      }
     }
-  ]
+  }
+
+  tags = local.tags
+}
+
+# IRSA role for AWS Load Balancer Controller
+module "aws_lb_controller_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.0"
+
+  role_name = "${local.identifier}-aws-lb-controller"
+
+  attach_load_balancer_controller_policy = true
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks_cluster.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:aws-load-balancer-controller"]
+    }
+  }
 
   tags = local.tags
 }

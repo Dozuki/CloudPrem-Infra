@@ -248,4 +248,19 @@ variable "vault_address" {
   default     = ""
 }
 
+variable "lb_controller_role_arn" {
+  description = "IAM role ARN for the AWS Load Balancer Controller (IRSA)"
+  type        = string
+}
+
+variable "nlb_https_target_group_arn" {
+  description = "NLB HTTPS target group ARN for TargetGroupBinding"
+  type        = string
+}
+
+variable "nlb_http_target_group_arn" {
+  description = "NLB HTTP target group ARN for TargetGroupBinding"
+  type        = string
+}
+
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #

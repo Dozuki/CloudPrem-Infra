@@ -3,16 +3,16 @@ output "msk_bootstrap_brokers" {
   value       = try(aws_msk_cluster.this[0].bootstrap_brokers, "")
 }
 output "eks_worker_asg_arns" {
-  description = "EKS worker autoscaling group ARNs"
-  value       = module.eks_cluster.workers_asg_arns
+  description = "EKS managed node group autoscaling group ARNs"
+  value       = [for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]]
 }
 output "eks_worker_asg_names" {
-  description = "EKS worker autoscaling group names"
-  value       = module.eks_cluster.workers_asg_names
+  description = "EKS managed node group autoscaling group names"
+  value       = [for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]]
 }
 output "eks_cluster_id" {
   description = "EKS Cluster Name"
-  value       = module.eks_cluster.cluster_id
+  value       = module.eks_cluster.cluster_name
 }
 output "eks_cluster_access_role_arn" {
   description = "IAM Role ARN for EKS cluster access"
@@ -104,4 +104,16 @@ output "private_subnet_ids" {
 output "vault_endpoint_dns" {
   description = "Private DNS name for reaching Vault via PrivateLink"
   value       = try(aws_route53_record.vault[0].fqdn, "")
+}
+output "nlb_https_target_group_arn" {
+  description = "NLB HTTPS target group ARN for TargetGroupBinding"
+  value       = module.nlb.target_group_arns[0]
+}
+output "nlb_http_target_group_arn" {
+  description = "NLB HTTP target group ARN for TargetGroupBinding"
+  value       = module.nlb.target_group_arns[1]
+}
+output "lb_controller_role_arn" {
+  description = "IAM role ARN for the AWS Load Balancer Controller"
+  value       = module.aws_lb_controller_role.iam_role_arn
 }

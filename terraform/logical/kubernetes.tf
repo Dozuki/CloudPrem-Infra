@@ -103,24 +103,24 @@ resource "helm_release" "adot_exporter" {
   name  = "adot-exporter-for-eks-on-ec2"
   chart = "${path.module}/charts/adot-exporter-for-eks-on-ec2"
 
-  set {
-    name  = "clusterName"
-    value = var.eks_cluster_id
-  }
-
-  set {
-    name  = "awsRegion"
-    value = data.aws_region.current.name
-  }
-
-  set {
-    name  = "adotCollector.daemonSet.service.metrics.receivers"
-    value = "{awscontainerinsightreceiver}"
-  }
-  set {
-    name  = "adotCollector.daemonSet.service.metrics.exporters"
-    value = "{awsemf}"
-  }
+  set = [
+    {
+      name  = "clusterName"
+      value = var.eks_cluster_id
+    },
+    {
+      name  = "awsRegion"
+      value = data.aws_region.current.name
+    },
+    {
+      name  = "adotCollector.daemonSet.service.metrics.receivers"
+      value = "{awscontainerinsightreceiver}"
+    },
+    {
+      name  = "adotCollector.daemonSet.service.metrics.exporters"
+      value = "{awsemf}"
+    },
+  ]
 }
 
 resource "helm_release" "fluent_bit_log_exporter" {
@@ -131,15 +131,16 @@ resource "helm_release" "fluent_bit_log_exporter" {
 
   namespace = "amazon-metrics"
 
-  set {
-    name  = "cloudWatchLogs.region"
-    value = data.aws_region.current.name
-  }
-
-  set {
-    name  = "global.namespaceOverride"
-    value = "amazon-metrics"
-  }
+  set = [
+    {
+      name  = "cloudWatchLogs.region"
+      value = data.aws_region.current.name
+    },
+    {
+      name  = "global.namespaceOverride"
+      value = "amazon-metrics"
+    },
+  ]
 }
 
 resource "kubernetes_namespace" "cert_manager" {
@@ -156,15 +157,16 @@ resource "helm_release" "cert_manager" {
 
   wait = true
 
-  set {
-    name  = "crds.enabled"
-    value = "true"
-  }
-
-  set {
-    name  = "crds.keep"
-    value = "true"
-  }
+  set = [
+    {
+      name  = "crds.enabled"
+      value = "true"
+    },
+    {
+      name  = "crds.keep"
+      value = "true"
+    },
+  ]
 }
 
 resource "helm_release" "ebs_csi_driver" {
@@ -180,6 +182,78 @@ resource "helm_release" "ebs_csi_driver" {
   wait = true
 }
 
+resource "helm_release" "aws_lb_controller" {
+  depends_on = [helm_release.cert_manager]
+
+  name       = "aws-load-balancer-controller"
+  namespace  = "kube-system"
+  repository = "https://aws.github.io/eks-charts"
+  chart      = "aws-load-balancer-controller"
+
+  wait = true
+
+  set = [
+    {
+      name  = "clusterName"
+      value = var.eks_cluster_id
+    },
+    {
+      name  = "serviceAccount.create"
+      value = "true"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = "aws-load-balancer-controller"
+    },
+    {
+      name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+      value = var.lb_controller_role_arn
+    },
+  ]
+}
+
+resource "kubernetes_manifest" "tgb_https" {
+  depends_on = [helm_release.aws_lb_controller, helm_release.app]
+
+  manifest = {
+    apiVersion = "elbv2.k8s.aws/v1beta1"
+    kind       = "TargetGroupBinding"
+    metadata = {
+      name      = "nginx-https"
+      namespace = kubernetes_namespace.app.metadata[0].name
+    }
+    spec = {
+      serviceRef = {
+        name = "dozuki-ingress-nginx-controller"
+        port = 443
+      }
+      targetGroupARN = var.nlb_https_target_group_arn
+      targetType     = "ip"
+    }
+  }
+}
+
+resource "kubernetes_manifest" "tgb_http" {
+  depends_on = [helm_release.aws_lb_controller, helm_release.app]
+
+  manifest = {
+    apiVersion = "elbv2.k8s.aws/v1beta1"
+    kind       = "TargetGroupBinding"
+    metadata = {
+      name      = "nginx-http"
+      namespace = kubernetes_namespace.app.metadata[0].name
+    }
+    spec = {
+      serviceRef = {
+        name = "dozuki-ingress-nginx-controller"
+        port = 80
+      }
+      targetGroupARN = var.nlb_http_target_group_arn
+      targetType     = "ip"
+    }
+  }
+}
+
 resource "helm_release" "external_secrets" {
   count      = var.enable_vault ? 1 : 0
   depends_on = [helm_release.cert_manager]
@@ -191,14 +265,16 @@ resource "helm_release" "external_secrets" {
 
   wait = true
 
-  set {
-    name  = "crds.createClusterExternalSecret"
-    value = "true"
-  }
-  set {
-    name  = "crds.createClusterSecretStore"
-    value = "true"
-  }
+  set = [
+    {
+      name  = "crds.createClusterExternalSecret"
+      value = "true"
+    },
+    {
+      name  = "crds.createClusterSecretStore"
+      value = "true"
+    },
+  ]
 }
 
 # Service account for ESO to authenticate to Vault via K8s auth.

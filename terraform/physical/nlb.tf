@@ -1,22 +1,23 @@
-
-resource "aws_security_group_rule" "app_access_https" {
+# With IP targeting, NLB sends traffic directly to pod IPs on the private subnets.
+# The NLB's ENIs live in the public subnets, so we allow their CIDRs to reach NGINX ports.
+resource "aws_security_group_rule" "nlb_to_nginx_https" {
   type              = "ingress"
-  from_port         = 32005
-  to_port           = 32005
+  from_port         = 443
+  to_port           = 443
   protocol          = "tcp"
   cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.worker_security_group_id
-  description       = "Access to application"
+  security_group_id = module.eks_cluster.node_security_group_id
+  description       = "NLB to NGINX HTTPS (IP target)"
 }
 
-resource "aws_security_group_rule" "acme_access_http" {
+resource "aws_security_group_rule" "nlb_to_nginx_http" {
   type              = "ingress"
-  from_port         = 32010
-  to_port           = 32010
+  from_port         = 80
+  to_port           = 80
   protocol          = "tcp"
   cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.worker_security_group_id
-  description       = "Access to port 80 for ACME http01 certificate challenges"
+  security_group_id = module.eks_cluster.node_security_group_id
+  description       = "NLB to NGINX HTTP for ACME http01 challenges (IP target)"
 }
 
 #tfsec:ignore:aws-elbv2-alb-not-public
@@ -33,20 +34,20 @@ module "nlb" {
   vpc_id  = local.vpc_id
   subnets = local.public_subnet_ids
 
+  # IP targeting: NLB sends directly to NGINX pod IPs.
+  # No proxy protocol — NLB preserves client IP natively with IP targets.
   target_groups = [
     {
-      name_prefix       = "app-"
-      backend_protocol  = "TCP"
-      backend_port      = 32005
-      target_type       = "instance"
-      proxy_protocol_v2 = true
+      name_prefix      = "app-"
+      backend_protocol = "TCP"
+      backend_port     = 443
+      target_type      = "ip"
     },
     {
-      name_prefix       = "acme-"
-      backend_protocol  = "TCP"
-      backend_port      = 32010
-      target_type       = "instance"
-      proxy_protocol_v2 = true
+      name_prefix      = "acme-"
+      backend_protocol = "TCP"
+      backend_port     = 80
+      target_type      = "ip"
     }
   ]
 
