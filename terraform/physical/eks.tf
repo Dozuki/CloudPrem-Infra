@@ -263,6 +263,11 @@ module "eks_cluster" {
   cluster_version = var.eks_k8s_version
   enable_irsa     = true
 
+  # Auto-upgrade the cluster at end of standard support to avoid extended support costs.
+  cluster_upgrade_policy = {
+    support_type = "STANDARD"
+  }
+
   # Need public access even when deploying from AWS due to the occasional inability to access private endpoints.
   cluster_endpoint_public_access  = true
   cluster_endpoint_private_access = true
