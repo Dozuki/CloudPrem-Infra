@@ -1,5 +1,21 @@
+resource "kubernetes_storage_class_v1" "ebs_gp3" {
+  metadata {
+    name = "ebs-gp3"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+  storage_provisioner    = "ebs.csi.eks.amazonaws.com"
+  reclaim_policy         = "Delete"
+  volume_binding_mode    = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+  parameters = {
+    type      = "gp3"
+    encrypted = "true"
+  }
+}
+
 resource "kubernetes_namespace" "app" {
-  depends_on = [helm_release.ebs_csi_driver]
   metadata {
     name = local.k8s_namespace_name
   }
@@ -92,57 +108,6 @@ resource "kubernetes_secret" "dozuki_infra_credentials" {
   }
 }
 
-resource "helm_release" "metrics_server" {
-  name  = "metrics-server"
-  chart = "charts/metrics-server"
-}
-
-resource "helm_release" "adot_exporter" {
-  depends_on = [helm_release.metrics_server]
-
-  name  = "adot-exporter-for-eks-on-ec2"
-  chart = "${path.module}/charts/adot-exporter-for-eks-on-ec2"
-
-  set = [
-    {
-      name  = "clusterName"
-      value = var.eks_cluster_id
-    },
-    {
-      name  = "awsRegion"
-      value = data.aws_region.current.name
-    },
-    {
-      name  = "adotCollector.daemonSet.service.metrics.receivers"
-      value = "{awscontainerinsightreceiver}"
-    },
-    {
-      name  = "adotCollector.daemonSet.service.metrics.exporters"
-      value = "{awsemf}"
-    },
-  ]
-}
-
-resource "helm_release" "fluent_bit_log_exporter" {
-  depends_on = [helm_release.adot_exporter]
-
-  chart = "${path.module}/charts/aws-for-fluent-bit"
-  name  = "aws-for-fluent-bit"
-
-  namespace = "amazon-metrics"
-
-  set = [
-    {
-      name  = "cloudWatchLogs.region"
-      value = data.aws_region.current.name
-    },
-    {
-      name  = "global.namespaceOverride"
-      value = "amazon-metrics"
-    },
-  ]
-}
-
 resource "kubernetes_namespace" "cert_manager" {
   metadata {
     name = "cert-manager"
@@ -169,54 +134,11 @@ resource "helm_release" "cert_manager" {
   ]
 }
 
-resource "helm_release" "ebs_csi_driver" {
-  name  = "ebs-csi-driver"
-  chart = "${path.module}/charts/aws-ebs-csi-driver"
-
-  values = [
-    file("static/ebs-csi-driver-values.yaml")
-  ]
-
-  namespace = "kube-system"
-
-  wait = true
-}
-
-resource "helm_release" "aws_lb_controller" {
-  depends_on = [helm_release.cert_manager]
-
-  name       = "aws-load-balancer-controller"
-  namespace  = "kube-system"
-  repository = "https://aws.github.io/eks-charts"
-  chart      = "aws-load-balancer-controller"
-
-  wait = true
-
-  set = [
-    {
-      name  = "clusterName"
-      value = var.eks_cluster_id
-    },
-    {
-      name  = "serviceAccount.create"
-      value = "true"
-    },
-    {
-      name  = "serviceAccount.name"
-      value = "aws-load-balancer-controller"
-    },
-    {
-      name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-      value = var.lb_controller_role_arn
-    },
-  ]
-}
-
 resource "kubernetes_manifest" "tgb_https" {
-  depends_on = [helm_release.aws_lb_controller, helm_release.app]
+  depends_on = [helm_release.app]
 
   manifest = {
-    apiVersion = "elbv2.k8s.aws/v1beta1"
+    apiVersion = "eks.amazonaws.com/v1"
     kind       = "TargetGroupBinding"
     metadata = {
       name      = "nginx-https"
@@ -234,10 +156,10 @@ resource "kubernetes_manifest" "tgb_https" {
 }
 
 resource "kubernetes_manifest" "tgb_http" {
-  depends_on = [helm_release.aws_lb_controller, helm_release.app]
+  depends_on = [helm_release.app]
 
   manifest = {
-    apiVersion = "elbv2.k8s.aws/v1beta1"
+    apiVersion = "eks.amazonaws.com/v1"
     kind       = "TargetGroupBinding"
     metadata = {
       name      = "nginx-http"

@@ -2,14 +2,6 @@ output "msk_bootstrap_brokers" {
   description = "Kafka bootstrap broker list"
   value       = try(aws_msk_cluster.this[0].bootstrap_brokers, "")
 }
-output "eks_worker_asg_arns" {
-  description = "EKS managed node group autoscaling group ARNs"
-  value       = [for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]]
-}
-output "eks_worker_asg_names" {
-  description = "EKS managed node group autoscaling group names"
-  value       = [for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]]
-}
 output "eks_cluster_id" {
   description = "EKS Cluster Name"
   value       = module.eks_cluster.cluster_name
@@ -17,18 +9,6 @@ output "eks_cluster_id" {
 output "eks_cluster_access_role_arn" {
   description = "IAM Role ARN for EKS cluster access"
   value       = module.cluster_access_role_assumable.iam_role_arn
-}
-output "eks_oidc_cluster_access_role_name" {
-  description = "OIDC-compatible IAM role name for EKS cluster access"
-  value       = local.cluster_access_role_name
-}
-output "termination_handler_role_arn" {
-  description = "IAM Role arn for EKS node termination handler"
-  value       = module.aws_node_termination_handler_role.iam_role_arn
-}
-output "termination_handler_sqs_queue_id" {
-  description = "SQS Queue ID for EKS node termination handler"
-  value       = module.aws_node_termination_handler_sqs.queue_id
 }
 output "dns_domain_name" {
   description = "URL to deployed application"
@@ -112,8 +92,4 @@ output "nlb_https_target_group_arn" {
 output "nlb_http_target_group_arn" {
   description = "NLB HTTP target group ARN for TargetGroupBinding"
   value       = module.nlb.target_group_arns[1]
-}
-output "lb_controller_role_arn" {
-  description = "IAM role ARN for the AWS Load Balancer Controller"
-  value       = module.aws_lb_controller_role.iam_role_arn
 }

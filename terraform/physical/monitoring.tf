@@ -76,16 +76,15 @@ resource "aws_sns_topic_subscription" "email_subscription" {
   endpoint  = var.alarm_email # Replace with your email address
 }
 
-# The alarm should never trigger unless something is wrong with the cluster autoscaler, or the max scale has been met
-module "cpu_alarm" {
+module "node_cpu_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "4.2.1"
 
   alarm_name        = "${local.identifier}-cpu-high"
-  alarm_description = "CPU utilization high for ${local.identifier} worker nodes"
+  alarm_description = "CPU utilization high for ${local.identifier} cluster"
 
-  namespace   = "AWS/EC2"
-  metric_name = "CPUUtilization"
+  namespace   = "ContainerInsights"
+  metric_name = "node_cpu_utilization"
   statistic   = "Average"
 
   comparison_operator = "GreaterThanThreshold"
@@ -94,7 +93,7 @@ module "cpu_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = one([for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]])
+    ClusterName = module.eks_cluster.cluster_name
   }
 
   alarm_actions = [
@@ -154,64 +153,6 @@ module "disk_alarm" {
 
   dimensions = {
     ClusterName = module.eks_cluster.cluster_name
-  }
-
-  alarm_actions = [
-    module.sns.topic_arn
-  ]
-
-  ok_actions = [
-    module.sns.topic_arn
-  ]
-}
-
-module "status_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
-
-  alarm_name        = "${local.identifier}-status"
-  alarm_description = "Status check for ${local.identifier} cluster"
-
-  namespace   = "AWS/EC2"
-  metric_name = "StatusCheckFailed"
-  statistic   = "Average"
-
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 3
-  threshold           = 1
-  period              = 60
-
-  dimensions = {
-    AutoScalingGroupName = one([for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]])
-  }
-
-  alarm_actions = [
-    module.sns.topic_arn
-  ]
-
-  ok_actions = [
-    module.sns.topic_arn
-  ]
-}
-
-module "nodes_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
-
-  alarm_name        = "${local.identifier}-nodes-in-service"
-  alarm_description = "Nodes in service under desired capacity for ${local.identifier} cluster"
-
-  namespace   = "AWS/AutoScaling"
-  metric_name = "GroupInServiceInstances"
-  statistic   = "Sum"
-
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 1
-  threshold           = var.eks_desired_capacity
-  period              = 60
-
-  dimensions = {
-    AutoScalingGroupName = one([for ng in module.eks_cluster.eks_managed_node_groups : ng.node_group_autoscaling_group_names[0]])
   }
 
   alarm_actions = [

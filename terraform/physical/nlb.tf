@@ -6,7 +6,7 @@ resource "aws_security_group_rule" "nlb_to_nginx_https" {
   to_port           = 443
   protocol          = "tcp"
   cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.node_security_group_id
+  security_group_id = module.eks_cluster.cluster_primary_security_group_id
   description       = "NLB to NGINX HTTPS (IP target)"
 }
 
@@ -16,7 +16,7 @@ resource "aws_security_group_rule" "nlb_to_nginx_http" {
   to_port           = 80
   protocol          = "tcp"
   cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.node_security_group_id
+  security_group_id = module.eks_cluster.cluster_primary_security_group_id
   description       = "NLB to NGINX HTTP for ACME http01 challenges (IP target)"
 }
 
@@ -65,4 +65,10 @@ module "nlb" {
   ]
 
   tags = local.tags
+
+  # Auto Mode's LB controller requires this tag on externally-created target
+  # groups so its scoped session policy allows RegisterTargets/DeregisterTargets.
+  target_group_tags = {
+    "eks:eks-cluster-name" = module.eks_cluster.cluster_name
+  }
 }

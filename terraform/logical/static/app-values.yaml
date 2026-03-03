@@ -779,19 +779,6 @@ deployments:
                 topologyKey: "kubernetes.io/hostname"
     restartPolicy: "Always"
 
-aws-node-termination-handler:
-  enabled: true
-  enableSqsTerminationDraining: true
-  queueURL: '${nth_sqs_queue_id}'
-  webhookURL: '${slack_webhook_url}'
-  enablePrometheusServer: true
-  emitKubernetesEvents: true
-  completeLifecycleActionDelaySeconds: 30
-  serviceAccount:
-    name: aws-node-termination-handler
-    annotations:
-      "eks.amazonaws.com/role-arn": "${nth_role_arn}"
-
 grafana:
   enabled: ${bi_enabled}
   path: "dashboards"

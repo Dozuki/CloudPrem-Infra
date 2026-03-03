@@ -148,26 +148,6 @@ variable "eks_cluster_id" {
   type        = string
 }
 
-variable "eks_oidc_cluster_access_role_name" {
-  description = "ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler"
-  type        = string
-}
-
-variable "eks_worker_asg_names" {
-  description = "Autoscaling group names for the EKS cluster"
-  type        = list(string)
-}
-
-variable "termination_handler_role_arn" {
-  description = "IAM Role for EKS node termination handler"
-  type        = string
-}
-
-variable "termination_handler_sqs_queue_id" {
-  description = "SQS Queue ID for the EKS node termination handler"
-  type        = string
-}
-
 variable "primary_db_secret" {
   description = "ARN to secret containing primary db credentials"
   type        = string
@@ -246,11 +226,6 @@ variable "vault_address" {
   description = "Vault server address accessible from within the cluster (e.g. http://vault.internal.dozuki.com:8200)"
   type        = string
   default     = ""
-}
-
-variable "lb_controller_role_arn" {
-  description = "IAM role ARN for the AWS Load Balancer Controller (IRSA)"
-  type        = string
 }
 
 variable "nlb_https_target_group_arn" {

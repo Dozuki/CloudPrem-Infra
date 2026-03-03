@@ -25,18 +25,8 @@ locals {
   EOF
 }
 
-generate "ebs_helmignore" {
-  path      = "charts/aws-ebs-csi-driver/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
 generate "dozuki_helmignore" {
   path      = "charts/dozuki/chart/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-generate "cluster_autoscaler_helmignore" {
-  path      = "charts/cluster-autoscaler/.helmignore"
   if_exists = "overwrite_terragrunt"
   contents  = local.helmignore
 }
@@ -45,12 +35,6 @@ generate "metrics_server_helmignore" {
   if_exists = "overwrite_terragrunt"
   contents  = local.helmignore
 }
-generate "adotexporter_helmignore" {
-  path      = "charts/adot-exporter-for-eks-on-ec2/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
-
 dependency "physical" {
   config_path = "${get_terragrunt_dir()}/../physical"
 
@@ -58,13 +42,8 @@ dependency "physical" {
     vpc_id = "temporary-dummy-id"
     azs_count = 3
     msk_bootstrap_brokers = "bootstrap-brokers"
-    eks_worker_asg_arns = "dummy-arn1,dummy-arn2"
-    eks_worker_asg_names = "dummy-name1,dummy-name2"
     eks_cluster_id = "dummy-cluster-id"
     eks_cluster_access_role_arn = "dummy-arn"
-    eks_oidc_cluster_access_role_name = "dummy-ca-role-arn"
-    termination_handler_role_arn = "dummy-termination-handler-role-arn"
-    termination_handler_sqs_queue_id = "dummy-sqs-id"
     dns_domain_name = "dummy-lb-dns"
     cluster_primary_sg = "dummy-sg"
     primary_db_secret = "dummy-secret-id"
@@ -83,7 +62,6 @@ dependency "physical" {
     vault_endpoint_dns = ""
     nlb_https_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
     nlb_http_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
-    lb_controller_role_arn = "arn:aws:iam::000000000000:role/dummy-lb-controller"
   }
   mock_outputs_merge_strategy_with_state = "shallow"
 }
@@ -96,11 +74,6 @@ inputs = {
 
   eks_cluster_id = dependency.physical.outputs.eks_cluster_id
   eks_cluster_access_role_arn = dependency.physical.outputs.eks_cluster_access_role_arn
-  eks_oidc_cluster_access_role_name = dependency.physical.outputs.eks_oidc_cluster_access_role_name
-  termination_handler_role_arn = dependency.physical.outputs.termination_handler_role_arn
-  termination_handler_sqs_queue_id = dependency.physical.outputs.termination_handler_sqs_queue_id
-  eks_worker_asg_arns = dependency.physical.outputs.eks_worker_asg_arns
-  eks_worker_asg_names = dependency.physical.outputs.eks_worker_asg_names
   dns_domain_name = dependency.physical.outputs.dns_domain_name
   cluster_primary_sg = dependency.physical.outputs.cluster_primary_sg
 
@@ -118,5 +91,4 @@ inputs = {
   vault_address = dependency.physical.outputs.vault_endpoint_dns != "" ? "http://${dependency.physical.outputs.vault_endpoint_dns}:8200" : ""
   nlb_https_target_group_arn = dependency.physical.outputs.nlb_https_target_group_arn
   nlb_http_target_group_arn = dependency.physical.outputs.nlb_http_target_group_arn
-  lb_controller_role_arn = dependency.physical.outputs.lb_controller_role_arn
 }
