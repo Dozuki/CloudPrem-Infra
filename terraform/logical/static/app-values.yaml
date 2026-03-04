@@ -249,14 +249,6 @@ service:
         protocol: "UDP"
         port: 514
         targetPort: 514
-  - name: consul
-    creationPhase: "-1"
-    appLabel: "consul"
-    ports:
-      - name: "consul-port-8500"
-        protocol: "TCP"
-        port: 8500
-        targetPort: 8500
   - name: nextjs
     creationPhase: "-1"
     appLabel: "nextjs"
@@ -459,6 +451,9 @@ coredns:
   # Ingress controller service for main app traffic
   ingressService: "ingress-nginx-controller"
 
+dbMigrations:
+  rdsSnapshotEnabled: true
+
 deployments:
   app:
     name: app
@@ -492,58 +487,6 @@ deployments:
       - name: "le-tls-cert"
         secret: "tls-secret"
     restartPolicy: "Always"
-    initContainers:
-      - name: db-startup-check
-        command:
-          - bash
-          - "/bootstrap/entrypoints/db_startup_check.sh"
-        volumeMounts:
-          - name: dozuki-config
-            mountPath: "/etc/dozuki"
-        resources:
-          requests:
-            cpu: 200m
-            memory: 256Mi
-      - name: db-initialize
-        command:
-          - bash
-          - "-e"
-          - "/bootstrap/db_initialize.sh"
-        volumeMounts:
-          - name: dozuki-config
-            mountPath: "/etc/dozuki"
-        resources:
-          requests:
-            cpu: 200m
-            memory: 256Mi
-      - name: db-rds-snapshot
-        command:
-          - bash
-          - "/bootstrap/entrypoints/db_rds_snapshot.sh"
-        env:
-          - name: APPLICATION_RELEASE_NUMBER
-            value: ''
-        volumeMounts:
-          - name: dozuki-config
-            mountPath: "/etc/dozuki"
-        resources:
-          requests:
-            cpu: 200m
-            memory: 256Mi
-      - name: db-migrations
-        command:
-          - bash
-          - "/bootstrap/entrypoints/db_migrations.sh"
-        env:
-          - name: APPLICATION_RELEASE_NUMBER
-            value: ''
-        volumeMounts:
-          - name: dozuki-config
-            mountPath: "/etc/dozuki"
-        resources:
-          requests:
-            cpu: 200m
-            memory: 256Mi
   beanstalkd:
     name: beanstalkd
     replicaCount: 1
@@ -590,32 +533,6 @@ deployments:
         configMap: "dozuki-resources-configmap"
     restartPolicy: "Always"
 
-  consul:
-    name: consul
-    replicaCount: 1
-    image:
-      path: "consul"
-      tag: "${consul_tag}"
-    command:
-      - "/usr/local/bin/docker-entrypoint.sh"
-      - "agent"
-      - "-dev"
-      - "-client"
-      - "0.0.0.0"
-    volumeMounts:
-      - name: "dozuki-config"
-        mountPath: "/etc/dozuki"
-    resources:
-      requests:
-        cpu: "15m"
-        memory: "16Mi"
-    ports:
-      - containerPort: 8500
-    volumes:
-      - name: "dozuki-config"
-        configMap: "dozuki-resources-configmap"
-    restartPolicy: "Always"
-
   crond:
     name: crond
     replicaCount: 1
@@ -641,13 +558,6 @@ deployments:
       - name: "dozuki-config"
         configMap: "dozuki-resources-configmap"
     restartPolicy: "Always"
-    initContainers:
-      - name: wait-for-beanstalkd
-        image: busybox:1.28
-        command:
-          - /bin/sh
-          - -c
-          - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
 
   pixelPing:
     name: pixel-ping
@@ -690,13 +600,6 @@ deployments:
       - name: "watchdog-script"
         configMap: "beanstalkd-watchdog-script"
     restartPolicy: "Always"
-    initContainers:
-      - name: wait-for-beanstalkd
-        image: busybox:1.28
-        command:
-          - /bin/sh
-          - -c
-          - "until nc -z beanstalkd 11300; do echo 'Waiting for beanstalkd'; sleep 2; done"
 
   searchd:
     name: searchd
@@ -970,6 +873,14 @@ memcached:
 # OpenSearch configuration
 opensearch:
   enabled: true
+
+  nodeSelector:
+    karpenter.sh/capacity-type: on-demand
+  tolerations:
+    - key: eks.amazonaws.com/capacity-type
+      operator: Equal
+      value: on-demand
+      effect: NoSchedule
 
   # Single node configuration (set to false for production cluster)
   singleNode: true

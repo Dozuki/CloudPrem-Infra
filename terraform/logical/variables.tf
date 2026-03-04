@@ -89,12 +89,6 @@ variable "nextjs_tag" {
   type        = string
 }
 
-variable "consul_tag" {
-  description = "Docker image tag for the Consul container."
-  type        = string
-  default     = "1.6.0"
-}
-
 variable "image_repository" {
   description = "Docker image repository (ECR) for app containers."
   type        = string

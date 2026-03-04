@@ -92,7 +92,6 @@ locals {
     image_repository       = { value = var.image_repository }
     image_tag              = { value = var.image_tag }
     nextjs_tag             = { value = var.nextjs_tag }
-    consul_tag             = { value = var.consul_tag }
     smtp_enabled           = { value = var.smtp_enabled ? "true" : "false" }
     smtp_host              = { value = var.smtp_host }
     smtp_from_address      = { value = var.smtp_from_address }

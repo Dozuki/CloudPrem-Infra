@@ -176,6 +176,89 @@ resource "kubernetes_manifest" "tgb_http" {
   }
 }
 
+resource "kubernetes_manifest" "nodepool_spot" {
+  manifest = {
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata = {
+      name = "spot"
+    }
+    spec = {
+      template = {
+        spec = {
+          nodeClassRef = {
+            group = "eks.amazonaws.com"
+            kind  = "NodeClass"
+            name  = "default"
+          }
+          requirements = [
+            {
+              key      = "karpenter.sh/capacity-type"
+              operator = "In"
+              values   = ["spot"]
+            },
+            {
+              key      = "kubernetes.io/arch"
+              operator = "In"
+              values   = ["amd64"]
+            }
+          ]
+        }
+      }
+      disruption = {
+        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        consolidateAfter    = "1m"
+      }
+      weight = 100
+    }
+  }
+}
+
+resource "kubernetes_manifest" "nodepool_on_demand" {
+  manifest = {
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata = {
+      name = "on-demand"
+    }
+    spec = {
+      template = {
+        spec = {
+          nodeClassRef = {
+            group = "eks.amazonaws.com"
+            kind  = "NodeClass"
+            name  = "default"
+          }
+          requirements = [
+            {
+              key      = "karpenter.sh/capacity-type"
+              operator = "In"
+              values   = ["on-demand"]
+            },
+            {
+              key      = "kubernetes.io/arch"
+              operator = "In"
+              values   = ["amd64"]
+            }
+          ]
+          taints = [
+            {
+              key    = "eks.amazonaws.com/capacity-type"
+              value  = "on-demand"
+              effect = "NoSchedule"
+            }
+          ]
+        }
+      }
+      disruption = {
+        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        consolidateAfter    = "1m"
+      }
+      weight = 10
+    }
+  }
+}
+
 resource "helm_release" "external_secrets" {
   count      = var.enable_vault ? 1 : 0
   depends_on = [helm_release.cert_manager]

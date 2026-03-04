@@ -211,7 +211,7 @@ module "eks_cluster" {
   # bootstrap_self_managed_addons defaults to false when compute_config is enabled, triggering cluster replacement.
   cluster_compute_config = {
     enabled    = true
-    node_pools = ["general-purpose", "system"]
+    node_pools = ["system"]
   }
 
   vpc_id     = local.vpc_id
