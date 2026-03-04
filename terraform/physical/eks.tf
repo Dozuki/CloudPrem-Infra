@@ -331,3 +331,9 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   cluster_name = module.eks_cluster.cluster_name
   addon_name   = "amazon-cloudwatch-observability"
 }
+
+# Metrics Server add-on (provides metrics.k8s.io API for kubectl top, HPA, k9s, Lens)
+resource "aws_eks_addon" "metrics_server" {
+  cluster_name = module.eks_cluster.cluster_name
+  addon_name   = "metrics-server"
+}
