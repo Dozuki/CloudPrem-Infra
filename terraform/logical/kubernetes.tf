@@ -164,6 +164,11 @@ resource "helm_release" "cert_manager" {
     name  = "crds.keep"
     value = "true"
   }
+
+  set {
+    name  = "config.enableGatewayAPI"
+    value = "true"
+  }
 }
 
 resource "helm_release" "ebs_csi_driver" {
