@@ -45,15 +45,15 @@ variable "enable_webhooks" {
 
 variable "enable_bi" {
   description = "Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster"
-  type        = string
+  type        = bool
   default     = false
 }
 
-#tfsec:ignore:general-secrets-no-plaintext-exposure
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string
   default     = ""
+  sensitive   = true
 }
 
 variable "grafana_subpath" {

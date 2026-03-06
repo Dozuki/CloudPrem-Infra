@@ -68,7 +68,7 @@ resource "vault_aws_auth_backend_role" "stack" {
   auth_type = "iam"
 
   bound_iam_principal_arns = [
-    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.vault_stack_label}-*",
+    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.vault_stack_label}-*",
   ]
 
   token_policies = [vault_policy.stack[0].name]

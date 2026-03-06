@@ -56,7 +56,7 @@ locals {
   # Grafana
   grafana_url            = var.enable_bi ? format("https://%s/%s", var.dns_domain_name, var.grafana_subpath) : null
   grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : "dozuki"
-  grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : ""
+  grafana_admin_password = var.enable_bi ? random_password.grafana_admin[0].result : ""
 
   # Kubernetes
   k8s_namespace_name = "dozuki"

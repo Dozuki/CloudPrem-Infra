@@ -1,3 +1,19 @@
+resource "kubernetes_secret_v1" "frontegg_db_credentials" {
+  count = var.enable_webhooks ? 1 : 0
+
+  metadata {
+    name      = "frontegg-db-credentials"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
+  }
+  type = "Opaque"
+
+  data = {
+    host     = local.db_master_host
+    username = local.db_master_username
+    password = local.db_master_password
+  }
+}
+
 resource "kubernetes_config_map_v1" "frontegg_db_script" {
   count = var.enable_webhooks ? 1 : 0
 
@@ -26,10 +42,37 @@ resource "kubernetes_job_v1" "frontegg_db_create" {
         container {
           name  = "frontegg-db-create"
           image = "imega/mysql-client:10.6.4"
+          env {
+            name = "MYSQL_HOST"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret_v1.frontegg_db_credentials[0].metadata[0].name
+                key  = "host"
+              }
+            }
+          }
+          env {
+            name = "MYSQL_USER"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret_v1.frontegg_db_credentials[0].metadata[0].name
+                key  = "username"
+              }
+            }
+          }
+          env {
+            name = "MYSQL_PWD"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret_v1.frontegg_db_credentials[0].metadata[0].name
+                key  = "password"
+              }
+            }
+          }
           command = [
             "sh",
             "-c",
-            "mysql --host=${local.db_master_host} --user=${local.db_master_username} --password=${local.db_master_password} < /scripts/frontegg-db.sql"
+            "mysql --host=$MYSQL_HOST --user=$MYSQL_USER < /scripts/frontegg-db.sql"
           ]
           volume_mount {
             name       = "scripts"

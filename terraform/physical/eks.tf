@@ -87,9 +87,12 @@ data "aws_iam_policy_document" "eks_worker" {
       "s3:DeleteObjectVersionTagging"
     ]
 
-    resources = [
-      "arn:${data.aws_partition.current.partition}:s3:::*",
-    ]
+    resources = flatten([
+      for bucket in aws_s3_bucket.guide_buckets : [
+        bucket.arn,
+        "${bucket.arn}/*",
+      ]
+    ])
   }
 
   statement {

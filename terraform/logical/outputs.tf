@@ -14,6 +14,7 @@ output "grafana_admin_username" {
 output "grafana_admin_password" {
   description = "Password for Grafana admin user"
   value       = local.grafana_admin_password
+  sensitive   = true
 }
 
 output "replicate_instructions" {
