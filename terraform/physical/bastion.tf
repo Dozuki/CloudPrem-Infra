@@ -14,7 +14,7 @@ data "aws_ami" "amazon_linux_2023" {
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 module "bastion_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.17.1"
+  version = "~> 5.0"
 
   name            = "${local.identifier}-bastion"
   use_name_prefix = false
@@ -49,7 +49,7 @@ resource "aws_ssm_association" "bastion_mysql_config" {
   parameters = {
     RDSEndpoint : module.primary_database.db_instance_address
     RDSCredentialSecret : aws_secretsmanager_secret.primary_database_credentials.id
-    Region : data.aws_region.current.name
+    Region : data.aws_region.current.id
   }
 
   targets {
@@ -72,8 +72,8 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
 
   parameters = {
     EKSClusterName : module.eks_cluster.cluster_name
-    EKSClusterRole : module.cluster_access_role_assumable.iam_role_arn
-    Region : data.aws_region.current.name
+    EKSClusterRole : module.cluster_access_role_assumable.arn
+    Region : data.aws_region.current.id
   }
 
   targets {
@@ -93,12 +93,12 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
-  version = "6.9.0"
+  version = "~> 9.0"
 
   name = "${local.identifier}-bastion"
 
   create_iam_instance_profile = true
-  iam_role_name               = "${local.identifier}-${data.aws_region.current.name}-bastion"
+  iam_role_name               = "${local.identifier}-${data.aws_region.current.id}-bastion"
   iam_role_path               = "/ec2/"
   iam_role_description        = "Bastion IAM Role"
   iam_role_tags = {

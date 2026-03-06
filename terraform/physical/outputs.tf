@@ -8,7 +8,7 @@ output "eks_cluster_id" {
 }
 output "eks_cluster_access_role_arn" {
   description = "IAM Role ARN for EKS cluster access"
-  value       = module.cluster_access_role_assumable.iam_role_arn
+  value       = module.cluster_access_role_assumable.arn
 }
 output "dns_domain_name" {
   description = "URL to deployed application"
@@ -67,7 +67,7 @@ output "bastion_asg_name" {
 }
 output "nlb_dns_name" {
   description = "The FQDN of the NLB."
-  value       = module.nlb.lb_dns_name
+  value       = module.nlb.dns_name
 }
 output "dms_enabled" {
   description = "Whether DMS was enabled or not via combination of other input variables or directly"
@@ -87,9 +87,9 @@ output "vault_endpoint_dns" {
 }
 output "nlb_https_target_group_arn" {
   description = "NLB HTTPS target group ARN for TargetGroupBinding"
-  value       = module.nlb.target_group_arns[0]
+  value       = module.nlb.target_groups["app"].arn
 }
 output "nlb_http_target_group_arn" {
   description = "NLB HTTP target group ARN for TargetGroupBinding"
-  value       = module.nlb.target_group_arns[1]
+  value       = module.nlb.target_groups["acme"].arn
 }

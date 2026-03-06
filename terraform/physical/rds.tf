@@ -22,7 +22,7 @@ data "aws_kms_key" "rds" {
 }
 module "primary_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.17.1"
+  version = "~> 5.0"
 
   name            = "${local.identifier}-database"
   use_name_prefix = false
@@ -50,7 +50,7 @@ module "primary_database_sg" {
 # To make the terraform a bit easier we will always create this security group even if BI is disabled.
 module "bi_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.17.1"
+  version = "~> 5.0"
 
   name            = "${local.identifier}-bi-database"
   use_name_prefix = false

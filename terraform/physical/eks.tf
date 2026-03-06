@@ -6,22 +6,29 @@ data "aws_kms_key" "eks" {
 
 # IAM role that the bastion host can assume.
 module "cluster_access_role_assumable" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
-  version = "5.11.2"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role"
+  version = "~> 6.0"
 
-  create_role = true
+  create = true
 
-  role_name         = "${local.identifier}-${data.aws_region.current.name}-cluster-access-assumable"
-  role_requires_mfa = false
+  name            = "${local.identifier}-${data.aws_region.current.id}-cluster-access-assumable"
+  use_name_prefix = false
 
-  custom_role_policy_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
-    aws_iam_policy.cluster_access.arn
-  ]
+  policies = {
+    ReadOnlyAccess = "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess"
+    ClusterAccess  = aws_iam_policy.cluster_access.arn
+  }
 
-  trusted_role_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
-  ]
+  trust_policy_permissions = {
+    assume = {
+      effect = "Allow"
+      principals = [{
+        type        = "AWS"
+        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+      }]
+      actions = ["sts:AssumeRole"]
+    }
+  }
 
   tags = local.tags
 }
@@ -33,13 +40,13 @@ data "aws_iam_policy_document" "cluster_access" {
     ]
 
     resources = [
-      "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/${local.identifier}",
+      "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:cluster/${local.identifier}",
     ]
   }
 }
 
 resource "aws_iam_policy" "cluster_access" {
-  name   = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
+  name   = "${local.identifier}-${data.aws_region.current.id}-cluster-access"
   policy = data.aws_iam_policy_document.cluster_access.json
 }
 
@@ -144,14 +151,14 @@ data "aws_iam_policy_document" "eks_worker" {
 }
 
 resource "aws_iam_policy" "eks_worker" {
-  name   = "${local.identifier}-${data.aws_region.current.name}"
+  name   = "${local.identifier}-${data.aws_region.current.id}"
   policy = data.aws_iam_policy_document.eks_worker.json
 }
 
 # We need separate policies to maintain backwards compatibility with existing stacks. Modifying the existing policy
 # with new resources triggers a cluster breaking event.
 resource "aws_iam_policy" "eks_worker_kms" {
-  name   = "${local.identifier}-${data.aws_region.current.name}-kms"
+  name   = "${local.identifier}-${data.aws_region.current.id}-kms"
   policy = data.aws_iam_policy_document.eks_worker_kms.json
 }
 
@@ -163,7 +170,7 @@ resource "aws_kms_key" "eks" {
 }
 
 resource "aws_iam_policy" "assume_cross_account_role" {
-  name        = "${local.identifier}-${data.aws_region.current.name}-AssumeCrossAccountRole"
+  name        = "${local.identifier}-${data.aws_region.current.id}-AssumeCrossAccountRole"
   description = "Policy to assume the cross-account role for Route 53 hosted zone access"
 
   policy = jsonencode({
@@ -185,31 +192,31 @@ resource "aws_iam_policy" "assume_cross_account_role" {
 #tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.0"
+  version = "~> 21.0"
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
-  cluster_name    = local.identifier
-  cluster_version = var.eks_k8s_version
-  enable_irsa     = true
+  name               = local.identifier
+  kubernetes_version = var.eks_k8s_version
+  enable_irsa        = true
 
   # Auto-upgrade the cluster at end of standard support to avoid extended support costs.
-  cluster_upgrade_policy = {
+  upgrade_policy = {
     support_type = "STANDARD"
   }
 
   # Need public access even when deploying from AWS due to the occasional inability to access private endpoints.
-  cluster_endpoint_public_access  = true
-  cluster_endpoint_private_access = true
+  endpoint_public_access  = true
+  endpoint_private_access = true
 
-  cluster_encryption_config = {
+  encryption_config = {
     provider_key_arn = local.eks_kms_key
     resources        = ["secrets"]
   }
 
   # Auto Mode: Karpenter-based scaling, built-in EBS CSI, LB controller, and spot interruption handling.
   # bootstrap_self_managed_addons defaults to false when compute_config is enabled, triggering cluster replacement.
-  cluster_compute_config = {
+  compute_config = {
     enabled    = true
     node_pools = ["system"]
   }
@@ -224,7 +231,7 @@ module "eks_cluster" {
   access_entries = merge(
     {
       cluster_access_assumable = {
-        principal_arn = module.cluster_access_role_assumable.iam_role_arn
+        principal_arn = module.cluster_access_role_assumable.arn
         policy_associations = {
           admin = {
             policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
@@ -253,7 +260,7 @@ module "eks_cluster" {
 
 # Pod Identity: App workloads (S3, KMS, RDS, DMS, logs, ECR)
 resource "aws_iam_role" "app_pod_identity" {
-  name = "${local.identifier}-${data.aws_region.current.name}-app-pod-identity"
+  name = "${local.identifier}-${data.aws_region.current.id}-app-pod-identity"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -293,7 +300,7 @@ resource "aws_eks_pod_identity_association" "app" {
 
 # Pod Identity: cert-manager cross-account Route53
 resource "aws_iam_role" "cert_manager_pod_identity" {
-  name = "${local.identifier}-${data.aws_region.current.name}-cert-manager-pod-identity"
+  name = "${local.identifier}-${data.aws_region.current.id}-cert-manager-pod-identity"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -324,16 +331,4 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
   namespace       = "cert-manager"
   service_account = "cert-manager"
   role_arn        = aws_iam_role.cert_manager_pod_identity.arn
-}
-
-# CloudWatch Observability add-on (replaces ADOT + Fluent Bit)
-resource "aws_eks_addon" "cloudwatch_observability" {
-  cluster_name = module.eks_cluster.cluster_name
-  addon_name   = "amazon-cloudwatch-observability"
-}
-
-# Metrics Server add-on (provides metrics.k8s.io API for kubectl top, HPA, k9s, Lens)
-resource "aws_eks_addon" "metrics_server" {
-  cluster_name = module.eks_cluster.cluster_name
-  addon_name   = "metrics-server"
 }
