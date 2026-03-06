@@ -9,7 +9,7 @@ terraform {
 locals {
   identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
-  ssm_prefix = "/dozuki/${coalesce(var.identifier, "general")}/${var.environment}/${data.aws_region.current.name}"
+  ssm_prefix = "/dozuki/${coalesce(var.identifier, "general")}/${var.environment}/${data.aws_region.current.id}"
 
   # Tags for all resources. If you add a tag, it must never be blank.
   tags = {

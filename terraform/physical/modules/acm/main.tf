@@ -9,10 +9,10 @@ terraform {
 locals {
   identifier = var.identifier == "" ? "dozuki-${var.environment}" : "${var.identifier}-dozuki-${var.environment}"
 
-  ssm_prefix = "/dozuki/${coalesce(var.identifier, "general")}/${var.environment}/${data.aws_region.current.name}"
+  ssm_prefix = "/dozuki/${coalesce(var.identifier, "general")}/${var.environment}/${data.aws_region.current.id}"
 
-  ssl_ca_cn   = var.ca_common_name == "" ? "${local.identifier}.${data.aws_region.current.name}.general.ca" : var.ca_common_name
-  ssl_cert_cn = var.cert_common_name == "" ? "${local.identifier}.${data.aws_region.current.name}.general.server" : var.cert_common_name
+  ssl_ca_cn   = var.ca_common_name == "" ? "${local.identifier}.${data.aws_region.current.id}.general.ca" : var.ca_common_name
+  ssl_cert_cn = var.cert_common_name == "" ? "${local.identifier}.${data.aws_region.current.id}.general.server" : var.cert_common_name
 
   # Tags for all resources. If you add a tag, it must never be blank.
   tags = {

@@ -12,7 +12,7 @@ data "aws_iam_policy_document" "vpn-logs-kms" {
   statement {
     effect = "Allow"
     principals {
-      identifiers = ["logs.${data.aws_region.current.name}.amazonaws.com"]
+      identifiers = ["logs.${data.aws_region.current.id}.amazonaws.com"]
       type        = "Service"
     }
     actions   = ["kms:*"]

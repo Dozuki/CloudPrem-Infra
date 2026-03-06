@@ -15,7 +15,7 @@ provider "kubernetes" {
   cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
-    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
+    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.id, "--profile", var.aws_profile]
     command     = "aws"
   }
 }
@@ -26,7 +26,7 @@ provider "helm" {
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
-      args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
+      args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.id, "--profile", var.aws_profile]
       command     = "aws"
     }
   }
@@ -70,7 +70,7 @@ locals {
     customer               = { value = coalesce(var.customer, "Dozuki") }
     environment            = { value = var.environment }
     aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
-    aws_region             = { value = data.aws_region.current.name }
+    aws_region             = { value = data.aws_region.current.id }
     hostname               = { value = var.dns_domain_name }
     bi_enabled             = { value = var.enable_bi ? "true" : "false" }
     webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }

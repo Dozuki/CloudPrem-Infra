@@ -85,16 +85,16 @@ resource "vault_auth_backend" "kubernetes" {
 }
 
 # Service account for Vault to call the TokenReview API on this cluster.
-resource "kubernetes_service_account" "vault_auth" {
+resource "kubernetes_service_account_v1" "vault_auth" {
   count = var.enable_vault ? 1 : 0
 
   metadata {
     name      = "vault-auth"
-    namespace = kubernetes_namespace.app.metadata[0].name
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 }
 
-resource "kubernetes_cluster_role_binding" "vault_auth_delegator" {
+resource "kubernetes_cluster_role_binding_v1" "vault_auth_delegator" {
   count = var.enable_vault ? 1 : 0
 
   metadata {
@@ -109,20 +109,20 @@ resource "kubernetes_cluster_role_binding" "vault_auth_delegator" {
 
   subject {
     kind      = "ServiceAccount"
-    name      = kubernetes_service_account.vault_auth[0].metadata[0].name
-    namespace = kubernetes_namespace.app.metadata[0].name
+    name      = kubernetes_service_account_v1.vault_auth[0].metadata[0].name
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 }
 
 # Long-lived token secret for the vault-auth service account.
-resource "kubernetes_secret" "vault_auth_token" {
+resource "kubernetes_secret_v1" "vault_auth_token" {
   count = var.enable_vault ? 1 : 0
 
   metadata {
     name      = "vault-auth-token"
-    namespace = kubernetes_namespace.app.metadata[0].name
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
     annotations = {
-      "kubernetes.io/service-account.name" = kubernetes_service_account.vault_auth[0].metadata[0].name
+      "kubernetes.io/service-account.name" = kubernetes_service_account_v1.vault_auth[0].metadata[0].name
     }
   }
 
@@ -135,7 +135,7 @@ resource "vault_kubernetes_auth_backend_config" "stack" {
   backend              = vault_auth_backend.kubernetes[0].path
   kubernetes_host      = data.aws_eks_cluster.main.endpoint
   kubernetes_ca_cert   = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
-  token_reviewer_jwt   = kubernetes_secret.vault_auth_token[0].data["token"]
+  token_reviewer_jwt   = kubernetes_secret_v1.vault_auth_token[0].data["token"]
   disable_local_ca_jwt = true
 }
 
@@ -157,9 +157,10 @@ resource "vault_kubernetes_auth_backend_role" "eso" {
 # --- Per-environment secrets (seeded by Terraform) --- #
 
 resource "vault_kv_secret_v2" "db" {
-  count = var.enable_vault ? 1 : 0
-  mount = "secret"
-  name  = "${local.vault_env_prefix}/db"
+  count               = var.enable_vault ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/db"
+  delete_all_versions = !var.protect_resources
 
   data_json = jsonencode({
     host     = local.db_master_host
@@ -169,9 +170,10 @@ resource "vault_kv_secret_v2" "db" {
 }
 
 resource "vault_kv_secret_v2" "bi" {
-  count = var.enable_vault && var.enable_bi ? 1 : 0
-  mount = "secret"
-  name  = "${local.vault_env_prefix}/bi"
+  count               = var.enable_vault && var.enable_bi ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/bi"
+  delete_all_versions = !var.protect_resources
 
   data_json = jsonencode({
     host     = local.db_bi_host
@@ -180,9 +182,10 @@ resource "vault_kv_secret_v2" "bi" {
 }
 
 resource "vault_kv_secret_v2" "cache" {
-  count = var.enable_vault ? 1 : 0
-  mount = "secret"
-  name  = "${local.vault_env_prefix}/cache"
+  count               = var.enable_vault ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/cache"
+  delete_all_versions = !var.protect_resources
 
   data_json = jsonencode({
     host = var.memcached_cluster_address
@@ -190,9 +193,10 @@ resource "vault_kv_secret_v2" "cache" {
 }
 
 resource "vault_kv_secret_v2" "google_translate" {
-  count = var.enable_vault ? 1 : 0
-  mount = "secret"
-  name  = "${local.vault_env_prefix}/google-translate"
+  count               = var.enable_vault ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/google-translate"
+  delete_all_versions = !var.protect_resources
 
   data_json = jsonencode({
     token = var.google_translate_api_token
@@ -200,9 +204,10 @@ resource "vault_kv_secret_v2" "google_translate" {
 }
 
 resource "vault_kv_secret_v2" "smtp" {
-  count = var.enable_vault ? 1 : 0
-  mount = "secret"
-  name  = "${local.vault_env_prefix}/smtp"
+  count               = var.enable_vault ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/smtp"
+  delete_all_versions = !var.protect_resources
 
   data_json = jsonencode({
     password = var.smtp_password
