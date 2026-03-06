@@ -133,6 +133,12 @@ variable "smtp_password" {
   sensitive   = true
 }
 
+variable "protect_resources" {
+  description = "When true, retain Vault secrets on destroy (soft delete). When false, permanently purge all versions."
+  type        = bool
+  default     = true
+}
+
 # --- END App Configuration --- #
 
 # --- BEGIN Physical Module Passthrough Configuration (do not set or modify) --- #
