@@ -126,78 +126,35 @@ featureRequests:
     enabledValue: "enabled"
     disabledValue: "disabled"
 
-ingress:
-  name: "app"
+gateway:
+  name: "dozuki-gateway"
+  className: "eg"
   certIssuer: "cert-issuer"
-  sslRedirect: "true"
-  forceSslRedirect: "true"
-  configurationSnippet: "proxy_set_header X-Forwarded-Proto $scheme;"
-  proxyBodySize: "0"
-  ingressClassName: "nginx"
   hosts:
     - hostname: "${hostname}"
       tlsSecretName: "tls-secret"
-      paths:
-        - path: "/_next"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/Courses"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/Skills"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/external-training-modules"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/User/Signoffs"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/Quizzes"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/Apps"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/v2"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/Guide/intro/periodic-review"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/JIB"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/bff-api"
-          pathType: "Prefix"
-          service:
-            name: "nextjs"
-            port: 3210
-        - path: "/"
-          pathType: "Prefix"
-          service:
-            name: "app"
-            port: 80
+  nextjsPaths:
+    - "/_next"
+    - "/Courses"
+    - "/Skills"
+    - "/external-training-modules"
+    - "/User/Signoffs"
+    - "/Quizzes"
+    - "/Apps"
+    - "/v2"
+    - "/Guide/intro/periodic-review"
+    - "/JIB"
+    - "/bff-api"
+  ops:
+    basicAuthSecretName: "ops-basic-auth"
+    alertmanager:
+      enabled: true
+      hostname: "alertmanager.${hostname}"
+      tlsSecretName: "alertmanager-general-tls"
+    grafana:
+      enabled: true
+      hostname: "grafana.${hostname}"
+      tlsSecretName: "grafana-general-tls"
 # Values.yaml for Services Template
 
 service:
@@ -289,7 +246,7 @@ secrets:
   - name: ops-basic-auth
     enabled: true
     stringData:
-      auth: "${ops_basic_auth}"
+      .htpasswd: "${ops_basic_auth}"
 
 hpas:
   - name: app-hpa
@@ -449,7 +406,7 @@ coredns:
   enabled: false
   customDomain: "onprem.dozuki"
   # Ingress controller service for main app traffic
-  ingressService: "ingress-nginx-controller"
+  ingressService: "dozuki-envoy-proxy"
 
 dbMigrations:
   rdsSnapshotEnabled: true
@@ -702,24 +659,7 @@ kube-prometheus-stack:
       windows: false
   alertmanager:
     ingress:
-      enabled: true
-      ingressClassName: nginx
-      annotations:
-        cert-manager.io/cluster-issuer: "cert-issuer"
-        nginx.ingress.kubernetes.io/ssl-redirect: "true"
-        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-        nginx.ingress.kubernetes.io/auth-type: basic
-        nginx.ingress.kubernetes.io/auth-secret: ops-basic-auth
-        nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required'
-      hosts:
-        - 'alertmanager.${hostname}'
-      paths:
-        - /
-      pathType: ImplementationSpecific
-      tls:
-        - secretName: alertmanager-general-tls
-          hosts:
-            - 'alertmanager.${hostname}'
+      enabled: false
     alertmanagerSpec:
       storage:
         volumeClaimTemplate:
@@ -735,21 +675,7 @@ kube-prometheus-stack:
     defaultDashboardsTimezone: America/Los_Angeles
     adminPassword: '${infra_auth_password}'
     ingress:
-      enabled: true
-      ingressClassName: nginx
-      annotations:
-        cert-manager.io/cluster-issuer: "cert-issuer"
-        nginx.ingress.kubernetes.io/ssl-redirect: "true"
-        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-        nginx.ingress.kubernetes.io/auth-type: basic
-        nginx.ingress.kubernetes.io/auth-secret: ops-basic-auth
-        nginx.ingress.kubernetes.io/auth-realm: 'Authentication Required'
-      hosts:
-        - 'grafana.${hostname}'
-      tls:
-        - secretName: grafana-general-tls
-          hosts:
-            - 'grafana.${hostname}'
+      enabled: false
   kubeScheduler:
     enabled: false
   kubeControllerManager:
@@ -765,55 +691,6 @@ kube-prometheus-stack:
               requests:
                 storage: 50Gi
 
-ingress-nginx:
-  defaultBackend:
-    enabled: true
-    image:
-      image: ingress-nginx/nginx-errors
-      tag: v20230312-helm-chart-4.5.2-28-g66a760794@sha256:332be6ff8c4e93e8845963932f98839dfd52ae49829c29e06475368a3e4fbd9e
-    extraVolumes:
-      - name: custom-error-pages
-        configMap:
-          name: custom-error-pages
-          items:
-            - key: "503.html"
-              path: "5xx.html"
-            - key: "503.json"
-              path: "5xx.json"
-    extraVolumeMounts:
-      - name: custom-error-pages
-        mountPath: /www
-  controller:
-    kind: "DaemonSet"
-    admissionWebhooks:
-      enabled: false
-    hostPort:
-      enabled: false
-    ingressClass: "nginx"
-    service:
-      type: "ClusterIP"
-    config:
-      use-proxy-protocol: "false"
-      keep-alive: "65"                 # Keep-alive timeout in seconds
-      ssl-session-cache-size: "10m"      # SSL session cache size
-      ssl-session-timeout: "1d"          # SSL session timeout
-      upstream-keepalive-connections: "32"      # Number of keepalive connections per worker
-      upstream-keepalive-timeout: "75"        # Timeout in seconds for keepalive connections
-      upstream-keepalive-requests: "100"
-      worker-processes: "auto"
-      custom-http-errors: "503"
-
-redis:
-  architecture: "standalone"
-  tls:
-    authClients: false
-  auth:
-    enabled: false
-
-mongodb:
-  auth:
-    enabled: false
-
 rustici:
   password: '${rustici_password}'
   managedPassword: '${rustici_managed_password}'
@@ -824,51 +701,6 @@ memcached:
   host: "${memcached_host}"
   # This enabled flag is for the local installation of memcache so true = install memcache on cluster (onprem)
   enabled: false
-
-  # Use a specific image if needed for air-gapped
-  image:
-    registry: docker.io
-    repository: bitnami/memcached
-    tag: 1.6.21-debian-11-r0
-    pullPolicy: IfNotPresent
-
-  # Minimal single node configuration
-  replicaCount: 1
-
-  # Architecture: standalone for single node
-  architecture: standalone
-
-  # Minimal resource allocation
-  resources:
-    limits:
-      memory: 64Mi
-      cpu: 50m
-    requests:
-      memory: 32Mi
-      cpu: 25m
-
-  # Service configuration
-  service:
-    type: ClusterIP
-    port: 11211
-
-  # Disable persistence for minimal setup
-  persistence:
-    enabled: false
-
-  # Minimal memory allocation for cache (in MB)
-  memcachedMaxMemory: 32
-
-  # Connection limit
-  memcachedConnLimit: 1024
-
-  # Disable metrics for minimal setup
-  metrics:
-    enabled: false
-
-  # Security - disable SASL for simplicity
-  auth:
-    enabled: false
 
 # OpenSearch configuration
 opensearch:
@@ -894,7 +726,7 @@ opensearch:
   # Image configuration
   image:
     repository: "opensearchproject/opensearch"
-    tag: "2.18.0"
+    tag: "3.4.0"
     pullPolicy: "IfNotPresent"
 
   # Security disabled for dev - no auth required
