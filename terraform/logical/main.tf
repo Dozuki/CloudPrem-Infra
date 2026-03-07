@@ -73,51 +73,32 @@ locals {
   # Kubernetes
   k8s_namespace_name = "dozuki"
 
-  // Map for app config
+  secret_values = jsondecode(data.aws_secretsmanager_secret_version.devops_secret_version.secret_string)
 
-  secret_values            = jsondecode(data.aws_secretsmanager_secret_version.devops_secret_version.secret_string)
-  secret_values_structured = { for key, value in local.secret_values : key => { value = value } }
-
-  base_config_values = {
-    customer               = { value = coalesce(var.customer, "Dozuki") }
-    environment            = { value = var.environment }
-    aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
-    aws_region             = { value = data.aws_region.current.name }
-    hostname               = { value = var.dns_domain_name }
-    ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
-    bi_enabled             = { value = var.enable_bi ? "true" : "false" }
-    webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
-    memcached_host         = { value = var.memcached_cluster_address }
-    s3_kms_key             = { value = data.aws_kms_key.s3.arn }
-    s3_images_bucket       = { value = var.s3_images_bucket }
-    s3_objects_bucket      = { value = var.s3_objects_bucket }
-    s3_documents_bucket    = { value = var.s3_documents_bucket }
-    s3_pdfs_bucket         = { value = var.s3_pdfs_bucket }
-    db_host                = { value = local.db_master_host }
-    db_user                = { value = local.db_master_username }
-    db_password            = { value = local.db_master_password }
-    rds_ca_cert            = { value = base64encode(file(local.ca_cert_pem_file)) }
-    msk_bootstrap_brokers  = { value = var.msk_bootstrap_brokers }
-    google_translate_token = { value = var.google_translate_api_token }
-    nth_role_arn           = { value = var.termination_handler_role_arn }
-    nth_sqs_queue_id       = { value = var.termination_handler_sqs_queue_id }
-    dns_validation         = { value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" }
+  sensitive_helm_values = {
+    db_password               = local.db_master_password
+    smtp_password             = try(local.secret_values["smtp_password"], "")
+    sentry_dsn                = try(local.secret_values["sentry_dsn"], "")
+    frontegg_client_id        = try(local.secret_values["frontegg_client_id"], "")
+    frontegg_api_token        = try(local.secret_values["frontegg_api_token"], "")
+    frontegg_docker_username  = try(local.secret_values["frontegg_docker_username"], "")
+    frontegg_docker_password  = try(local.secret_values["frontegg_docker_password"], "")
+    frontegg_auth_pubkey      = try(local.secret_values["frontegg_auth_pubkey"], "")
+    surveyjs_license_key      = try(local.secret_values["surveyjs_license_key"], "")
+    google_translate_token    = var.google_translate_api_token
+    rustici_password          = try(local.secret_values["rustici_password"], "")
+    rustici_managed_password  = try(local.secret_values["rustici_managed_password"], "")
+    ops_basic_auth            = try(local.secret_values["ops_basic_auth"], "")
+    infra_auth_password       = try(local.secret_values["infra_auth_password"], "")
+    grafana_smtp_enabled      = try(local.secret_values["grafana_smtp_enabled"], "false")
+    grafana_smtp_host         = try(local.secret_values["grafana_smtp_host"], "")
+    grafana_smtp_user         = try(local.secret_values["grafana_smtp_user"], "")
+    grafana_smtp_password     = try(local.secret_values["grafana_smtp_password"], "")
+    grafana_smtp_from_address = try(local.secret_values["grafana_smtp_from_address"], "")
+    grafana_smtp_starttls     = try(local.secret_values["grafana_smtp_starttls"], "OpportunisticStartTLS")
   }
 
-  // Optional add-on for Grafana config
-  grafana_config_values = {
-    grafana_admin_username      = { value = local.grafana_admin_username }
-    grafana_admin_password      = { value = local.grafana_admin_password }
-    grafana_datasource_hostname = { value = local.db_bi_host }
-    grafana_datasource_password = { value = local.db_bi_password }
-    grafana_settings_hostname   = { value = local.db_master_host }
-    grafana_settings_username   = { value = local.db_master_username }
-    grafana_settings_password   = { value = local.db_master_password }
-    grafana_subpath             = { value = try(var.grafana_subpath, "") }
-  }
-
-  all_config_values      = merge(local.base_config_values, local.grafana_config_values, local.secret_values_structured)
-  all_config_values_flat = { for key, value in local.all_config_values : key => value.value }
+  dns_validation = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", ""))
 
 }
 
