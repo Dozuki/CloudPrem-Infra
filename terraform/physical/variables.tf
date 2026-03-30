@@ -338,57 +338,6 @@ variable "eks_kms_key_id" {
   default     = ""
 }
 
-variable "eks_instance_types" {
-  description = "The instance type of each node in the application's EKS worker node group."
-  // For Govcloud ["m5.large", "m5a.large", "m5d.large", "m5ad.large"]
-  default = ["m7i-flex.xlarge", "m7i.xlarge"]
-  type    = list(string)
-}
-
-variable "eks_volume_size" {
-  description = "The amount of local storage (in gigabytes) to allocate to each kubernetes node. Keep in mind you will be billed for this amount of storage multiplied by how many nodes you spin up (i.e. 50GB * 4 nodes = 200GB on your bill). For production installations 50GB should be the minimum. This local storage is used as a temporary holding area for uploaded and in-process assets like videos and images."
-  default     = 100
-  type        = number
-
-  validation {
-    condition     = var.eks_volume_size >= 20
-    error_message = "Less than 20GB can cause problems even on testing instances."
-  }
-}
-
-variable "eks_min_size" {
-  description = "The minimum amount of nodes we will autoscale to."
-  type        = number
-  default     = "3"
-
-  validation {
-    condition     = var.eks_min_size >= 1
-    error_message = "NodeAutoScalingGroupMinSize must be an integer >= 1."
-  }
-}
-
-variable "eks_max_size" {
-  description = "The maximum amount of nodes we will autoscale to."
-  type        = number
-  default     = "10"
-
-  validation {
-    condition     = var.eks_max_size >= 1
-    error_message = "NodeAutoScalingGroupMaxSize must be an integer >= 1\nNodeAutoScalingGroupMaxSize must be >= NodeAutoScalingGroupDesiredCapacity & NodeAutoScalingGroupMinSize."
-  }
-}
-
-variable "eks_desired_capacity" {
-  description = "This is what the node count will start out as."
-  type        = number
-  default     = "3"
-
-  validation {
-    condition     = var.eks_desired_capacity >= 1
-    error_message = "NodeAutoScalingGroupDesiredCapacity must be an integer >= 1\nNodeAutoScalingGroupDesiredCapacity must be >= NodeAutoScalingGroupMinSize\nNodeAutoScalingGroupDesiredCapacity must be <= NodeAutoScalingGroupMaxSize."
-  }
-}
-
 variable "eks_k8s_version" {
   description = "Version of Kubernetes to launch or upgrade to. EKS does not support rolling back versions or upgrade version skipping."
   type        = string
@@ -399,6 +348,24 @@ variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
   type        = bool
   default     = false
+}
+
+variable "enable_vault" {
+  description = "Enable connectivity to a centrally managed HashiCorp Vault cluster via PrivateLink for secret management."
+  type        = bool
+  default     = false
+}
+
+variable "vault_endpoint_service_name" {
+  description = "VPC Endpoint Service name for the Vault PrivateLink service. Required when enable_vault is true."
+  type        = string
+  default     = ""
+}
+
+variable "sso_admin_role_arn" {
+  description = "Exact IAM role ARN for the SSO AdministratorAccess permission set in this account. Required for kubectl/Lens access from workstations. Find it via: aws iam list-roles --query \"Roles[?contains(RoleName,'AWSReservedSSO_AWSAdministratorAccess')].Arn\""
+  type        = string
+  default     = ""
 }
 
 # --- END App Configuration --- #

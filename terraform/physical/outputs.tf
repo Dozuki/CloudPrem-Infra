@@ -2,33 +2,13 @@ output "msk_bootstrap_brokers" {
   description = "Kafka bootstrap broker list"
   value       = try(aws_msk_cluster.this[0].bootstrap_brokers, "")
 }
-output "eks_worker_asg_arns" {
-  description = "EKS worker autoscaling group ARNs"
-  value       = module.eks_cluster.workers_asg_arns
-}
-output "eks_worker_asg_names" {
-  description = "EKS worker autoscaling group names"
-  value       = module.eks_cluster.workers_asg_names
-}
 output "eks_cluster_id" {
   description = "EKS Cluster Name"
-  value       = module.eks_cluster.cluster_id
+  value       = module.eks_cluster.cluster_name
 }
 output "eks_cluster_access_role_arn" {
   description = "IAM Role ARN for EKS cluster access"
-  value       = module.cluster_access_role_assumable.iam_role_arn
-}
-output "eks_oidc_cluster_access_role_name" {
-  description = "OIDC-compatible IAM role name for EKS cluster access"
-  value       = local.cluster_access_role_name
-}
-output "termination_handler_role_arn" {
-  description = "IAM Role arn for EKS node termination handler"
-  value       = module.aws_node_termination_handler_role.iam_role_arn
-}
-output "termination_handler_sqs_queue_id" {
-  description = "SQS Queue ID for EKS node termination handler"
-  value       = module.aws_node_termination_handler_sqs.queue_id
+  value       = module.cluster_access_role_assumable.arn
 }
 output "dns_domain_name" {
   description = "URL to deployed application"
@@ -87,9 +67,29 @@ output "bastion_asg_name" {
 }
 output "nlb_dns_name" {
   description = "The FQDN of the NLB."
-  value       = module.nlb.lb_dns_name
+  value       = module.nlb.dns_name
 }
 output "dms_enabled" {
   description = "Whether DMS was enabled or not via combination of other input variables or directly"
   value       = local.dms_enabled
+}
+output "eks_oidc_issuer_url" {
+  description = "OIDC issuer URL for the EKS cluster"
+  value       = module.eks_cluster.cluster_oidc_issuer_url
+}
+output "private_subnet_ids" {
+  description = "Private subnet IDs for the VPC"
+  value       = local.private_subnet_ids
+}
+output "vault_endpoint_dns" {
+  description = "Private DNS name for reaching Vault via PrivateLink"
+  value       = try(aws_route53_record.vault[0].fqdn, "")
+}
+output "nlb_https_target_group_arn" {
+  description = "NLB HTTPS target group ARN for TargetGroupBinding"
+  value       = module.nlb.target_groups["app"].arn
+}
+output "nlb_http_target_group_arn" {
+  description = "NLB HTTP target group ARN for TargetGroupBinding"
+  value       = module.nlb.target_groups["acme"].arn
 }
