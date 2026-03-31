@@ -58,8 +58,11 @@ provider "helm" {
 provider "vault" {
   address          = var.vault_address
   skip_child_token = true
-  # Auth via VAULT_TOKEN env var for local runs.
-  # Spacelift follow-up PR will add auth_login_aws for CI/CD.
+
+  # Spacelift authenticates via IAM role assumption; local runs use VAULT_TOKEN.
+  auth_login_aws {
+    role = "${coalesce(var.customer, "dozuki")}-${var.environment}"
+  }
 }
 
 locals {
