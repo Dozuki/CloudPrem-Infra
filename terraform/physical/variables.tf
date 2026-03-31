@@ -350,16 +350,9 @@ variable "enable_webhooks" {
   default     = false
 }
 
-variable "enable_vault" {
-  description = "Enable connectivity to a centrally managed HashiCorp Vault cluster via PrivateLink for secret management."
-  type        = bool
-  default     = false
-}
-
 variable "vault_endpoint_service_name" {
-  description = "VPC Endpoint Service name for the Vault PrivateLink service. Required when enable_vault is true."
+  description = "VPC Endpoint Service name for the Vault PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). Deploy vault-privatelink-service first."
   type        = string
-  default     = ""
 }
 
 variable "sso_admin_role_arn" {

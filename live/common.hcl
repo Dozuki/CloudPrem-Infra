@@ -59,7 +59,7 @@ dependency "physical" {
     dms_enabled = "false"
     eks_oidc_issuer_url = "https://oidc.eks.us-east-1.amazonaws.com/id/DUMMY"
     private_subnet_ids = ["subnet-dummy-a", "subnet-dummy-b", "subnet-dummy-c"]
-    vault_endpoint_dns = ""
+    vault_endpoint_dns = "vault.internal.dozuki.com"
     nlb_https_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
     nlb_http_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
   }
@@ -88,7 +88,7 @@ inputs = {
   memcached_cluster_address = dependency.physical.outputs.memcached_cluster_address
   dms_task_arn = dependency.physical.outputs.dms_task_arn
   dms_enabled = dependency.physical.outputs.dms_enabled
-  vault_address = dependency.physical.outputs.vault_endpoint_dns != "" ? "http://${dependency.physical.outputs.vault_endpoint_dns}:8200" : ""
+  vault_address = "http://${dependency.physical.outputs.vault_endpoint_dns}:8200"
   nlb_https_target_group_arn = dependency.physical.outputs.nlb_https_target_group_arn
   nlb_http_target_group_arn = dependency.physical.outputs.nlb_http_target_group_arn
 }

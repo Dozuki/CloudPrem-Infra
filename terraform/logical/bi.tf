@@ -44,6 +44,22 @@ resource "kubernetes_config_map_v1" "grafana_create_db_script" {
   }
 }
 
+resource "kubernetes_secret_v1" "grafana_db_credentials" {
+  count = var.enable_bi ? 1 : 0
+
+  metadata {
+    name      = "grafana-db-credentials"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
+  }
+  type = "Opaque"
+
+  data = {
+    host     = local.db_master_host
+    username = local.db_master_username
+    password = local.db_master_password
+  }
+}
+
 resource "kubernetes_job_v1" "grafana_db_create" {
   count = var.enable_bi ? 1 : 0
 
@@ -57,13 +73,13 @@ resource "kubernetes_job_v1" "grafana_db_create" {
       spec {
         container {
           name  = "grafana-db-create"
-          image = "imega/mysql-client:10.6.4"
+          image = "mysql:9.3"
           env {
             name = "MYSQL_HOST"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret_v1.dozuki_infra_credentials[0].metadata[0].name
-                key  = "master_host"
+                name = kubernetes_secret_v1.grafana_db_credentials[0].metadata[0].name
+                key  = "host"
               }
             }
           }
@@ -71,8 +87,8 @@ resource "kubernetes_job_v1" "grafana_db_create" {
             name = "MYSQL_USER"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret_v1.dozuki_infra_credentials[0].metadata[0].name
-                key  = "master_user"
+                name = kubernetes_secret_v1.grafana_db_credentials[0].metadata[0].name
+                key  = "username"
               }
             }
           }
@@ -80,8 +96,8 @@ resource "kubernetes_job_v1" "grafana_db_create" {
             name = "MYSQL_PASSWORD"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret_v1.dozuki_infra_credentials[0].metadata[0].name
-                key  = "master_password"
+                name = kubernetes_secret_v1.grafana_db_credentials[0].metadata[0].name
+                key  = "password"
               }
             }
           }

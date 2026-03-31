@@ -67,18 +67,6 @@ variable "grafana_subpath" {
   }
 }
 
-variable "devops_secret_name" {
-  description = "Name of the secret which houses app configuration"
-  type        = string
-  default     = "devops/app/config"
-}
-
-variable "enable_vault" {
-  description = "Use HashiCorp Vault for secret management via External Secrets Operator instead of Terraform-managed Kubernetes secrets."
-  type        = bool
-  default     = false
-}
-
 variable "image_tag" {
   description = "Docker image tag for the main Dozuki app container. Changes with every deploy."
   type        = string
@@ -92,7 +80,6 @@ variable "nextjs_tag" {
 variable "image_repository" {
   description = "Docker image repository (ECR) for app containers."
   type        = string
-  default     = "069174876992.dkr.ecr.us-east-1.amazonaws.com"
 }
 
 variable "smtp_enabled" {
@@ -229,9 +216,8 @@ variable "dms_enabled" {
   default     = false
 }
 variable "vault_address" {
-  description = "Vault server address accessible from within the cluster (e.g. http://vault.internal.dozuki.com:8200)"
+  description = "Vault server address accessible from within the cluster."
   type        = string
-  default     = ""
 }
 
 variable "nlb_https_target_group_arn" {

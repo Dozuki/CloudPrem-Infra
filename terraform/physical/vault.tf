@@ -5,16 +5,20 @@
 # ---------------------------------------------------------------------------
 
 data "aws_vpc_endpoint_service" "vault" {
-  count        = var.enable_vault ? 1 : 0
   service_name = var.vault_endpoint_service_name
+
+  lifecycle {
+    precondition {
+      condition     = var.vault_endpoint_service_name != ""
+      error_message = "vault_endpoint_service_name is required. Deploy vault-privatelink-service first."
+    }
+  }
 }
 
 # Filter private subnets to only those in AZs supported by the endpoint
 # service. AZ name-to-ID mappings differ per account, so the service may
 # not cover every AZ the customer VPC uses.
 data "aws_subnets" "vault_compatible" {
-  count = var.enable_vault ? 1 : 0
-
   filter {
     name   = "subnet-id"
     values = local.private_subnet_ids
@@ -22,13 +26,18 @@ data "aws_subnets" "vault_compatible" {
 
   filter {
     name   = "availability-zone"
-    values = data.aws_vpc_endpoint_service.vault[0].availability_zones
+    values = data.aws_vpc_endpoint_service.vault.availability_zones
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = length(self.ids) > 0
+      error_message = "No private subnets overlap with the Vault endpoint service AZs. Check cross-account AZ mappings."
+    }
   }
 }
 
 resource "aws_security_group" "vault_endpoint" {
-  count = var.enable_vault ? 1 : 0
-
   name_prefix = "vault-endpoint-"
   description = "Allow Vault API access from within the VPC"
   vpc_id      = local.vpc_id
@@ -46,7 +55,7 @@ resource "aws_security_group" "vault_endpoint" {
     from_port   = 8200
     to_port     = 8200
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [local.vpc_cidr]
   }
 
   tags = {
@@ -59,13 +68,11 @@ resource "aws_security_group" "vault_endpoint" {
 }
 
 resource "aws_vpc_endpoint" "vault" {
-  count = var.enable_vault ? 1 : 0
-
   vpc_id             = local.vpc_id
   service_name       = var.vault_endpoint_service_name
   vpc_endpoint_type  = "Interface"
-  subnet_ids         = data.aws_subnets.vault_compatible[0].ids
-  security_group_ids = [aws_security_group.vault_endpoint[0].id]
+  subnet_ids         = data.aws_subnets.vault_compatible.ids
+  security_group_ids = [aws_security_group.vault_endpoint.id]
 
   private_dns_enabled = false
 
@@ -75,8 +82,6 @@ resource "aws_vpc_endpoint" "vault" {
 }
 
 resource "aws_route53_zone" "vault_private" {
-  count = var.enable_vault ? 1 : 0
-
   name = "internal.dozuki.com"
 
   vpc {
@@ -89,11 +94,9 @@ resource "aws_route53_zone" "vault_private" {
 }
 
 resource "aws_route53_record" "vault" {
-  count = var.enable_vault ? 1 : 0
-
-  zone_id = aws_route53_zone.vault_private[0].zone_id
+  zone_id = aws_route53_zone.vault_private.zone_id
   name    = "vault.internal.dozuki.com"
   type    = "CNAME"
   ttl     = 300
-  records = [aws_vpc_endpoint.vault[0].dns_entry[0]["dns_name"]]
+  records = [aws_vpc_endpoint.vault.dns_entry[0]["dns_name"]]
 }

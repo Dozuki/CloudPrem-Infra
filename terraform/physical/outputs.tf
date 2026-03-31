@@ -83,7 +83,7 @@ output "private_subnet_ids" {
 }
 output "vault_endpoint_dns" {
   description = "Private DNS name for reaching Vault via PrivateLink"
-  value       = try(aws_route53_record.vault[0].fqdn, "")
+  value       = aws_route53_record.vault.fqdn
 }
 output "nlb_https_target_group_arn" {
   description = "NLB HTTPS target group ARN for TargetGroupBinding"

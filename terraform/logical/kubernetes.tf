@@ -88,26 +88,6 @@ resource "kubernetes_cluster_role_binding_v1" "dozuki_list_role_binding" {
   }
 }
 
-resource "kubernetes_secret_v1" "dozuki_infra_credentials" {
-  count = var.enable_vault ? 0 : 1
-
-  metadata {
-    name      = "dozuki-infra-credentials"
-    namespace = kubernetes_namespace_v1.app.metadata[0].name
-  }
-  type = "Opaque"
-
-  data = {
-    master_host     = local.db_master_host
-    master_user     = local.db_master_username
-    master_password = local.db_master_password
-    bi_host         = local.db_bi_host
-    bi_user         = local.db_master_username
-    bi_password     = local.db_bi_password
-    memcached_host  = var.memcached_cluster_address
-  }
-}
-
 resource "kubernetes_namespace_v1" "cert_manager" {
   metadata {
     name = "cert-manager"
@@ -305,7 +285,6 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
 }
 
 resource "helm_release" "external_secrets" {
-  count      = var.enable_vault ? 1 : 0
   depends_on = [helm_release.cert_manager]
 
   name       = "external-secrets"
@@ -330,8 +309,6 @@ resource "helm_release" "external_secrets" {
 # Service account for ESO to authenticate to Vault via K8s auth.
 # The SecretStore template references this SA by name.
 resource "kubernetes_service_account_v1" "eso_vault_auth" {
-  count = var.enable_vault ? 1 : 0
-
   metadata {
     name      = "dozuki-external-secrets"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -431,7 +408,7 @@ resource "helm_release" "app" {
     }
 
     vault = {
-      enabled = var.enable_vault
+      enabled = true
       address = var.vault_address
     }
 
