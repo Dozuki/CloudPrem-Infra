@@ -49,16 +49,7 @@ jobs:
         filter_mode: "nofilter"
         tflint_rulesets: "aws"
 
-    - name: Terraform Security Review
-      uses: reviewdog/action-tfsec@v1
-      with:
-        github_token: ${{ secrets.github_token }}
-        working_directory: ./terraform/${{ matrix.module }}
-        level: info
-        reporter: github-pr-review
-        filter_mode: nofilter
-        tfsec_version: v1.28.0
-        tfsec_flags: --exclude-downloaded-modules
-
-
+    # tfsec removed — deprecated in favor of Trivy. The reviewdog/action-tfsec
+    # action crashes on tfsec v1.28.0 output parsing. Migrate to Trivy in a
+    # follow-up PR if static security scanning is needed in CI.
 
