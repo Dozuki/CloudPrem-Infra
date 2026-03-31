@@ -22,11 +22,10 @@ jobs:
     steps:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
-    # Install the latest version of Terraform CLI
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v1
+      uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: 1.5.7
 
@@ -41,17 +40,17 @@ jobs:
 
     # Performs linting on the Terraform files
     - name: Terraform Linter
-      uses: reviewdog/action-tflint@master
+      uses: reviewdog/action-tflint@v1
       with:
         github_token: ${{ secrets.github_token }}
-        working_directory: "./terraform/${{ matrix.module }}" # Optional. Change working directory
-        reporter: github-pr-review # Optional. Change reporter
-        fail_on_error: "false" # Optional. Fail action if errors are found
-        filter_mode: "nofilter" # Optional. Check all files, not just the diff
-        tflint_rulesets: "aws" # Optional. Extra official rulesets to install
+        working_directory: "./terraform/${{ matrix.module }}"
+        reporter: github-pr-review
+        fail_on_error: "false"
+        filter_mode: "nofilter"
+        tflint_rulesets: "aws"
 
     - name: Terraform Security Review
-      uses: reviewdog/action-tfsec@master
+      uses: reviewdog/action-tfsec@v1
       with:
         github_token: ${{ secrets.github_token }}
         working_directory: ./terraform/${{ matrix.module }}

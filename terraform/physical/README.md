@@ -5,7 +5,7 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
 | <a name="requirement_archive"></a> [archive](#requirement\_archive) | ~> 2.0 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 5.0 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 2.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
 | <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.0 |
@@ -93,6 +93,8 @@
 | [aws_msk_configuration.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/msk_configuration) | resource |
 | [aws_route53_record.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.subsite_subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
+| [aws_route53_record.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
+| [aws_route53_zone.vault_private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_zone) | resource |
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket.logging_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_acl.logging_bucket_acl](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_acl) | resource |
@@ -114,6 +116,7 @@
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
@@ -130,6 +133,7 @@
 | [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_association) | resource |
 | [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
+| [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_vpc_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
@@ -164,14 +168,16 @@
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/s3_bucket) | data source |
 | [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_subnets.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
+| [aws_subnets.vault_compatible](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_vpc.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
+| [aws_vpc_endpoint_service.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc_endpoint_service) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_alarm_email"></a> [alarm\_email](#input\_alarm\_email) | Email address to send status alarms to. | `string` | `""` | no |
-| <a name="input_app_access_cidrs"></a> [app\_access\_cidrs](#input\_app\_access\_cidrs) | These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
+| <a name="input_app_access_cidrs"></a> [app\_access\_cidrs](#input\_app\_access\_cidrs) | These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
 | <a name="input_azs_count"></a> [azs\_count](#input\_azs\_count) | The number of availability zones we should use for deployment. | `number` | `3` | no |
@@ -179,7 +185,7 @@
 | <a name="input_bi_dms_enabled"></a> [bi\_dms\_enabled](#input\_bi\_dms\_enabled) | If BI is enabled, whether or not to use DMS for conditional replication if true or a basic RDS read replica if false. | `bool` | `false` | no |
 | <a name="input_bi_public_access"></a> [bi\_public\_access](#input\_bi\_public\_access) | NOTE: This is mutually exclusive with VPN access, both cannot be enabled at the same time. If BI is enabled and you need access to the BI database server from outside the amazon network, set this to true. | `bool` | `false` | no |
 | <a name="input_bi_vpn_access"></a> [bi\_vpn\_access](#input\_bi\_vpn\_access) | NOTE: This is mutually exclusive with public BI access, both cannot be enabled at the same time. If BI is enabled we can create an OpenVPN connection to the BI database for secure internet access to the server. | `bool` | `false` | no |
-| <a name="input_bi_vpn_user_list"></a> [bi\_vpn\_user\_list](#input\_bi\_vpn\_user\_list) | List of users to create OpenVPN configurations for usint mutual authentication. | `list(string)` | <pre>[<br/>  "root"<br/>]</pre> | no |
+| <a name="input_bi_vpn_user_list"></a> [bi\_vpn\_user\_list](#input\_bi\_vpn\_user\_list) | List of users to create OpenVPN configurations for usint mutual authentication. | `list(string)` | <pre>[<br>  "root"<br>]</pre> | no |
 | <a name="input_cf_template_version"></a> [cf\_template\_version](#input\_cf\_template\_version) | Version of the CloudFormation template that deployed this stack for validation | `number` | `0` | no |
 | <a name="input_customer"></a> [customer](#input\_customer) | The customer name for resource names and tagging. This will also be the autogenerated subdomain. | `string` | `""` | no |
 | <a name="input_dms_allocated_storage"></a> [dms\_allocated\_storage](#input\_dms\_allocated\_storage) | How many GB to allocate for the DMS replication instance | `string` | `100` | no |
@@ -203,14 +209,14 @@
 | <a name="input_rds_kms_key_id"></a> [rds\_kms\_key\_id](#input\_rds\_kms\_key\_id) | AWS KMS key identifier for RDS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `"alias/aws/rds"` | no |
 | <a name="input_rds_max_allocated_storage"></a> [rds\_max\_allocated\_storage](#input\_rds\_max\_allocated\_storage) | The maximum size to which AWS will scale the database (Gb) | `number` | `500` | no |
 | <a name="input_rds_multi_az"></a> [rds\_multi\_az](#input\_rds\_multi\_az) | If true we will tell RDS to automatically deploy and manage a highly available standby instance of your database. Enabling this doubles the cost of the RDS instance but without it you are susceptible to downtime if the AWS availability zone your RDS instance is in becomes unavailable. | `bool` | `true` | no |
-| <a name="input_rds_preferred_instance_classes"></a> [rds\_preferred\_instance\_classes](#input\_rds\_preferred\_instance\_classes) | A list of preferred RDS instance classes, the first available in the list will be used. See this page for a breakdown of the performance and cost differences between the different instance types: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.DBInstanceClass.html | `list(string)` | <pre>[<br/>  "db.m5.large",<br/>  "db.m4.large"<br/>]</pre> | no |
+| <a name="input_rds_preferred_instance_classes"></a> [rds\_preferred\_instance\_classes](#input\_rds\_preferred\_instance\_classes) | A list of preferred RDS instance classes, the first available in the list will be used. See this page for a breakdown of the performance and cost differences between the different instance types: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.DBInstanceClass.html | `list(string)` | <pre>[<br>  "db.m5.large",<br>  "db.m4.large"<br>]</pre> | no |
 | <a name="input_rds_snapshot_identifier"></a> [rds\_snapshot\_identifier](#input\_rds\_snapshot\_identifier) | We can seed the database from an existing RDS snapshot in this region. Type the snapshot identifier in this field or leave blank to start with a fresh database. Note: If you do use a snapshot it's critical that during stack updates you continue to include the snapshot identifier in this parameter. Clearing this parameter after using it will cause AWS to spin up a new fresh DB and delete your old one. | `string` | `""` | no |
 | <a name="input_s3_block_public_access"></a> [s3\_block\_public\_access](#input\_s3\_block\_public\_access) | To conform with SCP we can disable adding a public access block to the S3 buckets. This should only be disabled if absolutely necessary. | `bool` | `true` | no |
-| <a name="input_s3_existing_buckets"></a> [s3\_existing\_buckets](#input\_s3\_existing\_buckets) | List of the existing Dozuki buckets to use. Do not include the logging bucket. | <pre>list(object({<br/>    type        = string<br/>    bucket_name = string<br/>  }))</pre> | `[]` | no |
+| <a name="input_s3_existing_buckets"></a> [s3\_existing\_buckets](#input\_s3\_existing\_buckets) | List of the existing Dozuki buckets to use. Do not include the logging bucket. | <pre>list(object({<br>    type        = string<br>    bucket_name = string<br>  }))</pre> | `[]` | no |
 | <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | URL to an optional Slack webhook for SNS alerts. | `string` | `""` | no |
 | <a name="input_sso_admin_role_arn"></a> [sso\_admin\_role\_arn](#input\_sso\_admin\_role\_arn) | Exact IAM role ARN for the SSO AdministratorAccess permission set in this account. Required for kubectl/Lens access from workstations. Find it via: aws iam list-roles --query "Roles[?contains(RoleName,'AWSReservedSSO\_AWSAdministratorAccess')].Arn" | `string` | `""` | no |
-| <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br/>  "%CUSTOMER%",<br/>  "%ENVIRONMENT%",<br/>  "%REGION%",<br/>  "%ACCOUNT%"<br/>]</pre> | no |
+| <a name="input_subdomain_format"></a> [subdomain\_format](#input\_subdomain\_format) | Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%]) | `list(string)` | <pre>[<br>  "%CUSTOMER%",<br>  "%ENVIRONMENT%",<br>  "%REGION%",<br>  "%ACCOUNT%"<br>]</pre> | no |
 | <a name="input_subdomain_override"></a> [subdomain\_override](#input\_subdomain\_override) | For upgrades only, new stacks use `customer`. If the previous version used an identifier but you want the subdomain to be different, add it here. | `string` | `""` | no |
 | <a name="input_use_existing_s3_kms"></a> [use\_existing\_s3\_kms](#input\_use\_existing\_s3\_kms) | To use the s3\_kms\_key\_id provided for the new s3 buckets as well, set this to true. | `bool` | `false` | no |
 | <a name="input_vault_endpoint_service_name"></a> [vault\_endpoint\_service\_name](#input\_vault\_endpoint\_service\_name) | VPC Endpoint Service name for the Vault PrivateLink service. Required when enable\_vault is true. | `string` | `""` | no |
