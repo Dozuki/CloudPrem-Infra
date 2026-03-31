@@ -102,20 +102,18 @@ resource "helm_release" "cert_manager" {
 
   wait = true
 
-  set = [
-    {
-      name  = "crds.enabled"
-      value = "true"
-    },
-    {
-      name  = "crds.keep"
-      value = "true"
-    },
-    {
-      name  = "config.enableGatewayAPI"
-      value = "true"
-    },
-  ]
+  set {
+    name  = "crds.enabled"
+    value = "true"
+  }
+  set {
+    name  = "crds.keep"
+    value = "true"
+  }
+  set {
+    name  = "config.enableGatewayAPI"
+    value = "true"
+  }
 }
 
 resource "helm_release" "envoy_gateway" {
@@ -294,16 +292,14 @@ resource "helm_release" "external_secrets" {
 
   wait = true
 
-  set = [
-    {
-      name  = "crds.createClusterExternalSecret"
-      value = "true"
-    },
-    {
-      name  = "crds.createClusterSecretStore"
-      value = "true"
-    },
-  ]
+  set {
+    name  = "crds.createClusterExternalSecret"
+    value = "true"
+  }
+  set {
+    name  = "crds.createClusterSecretStore"
+    value = "true"
+  }
 }
 
 # Service account for ESO to authenticate to Vault via K8s auth.
@@ -446,11 +442,24 @@ resource "helm_release" "app" {
     rustici = {}
   })]
 
-  set_sensitive = [
-    { name = "db.password", value = local.db_master_password },
-    { name = "smtp.auth.password", value = var.smtp_password },
-    { name = "googleTranslate.token", value = var.google_translate_api_token },
-    { name = "grafana.security.admin_password", value = local.grafana_admin_password },
-    { name = "grafana.datasource.password", value = local.db_bi_password },
-  ]
+  set_sensitive {
+    name  = "db.password"
+    value = local.db_master_password
+  }
+  set_sensitive {
+    name  = "smtp.auth.password"
+    value = var.smtp_password
+  }
+  set_sensitive {
+    name  = "googleTranslate.token"
+    value = var.google_translate_api_token
+  }
+  set_sensitive {
+    name  = "grafana.security.admin_password"
+    value = local.grafana_admin_password
+  }
+  set_sensitive {
+    name  = "grafana.datasource.password"
+    value = local.db_bi_password
+  }
 }
