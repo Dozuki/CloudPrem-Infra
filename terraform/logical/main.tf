@@ -58,11 +58,7 @@ provider "helm" {
 provider "vault" {
   address          = var.vault_address
   skip_child_token = true
-
-  # Spacelift authenticates via IAM role assumption; local runs use VAULT_TOKEN.
-  auth_login_aws {
-    role = "${coalesce(var.customer, "dozuki")}-${var.environment}"
-  }
+  # Auth via VAULT_TOKEN env var (set in Spacelift UI or local shell).
 }
 
 locals {
