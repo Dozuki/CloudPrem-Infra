@@ -56,9 +56,11 @@ provider "helm" {
 }
 
 provider "vault" {
-  address          = var.vault_address
+  # address is intentionally omitted — uses VAULT_ADDR env var.
+  # Spacelift sets this to the public NLB; local runs use port-forward.
+  # var.vault_address (PrivateLink) is still passed to the helm chart
+  # for in-cluster access.
   skip_child_token = true
-  # Auth via VAULT_TOKEN env var (set in Spacelift UI or local shell).
 }
 
 locals {
