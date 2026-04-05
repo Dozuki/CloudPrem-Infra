@@ -61,12 +61,19 @@ provider "vault" {
   # to the helm chart separately for in-cluster access.
   skip_child_token = true
 
-  # In Spacelift, authenticate via IAM (deployer role in vault-infrastructure).
-  # Locally, fall back to VAULT_TOKEN env var.
-  dynamic "auth_login_aws" {
+  # In Spacelift, authenticate via AWS IAM (deployer role in vault-infrastructure).
+  # Uses the generic auth_login with method=aws to work around a known bug in
+  # auth_login_aws (hashicorp/terraform-provider-vault#1655) where v4.x requires
+  # explicit HCL credentials instead of reading AWS env vars.
+  # Locally, fall back to VAULT_TOKEN env var (no auth_login block).
+  dynamic "auth_login" {
     for_each = var.spacelift ? [1] : []
     content {
-      role = "deployer"
+      path   = "auth/aws/login"
+      method = "aws"
+      parameters = {
+        role = "deployer"
+      }
     }
   }
 }
