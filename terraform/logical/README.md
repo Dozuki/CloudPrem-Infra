@@ -122,7 +122,8 @@ No modules.
 | <a name="input_smtp_host"></a> [smtp\_host](#input\_smtp\_host) | SMTP server hostname. | `string` | `"smtp.sendgrid.net"` | no |
 | <a name="input_smtp_password"></a> [smtp\_password](#input\_smtp\_password) | SMTP authentication password. | `string` | `""` | no |
 | <a name="input_smtp_username"></a> [smtp\_username](#input\_smtp\_username) | SMTP authentication username. | `string` | `"apikey"` | no |
-| <a name="input_vault_address"></a> [vault\_address](#input\_vault\_address) | Vault server address accessible from within the cluster. | `string` | n/a | yes |
+| <a name="input_spacelift"></a> [spacelift](#input\_spacelift) | Set to true when running in Spacelift. Enables IAM auth for the Vault provider. | `bool` | `false` | no |
+| <a name="input_vault_address"></a> [vault\_address](#input\_vault\_address) | Vault server address accessible from within the cluster (PrivateLink). | `string` | n/a | yes |
 
 ## Outputs
 

@@ -56,11 +56,19 @@ provider "helm" {
 }
 
 provider "vault" {
-  # address is intentionally omitted — uses VAULT_ADDR env var.
-  # Spacelift sets this to the public NLB; local runs use port-forward.
-  # var.vault_address (PrivateLink) is still passed to the helm chart
-  # for in-cluster access.
+  # Address uses VAULT_ADDR env var: Spacelift sets this to the public NLB,
+  # local runs use port-forward. var.vault_address (PrivateLink) is passed
+  # to the helm chart separately for in-cluster access.
   skip_child_token = true
+
+  # In Spacelift, authenticate via IAM (deployer role in vault-infrastructure).
+  # Locally, fall back to VAULT_TOKEN env var.
+  dynamic "auth_login_aws" {
+    for_each = var.spacelift ? [1] : []
+    content {
+      role = "deployer"
+    }
+  }
 }
 
 locals {
