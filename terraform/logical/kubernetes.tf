@@ -387,6 +387,13 @@ resource "helm_release" "app" {
       }]
     }
 
+    gateway = {
+      hosts = [{
+        hostname      = coalesce(var.ingress_hostname, var.dns_domain_name)
+        tlsSecretName = "tls-secret"
+      }]
+    }
+
     webhooks = {
       enabled = var.enable_webhooks
     }
