@@ -180,7 +180,7 @@ resource "aws_iam_policy" "assume_cross_account_role" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action   = "sts:AssumeRole"
+        Action   = ["sts:AssumeRole", "sts:TagSession"]
         Effect   = "Allow"
         Resource = local.route_53_role
       }
