@@ -344,6 +344,12 @@ variable "eks_k8s_version" {
   default     = "1.33"
 }
 
+variable "eks_cluster_exists" {
+  description = "Set to true after the first successful apply. Enables reading the live cluster version to prevent drift from EKS auto-upgrades."
+  type        = bool
+  default     = false
+}
+
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
   type        = bool

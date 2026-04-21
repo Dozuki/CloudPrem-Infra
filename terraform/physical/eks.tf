@@ -188,6 +188,19 @@ resource "aws_iam_policy" "assume_cross_account_role" {
   })
 }
 
+# Read the live cluster version so Terraform doesn't fight EKS Auto Mode
+# upgrades. On first apply the cluster doesn't exist yet, so we fall back
+# to var.eks_k8s_version. On subsequent applies we always match the live
+# version, producing a zero-diff plan regardless of auto-upgrades.
+data "aws_eks_cluster" "current" {
+  count = var.eks_cluster_exists ? 1 : 0
+  name  = local.identifier
+}
+
+locals {
+  eks_k8s_version = var.eks_cluster_exists ? data.aws_eks_cluster.current[0].version : var.eks_k8s_version
+}
+
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 #tfsec:ignore:aws-eks-no-public-cluster-access-to-cidr
 #tfsec:ignore:aws-eks-no-public-cluster-access
@@ -200,7 +213,7 @@ module "eks_cluster" {
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
   name               = local.identifier
-  kubernetes_version = var.eks_k8s_version
+  kubernetes_version = local.eks_k8s_version
   enable_irsa        = true
 
   # Auto-upgrade the cluster at end of standard support to avoid extended support costs.
@@ -259,12 +272,6 @@ module "eks_cluster" {
   )
 
   tags = local.tags
-
-  # EKS Auto Mode manages cluster version upgrades via upgrade_policy.
-  # Ignore version drift so Terraform doesn't fight the auto-upgrade.
-  lifecycle {
-    ignore_changes = [kubernetes_version]
-  }
 }
 
 # Pod Identity: App workloads (S3, KMS, RDS, DMS, logs, ECR)
