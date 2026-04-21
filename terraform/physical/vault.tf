@@ -1,11 +1,18 @@
 # ---------------------------------------------------------------------------
 # Vault PrivateLink Endpoint
 # Creates a VPC Interface Endpoint and private DNS to reach a centrally
-# managed Vault cluster via AWS PrivateLink.
+# managed Vault cluster via AWS PrivateLink. Supports cross-region endpoints.
 # ---------------------------------------------------------------------------
 
+locals {
+  # Extract the service region from the endpoint service name
+  # (format: com.amazonaws.vpce.<region>.vpce-svc-xxx)
+  vault_service_region = element(split(".", var.vault_endpoint_service_name), 3)
+}
+
 data "aws_vpc_endpoint_service" "vault" {
-  service_name = var.vault_endpoint_service_name
+  service_name   = var.vault_endpoint_service_name
+  service_region = local.vault_service_region
 
   lifecycle {
     precondition {
@@ -70,6 +77,7 @@ resource "aws_security_group" "vault_endpoint" {
 resource "aws_vpc_endpoint" "vault" {
   vpc_id             = local.vpc_id
   service_name       = var.vault_endpoint_service_name
+  service_region     = local.vault_service_region
   vpc_endpoint_type  = "Interface"
   subnet_ids         = data.aws_subnets.vault_compatible.ids
   security_group_ids = [aws_security_group.vault_endpoint.id]
