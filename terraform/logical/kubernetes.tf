@@ -339,7 +339,7 @@ resource "helm_release" "app" {
   timeout           = 900
   dependency_update = true
 
-  values = [jsonencode({
+  values = [yamlencode({
     hostname       = var.dns_domain_name
     dns_validation = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
     customer       = coalesce(var.customer, "Dozuki")
