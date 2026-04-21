@@ -1,10 +1,10 @@
 terraform {
-  required_version = ">= 1.3.9"
+  required_version = ">= 1.5.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 4.0"
+      version = "~> 6.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -13,6 +13,10 @@ terraform {
     helm = {
       source  = "hashicorp/helm"
       version = "~> 2.0"
+    }
+    vault = {
+      source  = "hashicorp/vault"
+      version = "~> 4.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -34,8 +38,8 @@ provider "kubernetes" {
   cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
-    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
     command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.id]
   }
 }
 
@@ -45,10 +49,17 @@ provider "helm" {
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
-      args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.name, "--profile", var.aws_profile]
       command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.id]
     }
   }
+}
+
+provider "vault" {
+  address          = var.vault_address
+  skip_child_token = true
+  # Auth via VAULT_TOKEN env var for local runs.
+  # Spacelift follow-up PR will add auth_login_aws for CI/CD.
 }
 
 locals {
@@ -68,46 +79,67 @@ locals {
   # Grafana
   grafana_url            = var.enable_bi ? format("https://%s/%s", var.dns_domain_name, var.grafana_subpath) : null
   grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : "dozuki"
-  grafana_admin_password = var.enable_bi ? nonsensitive(random_password.grafana_admin[0].result) : ""
+  grafana_admin_password = var.enable_bi ? random_password.grafana_admin[0].result : ""
 
   # Kubernetes
   k8s_namespace_name = "dozuki"
 
-  secret_values = jsondecode(data.aws_secretsmanager_secret_version.devops_secret_version.secret_string)
+  // Map for app config
 
-  sensitive_helm_values = {
-    db_password               = local.db_master_password
-    smtp_password             = try(local.secret_values["smtp_password"], "")
-    sentry_dsn                = try(local.secret_values["sentry_dsn"], "")
-    frontegg_client_id        = try(local.secret_values["frontegg_client_id"], "")
-    frontegg_api_token        = try(local.secret_values["frontegg_api_token"], "")
-    frontegg_docker_username  = try(local.secret_values["frontegg_docker_username"], "")
-    frontegg_docker_password  = try(local.secret_values["frontegg_docker_password"], "")
-    frontegg_auth_pubkey      = try(local.secret_values["frontegg_auth_pubkey"], "")
-    surveyjs_license_key      = try(local.secret_values["surveyjs_license_key"], "")
-    google_translate_token    = var.google_translate_api_token
-    rustici_password          = try(local.secret_values["rustici_password"], "")
-    rustici_managed_password  = try(local.secret_values["rustici_managed_password"], "")
-    ops_basic_auth            = try(local.secret_values["ops_basic_auth"], "")
-    infra_auth_password       = try(local.secret_values["infra_auth_password"], "")
-    grafana_smtp_enabled      = try(local.secret_values["grafana_smtp_enabled"], "false")
-    grafana_smtp_host         = try(local.secret_values["grafana_smtp_host"], "")
-    grafana_smtp_user         = try(local.secret_values["grafana_smtp_user"], "")
-    grafana_smtp_password     = try(local.secret_values["grafana_smtp_password"], "")
-    grafana_smtp_from_address = try(local.secret_values["grafana_smtp_from_address"], "")
-    grafana_smtp_starttls     = try(local.secret_values["grafana_smtp_starttls"], "OpportunisticStartTLS")
+  base_config_values = {
+    customer               = { value = coalesce(var.customer, "Dozuki") }
+    environment            = { value = var.environment }
+    aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
+    aws_region             = { value = data.aws_region.current.id }
+    hostname               = { value = var.dns_domain_name }
+    ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
+    bi_enabled             = { value = var.enable_bi ? "true" : "false" }
+    webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
+    memcached_host         = { value = var.memcached_cluster_address }
+    s3_kms_key             = { value = data.aws_kms_key.s3.arn }
+    s3_images_bucket       = { value = var.s3_images_bucket }
+    s3_objects_bucket      = { value = var.s3_objects_bucket }
+    s3_documents_bucket    = { value = var.s3_documents_bucket }
+    s3_pdfs_bucket         = { value = var.s3_pdfs_bucket }
+    db_host                = { value = local.db_master_host }
+    db_user                = { value = local.db_master_username }
+    db_password            = { value = local.db_master_password }
+    rds_ca_cert            = { value = base64encode(file(local.ca_cert_pem_file)) }
+    msk_bootstrap_brokers  = { value = var.msk_bootstrap_brokers }
+    google_translate_token = { value = var.google_translate_api_token }
+    dns_validation         = { value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" }
+    vault_enabled          = { value = "true" }
+    vault_address          = { value = var.vault_address }
+    image_repository       = { value = var.image_repository }
+    image_tag              = { value = var.image_tag }
+    nextjs_tag             = { value = var.nextjs_tag }
+    smtp_enabled           = { value = var.smtp_enabled ? "true" : "false" }
+    smtp_host              = { value = var.smtp_host }
+    smtp_from_address      = { value = var.smtp_from_address }
+    smtp_auth_enabled      = { value = var.smtp_auth_enabled ? "true" : "false" }
+    smtp_username          = { value = var.smtp_username }
+    smtp_password          = { value = var.smtp_password }
   }
 
-  dns_validation = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", ""))
+  // Optional add-on for Grafana config
+  grafana_config_values = {
+    grafana_admin_username      = { value = local.grafana_admin_username }
+    grafana_admin_password      = { value = local.grafana_admin_password }
+    grafana_datasource_hostname = { value = local.db_bi_host }
+    grafana_datasource_password = { value = local.db_bi_password }
+    grafana_settings_hostname   = { value = local.db_master_host }
+    grafana_settings_username   = { value = local.db_master_username }
+    grafana_settings_password   = { value = local.db_master_password }
+    grafana_subpath             = { value = var.grafana_subpath }
+  }
 
 }
 
-data "aws_secretsmanager_secret" "devops_secret" {
-  name = var.devops_secret_name
-}
-
-data "aws_secretsmanager_secret_version" "devops_secret_version" {
-  secret_id = data.aws_secretsmanager_secret.devops_secret.id
+check "vault_address_configured" {
+  assert {
+    condition     = var.vault_address != ""
+    error_message = "vault_address must be set. Vault is required for all deployments."
+  }
 }
 
 data "aws_eks_cluster" "main" {

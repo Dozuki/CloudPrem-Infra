@@ -16,7 +16,7 @@ resource "tls_cert_request" "client" {
 
   private_key_pem = tls_private_key.client[count.index].private_key_pem
   subject {
-    common_name  = "${local.identifier}.${data.aws_region.current.name}.vpn.${var.vpn-client-list[count.index]}-client"
+    common_name  = "${local.identifier}.${data.aws_region.current.id}.vpn.${var.vpn-client-list[count.index]}-client"
     organization = local.identifier
   }
 }
@@ -59,7 +59,7 @@ resource "aws_s3_object" "vpn-config-file" {
 client
 dev tun
 proto udp
-remote ${aws_ec2_client_vpn_endpoint.vpn-client.id}.prod.clientvpn.${data.aws_region.current.name}.amazonaws.com 443
+remote ${aws_ec2_client_vpn_endpoint.vpn-client.id}.prod.clientvpn.${data.aws_region.current.id}.amazonaws.com 443
 remote-random-hostname
 resolv-retry infinite
 nobind

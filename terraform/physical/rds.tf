@@ -1,24 +1,3 @@
-moved {
-  from = module.database_sg
-  to   = module.primary_database_sg
-}
-moved {
-  from = aws_secretsmanager_secret.replica_database[0]
-  to   = aws_secretsmanager_secret.replica_database_credentials[0]
-}
-moved {
-  from = aws_secretsmanager_secret_version.replica_database[0]
-  to   = aws_secretsmanager_secret_version.replica_database_credentials[0]
-}
-moved {
-  from = random_password.replica_database[0]
-  to   = module.replica_database[0].random_password.master_password[0]
-}
-moved {
-  from = random_password.primary_database
-  to   = module.primary_database.random_password.master_password[0]
-}
-
 data "aws_rds_orderable_db_instance" "default" {
   engine         = "mysql"
   engine_version = var.rds_engine_version
@@ -43,7 +22,7 @@ data "aws_kms_key" "rds" {
 }
 module "primary_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.17.1"
+  version = "~> 5.0"
 
   name            = "${local.identifier}-database"
   use_name_prefix = false
@@ -54,7 +33,7 @@ module "primary_database_sg" {
   ingress_with_source_security_group_id = [
     {
       rule                     = "mysql-tcp"
-      source_security_group_id = module.eks_cluster.worker_security_group_id
+      source_security_group_id = module.eks_cluster.cluster_primary_security_group_id
     },
     {
       rule                     = "mysql-tcp"
@@ -71,7 +50,7 @@ module "primary_database_sg" {
 # To make the terraform a bit easier we will always create this security group even if BI is disabled.
 module "bi_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "4.17.1"
+  version = "~> 5.0"
 
   name            = "${local.identifier}-bi-database"
   use_name_prefix = false

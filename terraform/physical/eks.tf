@@ -4,94 +4,31 @@ data "aws_kms_key" "eks" {
   key_id = var.eks_kms_key_id
 }
 
-resource "aws_iam_policy" "cluster_autoscaler_policy" {
-  name_prefix = "cluster-autoscaler"
-  description = "EKS cluster-autoscaler policy for cluster ${module.eks_cluster.cluster_id}"
-  policy      = data.aws_iam_policy_document.cluster_autoscaler_pd.json
-}
-
-#tfsec:ignore:aws-iam-no-policy-wildcards
-data "aws_iam_policy_document" "cluster_autoscaler_pd" {
-  statement {
-    sid    = "clusterAutoscalerAll"
-    effect = "Allow"
-
-    actions = [
-      "autoscaling:DescribeAutoScalingGroups",
-      "autoscaling:DescribeAutoScalingInstances",
-      "autoscaling:DescribeLaunchConfigurations",
-      "autoscaling:DescribeTags",
-      "ec2:DescribeLaunchTemplateVersions",
-    ]
-
-    resources = ["*"]
-  }
-
-  statement {
-    sid    = "clusterAutoscalerOwn"
-    effect = "Allow"
-
-    actions = [
-      "autoscaling:SetDesiredCapacity",
-      "autoscaling:TerminateInstanceInAutoScalingGroup",
-      "autoscaling:UpdateAutoScalingGroup",
-    ]
-
-    resources = ["*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/${module.eks_cluster.cluster_id}"
-      values   = ["owned"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/enabled"
-      values   = ["true"]
-    }
-  }
-}
-
 # IAM role that the bastion host can assume.
 module "cluster_access_role_assumable" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
-  version = "5.11.2"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role"
+  version = "~> 6.0"
 
-  create_role = true
+  create = true
 
-  role_name         = "${local.identifier}-${data.aws_region.current.name}-cluster-access-assumable"
-  role_requires_mfa = false
+  name            = "${local.identifier}-${data.aws_region.current.id}-cluster-access-assumable"
+  use_name_prefix = false
 
-  custom_role_policy_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
-    aws_iam_policy.cluster_access.arn
-  ]
+  policies = {
+    ReadOnlyAccess = "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess"
+    ClusterAccess  = aws_iam_policy.cluster_access.arn
+  }
 
-  trusted_role_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
-  ]
-
-  tags = local.tags
-}
-
-# IAM role to access the EKS cluster. By default only the user that creates the cluster has access to it
-module "cluster_access_role" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role-with-oidc"
-  version = "5.11.2"
-
-  create_role = true
-  role_name   = local.cluster_access_role_name
-
-  provider_url = replace(module.eks_cluster.cluster_oidc_issuer_url, "https://", "")
-  role_policy_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/ReadOnlyAccess",
-    aws_iam_policy.cluster_access.arn,
-    aws_iam_policy.cluster_autoscaler_policy.arn
-  ]
-  oidc_fully_qualified_subjects = [
-    "system:serviceaccount:kube-system:cluster-autoscaler-aws-cluster-autoscaler-chart"
-  ]
+  trust_policy_permissions = {
+    assume = {
+      effect = "Allow"
+      principals = [{
+        type        = "AWS"
+        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+      }]
+      actions = ["sts:AssumeRole"]
+    }
+  }
 
   tags = local.tags
 }
@@ -103,13 +40,13 @@ data "aws_iam_policy_document" "cluster_access" {
     ]
 
     resources = [
-      "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/${local.identifier}",
+      "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:cluster/${local.identifier}",
     ]
   }
 }
 
 resource "aws_iam_policy" "cluster_access" {
-  name   = "${local.identifier}-${data.aws_region.current.name}-cluster-access"
+  name   = "${local.identifier}-${data.aws_region.current.id}-cluster-access"
   policy = data.aws_iam_policy_document.cluster_access.json
 }
 
@@ -150,9 +87,12 @@ data "aws_iam_policy_document" "eks_worker" {
       "s3:DeleteObjectVersionTagging"
     ]
 
-    resources = [
-      "arn:${data.aws_partition.current.partition}:s3:::*",
-    ]
+    resources = flatten([
+      for bucket in aws_s3_bucket.guide_buckets : [
+        bucket.arn,
+        "${bucket.arn}/*",
+      ]
+    ])
   }
 
   statement {
@@ -214,14 +154,14 @@ data "aws_iam_policy_document" "eks_worker" {
 }
 
 resource "aws_iam_policy" "eks_worker" {
-  name   = "${local.identifier}-${data.aws_region.current.name}"
+  name   = "${local.identifier}-${data.aws_region.current.id}"
   policy = data.aws_iam_policy_document.eks_worker.json
 }
 
 # We need separate policies to maintain backwards compatibility with existing stacks. Modifying the existing policy
 # with new resources triggers a cluster breaking event.
 resource "aws_iam_policy" "eks_worker_kms" {
-  name   = "${local.identifier}-${data.aws_region.current.name}-kms"
+  name   = "${local.identifier}-${data.aws_region.current.id}-kms"
   policy = data.aws_iam_policy_document.eks_worker_kms.json
 }
 
@@ -233,7 +173,7 @@ resource "aws_kms_key" "eks" {
 }
 
 resource "aws_iam_policy" "assume_cross_account_role" {
-  name        = "${local.identifier}-${data.aws_region.current.name}-AssumeCrossAccountRole"
+  name        = "${local.identifier}-${data.aws_region.current.id}-AssumeCrossAccountRole"
   description = "Policy to assume the cross-account role for Route 53 hosted zone access"
 
   policy = jsonencode({
@@ -255,135 +195,143 @@ resource "aws_iam_policy" "assume_cross_account_role" {
 #tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "17.24.0"
+  version = "~> 21.0"
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
-  # EKS cofigurations
-  cluster_name    = local.identifier
-  cluster_version = var.eks_k8s_version
-  enable_irsa     = true
+  name               = local.identifier
+  kubernetes_version = var.eks_k8s_version
+  enable_irsa        = true
+
+  # Auto-upgrade the cluster at end of standard support to avoid extended support costs.
+  upgrade_policy = {
+    support_type = "STANDARD"
+  }
+
   # Need public access even when deploying from AWS due to the occasional inability to access private endpoints.
-  cluster_endpoint_public_access                 = true
-  cluster_endpoint_private_access                = true
-  cluster_endpoint_private_access_cidrs          = [local.vpc_cidr]
-  cluster_create_endpoint_private_access_sg_rule = true
+  endpoint_public_access  = true
+  endpoint_private_access = true
 
-  cluster_encryption_config = [
+  encryption_config = {
+    provider_key_arn = local.eks_kms_key
+    resources        = ["secrets"]
+  }
+
+  # Auto Mode: Karpenter-based scaling, built-in EBS CSI, LB controller, and spot interruption handling.
+  # bootstrap_self_managed_addons defaults to false when compute_config is enabled, triggering cluster replacement.
+  compute_config = {
+    enabled    = true
+    node_pools = ["system"]
+  }
+
+  vpc_id     = local.vpc_id
+  subnet_ids = local.private_subnet_ids
+
+  # Access entries replace the old map_roles / aws-auth configmap management.
+  authentication_mode                      = "API_AND_CONFIG_MAP"
+  enable_cluster_creator_admin_permissions = true
+
+  access_entries = merge(
     {
-      provider_key_arn = local.eks_kms_key
-      resources        = ["secrets"]
-    }
-  ]
-
-  vpc_id  = local.vpc_id
-  subnets = local.private_subnet_ids
-
-  workers_additional_policies = [
-    aws_iam_policy.eks_worker.arn,
-    aws_iam_policy.eks_worker_kms.arn,
-    aws_iam_policy.assume_cross_account_role.arn,
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore",
-    "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-  ]
-
-  worker_groups_launch_template = [
-    {
-      name                                    = "workers"
-      asg_max_size                            = var.eks_max_size
-      asg_desired_capacity                    = var.eks_desired_capacity
-      asg_min_size                            = var.eks_min_size
-      spot_allocation_strategy                = "price-capacity-optimized"
-      root_volume_type                        = "gp3"
-      root_volume_size                        = var.eks_volume_size
-      instance_refresh_enabled                = true
-      instance_refresh_instance_warmup        = 60
-      public_ip                               = false
-      metadata_http_put_response_hop_limit    = 3
-      spot_instance_pools                     = 0
-      update_default_version                  = true
-      instance_refresh_triggers               = ["tag"]
-      instance_refresh_min_healthy_percentage = 50
-      kubelet_extra_args                      = "--node-labels=node.kubernetes.io/lifecycle=spot"
-      override_instance_types                 = var.eks_instance_types
-      enable_monitoring                       = true
-      enabled_metrics = [
-        "GroupAndWarmPoolDesiredCapacity",
-        "GroupAndWarmPoolTotalCapacity",
-        "GroupDesiredCapacity",
-        "GroupInServiceCapacity",
-        "GroupInServiceInstances",
-        "GroupMaxSize",
-        "GroupMinSize",
-        "GroupPendingCapacity",
-        "GroupPendingInstances",
-        "GroupStandbyCapacity",
-        "GroupStandbyInstances",
-        "GroupTerminatingCapacity",
-        "GroupTerminatingInstances",
-        "GroupTotalCapacity",
-        "GroupTotalInstances",
-        "WarmPoolDesiredCapacity",
-        "WarmPoolMinSize",
-        "WarmPoolPendingCapacity",
-        "WarmPoolTerminatingCapacity",
-        "WarmPoolTotalCapacity",
-        "WarmPoolWarmedCapacity"
-      ]
-      target_group_arns = module.nlb.target_group_arns
-      taints = [
-        {
-          key    = "ebs.csi.aws.com/agent-not-ready"
-          value  = "NoExecute"
-          effect = "NO_SCHEDULE"
+      cluster_access_assumable = {
+        principal_arn = module.cluster_access_role_assumable.arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
         }
-      ]
-      tags = [
-        {
-          key                 = "aws-node-termination-handler/managed"
-          value               = true
-          propagate_at_launch = true
-        },
-        {
-          key                 = "Environment"
-          value               = var.environment
-          propagate_at_launch = true
-        },
-        {
-          key                 = "k8s.io/cluster-autoscaler/enabled"
-          value               = true
-          propagate_at_launch = true
-        },
-        {
-          key                 = "k8s.io/cluster-autoscaler/${local.identifier}"
-          value               = "owned"
-          propagate_at_launch = true
+      }
+    },
+    # SSO admin access for kubectl/Lens from workstations.
+    # Access entries require an exact role ARN — wildcards are not supported.
+    var.sso_admin_role_arn != "" ? {
+      sso_admin = {
+        principal_arn = var.sso_admin_role_arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
         }
-      ]
-    }
-  ]
-
-  # Kubernetes configurations
-  write_kubeconfig = false
-  # Give both roles admin access due to the need for the OIDC assumable role and the basic assumable role. The bastion
-  # host does not seem to support the OIDC role at all so a second one was required.
-  map_roles = [ # aws-auth configmap
-    {
-      rolearn  = module.cluster_access_role.iam_role_arn
-      username = "admin"
-      groups   = ["system:masters"]
-    },
-    {
-      rolearn  = module.cluster_access_role_assumable.iam_role_arn
-      username = "admin"
-      groups   = ["system:masters"]
-    },
-    {
-      rolearn  = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/AWSReservedSSO_AWSAdministratorAccess_*"
-      username = "admin"
-      groups   = ["system:masters"]
-    }
-  ]
+      }
+    } : {}
+  )
 
   tags = local.tags
+}
+
+# Pod Identity: App workloads (S3, KMS, RDS, DMS, logs, ECR)
+resource "aws_iam_role" "app_pod_identity" {
+  name = "${local.identifier}-${data.aws_region.current.id}-app-pod-identity"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "pods.eks.amazonaws.com"
+        }
+        Action = [
+          "sts:AssumeRole",
+          "sts:TagSession"
+        ]
+      }
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "app_pod_identity_worker" {
+  role       = aws_iam_role.app_pod_identity.name
+  policy_arn = aws_iam_policy.eks_worker.arn
+}
+
+resource "aws_iam_role_policy_attachment" "app_pod_identity_worker_kms" {
+  role       = aws_iam_role.app_pod_identity.name
+  policy_arn = aws_iam_policy.eks_worker_kms.arn
+}
+
+resource "aws_eks_pod_identity_association" "app" {
+  cluster_name    = module.eks_cluster.cluster_name
+  namespace       = "dozuki"
+  service_account = "default"
+  role_arn        = aws_iam_role.app_pod_identity.arn
+}
+
+# Pod Identity: cert-manager cross-account Route53
+resource "aws_iam_role" "cert_manager_pod_identity" {
+  name = "${local.identifier}-${data.aws_region.current.id}-cert-manager-pod-identity"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "pods.eks.amazonaws.com"
+        }
+        Action = [
+          "sts:AssumeRole",
+          "sts:TagSession"
+        ]
+      }
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "cert_manager_pod_identity" {
+  role       = aws_iam_role.cert_manager_pod_identity.name
+  policy_arn = aws_iam_policy.assume_cross_account_role.arn
+}
+
+resource "aws_eks_pod_identity_association" "cert_manager" {
+  cluster_name    = module.eks_cluster.cluster_name
+  namespace       = "cert-manager"
+  service_account = "cert-manager"
+  role_arn        = aws_iam_role.cert_manager_pod_identity.arn
 }

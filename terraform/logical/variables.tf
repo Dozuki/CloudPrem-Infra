@@ -45,15 +45,15 @@ variable "enable_webhooks" {
 
 variable "enable_bi" {
   description = "Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster"
-  type        = string
+  type        = bool
   default     = false
 }
 
-#tfsec:ignore:general-secrets-no-plaintext-exposure
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string
   default     = ""
+  sensitive   = true
 }
 
 variable "grafana_subpath" {
@@ -67,10 +67,63 @@ variable "grafana_subpath" {
   }
 }
 
-variable "devops_secret_name" {
-  description = "Name of the secret which houses app configuration"
+variable "image_tag" {
+  description = "Docker image tag for the main Dozuki app container. Changes with every deploy."
   type        = string
-  default     = "devops/app/config"
+}
+
+variable "nextjs_tag" {
+  description = "Docker image tag for the Next.js frontend container. Changes with every deploy."
+  type        = string
+}
+
+variable "image_repository" {
+  description = "Docker image repository (ECR) for app containers."
+  type        = string
+}
+
+variable "smtp_enabled" {
+  description = "Whether to enable SMTP email sending."
+  type        = bool
+  default     = true
+}
+
+variable "smtp_host" {
+  description = "SMTP server hostname."
+  type        = string
+  default     = "smtp.sendgrid.net"
+}
+
+variable "smtp_from_address" {
+  description = "SMTP from email address."
+  type        = string
+  default     = "noreply@dozuki.com"
+}
+
+variable "smtp_auth_enabled" {
+  description = "Whether to use SMTP authentication."
+  type        = bool
+  default     = true
+}
+
+variable "smtp_username" {
+  description = "SMTP authentication username."
+  type        = string
+  default     = "apikey"
+}
+
+#tfsec:ignore:general-secrets-no-plaintext-exposure
+variable "smtp_password" {
+  description = "SMTP authentication password."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "protect_resources" {
+  description = "When true, retain Vault secrets on destroy (soft delete). When false, permanently purge all versions."
+  type        = bool
+  default     = true
 }
 
 # --- END App Configuration --- #
@@ -79,26 +132,6 @@ variable "devops_secret_name" {
 
 variable "eks_cluster_id" {
   description = "ID of EKS cluster for app provisioning"
-  type        = string
-}
-
-variable "eks_oidc_cluster_access_role_name" {
-  description = "ARN for OIDC-compatible IAM Role for the EKS Cluster Autoscaler"
-  type        = string
-}
-
-variable "eks_worker_asg_names" {
-  description = "Autoscaling group names for the EKS cluster"
-  type        = list(string)
-}
-
-variable "termination_handler_role_arn" {
-  description = "IAM Role for EKS node termination handler"
-  type        = string
-}
-
-variable "termination_handler_sqs_queue_id" {
-  description = "SQS Queue ID for the EKS node termination handler"
   type        = string
 }
 
@@ -182,4 +215,19 @@ variable "dms_enabled" {
   type        = bool
   default     = false
 }
+variable "vault_address" {
+  description = "Vault server address accessible from within the cluster."
+  type        = string
+}
+
+variable "nlb_https_target_group_arn" {
+  description = "NLB HTTPS target group ARN for TargetGroupBinding"
+  type        = string
+}
+
+variable "nlb_http_target_group_arn" {
+  description = "NLB HTTP target group ARN for TargetGroupBinding"
+  type        = string
+}
+
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #

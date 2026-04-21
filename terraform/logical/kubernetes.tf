@@ -1,14 +1,30 @@
-resource "kubernetes_namespace" "app" {
-  depends_on = [helm_release.ebs_csi_driver]
+resource "kubernetes_storage_class_v1" "ebs_gp3" {
+  metadata {
+    name = "ebs-gp3"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+  storage_provisioner    = "ebs.csi.eks.amazonaws.com"
+  reclaim_policy         = "Delete"
+  volume_binding_mode    = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+  parameters = {
+    type      = "gp3"
+    encrypted = "true"
+  }
+}
+
+resource "kubernetes_namespace_v1" "app" {
   metadata {
     name = local.k8s_namespace_name
   }
 }
 
-resource "kubernetes_role" "dozuki_subsite_role" {
+resource "kubernetes_role_v1" "dozuki_subsite_role" {
   metadata {
     name      = "dozuki_subsite_role"
-    namespace = kubernetes_namespace.app.metadata[0].name
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 
   rule {
@@ -19,25 +35,25 @@ resource "kubernetes_role" "dozuki_subsite_role" {
 }
 
 
-resource "kubernetes_role_binding" "dozuki_subsite_role_binding" {
+resource "kubernetes_role_binding_v1" "dozuki_subsite_role_binding" {
 
   metadata {
     name      = "dozuki_subsite_role_binding"
-    namespace = kubernetes_namespace.app.metadata[0].name
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
   role_ref {
     api_group = "rbac.authorization.k8s.io"
     kind      = "Role"
-    name      = kubernetes_role.dozuki_subsite_role.metadata[0].name
+    name      = kubernetes_role_v1.dozuki_subsite_role.metadata[0].name
   }
   subject {
     kind      = "ServiceAccount"
     name      = "default"
-    namespace = kubernetes_namespace.app.metadata[0].name
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 }
 
-resource "kubernetes_cluster_role" "dozuki_list_role" {
+resource "kubernetes_cluster_role_v1" "dozuki_list_role" {
 
   metadata {
     name = "dozuki_list_role"
@@ -55,7 +71,7 @@ resource "kubernetes_cluster_role" "dozuki_list_role" {
   }
 }
 
-resource "kubernetes_cluster_role_binding" "dozuki_list_role_binding" {
+resource "kubernetes_cluster_role_binding_v1" "dozuki_list_role_binding" {
 
   metadata {
     name = "dozuki_list_role_binding"
@@ -63,85 +79,16 @@ resource "kubernetes_cluster_role_binding" "dozuki_list_role_binding" {
   role_ref {
     api_group = "rbac.authorization.k8s.io"
     kind      = "ClusterRole"
-    name      = kubernetes_cluster_role.dozuki_list_role.metadata[0].name
+    name      = kubernetes_cluster_role_v1.dozuki_list_role.metadata[0].name
   }
   subject {
     kind      = "ServiceAccount"
     name      = "default"
-    namespace = kubernetes_namespace.app.metadata[0].name
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
 }
 
-resource "kubernetes_secret" "dozuki_infra_credentials" {
-
-  metadata {
-    name      = "dozuki-infra-credentials"
-    namespace = kubernetes_namespace.app.metadata[0].name
-  }
-  type = "Opaque"
-
-  data = {
-    master_host     = local.db_master_host
-    master_user     = local.db_master_username
-    master_password = local.db_master_password
-    bi_host         = local.db_bi_host
-    bi_user         = local.db_master_username
-    bi_password     = local.db_bi_password
-    memcached_host  = var.memcached_cluster_address
-  }
-}
-
-resource "helm_release" "metrics_server" {
-  name  = "metrics-server"
-  chart = "charts/metrics-server"
-}
-
-resource "helm_release" "adot_exporter" {
-  depends_on = [helm_release.metrics_server]
-
-  name  = "adot-exporter-for-eks-on-ec2"
-  chart = "${path.module}/charts/adot-exporter-for-eks-on-ec2"
-
-  set {
-    name  = "clusterName"
-    value = var.eks_cluster_id
-  }
-
-  set {
-    name  = "awsRegion"
-    value = data.aws_region.current.name
-  }
-
-  set {
-    name  = "adotCollector.daemonSet.service.metrics.receivers"
-    value = "{awscontainerinsightreceiver}"
-  }
-  set {
-    name  = "adotCollector.daemonSet.service.metrics.exporters"
-    value = "{awsemf}"
-  }
-}
-
-resource "helm_release" "fluent_bit_log_exporter" {
-  depends_on = [helm_release.adot_exporter]
-
-  chart = "${path.module}/charts/aws-for-fluent-bit"
-  name  = "aws-for-fluent-bit"
-
-  namespace = "amazon-metrics"
-
-  set {
-    name  = "cloudWatchLogs.region"
-    value = data.aws_region.current.name
-  }
-
-  set {
-    name  = "global.namespaceOverride"
-    value = "amazon-metrics"
-  }
-}
-
-resource "kubernetes_namespace" "cert_manager" {
+resource "kubernetes_namespace_v1" "cert_manager" {
   metadata {
     name = "cert-manager"
   }
@@ -151,58 +98,259 @@ resource "helm_release" "cert_manager" {
   name  = "cert-manager"
   chart = "${path.module}/charts/cert-manager"
 
-  namespace = kubernetes_namespace.cert_manager.metadata[0].name
+  namespace = kubernetes_namespace_v1.cert_manager.metadata[0].name
 
   wait = true
 
-  set {
-    name  = "crds.enabled"
-    value = "true"
-  }
+  set = [
+    {
+      name  = "crds.enabled"
+      value = "true"
+    },
+    {
+      name  = "crds.keep"
+      value = "true"
+    },
+    {
+      name  = "config.enableGatewayAPI"
+      value = "true"
+    },
+  ]
+}
 
-  set {
-    name  = "crds.keep"
-    value = "true"
-  }
+resource "helm_release" "envoy_gateway" {
+  name       = "envoy-gateway"
+  namespace  = "envoy-gateway-system"
+  repository = "oci://docker.io/envoyproxy"
+  chart      = "gateway-helm"
+  version    = "v1.7.0"
 
-  set {
-    name  = "config.enableGatewayAPI"
-    value = "true"
+  create_namespace = true
+  wait             = true
+}
+
+# Stable Service in envoy-gateway-system targeting Envoy proxy pods.
+# Proxy pods are deployed in the controller namespace, not the Gateway namespace.
+resource "kubernetes_service_v1" "envoy_proxy" {
+  depends_on = [helm_release.app]
+
+  metadata {
+    name      = "dozuki-envoy-proxy"
+    namespace = "envoy-gateway-system"
+  }
+  spec {
+    type = "ClusterIP"
+    selector = {
+      "gateway.envoyproxy.io/owning-gateway-name"      = "dozuki-gateway"
+      "gateway.envoyproxy.io/owning-gateway-namespace" = kubernetes_namespace_v1.app.metadata[0].name
+    }
+    port {
+      name        = "https"
+      port        = 443
+      target_port = 10443
+      protocol    = "TCP"
+    }
+    port {
+      name        = "http"
+      port        = 80
+      target_port = 10080
+      protocol    = "TCP"
+    }
   }
 }
 
-resource "helm_release" "ebs_csi_driver" {
-  name  = "ebs-csi-driver"
-  chart = "${path.module}/charts/aws-ebs-csi-driver"
+resource "kubernetes_manifest" "tgb_https" {
+  depends_on = [kubernetes_service_v1.envoy_proxy]
 
-  values = [
-    file("static/ebs-csi-driver-values.yaml")
-  ]
+  manifest = {
+    apiVersion = "eks.amazonaws.com/v1"
+    kind       = "TargetGroupBinding"
+    metadata = {
+      name      = "envoy-https"
+      namespace = "envoy-gateway-system"
+    }
+    spec = {
+      serviceRef = {
+        name = "dozuki-envoy-proxy"
+        port = 443
+      }
+      targetGroupARN = var.nlb_https_target_group_arn
+      targetType     = "ip"
+    }
+  }
+}
 
-  namespace = "kube-system"
+resource "kubernetes_manifest" "tgb_http" {
+  depends_on = [kubernetes_service_v1.envoy_proxy]
+
+  manifest = {
+    apiVersion = "eks.amazonaws.com/v1"
+    kind       = "TargetGroupBinding"
+    metadata = {
+      name      = "envoy-http"
+      namespace = "envoy-gateway-system"
+    }
+    spec = {
+      serviceRef = {
+        name = "dozuki-envoy-proxy"
+        port = 80
+      }
+      targetGroupARN = var.nlb_http_target_group_arn
+      targetType     = "ip"
+    }
+  }
+}
+
+resource "kubernetes_manifest" "nodepool_spot" {
+  manifest = {
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata = {
+      name = "spot"
+    }
+    spec = {
+      template = {
+        spec = {
+          nodeClassRef = {
+            group = "eks.amazonaws.com"
+            kind  = "NodeClass"
+            name  = "default"
+          }
+          requirements = [
+            {
+              key      = "karpenter.sh/capacity-type"
+              operator = "In"
+              values   = ["spot"]
+            },
+            {
+              key      = "kubernetes.io/arch"
+              operator = "In"
+              values   = ["amd64"]
+            }
+          ]
+        }
+      }
+      disruption = {
+        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        consolidateAfter    = "1m"
+      }
+      weight = 100
+    }
+  }
+}
+
+resource "kubernetes_manifest" "nodepool_on_demand" {
+  manifest = {
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata = {
+      name = "on-demand"
+    }
+    spec = {
+      template = {
+        spec = {
+          nodeClassRef = {
+            group = "eks.amazonaws.com"
+            kind  = "NodeClass"
+            name  = "default"
+          }
+          requirements = [
+            {
+              key      = "karpenter.sh/capacity-type"
+              operator = "In"
+              values   = ["on-demand"]
+            },
+            {
+              key      = "kubernetes.io/arch"
+              operator = "In"
+              values   = ["amd64"]
+            }
+          ]
+          taints = [
+            {
+              key    = "eks.amazonaws.com/capacity-type"
+              value  = "on-demand"
+              effect = "NoSchedule"
+            }
+          ]
+        }
+      }
+      disruption = {
+        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        consolidateAfter    = "1m"
+      }
+      weight = 10
+    }
+  }
+}
+
+resource "helm_release" "external_secrets" {
+  depends_on = [helm_release.cert_manager]
+
+  name       = "external-secrets"
+  namespace  = kubernetes_namespace_v1.app.metadata[0].name
+  repository = "https://charts.external-secrets.io"
+  chart      = "external-secrets"
 
   wait = true
+
+  set = [
+    {
+      name  = "crds.createClusterExternalSecret"
+      value = "true"
+    },
+    {
+      name  = "crds.createClusterSecretStore"
+      value = "true"
+    },
+  ]
+}
+
+# Service account for ESO to authenticate to Vault via K8s auth.
+# The SecretStore template references this SA by name.
+resource "kubernetes_service_account_v1" "eso_vault_auth" {
+  metadata {
+    name      = "dozuki-external-secrets"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
+  }
+}
+
+# CloudWatch Observability add-on — installed in logical (not physical) because
+# Auto Mode won't provision nodes until workloads are scheduled. cert-manager
+# and envoy-gateway trigger node creation; this addon installs after nodes exist.
+resource "aws_eks_addon" "cloudwatch_observability" {
+  cluster_name = data.aws_eks_cluster.main.name
+  addon_name   = "amazon-cloudwatch-observability"
+  depends_on   = [helm_release.cert_manager]
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, aws_eks_addon.cloudwatch_observability]
 
   name      = "dozuki"
-  namespace = kubernetes_namespace.app.metadata[0].name
+  namespace = kubernetes_namespace_v1.app.metadata[0].name
 
   chart = "${path.module}/charts/dozuki/chart"
 
-  wait              = false
+  # wait must be true so that on destroy, Helm waits for all resources
+  # (including custom resources with finalizers like Gateway, HTTPRoute,
+  # Certificate, ClusterIssuer) to be fully deleted before Terraform
+  # proceeds to destroy the controllers (cert-manager, envoy-gateway)
+  # that process those finalizers. Without this, controllers are torn
+  # down while custom resources still have pending finalizers, causing
+  # the namespace to hang indefinitely.
+  wait              = true
+  timeout           = 900
   dependency_update = true
 
   values = [jsonencode({
     hostname       = var.dns_domain_name
-    dns_validation = local.dns_validation
+    dns_validation = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
     customer       = coalesce(var.customer, "Dozuki")
     environment    = var.environment
 
     aws = {
-      region    = data.aws_region.current.name
+      region    = data.aws_region.current.id
       accountId = data.aws_caller_identity.current.account_id
       enabled   = true
     }
@@ -214,12 +362,12 @@ resource "helm_release" "app" {
     }
 
     smtp = {
-      enabled = try(local.secret_values["smtp_enabled"], false)
-      host    = try(local.secret_values["smtp_host"], "")
-      from    = try(local.secret_values["smtp_from_address"], "")
+      enabled = var.smtp_enabled
+      host    = var.smtp_host
+      from    = var.smtp_from_address
       auth = {
-        enabled  = try(local.secret_values["smtp_auth_enabled"], false)
-        username = try(local.secret_values["smtp_username"], "")
+        enabled  = var.smtp_auth_enabled
+        username = var.smtp_username
       }
     }
 
@@ -229,11 +377,11 @@ resource "helm_release" "app" {
 
     images = {
       app = {
-        repository = try(local.secret_values["image_repository"], "")
-        tag        = try(local.secret_values["image_tag"], "")
+        repository = var.image_repository
+        tag        = var.image_tag
       }
       webnextjs = {
-        tag = try(local.secret_values["nextjs_tag"], "")
+        tag = var.nextjs_tag
       }
     }
 
@@ -259,6 +407,11 @@ resource "helm_release" "app" {
       host = var.memcached_cluster_address
     }
 
+    vault = {
+      enabled = true
+      address = var.vault_address
+    }
+
     grafana = {
       enabled = var.enable_bi
       security = {
@@ -269,49 +422,7 @@ resource "helm_release" "app" {
       }
     }
 
-    secrets = [
-      {
-        name    = "grafana-common-config"
-        enabled = var.enable_bi
-        stringData = {
-          GRAFANA_SUBPATH                         = "dashboards"
-          GF_SERVER_SERVE_FROM_SUBPATH            = "true"
-          GF_USERS_DEFAULT_THEME                  = "light"
-          GF_DATABASE_TYPE                        = "mysql"
-          GF_DATABASE_HOST                        = local.db_master_host
-          GF_DATABASE_USER                        = local.db_master_username
-          GF_DATABASE_PASSWORD                    = local.db_master_password
-          GF_ANALYTICS_REPORTING_ENABLED          = "false"
-          GF_ANALYTICS_CHECK_FOR_UPDATES          = "false"
-          GF_METRICS_ENABLED                      = "false"
-          GF_SECURITY_ADMIN_PASSWORD              = local.grafana_admin_password
-          GF_SECURITY_ADMIN_USER                  = local.grafana_admin_username
-          GF_SECURITY_COOKIE_SECURE               = "true"
-          GF_SECURITY_DATA_SOURCE_PROXY_WHITELIST = "1.1.1.1:1"
-          GF_SECURITY_COOKIE_SAMESITE             = "strict"
-          GF_SECURITY_X_XSS_PROTECTION            = "true"
-          GF_SMTP_ENABLED                         = local.sensitive_helm_values.grafana_smtp_enabled
-          GF_SMTP_HOST                            = local.sensitive_helm_values.grafana_smtp_host
-          GF_SMTP_USER                            = local.sensitive_helm_values.grafana_smtp_user
-          GF_SMTP_PASSWORD                        = local.sensitive_helm_values.grafana_smtp_password
-          GF_SMTP_FROM_ADDRESS                    = local.sensitive_helm_values.grafana_smtp_from_address
-          GF_SMTP_FROM_NAME                       = "Dozuki Grafana Dashboard"
-          GF_SMTP_STARTTLS_POLICY                 = local.sensitive_helm_values.grafana_smtp_starttls
-        }
-      },
-      {
-        name    = "ops-basic-auth"
-        enabled = true
-        stringData = {
-          auth = local.sensitive_helm_values.ops_basic_auth
-        }
-      }
-    ]
-
     connectivity = {
-      frontegg = {
-        images = {}
-      }
       "webhook-service" = {
         messageBroker = { brokerList = var.msk_bootstrap_brokers }
         mysql         = { host = local.db_master_host, username = local.db_master_username }
@@ -320,104 +431,26 @@ resource "helm_release" "app" {
       "integrations-service" = {
         messageBroker = { brokerList = var.msk_bootstrap_brokers }
         mongo         = { connectionString = "mongodb://dozuki-mongodb/integrations" }
-        frontegg      = { slack = { encryptionKey = "dummyval" } }
       }
       "event-service" = {
         database      = { host = local.db_master_host, username = local.db_master_username }
         messageBroker = { brokerList = var.msk_bootstrap_brokers }
         redis         = { host = "dozuki-redis-master", tls = "false" }
-        frontegg      = { sync = { enabled = "false" }, authenticationUrl = "https://api.frontegg.com/auth/vendor" }
       }
       "connectors-worker" = {
         messageBroker = { brokerList = var.msk_bootstrap_brokers }
         redis         = { host = "dozuki-redis-master", tls = "false" }
-        frontegg      = { channels = "slack", emails = { provider = "sendgrid", sendgrid = { apiKey = "dummyval" } } }
-      }
-    }
-
-    "kube-prometheus-stack" = {
-      grafana = {
-        defaultDashboardsTimezone = "America/Los_Angeles"
       }
     }
 
     rustici = {}
   })]
 
-  set_sensitive {
-    name  = "db.password"
-    value = local.db_master_password
-  }
-  set_sensitive {
-    name  = "smtp.auth.password"
-    value = local.sensitive_helm_values.smtp_password
-  }
-  set_sensitive {
-    name  = "sentry.dsn"
-    value = local.sensitive_helm_values.sentry_dsn
-  }
-  set_sensitive {
-    name  = "frontegg.clientId"
-    value = local.sensitive_helm_values.frontegg_client_id
-  }
-  set_sensitive {
-    name  = "frontegg.apiToken"
-    value = local.sensitive_helm_values.frontegg_api_token
-  }
-  set_sensitive {
-    name  = "surveyjs.licenseKey"
-    value = local.sensitive_helm_values.surveyjs_license_key
-  }
-  set_sensitive {
-    name  = "googleTranslate.token"
-    value = local.sensitive_helm_values.google_translate_token
-  }
-  set_sensitive {
-    name  = "rustici.password"
-    value = local.sensitive_helm_values.rustici_password
-  }
-  set_sensitive {
-    name  = "rustici.managedPassword"
-    value = local.sensitive_helm_values.rustici_managed_password
-  }
-  set_sensitive {
-    name  = "connectivity.frontegg.images.username"
-    value = local.sensitive_helm_values.frontegg_docker_username
-  }
-  set_sensitive {
-    name  = "connectivity.frontegg.images.password"
-    value = local.sensitive_helm_values.frontegg_docker_password
-  }
-  set_sensitive {
-    name  = "connectivity.api-gateway.frontegg.authenticationPublicKey"
-    value = local.sensitive_helm_values.frontegg_auth_pubkey
-  }
-  set_sensitive {
-    name  = "connectivity.webhook-service.mysql.password"
-    value = local.db_master_password
-  }
-  set_sensitive {
-    name  = "connectivity.event-service.database.password"
-    value = local.db_master_password
-  }
-  set_sensitive {
-    name  = "connectivity.event-service.frontegg.clientId"
-    value = local.sensitive_helm_values.frontegg_client_id
-  }
-  set_sensitive {
-    name  = "connectivity.event-service.frontegg.apiKey"
-    value = local.sensitive_helm_values.frontegg_api_token
-  }
-  set_sensitive {
-    name  = "grafana.security.admin_password"
-    value = local.grafana_admin_password
-  }
-  set_sensitive {
-    name  = "grafana.datasource.password"
-    value = local.db_bi_password
-  }
-  set_sensitive {
-    name  = "kube-prometheus-stack.grafana.adminPassword"
-    value = local.sensitive_helm_values.infra_auth_password
-  }
+  set_sensitive = [
+    { name = "db.password", value = local.db_master_password },
+    { name = "smtp.auth.password", value = var.smtp_password },
+    { name = "googleTranslate.token", value = var.google_translate_api_token },
+    { name = "grafana.security.admin_password", value = local.grafana_admin_password },
+    { name = "grafana.datasource.password", value = local.db_bi_password },
+  ]
 }
