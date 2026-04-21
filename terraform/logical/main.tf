@@ -85,11 +85,11 @@ locals {
   # Database
   db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
 
-  db_master_host     = local.db_credentials["host"]
-  db_master_username = local.db_credentials["username"]
+  db_master_host     = nonsensitive(local.db_credentials["host"])
+  db_master_username = nonsensitive(local.db_credentials["username"])
   db_master_password = local.db_credentials["password"]
 
-  db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
+  db_bi_host     = var.enable_bi ? nonsensitive(jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"]) : ""
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
   # Grafana
