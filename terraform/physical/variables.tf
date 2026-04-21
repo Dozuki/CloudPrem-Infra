@@ -339,9 +339,9 @@ variable "eks_kms_key_id" {
 }
 
 variable "eks_k8s_version" {
-  description = "Version of Kubernetes to launch or upgrade to. EKS does not support rolling back versions or upgrade version skipping."
+  description = "Initial Kubernetes version for new clusters. Ignored after creation — EKS Auto Mode manages upgrades via upgrade_policy."
   type        = string
-  default     = "1.32"
+  default     = "1.33"
 }
 
 variable "enable_webhooks" {

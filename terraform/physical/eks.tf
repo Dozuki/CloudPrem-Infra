@@ -259,6 +259,12 @@ module "eks_cluster" {
   )
 
   tags = local.tags
+
+  # EKS Auto Mode manages cluster version upgrades via upgrade_policy.
+  # Ignore version drift so Terraform doesn't fight the auto-upgrade.
+  lifecycle {
+    ignore_changes = [kubernetes_version]
+  }
 }
 
 # Pod Identity: App workloads (S3, KMS, RDS, DMS, logs, ECR)
