@@ -62,11 +62,19 @@ resource "aws_elasticache_parameter_group" "this" {
   family = "memcached1.5"
 }
 
+resource "random_id" "elasticache" {
+  byte_length = 4
+  keepers = {
+    node_type      = var.elasticache_instance_type
+    engine_version = "1.5.16"
+  }
+}
+
 resource "aws_elasticache_cluster" "this" {
-  cluster_id = local.identifier
+  cluster_id = "${local.identifier}-${random_id.elasticache.hex}"
 
   engine         = "memcached"
-  engine_version = "1.5.16"
+  engine_version = random_id.elasticache.keepers.engine_version
   port           = 11211
 
   node_type       = var.elasticache_instance_type
@@ -81,4 +89,8 @@ resource "aws_elasticache_cluster" "this" {
   apply_immediately = true
 
   tags = local.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }

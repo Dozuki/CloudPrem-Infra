@@ -7,7 +7,31 @@
 locals {
   # Extract the service region from the endpoint service name
   # (format: com.amazonaws.vpce.<region>.vpce-svc-xxx)
-  vault_service_region = element(split(".", var.vault_endpoint_service_name), 3)
+  vault_service_region  = element(split(".", var.vault_endpoint_service_name), 3)
+  vault_is_cross_region = local.vault_service_region != data.aws_region.current.id
+}
+
+# Look up endpoint service AZs for same-region deployments to filter subnets.
+# Cross-region lookups don't work (data source doesn't support service_region),
+# so we skip the filter and pass all subnets — AWS maps all consumer AZs for
+# cross-region endpoints.
+data "aws_vpc_endpoint_service" "vault" {
+  count        = local.vault_is_cross_region ? 0 : 1
+  service_name = var.vault_endpoint_service_name
+}
+
+data "aws_subnets" "vault_compatible" {
+  count = local.vault_is_cross_region ? 0 : 1
+
+  filter {
+    name   = "subnet-id"
+    values = local.private_subnet_ids
+  }
+
+  filter {
+    name   = "availability-zone"
+    values = data.aws_vpc_endpoint_service.vault[0].availability_zones
+  }
 }
 
 resource "aws_security_group" "vault_endpoint" {
@@ -45,7 +69,7 @@ resource "aws_vpc_endpoint" "vault" {
   service_name       = var.vault_endpoint_service_name
   service_region     = local.vault_service_region
   vpc_endpoint_type  = "Interface"
-  subnet_ids         = local.private_subnet_ids
+  subnet_ids         = local.vault_is_cross_region ? local.private_subnet_ids : data.aws_subnets.vault_compatible[0].ids
   security_group_ids = [aws_security_group.vault_endpoint.id]
 
   private_dns_enabled = false
