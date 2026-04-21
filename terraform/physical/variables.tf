@@ -338,6 +338,12 @@ variable "eks_kms_key_id" {
   default     = ""
 }
 
+variable "eks_k8s_version" {
+  description = "Kubernetes version override. Leave null to let EKS Auto Mode manage the version. Set explicitly only to pin a specific version."
+  type        = string
+  default     = null
+}
+
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
   type        = bool
