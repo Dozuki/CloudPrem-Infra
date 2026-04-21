@@ -191,7 +191,7 @@
 | <a name="input_eks_k8s_version"></a> [eks\_k8s\_version](#input\_eks\_k8s\_version) | Kubernetes version override. Leave null to let EKS Auto Mode manage the version. Set explicitly only to pin a specific version. | `string` | `null` | no |
 | <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_elasticache_cluster_size"></a> [elasticache\_cluster\_size](#input\_elasticache\_cluster\_size) | Cluster size | `number` | `1` | no |
-| <a name="input_elasticache_instance_type"></a> [elasticache\_instance\_type](#input\_elasticache\_instance\_type) | Elastic cache instance type | `string` | `"cache.t2.micro"` | no |
+| <a name="input_elasticache_instance_type"></a> [elasticache\_instance\_type](#input\_elasticache\_instance\_type) | Elastic cache instance type | `string` | `"cache.t3.micro"` | no |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users). | `bool` | `false` | no |
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |

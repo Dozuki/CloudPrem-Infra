@@ -322,7 +322,7 @@ variable "app_access_cidrs" {
 
 variable "elasticache_instance_type" {
   type        = string
-  default     = "cache.t2.micro"
+  default     = "cache.t3.micro"
   description = "Elastic cache instance type"
 }
 
