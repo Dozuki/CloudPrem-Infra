@@ -202,8 +202,8 @@ module "eks_cluster" {
   name = local.identifier
   # Default null lets EKS Auto Mode manage version via upgrade_policy.
   # Set eks_k8s_version to pin a specific version if needed.
-  cluster_version = var.eks_k8s_version
-  enable_irsa     = true
+  kubernetes_version = var.eks_k8s_version
+  enable_irsa        = true
 
   # Auto-upgrade the cluster at end of standard support to avoid extended support costs.
   upgrade_policy = {
