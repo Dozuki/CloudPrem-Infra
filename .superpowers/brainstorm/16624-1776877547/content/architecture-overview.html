@@ -1,0 +1,99 @@
+<h2>Architecture: Dual Cluster, Shared Data Layer</h2>
+<p class="subtitle">Section 1 of 5 — Overall architecture and traffic flow</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Steady State (No Deployment)</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.8;">
+<pre style="color: #e0e0e0; margin: 0;">
+Users
+  │
+  ▼
+Route53 (weighted: blue=100, green=0)
+  │
+  ▼
+┌─────────────────────────────────────────────────────────┐
+│                      Shared VPC                         │
+│                                                         │
+│  ┌──────────────┐                                       │
+│  │  NLB (blue)  │ ◄── Only blue NLB active              │
+│  └──────┬───────┘                                       │
+│         │                                               │
+│         ▼                                               │
+│  ┌──────────────────────┐     ┌─────────────────────┐   │
+│  │   EKS Cluster BLUE   │     │  EKS Cluster GREEN  │   │
+│  │  ┌────────────────┐  │     │                     │   │
+│  │  │ Envoy Gateway  │  │     │  (does not exist    │   │
+│  │  │ App Pods (v1)  │  │     │   until deployment) │   │
+│  │  │ ESO / Vault    │  │     │                     │   │
+│  │  │ cert-manager   │  │     └─────────────────────┘   │
+│  │  └────────────────┘  │                               │
+│  └──────────┬───────────┘                               │
+│             │                                           │
+│     ┌───────┴───────────────────────────┐               │
+│     ▼               ▼              ▼    ▼               │
+│  ┌────────┐   ┌──────────┐   ┌─────┐ ┌────────────┐    │
+│  │ Aurora │   │ElastiCache│   │ S3  │ │ Vault      │    │
+│  │ MySQL  │   │(Memcached)│   │     │ │(PrivateLink│    │
+│  └────────┘   └──────────┘   └─────┘ └────────────┘    │
+│                                                         │
+│              SHARED DATA LAYER                          │
+└─────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">During Deployment (Green Spun Up)</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.8;">
+<pre style="color: #e0e0e0; margin: 0;">
+Users
+  │
+  ▼
+Route53 (weighted: blue=90, green=10)  ◄── Gradual shift
+  │                    │
+  ▼                    ▼
+┌─────────────────────────────────────────────────────────┐
+│                      Shared VPC                         │
+│                                                         │
+│  ┌──────────────┐    ┌───────────────┐                  │
+│  │  NLB (blue)  │    │  NLB (green)  │                  │
+│  └──────┬───────┘    └───────┬───────┘                  │
+│         │                    │                          │
+│         ▼                    ▼                          │
+│  ┌─────────────────┐  ┌─────────────────┐              │
+│  │  EKS BLUE       │  │  EKS GREEN      │              │
+│  │  App v1 (old)   │  │  App v2 (new)   │              │
+│  │  ✅ Serving 90% │  │  ✅ Serving 10% │              │
+│  └────────┬────────┘  └────────┬────────┘              │
+│           │                    │                        │
+│     ┌─────┴────────────────────┴──────────┐             │
+│     ▼               ▼              ▼      ▼             │
+│  ┌────────┐   ┌──────────┐   ┌─────┐  ┌────────────┐   │
+│  │ Aurora │   │ElastiCache│   │ S3  │  │ Vault      │   │
+│  │ MySQL  │   │(Memcached)│   │     │  │(PrivateLink│   │
+│  │(shared)│   │ (shared)  │   │     │  └────────────┘   │
+│  └────────┘   └──────────┘   └─────┘                    │
+│                                                         │
+│   Both clusters read/write the SAME Aurora instance     │
+│   Migrations run before green starts (backward-compat)  │
+└─────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem;">
+  <h3>Key Design Decisions</h3>
+  <ul style="line-height: 2;">
+    <li><strong>Shared VPC</strong> — both clusters in the same VPC for direct access to shared data layer</li>
+    <li><strong>Separate NLBs</strong> — each cluster gets its own NLB; Route53 weighted routing controls split</li>
+    <li><strong>Shared Aurora</strong> — both clusters point at the same Aurora instance (backward-compatible migrations)</li>
+    <li><strong>Shared ElastiCache</strong> — memcached is a cache, safe to share (cache invalidation is worst case)</li>
+    <li><strong>Shared S3</strong> — buckets are global, both clusters use the same buckets</li>
+    <li><strong>Green spins up on deploy</strong> — no idle resources when not deploying</li>
+    <li><strong>Green tears down after cutover</strong> — or becomes the new "blue" for next deployment</li>
+  </ul>
+</div>

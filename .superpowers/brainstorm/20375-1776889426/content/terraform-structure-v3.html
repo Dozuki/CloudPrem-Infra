@@ -1,0 +1,157 @@
+<h2>Terraform Structure (Revised — Physical/Logical Preserved)</h2>
+<p class="subtitle">Section 2 of 5 — Blue/green within the existing two-layer model</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Same Two Layers, Blue/Green Inside</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.8;">
+<pre style="color: #e0e0e0; margin: 0;">
+<span style="color: #888;">infra-tf/standard/us-east-1/usac/</span>
+├── physical/           ← Spacelift: usac-physical  <span style="color: #4f8;">(same as today)</span>
+│   terragrunt.hcl
+│
+└── logical/            ← Spacelift: usac-logical   <span style="color: #4f8;">(same as today)</span>
+    terragrunt.hcl
+
+<span style="color: #fd0;">Still just 2 stacks per market. No new Spacelift stacks.</span>
+
+
+<span style="color: #888;">CloudPrem-Infra/terraform/physical/</span>
+├── main.tf
+├── <span style="color: #6cf;">shared.tf</span>            VPC, Aurora, ElastiCache, S3, Vault PrivateLink
+│                       <span style="color: #888;">Always exists. Never blue/green'd.</span>
+│
+├── <span style="color: #4f8;">eks.tf</span>              module "eks_blue"  { ... }  <span style="color: #888;">← always</span>
+│                       module "eks_green" { ... }  <span style="color: #888;">← count = var.deploy_green</span>
+│
+├── <span style="color: #4f8;">nlb.tf</span>              module "nlb_blue"  { ... }  <span style="color: #888;">← always</span>
+│                       module "nlb_green" { ... }  <span style="color: #888;">← count = var.deploy_green</span>
+│
+├── <span style="color: #fd0;">dns.tf</span>              Route53 weighted records
+│                       blue_weight / green_weight variables
+│
+├── rds.tf → <span style="color: #f84;">aurora.tf</span>  Aurora cluster (shared, not blue/green'd)
+├── elasticache.tf      Shared ElastiCache
+├── s3.tf               Shared S3 buckets
+└── vault.tf            Shared Vault PrivateLink
+
+
+<span style="color: #888;">CloudPrem-Infra/terraform/logical/</span>
+├── main.tf             Providers for <span style="color: #4f8;">blue</span> cluster (always)
+│                       Providers for <span style="color: #f84;">green</span> cluster (conditional)
+│
+├── <span style="color: #4f8;">kubernetes.tf</span>       helm_release "app_blue"  { ... }
+│                       helm_release "app_green" { count = var.deploy_green }
+│
+├── vault.tf            Vault resources for blue (always)
+│                       Vault resources for green (conditional)
+│
+└── charts/dozuki/      Same helm chart, different inputs
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">What Changes vs Today</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.8;">
+<pre style="color: #e0e0e0; margin: 0;">
+<span style="color: #4f8;">KEEPS:</span>
+  ✓ Two Spacelift stacks per market (physical + logical)
+  ✓ Physical → Logical dependency chain
+  ✓ Same Terragrunt directory structure
+  ✓ Same module source references
+
+<span style="color: #fd0;">ADDS:</span>
+  + deploy_green variable (bool, default false)
+  + green_image_tag variable (when deploying)
+  + blue_weight / green_weight variables (Route53)
+  + Conditional second EKS cluster + NLB in physical
+  + Conditional second helm release in logical
+  + Dual provider configuration in logical (two K8s contexts)
+
+<span style="color: #f84;">CHANGES:</span>
+  ~ RDS MySQL → Aurora MySQL (shared, one-time migration)
+  ~ EKS + NLB resources extracted into reusable local module
+    or child module to avoid code duplication
+  ~ DNS records change from simple CNAME to weighted CNAME set
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Deployment Flow (Variables Only)</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.8;">
+<pre style="color: #e0e0e0; margin: 0;">
+<span style="color: #888;">Steady state:</span>
+  deploy_green    = false
+  blue_weight     = 100
+  green_weight    = 0
+
+<span style="color: #888;">Step 1 — Spin up green:</span>
+  deploy_green    = true
+  green_image_tag = "abc123.6"        <span style="color: #888;">← new version</span>
+  blue_weight     = 100               <span style="color: #888;">← all traffic still on blue</span>
+  green_weight    = 0
+  <span style="color: #4f8;">→ spacectl: apply physical (creates green EKS + NLB)</span>
+  <span style="color: #4f8;">→ spacectl: apply logical (deploys app to green cluster)</span>
+
+<span style="color: #888;">Step 2 — Canary (10%):</span>
+  blue_weight     = 90
+  green_weight    = 10
+  <span style="color: #4f8;">→ spacectl: apply physical (updates Route53 weights)</span>
+
+<span style="color: #888;">Step 3 — Shift more (50/50):</span>
+  blue_weight     = 50
+  green_weight    = 50
+
+<span style="color: #888;">Step 4 — Full cutover:</span>
+  blue_weight     = 0
+  green_weight    = 100
+
+<span style="color: #888;">Step 5 — Promote green to blue:</span>
+  <span style="color: #888;">Swap: green becomes new blue, tear down old blue</span>
+  deploy_green    = false
+  blue_image_tag  = "abc123.6"        <span style="color: #888;">← was green's tag</span>
+  blue_weight     = 100
+  green_weight    = 0
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem; padding: 1.5rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+  <h3>Why This Works</h3>
+  <ul style="line-height: 2;">
+    <li><strong>No new paradigm</strong> — physical creates infra, logical deploys apps. Same as today.</li>
+    <li><strong>No new stacks</strong> — same 2 Spacelift stacks per market.</li>
+    <li><strong>Toggle-driven</strong> — deploy_green=true/false is the only switch.</li>
+    <li><strong>Internal modules</strong> — EKS+NLB extracted to a child module called twice. No code duplication.</li>
+    <li><strong>Weight-based routing</strong> — Route53 weighted records in physical/dns.tf. Gradual or instant.</li>
+  </ul>
+</div>
+
+<div class="section" style="margin-top: 1rem; padding: 1.5rem; background: rgba(255,200,0,0.05); border: 1px solid rgba(255,200,0,0.2); border-radius: 8px;">
+  <h3>⚠️ One Complexity: Dual Kubernetes Providers</h3>
+  <p>The logical layer needs to talk to <strong>two</strong> EKS clusters simultaneously (blue + green). Terraform 1.5.7 requires provider aliases for this:</p>
+<pre style="color: #e0e0e0; margin: 0; margin-top: 0.5rem; font-size: 12px;">
+provider "kubernetes" {
+  alias = "blue"
+  host  = data.aws_eks_cluster.blue.endpoint
+  ...
+}
+provider "kubernetes" {
+  alias = "green"
+  host  = data.aws_eks_cluster.green[0].endpoint
+  ...
+}
+
+# Each helm release targets a specific provider
+helm_release "app_blue"  { provider = helm.blue  ... }
+helm_release "app_green" { provider = helm.green ... }
+</pre>
+  <p style="margin-top: 0.75rem;">This is the trickiest part — provider aliases with conditional resources. It works but requires careful structuring. The alternative is using two separate logical stacks (blue-logical + green-logical), but that breaks the two-stack paradigm you want to keep.</p>
+</div>

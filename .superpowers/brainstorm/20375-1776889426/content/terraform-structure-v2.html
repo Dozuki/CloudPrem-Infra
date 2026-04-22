@@ -1,0 +1,139 @@
+<h2>Terraform & Spacelift Structure (Revised)</h2>
+<p class="subtitle">Section 2 of 5 — Single module, instantiated conditionally</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Revised Structure — Module Reuse</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.8;">
+<pre style="color: #e0e0e0; margin: 0;">
+<span style="color: #888;">CloudPrem-Infra/terraform/</span>
+├── <span style="color: #6cf;">shared/</span>              Shared data layer module
+│   ├── main.tf            VPC, Aurora, ElastiCache, S3
+│   ├── outputs.tf         vpc_id, aurora_endpoint, bucket names
+│   └── variables.tf
+│
+├── <span style="color: #4f8;">compute/</span>             Compute module (called TWICE: blue + green)
+│   ├── main.tf            EKS cluster, NLB, Pod Identity
+│   ├── outputs.tf         cluster_endpoint, nlb_dns
+│   └── variables.tf       identifier, vpc_id, subnet_ids, ...
+│
+├── <span style="color: #fd0;">app/</span>                 App module (called TWICE: blue + green)
+│   ├── main.tf            Helm release, K8s resources, Vault auth
+│   ├── outputs.tf
+│   └── variables.tf       cluster_id, aurora_endpoint, image_tag
+│
+└── <span style="color: #f84;">routing/</span>             Traffic routing module
+    ├── main.tf            Route53 weighted records
+    └── variables.tf       blue_nlb_dns, green_nlb_dns, weights
+
+
+<span style="color: #888;">infra-tf/standard/us-east-1/usac/</span>
+├── shared/              ← Spacelift: usac-shared
+│   terragrunt.hcl          source = "...//terraform/shared"
+│
+├── compute/             ← Spacelift: usac-compute
+│   terragrunt.hcl          source = "...//terraform/compute"
+│   <span style="color: #888;"># Instantiates the module TWICE:</span>
+│   <span style="color: #4f8;">module "blue"  { source = "...//compute"  }</span>
+│   <span style="color: #f84;">module "green" { source = "...//compute", count = var.deploy_green ? 1 : 0 }</span>
+│
+├── app/                 ← Spacelift: usac-app
+│   terragrunt.hcl          source = "...//terraform/app"
+│   <span style="color: #888;"># Same pattern:</span>
+│   <span style="color: #4f8;">module "blue"  { ... image_tag = var.blue_image_tag }</span>
+│   <span style="color: #f84;">module "green" { ... image_tag = var.green_image_tag, count = ... }</span>
+│
+└── routing/             ← Spacelift: usac-routing
+    terragrunt.hcl          source = "...//terraform/routing"
+                            <span style="color: #888;">inputs: blue_weight=100, green_weight=0</span>
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">How Blue/Green Toggle Works</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.6;">
+<pre style="color: #e0e0e0; margin: 0;">
+<span style="color: #888;"># compute/main.tf (conceptual)</span>
+
+module "blue" {
+  source     = "../modules/eks-stack"
+  identifier = "${var.identifier}-blue"
+  vpc_id     = var.vpc_id
+  subnet_ids = var.private_subnet_ids
+  # ... always exists
+}
+
+module "green" {
+  source     = "../modules/eks-stack"
+  <span style="color: #f84;">count      = var.deploy_green ? 1 : 0</span>
+  identifier = "${var.identifier}-green"
+  vpc_id     = var.vpc_id
+  subnet_ids = var.private_subnet_ids
+  # ... only exists during deployments
+}
+
+<span style="color: #888;"># routing/main.tf</span>
+
+resource "aws_route53_record" "app" {
+  type = "CNAME"
+  set_identifier = "blue"
+  weighted_routing_policy { weight = var.blue_weight }   <span style="color: #888;"># 100 → 0</span>
+  records = [module.blue.nlb_dns]
+}
+
+resource "aws_route53_record" "app_green" {
+  <span style="color: #f84;">count = var.deploy_green ? 1 : 0</span>
+  type = "CNAME"
+  set_identifier = "green"
+  weighted_routing_policy { weight = var.green_weight }  <span style="color: #888;"># 0 → 100</span>
+  records = [module.green[0].nlb_dns]
+}
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Spacelift Dependency Graph (Simplified)</div>
+    <div class="mockup-body" style="padding: 1.5rem; font-family: monospace; font-size: 13px; line-height: 1.8;">
+<pre style="color: #e0e0e0; margin: 0;">
+  ┌──────────┐
+  │  shared  │  VPC, Aurora, S3, ElastiCache, Vault
+  └────┬─────┘
+       │
+       ▼
+  ┌──────────┐
+  │ compute  │  EKS blue (always) + EKS green (conditional)
+  └────┬─────┘
+       │
+       ▼
+  ┌──────────┐
+  │   app    │  Helm blue (always) + Helm green (conditional)
+  └────┬─────┘
+       │
+       ▼
+  ┌──────────┐
+  │ routing  │  Route53 weighted records (blue_weight + green_weight)
+  └──────────┘
+
+<span style="color: #888;">4 Spacelift stacks per market (vs current 2)</span>
+<span style="color: #888;">Green resources toggled by: deploy_green = true/false</span>
+</pre>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 1.5rem; padding: 1.5rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;">
+  <h3>Advantages of This Approach</h3>
+  <ul style="line-height: 2;">
+    <li><strong>Zero duplication</strong> — blue and green use the same module code, just different inputs</li>
+    <li><strong>Single toggle</strong> — <code>deploy_green = true</code> spins up the entire green environment</li>
+    <li><strong>Fewer Spacelift stacks</strong> — 4 per market instead of 6 (no separate blue/green stacks)</li>
+    <li><strong>Clean teardown</strong> — set <code>deploy_green = false</code> and apply to remove green entirely</li>
+    <li><strong>Role swap</strong> — after cutover, swap which instance is "blue" vs "green" via variable</li>
+  </ul>
+</div>
