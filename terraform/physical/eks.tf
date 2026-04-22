@@ -296,10 +296,19 @@ resource "aws_iam_role_policy_attachment" "app_pod_identity_worker_kms" {
   policy_arn = aws_iam_policy.eks_worker_kms.arn
 }
 
-resource "aws_eks_pod_identity_association" "app" {
+resource "aws_eks_pod_identity_association" "app_default" {
   cluster_name    = module.eks_cluster.cluster_name
   namespace       = "dozuki"
   service_account = "default"
+  role_arn        = aws_iam_role.app_pod_identity.arn
+}
+
+# App deployments use the migration-wait SA (for kubectl RBAC in init
+# containers). Pod Identity on EKS 1.35+ strictly matches SA names.
+resource "aws_eks_pod_identity_association" "app_migration_wait" {
+  cluster_name    = module.eks_cluster.cluster_name
+  namespace       = "dozuki"
+  service_account = "dozuki-migration-wait"
   role_arn        = aws_iam_role.app_pod_identity.arn
 }
 
