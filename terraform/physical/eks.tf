@@ -180,7 +180,7 @@ resource "aws_iam_policy" "assume_cross_account_role" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action   = "sts:AssumeRole"
+        Action   = ["sts:AssumeRole", "sts:TagSession"]
         Effect   = "Allow"
         Resource = local.route_53_role
       }
@@ -199,7 +199,9 @@ module "eks_cluster" {
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
-  name               = local.identifier
+  name = local.identifier
+  # Default null lets EKS Auto Mode manage version via upgrade_policy.
+  # Set eks_k8s_version to pin a specific version if needed.
   kubernetes_version = var.eks_k8s_version
   enable_irsa        = true
 
@@ -294,10 +296,19 @@ resource "aws_iam_role_policy_attachment" "app_pod_identity_worker_kms" {
   policy_arn = aws_iam_policy.eks_worker_kms.arn
 }
 
-resource "aws_eks_pod_identity_association" "app" {
+resource "aws_eks_pod_identity_association" "app_default" {
   cluster_name    = module.eks_cluster.cluster_name
   namespace       = "dozuki"
   service_account = "default"
+  role_arn        = aws_iam_role.app_pod_identity.arn
+}
+
+# App deployments use the migration-wait SA (for kubectl RBAC in init
+# containers). Pod Identity on EKS 1.35+ strictly matches SA names.
+resource "aws_eks_pod_identity_association" "app_migration_wait" {
+  cluster_name    = module.eks_cluster.cluster_name
+  namespace       = "dozuki"
+  service_account = "dozuki-migration-wait"
   role_arn        = aws_iam_role.app_pod_identity.arn
 }
 

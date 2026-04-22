@@ -56,10 +56,26 @@ provider "helm" {
 }
 
 provider "vault" {
-  address          = var.vault_address
+  # Address uses VAULT_ADDR env var: Spacelift sets this to the public NLB,
+  # local runs use port-forward. var.vault_address (PrivateLink) is passed
+  # to the helm chart separately for in-cluster access.
   skip_child_token = true
-  # Auth via VAULT_TOKEN env var for local runs.
-  # Spacelift follow-up PR will add auth_login_aws for CI/CD.
+
+  # In Spacelift, authenticate via AWS IAM (deployer role in vault-infrastructure).
+  # Uses the generic auth_login with method=aws to work around a known bug in
+  # auth_login_aws (hashicorp/terraform-provider-vault#1655) where v4.x requires
+  # explicit HCL credentials instead of reading AWS env vars.
+  # Locally, fall back to VAULT_TOKEN env var (no auth_login block).
+  dynamic "auth_login" {
+    for_each = var.spacelift ? [1] : []
+    content {
+      path   = "auth/aws/login"
+      method = "aws"
+      parameters = {
+        role = "deployer"
+      }
+    }
+  }
 }
 
 locals {
@@ -69,11 +85,11 @@ locals {
   # Database
   db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
 
-  db_master_host     = local.db_credentials["host"]
-  db_master_username = local.db_credentials["username"]
+  db_master_host     = nonsensitive(local.db_credentials["host"])
+  db_master_username = nonsensitive(local.db_credentials["username"])
   db_master_password = local.db_credentials["password"]
 
-  db_bi_host     = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"] : ""
+  db_bi_host     = var.enable_bi ? nonsensitive(jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"]) : ""
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
   # Grafana
