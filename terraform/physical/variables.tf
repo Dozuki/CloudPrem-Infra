@@ -322,7 +322,7 @@ variable "app_access_cidrs" {
 
 variable "elasticache_instance_type" {
   type        = string
-  default     = "cache.t2.micro"
+  default     = "cache.t3.micro"
   description = "Elastic cache instance type"
 }
 
@@ -339,9 +339,9 @@ variable "eks_kms_key_id" {
 }
 
 variable "eks_k8s_version" {
-  description = "Version of Kubernetes to launch or upgrade to. EKS does not support rolling back versions or upgrade version skipping."
+  description = "Kubernetes version override. Leave null to let EKS Auto Mode manage the version. Set explicitly only to pin a specific version."
   type        = string
-  default     = "1.32"
+  default     = null
 }
 
 variable "enable_webhooks" {

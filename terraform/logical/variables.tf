@@ -216,8 +216,14 @@ variable "dms_enabled" {
   default     = false
 }
 variable "vault_address" {
-  description = "Vault server address accessible from within the cluster."
+  description = "Vault server address accessible from within the cluster (PrivateLink)."
   type        = string
+}
+
+variable "spacelift" {
+  description = "Set to true when running in Spacelift. Enables IAM auth for the Vault provider."
+  type        = bool
+  default     = false
 }
 
 variable "nlb_https_target_group_arn" {

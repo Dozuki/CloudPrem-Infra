@@ -1,24 +1,28 @@
 # ---------------------------------------------------------------------------
 # Vault PrivateLink Endpoint
 # Creates a VPC Interface Endpoint and private DNS to reach a centrally
-# managed Vault cluster via AWS PrivateLink.
+# managed Vault cluster via AWS PrivateLink. Supports cross-region endpoints.
 # ---------------------------------------------------------------------------
 
-data "aws_vpc_endpoint_service" "vault" {
-  service_name = var.vault_endpoint_service_name
-
-  lifecycle {
-    precondition {
-      condition     = var.vault_endpoint_service_name != ""
-      error_message = "vault_endpoint_service_name is required. Deploy vault-privatelink-service first."
-    }
-  }
+locals {
+  # Extract the service region from the endpoint service name
+  # (format: com.amazonaws.vpce.<region>.vpce-svc-xxx)
+  vault_service_region  = element(split(".", var.vault_endpoint_service_name), 3)
+  vault_is_cross_region = local.vault_service_region != data.aws_region.current.id
 }
 
-# Filter private subnets to only those in AZs supported by the endpoint
-# service. AZ name-to-ID mappings differ per account, so the service may
-# not cover every AZ the customer VPC uses.
+# Look up endpoint service AZs for same-region deployments to filter subnets.
+# Cross-region lookups don't work (data source doesn't support service_region),
+# so we skip the filter and pass all subnets — AWS maps all consumer AZs for
+# cross-region endpoints.
+data "aws_vpc_endpoint_service" "vault" {
+  count        = local.vault_is_cross_region ? 0 : 1
+  service_name = var.vault_endpoint_service_name
+}
+
 data "aws_subnets" "vault_compatible" {
+  count = local.vault_is_cross_region ? 0 : 1
+
   filter {
     name   = "subnet-id"
     values = local.private_subnet_ids
@@ -26,14 +30,7 @@ data "aws_subnets" "vault_compatible" {
 
   filter {
     name   = "availability-zone"
-    values = data.aws_vpc_endpoint_service.vault.availability_zones
-  }
-
-  lifecycle {
-    postcondition {
-      condition     = length(self.ids) > 0
-      error_message = "No private subnets overlap with the Vault endpoint service AZs. Check cross-account AZ mappings."
-    }
+    values = data.aws_vpc_endpoint_service.vault[0].availability_zones
   }
 }
 
@@ -70,8 +67,9 @@ resource "aws_security_group" "vault_endpoint" {
 resource "aws_vpc_endpoint" "vault" {
   vpc_id             = local.vpc_id
   service_name       = var.vault_endpoint_service_name
+  service_region     = local.vault_service_region
   vpc_endpoint_type  = "Interface"
-  subnet_ids         = data.aws_subnets.vault_compatible.ids
+  subnet_ids         = local.vault_is_cross_region ? local.private_subnet_ids : data.aws_subnets.vault_compatible[0].ids
   security_group_ids = [aws_security_group.vault_endpoint.id]
 
   private_dns_enabled = false
