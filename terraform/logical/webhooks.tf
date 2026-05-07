@@ -41,7 +41,7 @@ resource "kubernetes_job_v1" "frontegg_db_create" {
       spec {
         container {
           name  = "frontegg-db-create"
-          image = "imega/mysql-client:10.6.4"
+          image = "mysql:9.3"
           env {
             name = "MYSQL_HOST"
             value_from {
@@ -61,7 +61,7 @@ resource "kubernetes_job_v1" "frontegg_db_create" {
             }
           }
           env {
-            name = "MYSQL_PWD"
+            name = "MYSQL_PASSWORD"
             value_from {
               secret_key_ref {
                 name = kubernetes_secret_v1.frontegg_db_credentials[0].metadata[0].name
@@ -72,7 +72,7 @@ resource "kubernetes_job_v1" "frontegg_db_create" {
           command = [
             "sh",
             "-c",
-            "mysql --host=$MYSQL_HOST --user=$MYSQL_USER < /scripts/frontegg-db.sql"
+            "mysql --host=$MYSQL_HOST --user=$MYSQL_USER --password=$MYSQL_PASSWORD < /scripts/frontegg-db.sql"
           ]
           volume_mount {
             name       = "scripts"

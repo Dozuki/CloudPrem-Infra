@@ -102,20 +102,18 @@ resource "helm_release" "cert_manager" {
 
   wait = true
 
-  set = [
-    {
-      name  = "crds.enabled"
-      value = "true"
-    },
-    {
-      name  = "crds.keep"
-      value = "true"
-    },
-    {
-      name  = "config.enableGatewayAPI"
-      value = "true"
-    },
-  ]
+  set {
+    name  = "crds.enabled"
+    value = "true"
+  }
+  set {
+    name  = "crds.keep"
+    value = "true"
+  }
+  set {
+    name  = "config.enableGatewayAPI"
+    value = "true"
+  }
 }
 
 resource "helm_release" "envoy_gateway" {
@@ -294,16 +292,14 @@ resource "helm_release" "external_secrets" {
 
   wait = true
 
-  set = [
-    {
-      name  = "crds.createClusterExternalSecret"
-      value = "true"
-    },
-    {
-      name  = "crds.createClusterSecretStore"
-      value = "true"
-    },
-  ]
+  set {
+    name  = "crds.createClusterExternalSecret"
+    value = "true"
+  }
+  set {
+    name  = "crds.createClusterSecretStore"
+    value = "true"
+  }
 }
 
 # Service account for ESO to authenticate to Vault via K8s auth.
@@ -343,114 +339,243 @@ resource "helm_release" "app" {
   timeout           = 900
   dependency_update = true
 
-  values = [jsonencode({
-    hostname       = var.dns_domain_name
-    dns_validation = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
-    customer       = coalesce(var.customer, "Dozuki")
-    environment    = var.environment
+  # --- General ---
+  set {
+    name  = "hostname"
+    value = var.dns_domain_name
+  }
+  set {
+    name  = "dns_validation"
+    value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
+  }
+  set {
+    name  = "customer"
+    value = coalesce(var.customer, "Dozuki")
+  }
+  set {
+    name  = "environment"
+    value = var.environment
+  }
 
-    aws = {
-      region    = data.aws_region.current.id
-      accountId = data.aws_caller_identity.current.account_id
-      enabled   = true
-    }
+  # --- AWS ---
+  set {
+    name  = "aws.region"
+    value = data.aws_region.current.id
+  }
+  set {
+    name  = "aws.accountId"
+    value = data.aws_caller_identity.current.account_id
+  }
+  set {
+    name  = "aws.enabled"
+    value = "true"
+  }
 
-    db = {
-      host      = local.db_master_host
-      user      = local.db_master_username
-      rdsCaCert = base64encode(file(local.ca_cert_pem_file))
-    }
+  # --- Database ---
+  set {
+    name  = "db.host"
+    value = local.db_master_host
+  }
+  set {
+    name  = "db.user"
+    value = local.db_master_username
+  }
+  set {
+    name  = "db.rdsCaCert"
+    value = base64encode(file(local.ca_cert_pem_file))
+  }
+  set_sensitive {
+    name  = "db.password"
+    value = local.db_master_password
+  }
 
-    smtp = {
-      enabled = var.smtp_enabled
-      host    = var.smtp_host
-      from    = var.smtp_from_address
-      auth = {
-        enabled  = var.smtp_auth_enabled
-        username = var.smtp_username
-      }
-    }
+  # --- SMTP ---
+  set {
+    name  = "smtp.enabled"
+    value = var.smtp_enabled ? "true" : "false"
+  }
+  set {
+    name  = "smtp.host"
+    value = var.smtp_host
+  }
+  set {
+    name  = "smtp.from"
+    value = var.smtp_from_address
+  }
+  set {
+    name  = "smtp.auth.enabled"
+    value = var.smtp_auth_enabled ? "true" : "false"
+  }
+  set {
+    name  = "smtp.auth.username"
+    value = var.smtp_username
+  }
+  set_sensitive {
+    name  = "smtp.auth.password"
+    value = var.smtp_password
+  }
 
-    sentry = {
-      customerName = coalesce(var.customer, "Dozuki")
-    }
+  # --- Sentry ---
+  set {
+    name  = "sentry.customerName"
+    value = coalesce(var.customer, "Dozuki")
+  }
 
-    images = {
-      app = {
-        repository = var.image_repository
-        tag        = var.image_tag
-      }
-      webnextjs = {
-        tag = var.nextjs_tag
-      }
-    }
+  # --- Images ---
+  set {
+    name  = "images.app.repository"
+    value = var.image_repository
+  }
+  set {
+    name  = "images.app.tag"
+    value = var.image_tag
+  }
+  set {
+    name  = "images.webnextjs.tag"
+    value = var.nextjs_tag
+  }
 
-    ingress = {
-      hosts = [{
-        hostname = coalesce(var.ingress_hostname, var.dns_domain_name)
-      }]
-    }
+  # --- Ingress / Gateway ---
+  set {
+    name  = "ingress.hosts[0].hostname"
+    value = coalesce(var.ingress_hostname, var.dns_domain_name)
+  }
+  set {
+    name  = "gateway.hosts[0].hostname"
+    value = coalesce(var.ingress_hostname, var.dns_domain_name)
+  }
+  set {
+    name  = "gateway.hosts[0].tlsSecretName"
+    value = "tls-secret"
+  }
 
-    webhooks = {
-      enabled = var.enable_webhooks
-    }
+  # --- Webhooks ---
+  set {
+    name  = "webhooks.enabled"
+    value = var.enable_webhooks ? "true" : "false"
+  }
 
-    objectStorage = {
-      kmsKey          = data.aws_kms_key.s3.arn
-      imagesBucket    = var.s3_images_bucket
-      pdfsBucket      = var.s3_pdfs_bucket
-      documentsBucket = var.s3_documents_bucket
-      objectsBucket   = var.s3_objects_bucket
-    }
+  # --- Object Storage ---
+  set {
+    name  = "objectStorage.kmsKey"
+    value = data.aws_kms_key.s3.arn
+  }
+  set {
+    name  = "objectStorage.imagesBucket"
+    value = var.s3_images_bucket
+  }
+  set {
+    name  = "objectStorage.pdfsBucket"
+    value = var.s3_pdfs_bucket
+  }
+  set {
+    name  = "objectStorage.documentsBucket"
+    value = var.s3_documents_bucket
+  }
+  set {
+    name  = "objectStorage.objectsBucket"
+    value = var.s3_objects_bucket
+  }
 
-    memcached = {
-      host = var.memcached_cluster_address
-    }
+  # --- Memcached ---
+  set {
+    name  = "memcached.host"
+    value = var.memcached_cluster_address
+  }
 
-    vault = {
-      enabled = true
-      address = var.vault_address
-    }
+  # --- Vault ---
+  set {
+    name  = "vault.enabled"
+    value = "true"
+  }
+  set {
+    name  = "vault.address"
+    value = var.vault_address
+  }
 
-    grafana = {
-      enabled = var.enable_bi
-      security = {
-        admin_user = local.grafana_admin_username
-      }
-      datasource = {
-        host = local.db_bi_host
-      }
-    }
+  # --- Google Translate ---
+  set_sensitive {
+    name  = "googleTranslate.token"
+    value = var.google_translate_api_token
+  }
 
-    connectivity = {
-      "webhook-service" = {
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        mysql         = { host = local.db_master_host, username = local.db_master_username }
-        mongo         = { connectionString = "mongodb://dozuki-mongodb/webhooks" }
-      }
-      "integrations-service" = {
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        mongo         = { connectionString = "mongodb://dozuki-mongodb/integrations" }
-      }
-      "event-service" = {
-        database      = { host = local.db_master_host, username = local.db_master_username }
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        redis         = { host = "dozuki-redis-master", tls = "false" }
-      }
-      "connectors-worker" = {
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        redis         = { host = "dozuki-redis-master", tls = "false" }
-      }
-    }
+  # --- Grafana ---
+  set {
+    name  = "grafana.enabled"
+    value = var.enable_bi ? "true" : "false"
+  }
+  set {
+    name  = "grafana.security.admin_user"
+    value = local.grafana_admin_username
+  }
+  set {
+    name  = "grafana.datasource.host"
+    value = local.db_bi_host
+  }
+  set_sensitive {
+    name  = "grafana.security.admin_password"
+    value = local.grafana_admin_password
+  }
+  set_sensitive {
+    name  = "grafana.datasource.password"
+    value = local.db_bi_password
+  }
 
-    rustici = {}
-  })]
-
-  set_sensitive = [
-    { name = "db.password", value = local.db_master_password },
-    { name = "smtp.auth.password", value = var.smtp_password },
-    { name = "googleTranslate.token", value = var.google_translate_api_token },
-    { name = "grafana.security.admin_password", value = local.grafana_admin_password },
-    { name = "grafana.datasource.password", value = local.db_bi_password },
-  ]
+  # --- Connectivity (sunset planned) ---
+  set {
+    name  = "connectivity.webhook-service.messageBroker.brokerList"
+    value = var.msk_bootstrap_brokers
+  }
+  set {
+    name  = "connectivity.webhook-service.mysql.host"
+    value = local.db_master_host
+  }
+  set {
+    name  = "connectivity.webhook-service.mysql.username"
+    value = local.db_master_username
+  }
+  set {
+    name  = "connectivity.webhook-service.mongo.connectionString"
+    value = "mongodb://dozuki-mongodb/webhooks"
+  }
+  set {
+    name  = "connectivity.integrations-service.messageBroker.brokerList"
+    value = var.msk_bootstrap_brokers
+  }
+  set {
+    name  = "connectivity.integrations-service.mongo.connectionString"
+    value = "mongodb://dozuki-mongodb/integrations"
+  }
+  set {
+    name  = "connectivity.event-service.database.host"
+    value = local.db_master_host
+  }
+  set {
+    name  = "connectivity.event-service.database.username"
+    value = local.db_master_username
+  }
+  set {
+    name  = "connectivity.event-service.messageBroker.brokerList"
+    value = var.msk_bootstrap_brokers
+  }
+  set {
+    name  = "connectivity.event-service.redis.host"
+    value = "dozuki-redis-master"
+  }
+  set {
+    name  = "connectivity.event-service.redis.tls"
+    value = "false"
+  }
+  set {
+    name  = "connectivity.connectors-worker.messageBroker.brokerList"
+    value = var.msk_bootstrap_brokers
+  }
+  set {
+    name  = "connectivity.connectors-worker.redis.host"
+    value = "dozuki-redis-master"
+  }
+  set {
+    name  = "connectivity.connectors-worker.redis.tls"
+    value = "false"
+  }
 }
