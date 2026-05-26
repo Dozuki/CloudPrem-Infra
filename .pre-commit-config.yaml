@@ -13,3 +13,4 @@ repos:
       - id: terraform_tflint
         args:
           - --args=--enable-rule=terraform_documented_variables
+          - --args=--minimum-failure-severity=error

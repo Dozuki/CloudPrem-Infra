@@ -8,7 +8,7 @@ resource "aws_s3_bucket_versioning" "vpn_config_versioning_block" {
 }
 #tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "vpn-config-files" {
-  bucket        = "${local.identifier}-${data.aws_region.current.name}-vpn-credentials"
+  bucket        = "${local.identifier}-${data.aws_region.current.id}-vpn-credentials"
   force_destroy = true
 }
 
@@ -44,8 +44,8 @@ data "aws_iam_policy_document" "vpn-config-files" {
     actions = ["s3:*"]
     effect  = "Deny"
     resources = [
-      "arn:${data.aws_partition.current.partition}:s3:::${local.identifier}-${data.aws_region.current.name}-vpn-credentials",
-      "arn:${data.aws_partition.current.partition}:s3:::${local.identifier}-${data.aws_region.current.name}-vpn-credentials/*"
+      "arn:${data.aws_partition.current.partition}:s3:::${local.identifier}-${data.aws_region.current.id}-vpn-credentials",
+      "arn:${data.aws_partition.current.partition}:s3:::${local.identifier}-${data.aws_region.current.id}-vpn-credentials/*"
     ]
     condition {
       test     = "Bool"

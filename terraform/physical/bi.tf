@@ -157,7 +157,7 @@ resource "null_resource" "replication_control" {
     dms_task_arn        = aws_dms_replication_task.this[0].replication_task_arn,
     source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn,
     target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn,
-    aws_region          = data.aws_region.current.name,
+    aws_region          = data.aws_region.current.id,
     aws_profile         = var.aws_profile
   }
 

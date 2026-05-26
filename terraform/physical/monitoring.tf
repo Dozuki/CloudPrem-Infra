@@ -29,14 +29,14 @@ data "aws_iam_policy_document" "lambda_permissions" {
 resource "aws_iam_policy" "lambda_permissions" {
   count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
-  name   = "${local.identifier}-${data.aws_region.current.name}-lambda-alias"
+  name   = "${local.identifier}-${data.aws_region.current.id}-lambda-alias"
   policy = data.aws_iam_policy_document.lambda_permissions[0].json
 }
 
 resource "aws_iam_role" "lambda_execution" {
   count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
-  name               = "${local.identifier}-${data.aws_region.current.name}-lambda-execution"
+  name               = "${local.identifier}-${data.aws_region.current.id}-lambda-execution"
   assume_role_policy = data.aws_iam_policy_document.lambda_execution[0].json
 }
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
@@ -54,7 +54,7 @@ resource "aws_iam_role_policy_attachment" "lambda_iam_alias" {
 
 module "sns" {
   source  = "terraform-aws-modules/sns/aws"
-  version = "5.1.0"
+  version = "~> 7.0"
   name    = local.identifier
 
   topic_policy_statements = {
@@ -76,16 +76,15 @@ resource "aws_sns_topic_subscription" "email_subscription" {
   endpoint  = var.alarm_email # Replace with your email address
 }
 
-# The alarm should never trigger unless something is wrong with the cluster autoscaler, or the max scale has been met
-module "cpu_alarm" {
+module "node_cpu_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name        = "${local.identifier}-cpu-high"
-  alarm_description = "CPU utilization high for ${local.identifier} worker nodes"
+  alarm_description = "CPU utilization high for ${local.identifier} cluster"
 
-  namespace   = "AWS/EC2"
-  metric_name = "CPUUtilization"
+  namespace   = "ContainerInsights"
+  metric_name = "node_cpu_utilization"
   statistic   = "Average"
 
   comparison_operator = "GreaterThanThreshold"
@@ -94,7 +93,7 @@ module "cpu_alarm" {
   period              = 60
 
   dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    ClusterName = module.eks_cluster.cluster_name
   }
 
   alarm_actions = [
@@ -109,7 +108,7 @@ module "cpu_alarm" {
 # The alarm should never trigger unless something is wrong with the cluster autoscaler, or the max scale has been met
 module "memory_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name        = "${local.identifier}-memory-utilization"
   alarm_description = "High memory utilization for ${local.identifier} cluster"
@@ -124,7 +123,7 @@ module "memory_alarm" {
   period              = 300
 
   dimensions = {
-    ClusterName = module.eks_cluster.cluster_id
+    ClusterName = module.eks_cluster.cluster_name
   }
 
   alarm_actions = [
@@ -138,7 +137,7 @@ module "memory_alarm" {
 
 module "disk_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name        = "${local.identifier}-out-of-disk"
   alarm_description = "Disk usage high for ${local.identifier} cluster"
@@ -153,65 +152,7 @@ module "disk_alarm" {
   period              = 300
 
   dimensions = {
-    ClusterName = module.eks_cluster.cluster_id
-  }
-
-  alarm_actions = [
-    module.sns.topic_arn
-  ]
-
-  ok_actions = [
-    module.sns.topic_arn
-  ]
-}
-
-module "status_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
-
-  alarm_name        = "${local.identifier}-status"
-  alarm_description = "Status check for ${local.identifier} cluster"
-
-  namespace   = "AWS/EC2"
-  metric_name = "StatusCheckFailed"
-  statistic   = "Average"
-
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 3
-  threshold           = 1
-  period              = 60
-
-  dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
-  }
-
-  alarm_actions = [
-    module.sns.topic_arn
-  ]
-
-  ok_actions = [
-    module.sns.topic_arn
-  ]
-}
-
-module "nodes_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
-
-  alarm_name        = "${local.identifier}-nodes-in-service"
-  alarm_description = "Nodes in service under desired capacity for ${local.identifier} cluster"
-
-  namespace   = "AWS/AutoScaling"
-  metric_name = "GroupInServiceInstances"
-  statistic   = "Sum"
-
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 1
-  threshold           = var.eks_desired_capacity
-  period              = 60
-
-  dimensions = {
-    AutoScalingGroupName = module.eks_cluster.workers_asg_names[0]
+    ClusterName = module.eks_cluster.cluster_name
   }
 
   alarm_actions = [
@@ -225,7 +166,7 @@ module "nodes_alarm" {
 
 module "rds_cpu_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name        = "${local.identifier}-rds-cpu-usage"
   alarm_description = "CPU usage for RDS instance ${local.identifier}"
@@ -254,7 +195,7 @@ module "rds_cpu_alarm" {
 
 module "rds_free_memory_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name        = "${local.identifier}-rds-free-memory"
   alarm_description = "Freeable Memory for RDS instance ${local.identifier}"
@@ -288,7 +229,7 @@ module "rds_free_memory_alarm" {
 
 module "rds_swap_usage_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name        = "${local.identifier}-rds-swap-usage"
   alarm_description = "Swap Usage for RDS instance ${local.identifier}"
@@ -347,7 +288,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_space_alarm" {
 
 module "rds_connections_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name        = "${local.identifier}-rds-connections"
   alarm_description = "Connection count for RDS instance ${local.identifier}"
@@ -376,7 +317,7 @@ module "rds_connections_alarm" {
 
 module "rds_read_latency_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name          = "${local.identifier}-rds-read-latency"
   alarm_description   = "Read latency for RDS instance ${local.identifier}"
@@ -399,7 +340,7 @@ module "rds_read_latency_alarm" {
 
 module "rds_write_latency_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "4.2.1"
+  version = "~> 5.0"
 
   alarm_name          = "${local.identifier}-rds-write-latency"
   alarm_description   = "Write latency for RDS instance ${local.identifier}"

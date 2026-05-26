@@ -6,7 +6,8 @@ locals {
   enable_bi = false
   rds_multi_az = false
   highly_available_nat_gateway = false
-  dozuki_customer_id_parameter_name = "/dozuki/workstation/kots/webhooks/customer_id"
   protect_resources = false
   alarm_email = "ddv@dozuki.com"
+  image_tag   = "CHANGE_ME"
+  nextjs_tag  = "CHANGE_ME"
 }

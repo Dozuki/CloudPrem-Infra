@@ -112,7 +112,7 @@ resource "aws_kms_key" "s3" {
 resource "aws_kms_alias" "s3" {
   count = local.use_provided_s3_kms ? 0 : 1
 
-  name_prefix   = "alias/${local.identifier}/${data.aws_region.current.name}/s3/"
+  name_prefix   = "alias/${local.identifier}/${data.aws_region.current.id}/s3/"
   target_key_id = aws_kms_key.s3[0].id
 }
 
@@ -153,7 +153,7 @@ data "aws_iam_policy_document" "s3_replication_assume_role" {
 resource "aws_iam_role" "s3_replication" {
   count = local.use_existing_buckets ? 1 : 0
 
-  name               = "${local.identifier}-${data.aws_region.current.name}-s3-replication-role"
+  name               = "${local.identifier}-${data.aws_region.current.id}-s3-replication-role"
   assume_role_policy = data.aws_iam_policy_document.s3_replication_assume_role[0].json
 }
 
@@ -226,7 +226,7 @@ data "aws_iam_policy_document" "s3_replication" {
     condition {
       test     = "StringLike"
       variable = "kms:ViaService"
-      values   = ["s3.${data.aws_region.current.name}.${data.aws_partition.current.dns_suffix}"]
+      values   = ["s3.${data.aws_region.current.id}.${data.aws_partition.current.dns_suffix}"]
     }
 
     resources = [data.aws_kms_key.s3_migration[0].arn]
@@ -240,7 +240,7 @@ data "aws_iam_policy_document" "s3_replication" {
     condition {
       test     = "StringLike"
       variable = "kms:ViaService"
-      values   = ["s3.${data.aws_region.current.name}.${data.aws_partition.current.dns_suffix}"]
+      values   = ["s3.${data.aws_region.current.id}.${data.aws_partition.current.dns_suffix}"]
     }
 
     resources = [local.s3_kms_key_id]
@@ -250,7 +250,7 @@ data "aws_iam_policy_document" "s3_replication" {
 resource "aws_iam_policy" "s3_replication" {
   count = local.use_existing_buckets ? 1 : 0
 
-  name   = "${local.identifier}-${data.aws_region.current.name}-s3-replication-policy"
+  name   = "${local.identifier}-${data.aws_region.current.id}-s3-replication-policy"
   policy = data.aws_iam_policy_document.s3_replication[0].json
 }
 
@@ -368,7 +368,7 @@ resource "aws_s3_bucket_ownership_controls" "logging_bucket" {
 #tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "logging_bucket" {
 
-  bucket_prefix = "${local.identifier}-log-${data.aws_region.current.name}"
+  bucket_prefix = "${local.identifier}-log-${data.aws_region.current.id}"
   force_destroy = !var.protect_resources
 
   lifecycle {
@@ -403,7 +403,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_en
 resource "aws_s3_bucket" "guide_buckets" {
   for_each = toset(local.create_s3_bucket_names)
 
-  bucket_prefix = "${local.identifier}-${each.key}-${data.aws_region.current.name}"
+  bucket_prefix = "${local.identifier}-${each.key}-${data.aws_region.current.id}"
   force_destroy = !var.protect_resources
 
   lifecycle {

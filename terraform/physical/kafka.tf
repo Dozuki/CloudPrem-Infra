@@ -57,7 +57,7 @@ resource "aws_security_group_rule" "kafka_ingress_cidr_blocks" {
 resource "aws_msk_configuration" "this" {
   count = var.enable_webhooks ? 1 : 0
 
-  kafka_versions = ["2.7.0"]
+  kafka_versions = ["3.7.x"]
   name           = "${local.identifier}-kafka-config"
 
   server_properties = <<PROPERTIES
@@ -70,7 +70,7 @@ resource "aws_msk_cluster" "this" {
   count = var.enable_webhooks ? 1 : 0
 
   cluster_name           = "${local.identifier}-kafka"
-  kafka_version          = "2.7.0"
+  kafka_version          = "3.7.x"
   number_of_broker_nodes = var.azs_count
 
   broker_node_group_info {

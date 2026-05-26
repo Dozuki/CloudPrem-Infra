@@ -1,0 +1,1 @@
+create database if not exists frontegg_events; create database if not exists frontegg_webhooks;

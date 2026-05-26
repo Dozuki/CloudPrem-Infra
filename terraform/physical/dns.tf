@@ -14,7 +14,7 @@ resource "aws_route53_record" "subdomain" {
   name    = "${local.subdomain}.${data.aws_route53_zone.subdomain[0].name}"
   type    = "CNAME"
   ttl     = "300"
-  records = [module.nlb.lb_dns_name]
+  records = [module.nlb.dns_name]
 }
 
 resource "aws_route53_record" "subsite_subdomain" {
@@ -26,5 +26,5 @@ resource "aws_route53_record" "subsite_subdomain" {
   name    = "*.${local.subdomain}.${data.aws_route53_zone.subdomain[0].name}"
   type    = "CNAME"
   ttl     = "300"
-  records = [module.nlb.lb_dns_name]
+  records = [module.nlb.dns_name]
 }
