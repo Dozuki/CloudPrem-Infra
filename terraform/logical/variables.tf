@@ -220,6 +220,19 @@ variable "vault_address" {
   type        = string
 }
 
+variable "customer_tls_externally_managed" {
+  description = <<-EOT
+    Set true when the customer provides their own TLS cert (e.g. their wildcard) and it's stored in Vault.
+    When true, an ExternalSecret is created that syncs the cert+key from Vault path
+    secret/{customer}/{environment}/tls (keys: cert, key) into the K8s Secret named tls-secret.
+    The chart's tls.externallyManaged flag is also set so it skips rendering tls-secret and
+    drops the cert-manager Gateway annotation.
+    The cert/key must be pre-seeded in Vault out-of-band (terraform does not touch the cert content).
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "spacelift" {
   description = "Set to true when running in Spacelift. Enables IAM auth for the Vault provider."
   type        = bool

@@ -493,6 +493,15 @@ resource "helm_release" "app" {
     value = var.vault_address
   }
 
+  # --- Customer-provided TLS ---
+  # When true, the chart skips rendering tls-secret and drops the cert-manager
+  # annotation on the Gateway. The Secret is populated by the companion
+  # kubernetes_manifest.tls_external_secret (ExternalSecret syncing from Vault).
+  set {
+    name  = "tls.externallyManaged"
+    value = var.customer_tls_externally_managed ? "true" : "false"
+  }
+
   # --- Google Translate ---
   set_sensitive {
     name  = "googleTranslate.token"
