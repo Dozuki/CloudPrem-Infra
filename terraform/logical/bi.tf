@@ -17,7 +17,7 @@ resource "kubernetes_job_v1" "dms_start" {
           command = [
             "/bin/sh",
             "-c",
-            "kubectl wait deploy/app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current.id}"
+            "kubectl wait deploy/dozuki-app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current.id}"
           ]
         }
         restart_policy = "Never"
@@ -131,4 +131,43 @@ resource "random_password" "grafana_admin" {
 
   length  = 16
   special = false
+}
+
+# Secret consumed by grafana-primary via envFrom (see grafana.yaml). The chart
+# defines it in values.yaml with enabled=false; this terraform resource is the
+# canonical source when BI is enabled.
+resource "kubernetes_secret_v1" "grafana_common_config" {
+  count = var.enable_bi ? 1 : 0
+
+  metadata {
+    name      = "grafana-common-config"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
+  }
+  type = "Opaque"
+
+  data = {
+    GRAFANA_SUBPATH                         = "dashboards"
+    GF_SERVER_SERVE_FROM_SUBPATH            = "true"
+    GF_USERS_DEFAULT_THEME                  = "light"
+    GF_DATABASE_TYPE                        = "mysql"
+    GF_DATABASE_HOST                        = local.db_master_host
+    GF_DATABASE_USER                        = local.db_master_username
+    GF_DATABASE_PASSWORD                    = local.db_master_password
+    GF_ANALYTICS_REPORTING_ENABLED          = "false"
+    GF_ANALYTICS_CHECK_FOR_UPDATES          = "false"
+    GF_METRICS_ENABLED                      = "false"
+    GF_SECURITY_ADMIN_PASSWORD              = local.grafana_admin_password
+    GF_SECURITY_ADMIN_USER                  = local.grafana_admin_username
+    GF_SECURITY_COOKIE_SECURE               = "true"
+    GF_SECURITY_DATA_SOURCE_PROXY_WHITELIST = "1.1.1.1:1"
+    GF_SECURITY_COOKIE_SAMESITE             = "strict"
+    GF_SECURITY_X_XSS_PROTECTION            = "true"
+    GF_SMTP_ENABLED                         = var.smtp_enabled ? "true" : "false"
+    GF_SMTP_HOST                            = var.smtp_host
+    GF_SMTP_USER                            = var.smtp_username
+    GF_SMTP_PASSWORD                        = var.smtp_password
+    GF_SMTP_FROM_ADDRESS                    = var.smtp_from_address
+    GF_SMTP_FROM_NAME                       = "Dozuki Grafana Dashboard"
+    GF_SMTP_STARTTLS_POLICY                 = "OpportunisticStartTLS"
+  }
 }
