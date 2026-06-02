@@ -164,6 +164,13 @@ module "disk_alarm" {
   ]
 }
 
+# RDS alarm dimensions use local.identifier (the value passed to the rds module's
+# `identifier`), NOT module.primary_database.db_instance_id. The rds module is pinned
+# to v5.6.0, whose db_instance_id output returns aws_db_instance.this.id — and under
+# AWS provider v5+ that .id is the resource ID (db-XXXX), not the instance identifier.
+# CloudWatch's AWS/RDS namespace keys on the identifier, so the resource ID matches no
+# metric and every RDS alarm sits in INSUFFICIENT_DATA. local.identifier is correct by
+# construction and immune to provider/module-version drift.
 module "rds_cpu_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
@@ -181,7 +188,7 @@ module "rds_cpu_alarm" {
   period              = 300
 
   dimensions = {
-    DBInstanceIdentifier = module.primary_database.db_instance_id
+    DBInstanceIdentifier = local.identifier
   }
 
   alarm_actions = [
@@ -219,7 +226,7 @@ module "rds_free_memory_alarm" {
   statistic   = "Average"
 
   dimensions = {
-    DBInstanceIdentifier = module.primary_database.db_instance_id
+    DBInstanceIdentifier = local.identifier
   }
 
   tags = {
@@ -244,7 +251,7 @@ module "rds_swap_usage_alarm" {
   period              = "300"
 
   dimensions = {
-    DBInstanceIdentifier = module.primary_database.db_instance_id
+    DBInstanceIdentifier = local.identifier
   }
 
   alarm_actions = [
@@ -280,7 +287,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_space_alarm" {
       period      = "300"
       stat        = "Average"
       dimensions = {
-        DBInstanceIdentifier = module.primary_database.db_instance_id
+        DBInstanceIdentifier = local.identifier
       }
     }
   }
@@ -303,7 +310,7 @@ module "rds_connections_alarm" {
   period              = 60
 
   dimensions = {
-    DBInstanceIdentifier = module.primary_database.db_instance_id
+    DBInstanceIdentifier = local.identifier
   }
 
   alarm_actions = [
@@ -331,7 +338,7 @@ module "rds_read_latency_alarm" {
   statistic   = "Average"
 
   dimensions = {
-    DBInstanceIdentifier = module.primary_database.db_instance_id
+    DBInstanceIdentifier = local.identifier
   }
 
   alarm_actions = [module.sns.topic_arn]
@@ -354,7 +361,7 @@ module "rds_write_latency_alarm" {
   statistic   = "Average"
 
   dimensions = {
-    DBInstanceIdentifier = module.primary_database.db_instance_id
+    DBInstanceIdentifier = local.identifier
   }
 
   alarm_actions = [module.sns.topic_arn]

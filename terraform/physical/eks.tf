@@ -346,3 +346,67 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
   service_account = "cert-manager"
   role_arn        = aws_iam_role.cert_manager_pod_identity.arn
 }
+
+# Container Insights: CloudWatch agent (amazon-cloudwatch-observability addon).
+#
+# EKS Auto Mode gives nodes a deliberately minimal role (only EKS worker + ECR pull),
+# so the agent must get its CloudWatch permissions via Pod Identity. Without an
+# association the cloudwatch-agent SA falls back to the node role and every publish
+# (cloudwatch:PutMetricData, logs:PutLogEvents, xray:PutTraceSegments) is AccessDenied:
+# the ContainerInsights namespace stays empty and the node_* cluster alarms sit in
+# INSUFFICIENT_DATA. Both the metrics agent and fluent-bit run as the cloudwatch-agent
+# SA, so one association covers metrics and logs.
+resource "aws_iam_role" "cloudwatch_agent_pod_identity" {
+  name = "${local.identifier}-${data.aws_region.current.id}-cw-agent-pod-identity"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "pods.eks.amazonaws.com"
+        }
+        Action = [
+          "sts:AssumeRole",
+          "sts:TagSession"
+        ]
+      }
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent_server" {
+  role       = aws_iam_role.cloudwatch_agent_pod_identity.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+# The agent's bundled OTel collector exports traces to X-Ray; without this the agent
+# logs a continuous stream of AccessDenied errors for xray:PutTraceSegments.
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent_xray" {
+  role       = aws_iam_role.cloudwatch_agent_pod_identity.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# Managed addon. The pod_identity_association wires the role to the cloudwatch-agent SA
+# in the amazon-cloudwatch namespace (EKS creates the association and annotates the SA).
+# addon_version is left unset so EKS selects the default compatible with the cluster's
+# Kubernetes version. OVERWRITE resolves field-level conflicts on managed resources;
+# it does NOT adopt a pre-existing addon — a cluster that already has this addon
+# installed out-of-band must have it removed (or imported) once before first apply.
+resource "aws_eks_addon" "cloudwatch_observability" {
+  cluster_name = module.eks_cluster.cluster_name
+  addon_name   = "amazon-cloudwatch-observability"
+
+  pod_identity_association {
+    role_arn        = aws_iam_role.cloudwatch_agent_pod_identity.arn
+    service_account = "cloudwatch-agent"
+  }
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = local.tags
+}
