@@ -361,4 +361,16 @@ variable "sso_admin_role_arn" {
   default     = ""
 }
 
+variable "enable_dr" {
+  description = "Enable the always-on cross-region DR data-protection layer (RDS automated-backup replication + S3 CRR). On by default; ephemeral/dev stacks may set false."
+  type        = bool
+  default     = true
+}
+
+variable "dr_region" {
+  description = "The DR region (concrete value). Normally injected by the Spacelift admin layer via TG_AWS_DR_REGION; may be set explicitly to override. Never auto-derived in workload TF."
+  type        = string
+  default     = ""
+}
+
 # --- END App Configuration --- #
