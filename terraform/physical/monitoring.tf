@@ -474,3 +474,54 @@ resource "aws_lambda_permission" "dms_restart_permission" {
   principal     = "sns.amazonaws.com"
   source_arn    = module.sns.topic_arn
 }
+
+# --- DR replication health (count-gated on enable_dr) --- #
+
+# S3 CRR: pending bytes growing unboundedly means replication is failing/stuck.
+resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
+  for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
+
+  alarm_name          = "${local.identifier}-dr-s3-replication-${each.key}"
+  alarm_description   = "S3 DR replication latency high for ${local.identifier} ${each.key} bucket"
+  namespace           = "AWS/S3"
+  metric_name         = "ReplicationLatency"
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 900
+  evaluation_periods  = 3
+  period              = 300
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    SourceBucket      = each.value.id
+    DestinationBucket = aws_s3_bucket.dr_guide_buckets[each.key].id
+    RuleId            = "dr-${each.key}"
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
+  for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
+
+  alarm_name          = "${local.identifier}-dr-s3-replication-failed-${each.key}"
+  alarm_description   = "S3 DR replication operations failing for ${local.identifier} ${each.key} bucket"
+  namespace           = "AWS/S3"
+  metric_name         = "OperationsFailedReplication"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  evaluation_periods  = 1
+  period              = 300
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    SourceBucket      = each.value.id
+    DestinationBucket = aws_s3_bucket.dr_guide_buckets[each.key].id
+    RuleId            = "dr-${each.key}"
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+}
