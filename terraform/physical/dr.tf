@@ -20,3 +20,40 @@ check "dr_region_valid" {
     error_message = "enable_dr is true but dr_region is empty or equals the primary region (${data.aws_region.current.id}). The admin layer must inject TG_AWS_DR_REGION, or set dr_region explicitly."
   }
 }
+
+# DR-region CMK for replicated RDS automated backups (the encrypted source DB
+# requires a destination-region key).
+resource "aws_kms_key" "dr_rds" {
+  count    = local.dr_enabled ? 1 : 0
+  provider = aws.dr
+
+  description         = "${local.identifier} DR replicated RDS backups"
+  enable_key_rotation = true
+  tags                = local.tags
+}
+
+resource "aws_kms_alias" "dr_rds" {
+  count    = local.dr_enabled ? 1 : 0
+  provider = aws.dr
+
+  name_prefix   = "alias/${local.identifier}/dr/rds/"
+  target_key_id = aws_kms_key.dr_rds[0].id
+}
+
+# DR-region CMK for the destination S3 buckets.
+resource "aws_kms_key" "dr_s3" {
+  count    = local.dr_enabled ? 1 : 0
+  provider = aws.dr
+
+  description         = "${local.identifier} DR replicated S3 content"
+  enable_key_rotation = true
+  tags                = local.tags
+}
+
+resource "aws_kms_alias" "dr_s3" {
+  count    = local.dr_enabled ? 1 : 0
+  provider = aws.dr
+
+  name_prefix   = "alias/${local.identifier}/dr/s3/"
+  target_key_id = aws_kms_key.dr_s3[0].id
+}

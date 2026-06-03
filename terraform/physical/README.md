@@ -17,6 +17,7 @@
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.7.1 |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.36.0 |
 | <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.36.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.36.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.2.4 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.8.1 |
 
@@ -83,8 +84,12 @@
 | [aws_iam_role_policy_attachment.lambda_basic_execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.lambda_iam_alias](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_kms_alias.dr_rds](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_alias) | resource |
+| [aws_kms_alias.dr_s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_alias) | resource |
 | [aws_kms_alias.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_alias) | resource |
 | [aws_kms_key.bi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
+| [aws_kms_key.dr_rds](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
+| [aws_kms_key.dr_s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_lambda_function.dms_restart](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
