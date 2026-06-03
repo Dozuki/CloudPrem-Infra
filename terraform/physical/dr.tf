@@ -72,3 +72,47 @@ resource "aws_db_instance_automated_backups_replication" "primary" {
 
   depends_on = [module.primary_database]
 }
+
+# Destination buckets for S3 cross-region replication, one per content bucket.
+resource "aws_s3_bucket" "dr_guide_buckets" {
+  for_each = local.dr_enabled ? aws_s3_bucket.guide_buckets : {}
+  provider = aws.dr
+
+  bucket = "${each.value.bucket}-dr"
+  tags   = local.tags
+}
+
+resource "aws_s3_bucket_versioning" "dr_guide_buckets" {
+  for_each = aws_s3_bucket.dr_guide_buckets
+  provider = aws.dr
+
+  bucket = each.value.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "dr_guide_buckets" {
+  for_each = aws_s3_bucket.dr_guide_buckets
+  provider = aws.dr
+
+  bucket = each.value.id
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.dr_s3[0].arn
+      sse_algorithm     = "aws:kms"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "dr_guide_buckets" {
+  for_each = aws_s3_bucket.dr_guide_buckets
+  provider = aws.dr
+
+  bucket                  = each.value.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
