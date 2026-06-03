@@ -373,4 +373,10 @@ variable "dr_region" {
   default     = ""
 }
 
+variable "rds_adopt_dr_cmk" {
+  description = "When true (set for NEW DR-protected stacks only), the RDS instance is created with a Terraform-managed customer KMS key so its automated backups can be replicated cross-region for DR. MUST stay false for existing stacks created with the AWS-managed key — changing an existing DB's KMS key replaces the database."
+  type        = bool
+  default     = false
+}
+
 # --- END App Configuration --- #

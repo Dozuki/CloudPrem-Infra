@@ -131,7 +131,7 @@ module "primary_database" {
   allocated_storage            = var.rds_allocated_storage
   max_allocated_storage        = var.rds_max_allocated_storage
   storage_encrypted            = true
-  kms_key_id                   = data.aws_kms_key.rds.arn
+  kms_key_id                   = local.rds_kms_key_arn
   apply_immediately            = !var.protect_resources
   allow_major_version_upgrade  = true
   performance_insights_enabled = true

@@ -10,6 +10,16 @@ locals {
 
   # Source RDS instance ARN (the rds module exposes no ARN output, so construct it).
   dr_source_db_arn = "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}"
+
+  # Use a Terraform-created customer-managed key for RDS only when a new stack
+  # opts in AND no explicit key was given. Resolves to the SAME ARN as before for
+  # existing stacks (flag false), so it never triggers a DB replacement.
+  rds_use_dr_cmk  = var.enable_dr && var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
+  rds_kms_key_arn = local.rds_use_dr_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
+
+  # RDS automated-backup cross-region replication is only possible when the DB
+  # uses a customer-managed key (either our created CMK or an operator-pinned one).
+  dr_rds_enabled = var.enable_dr && (local.rds_use_dr_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
 }
 
 # Defense-in-depth guardrail. The real selection + blocklist enforcement happens
@@ -21,10 +31,39 @@ check "dr_region_valid" {
   }
 }
 
+# Non-blocking warning: surfaced on every plan/apply when DR is on but the DB
+# uses an AWS-managed key, so RDS automated backups are NOT being replicated.
+# S3 content IS still replicated. Migrate the DB to a customer-managed key
+# (new stacks: rds_adopt_dr_cmk = true; or set rds_kms_key_id to a CMK).
+check "dr_rds_replicable" {
+  assert {
+    condition     = !var.enable_dr || local.dr_rds_enabled
+    error_message = "DR is enabled but the RDS instance uses an AWS-managed KMS key; its automated backups are NOT being replicated cross-region (S3 content IS). To enable RDS DR, the database must use a customer-managed key — see the DR cold-recovery runbook."
+  }
+}
+
+# Customer-managed key for the PRIMARY RDS instance, created only when a new
+# stack opts in (rds_adopt_dr_cmk). Required so automated backups are eligible
+# for cross-region replication. Never created for existing managed-key stacks.
+resource "aws_kms_key" "rds_cmk" {
+  count = local.rds_use_dr_cmk ? 1 : 0
+
+  description         = "${local.identifier} RDS encryption (DR-replicable)"
+  enable_key_rotation = true
+  tags                = local.tags
+}
+
+resource "aws_kms_alias" "rds_cmk" {
+  count = local.rds_use_dr_cmk ? 1 : 0
+
+  name_prefix   = "alias/${local.identifier}/rds-dr/"
+  target_key_id = aws_kms_key.rds_cmk[0].id
+}
+
 # DR-region CMK for replicated RDS automated backups (the encrypted source DB
 # requires a destination-region key).
 resource "aws_kms_key" "dr_rds" {
-  count    = local.dr_enabled ? 1 : 0
+  count    = local.dr_rds_enabled ? 1 : 0
   provider = aws.dr
 
   description         = "${local.identifier} DR replicated RDS backups"
@@ -33,7 +72,7 @@ resource "aws_kms_key" "dr_rds" {
 }
 
 resource "aws_kms_alias" "dr_rds" {
-  count    = local.dr_enabled ? 1 : 0
+  count    = local.dr_rds_enabled ? 1 : 0
   provider = aws.dr
 
   name_prefix   = "alias/${local.identifier}/dr/rds/"
@@ -64,7 +103,7 @@ resource "aws_kms_alias" "dr_s3" {
 # restores to the latest point, so there's no need to match the primary's
 # (potentially 30d) retention and 4x the replicated-backup storage.
 resource "aws_db_instance_automated_backups_replication" "primary" {
-  count    = local.dr_enabled ? 1 : 0
+  count    = local.dr_rds_enabled ? 1 : 0
   provider = aws.dr
 
   source_db_instance_arn = local.dr_source_db_arn
@@ -78,8 +117,12 @@ resource "aws_s3_bucket" "dr_guide_buckets" {
   for_each = local.dr_enabled ? aws_s3_bucket.guide_buckets : {}
   provider = aws.dr
 
-  bucket = "${each.value.bucket}-dr"
-  tags   = local.tags
+  bucket_prefix = "${local.identifier}-${each.key}-dr-"
+  tags          = local.tags
+
+  lifecycle {
+    ignore_changes = [bucket, bucket_prefix]
+  }
 }
 
 resource "aws_s3_bucket_versioning" "dr_guide_buckets" {
@@ -193,6 +236,8 @@ resource "aws_s3_bucket_replication_configuration" "dr" {
     id     = "dr-${each.key}"
     status = "Enabled"
 
+    filter {}
+
     delete_marker_replication {
       status = "Enabled"
     }
@@ -213,6 +258,7 @@ resource "aws_s3_bucket_replication_configuration" "dr" {
   }
 
   depends_on = [
+    aws_iam_role_policy_attachment.dr_s3_replication,
     aws_s3_bucket_versioning.guide_buckets_versioning,
     aws_s3_bucket_versioning.dr_guide_buckets,
   ]
