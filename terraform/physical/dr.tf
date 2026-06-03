@@ -116,3 +116,104 @@ resource "aws_s3_bucket_public_access_block" "dr_guide_buckets" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
+
+data "aws_iam_policy_document" "dr_s3_replication_assume" {
+  count = local.dr_enabled ? 1 : 0
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["s3.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "dr_s3_replication" {
+  count              = local.dr_enabled ? 1 : 0
+  name               = "${local.identifier}-${data.aws_region.current.id}-dr-s3-replication"
+  assume_role_policy = data.aws_iam_policy_document.dr_s3_replication_assume[0].json
+  tags               = local.tags
+}
+
+data "aws_iam_policy_document" "dr_s3_replication" {
+  count = local.dr_enabled ? 1 : 0
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:GetReplicationConfiguration", "s3:ListBucket"]
+    resources = [for b in aws_s3_bucket.guide_buckets : b.arn]
+  }
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:GetObjectVersionForReplication", "s3:GetObjectVersionAcl", "s3:GetObjectVersionTagging"]
+    resources = [for b in aws_s3_bucket.guide_buckets : "${b.arn}/*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags", "s3:ObjectOwnerOverrideToBucketOwner"]
+    resources = [for b in aws_s3_bucket.dr_guide_buckets : "${b.arn}/*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
+    resources = distinct(compact([local.s3_kms_key_id, var.s3_kms_key_id]))
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["kms:Encrypt", "kms:GenerateDataKey"]
+    resources = [aws_kms_key.dr_s3[0].arn]
+  }
+}
+
+resource "aws_iam_policy" "dr_s3_replication" {
+  count  = local.dr_enabled ? 1 : 0
+  name   = "${local.identifier}-${data.aws_region.current.id}-dr-s3-replication"
+  policy = data.aws_iam_policy_document.dr_s3_replication[0].json
+}
+
+resource "aws_iam_role_policy_attachment" "dr_s3_replication" {
+  count      = local.dr_enabled ? 1 : 0
+  role       = aws_iam_role.dr_s3_replication[0].name
+  policy_arn = aws_iam_policy.dr_s3_replication[0].arn
+}
+
+# CRR from each source content bucket to its DR counterpart. Source versioning
+# is already enabled (aws_s3_bucket_versioning.guide_buckets_versioning).
+resource "aws_s3_bucket_replication_configuration" "dr" {
+  for_each = aws_s3_bucket.dr_guide_buckets
+
+  role   = aws_iam_role.dr_s3_replication[0].arn
+  bucket = aws_s3_bucket.guide_buckets[each.key].id
+
+  rule {
+    id     = "dr-${each.key}"
+    status = "Enabled"
+
+    delete_marker_replication {
+      status = "Enabled"
+    }
+
+    source_selection_criteria {
+      sse_kms_encrypted_objects {
+        status = "Enabled"
+      }
+    }
+
+    destination {
+      bucket        = each.value.arn
+      storage_class = "STANDARD"
+      encryption_configuration {
+        replica_kms_key_id = aws_kms_key.dr_s3[0].arn
+      }
+    }
+  }
+
+  depends_on = [
+    aws_s3_bucket_versioning.guide_buckets_versioning,
+    aws_s3_bucket_versioning.dr_guide_buckets,
+  ]
+}
