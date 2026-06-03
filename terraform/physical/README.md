@@ -258,6 +258,10 @@
 | <a name="output_dms_task_arn"></a> [dms\_task\_arn](#output\_dms\_task\_arn) | DMS Replication Task ARN for BI |
 | <a name="output_dns_domain_name"></a> [dns\_domain\_name](#output\_dns\_domain\_name) | URL to deployed application |
 | <a name="output_documents_bucket"></a> [documents\_bucket](#output\_documents\_bucket) | n/a |
+| <a name="output_dr_rds_backup_replication_arn"></a> [dr\_rds\_backup\_replication\_arn](#output\_dr\_rds\_backup\_replication\_arn) | ARN of the replicated RDS automated backups in the DR region. |
+| <a name="output_dr_region"></a> [dr\_region](#output\_dr\_region) | Region the DR replication layer targets (empty when DR disabled). |
+| <a name="output_dr_s3_bucket_names"></a> [dr\_s3\_bucket\_names](#output\_dr\_s3\_bucket\_names) | DR destination S3 bucket names by content type. |
+| <a name="output_dr_s3_kms_key_arn"></a> [dr\_s3\_kms\_key\_arn](#output\_dr\_s3\_kms\_key\_arn) | ARN of the DR-region S3 KMS key (use as s3\_kms\_key\_id when rebuilding in DR). |
 | <a name="output_eks_cluster_access_role_arn"></a> [eks\_cluster\_access\_role\_arn](#output\_eks\_cluster\_access\_role\_arn) | IAM Role ARN for EKS cluster access |
 | <a name="output_eks_cluster_id"></a> [eks\_cluster\_id](#output\_eks\_cluster\_id) | EKS Cluster Name |
 | <a name="output_eks_oidc_issuer_url"></a> [eks\_oidc\_issuer\_url](#output\_eks\_oidc\_issuer\_url) | OIDC issuer URL for the EKS cluster |
