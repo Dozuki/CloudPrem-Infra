@@ -135,6 +135,61 @@ resource "vault_kubernetes_auth_backend_role" "eso" {
   token_max_ttl  = 86400
 }
 
+# Sync customer-provided TLS cert from Vault into the tls-secret K8s Secret used
+# by the Gateway listener. Cert + key are seeded into Vault out-of-band (so they
+# never appear in terraform state). The chart's tls.externallyManaged flag is set
+# in parallel so the chart skips creating tls-secret AND skips the cert-manager
+# annotation (which would otherwise overwrite the ESO-synced secret).
+resource "kubernetes_manifest" "tls_external_secret" {
+  count = var.customer_tls_externally_managed ? 1 : 0
+
+  depends_on = [helm_release.external_secrets, helm_release.app]
+
+  manifest = {
+    apiVersion = "external-secrets.io/v1"
+    kind       = "ExternalSecret"
+    metadata = {
+      name      = "tls-secret"
+      namespace = kubernetes_namespace_v1.app.metadata[0].name
+    }
+    spec = {
+      refreshInterval = "5m"
+      secretStoreRef = {
+        name = "vault-${local.vault_stack_label}"
+        kind = "SecretStore"
+      }
+      target = {
+        name           = "tls-secret"
+        creationPolicy = "Owner"
+        deletionPolicy = "Retain"
+        template = {
+          type = "kubernetes.io/tls"
+          data = {
+            "tls.crt" = "{{ .cert }}"
+            "tls.key" = "{{ .key }}"
+          }
+        }
+      }
+      data = [
+        {
+          secretKey = "cert"
+          remoteRef = {
+            key      = "${local.vault_env_prefix}/tls"
+            property = "cert"
+          }
+        },
+        {
+          secretKey = "key"
+          remoteRef = {
+            key      = "${local.vault_env_prefix}/tls"
+            property = "key"
+          }
+        },
+      ]
+    }
+  }
+}
+
 # --- Per-environment secrets (seeded by Terraform) --- #
 
 resource "vault_kv_secret_v2" "db" {
