@@ -214,6 +214,12 @@ module "eks_cluster" {
   endpoint_public_access  = true
   endpoint_private_access = true
 
+  # Control-plane log streaming to CloudWatch (audit, api, authenticator,
+  # controllerManager, scheduler). Required by SOC2 / Vanta and other
+  # compliance frameworks. Configurable via var.eks_enabled_log_types;
+  # default is all 5. Retention defaults to 90 days (module default).
+  enabled_log_types = var.eks_enabled_log_types
+
   encryption_config = {
     provider_key_arn = local.eks_kms_key
     resources        = ["secrets"]
