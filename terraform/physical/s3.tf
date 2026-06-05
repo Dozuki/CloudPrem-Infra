@@ -299,6 +299,12 @@ resource "null_resource" "s3_replication_job_init" {
   }
 
   provisioner "local-exec" {
+    # Set AWS_REGION explicitly because Spacelift workers don't inherit
+    # a default region; without this the aws CLI calls inside the script
+    # fail with "An error occurred (NoRegion): You must specify a region."
+    environment = {
+      AWS_REGION = data.aws_region.current.id
+    }
     command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_account"]} ${self.triggers["aws_partition"]} ${self.triggers["aws_profile"]}"
   }
 }
