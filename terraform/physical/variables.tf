@@ -344,6 +344,12 @@ variable "eks_k8s_version" {
   default     = null
 }
 
+variable "eks_enabled_log_types" {
+  description = "EKS control-plane log types to stream to CloudWatch Logs. Defaults to all 5 (audit, api, authenticator, controllerManager, scheduler) for compliance (SOC2 / Vanta require audit logs at minimum). Set to [] to disable cluster logging entirely (not recommended)."
+  type        = list(string)
+  default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+}
+
 variable "enable_webhooks" {
   description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
   type        = bool

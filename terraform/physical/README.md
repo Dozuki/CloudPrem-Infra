@@ -65,6 +65,7 @@
 | [aws_dms_replication_instance.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_instance) | resource |
 | [aws_dms_replication_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_subnet_group) | resource |
 | [aws_dms_replication_task.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_task) | resource |
+| [aws_eks_addon.cloudwatch_observability](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_pod_identity_association.app_default](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.app_migration_wait](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.cert_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
@@ -80,12 +81,15 @@
 | [aws_iam_policy.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.app_pod_identity](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.cert_manager_pod_identity](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.cloudwatch_agent_pod_identity](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.dr_s3_replication](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.lambda_execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.s3_replication](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.app_pod_identity_worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.app_pod_identity_worker_kms](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.cert_manager_pod_identity](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.cloudwatch_agent_server](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.cloudwatch_agent_xray](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.dr_s3_replication](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.lambda_basic_execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.lambda_iam_alias](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
@@ -214,6 +218,7 @@
 | <a name="input_dms_allocated_storage"></a> [dms\_allocated\_storage](#input\_dms\_allocated\_storage) | How many GB to allocate for the DMS replication instance | `string` | `100` | no |
 | <a name="input_dms_instance_type"></a> [dms\_instance\_type](#input\_dms\_instance\_type) | The instance type for the DMS replication instance | `string` | `"dms.r5.large"` | no |
 | <a name="input_dr_region"></a> [dr\_region](#input\_dr\_region) | The DR region (concrete value). Normally injected by the Spacelift admin layer via TG\_AWS\_DR\_REGION; may be set explicitly to override. Never auto-derived in workload TF. | `string` | `""` | no |
+| <a name="input_eks_enabled_log_types"></a> [eks\_enabled\_log\_types](#input\_eks\_enabled\_log\_types) | EKS control-plane log types to stream to CloudWatch Logs. Defaults to all 5 (audit, api, authenticator, controllerManager, scheduler) for compliance (SOC2 / Vanta require audit logs at minimum). Set to [] to disable cluster logging entirely (not recommended). | `list(string)` | <pre>[<br>  "api",<br>  "audit",<br>  "authenticator",<br>  "controllerManager",<br>  "scheduler"<br>]</pre> | no |
 | <a name="input_eks_k8s_version"></a> [eks\_k8s\_version](#input\_eks\_k8s\_version) | Kubernetes version override. Leave null to let EKS Auto Mode manage the version. Set explicitly only to pin a specific version. | `string` | `null` | no |
 | <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_elasticache_cluster_size"></a> [elasticache\_cluster\_size](#input\_elasticache\_cluster\_size) | Cluster size | `number` | `1` | no |
