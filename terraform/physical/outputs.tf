@@ -93,3 +93,23 @@ output "nlb_http_target_group_arn" {
   description = "NLB HTTP target group ARN for TargetGroupBinding"
   value       = module.nlb.target_groups["acme"].arn
 }
+
+output "dr_region" {
+  description = "Region the DR replication layer targets (empty when DR disabled)."
+  value       = var.enable_dr ? var.dr_region : ""
+}
+
+output "dr_s3_bucket_names" {
+  description = "DR destination S3 bucket names by content type."
+  value       = { for k, b in aws_s3_bucket.dr_guide_buckets : k => b.id }
+}
+
+output "dr_s3_kms_key_arn" {
+  description = "ARN of the DR-region S3 KMS key (use as s3_kms_key_id when rebuilding in DR)."
+  value       = try(aws_kms_key.dr_s3[0].arn, "")
+}
+
+output "dr_rds_backup_replication_arn" {
+  description = "ARN of the replicated RDS automated backups in the DR region."
+  value       = try(aws_db_instance_automated_backups_replication.primary[0].id, "")
+}

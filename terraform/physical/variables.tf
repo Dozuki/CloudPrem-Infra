@@ -367,4 +367,22 @@ variable "sso_admin_role_arn" {
   default     = ""
 }
 
+variable "enable_dr" {
+  description = "Enable the always-on cross-region DR data-protection layer (RDS automated-backup replication + S3 CRR). On by default; ephemeral/dev stacks may set false."
+  type        = bool
+  default     = true
+}
+
+variable "dr_region" {
+  description = "The DR region (concrete value). Normally injected by the Spacelift admin layer via TG_AWS_DR_REGION; may be set explicitly to override. Never auto-derived in workload TF."
+  type        = string
+  default     = ""
+}
+
+variable "rds_adopt_dr_cmk" {
+  description = "When true (set for NEW DR-protected stacks only), the RDS instance is created with a Terraform-managed customer KMS key so its automated backups can be replicated cross-region for DR. MUST stay false for existing stacks created with the AWS-managed key — changing an existing DB's KMS key replaces the database."
+  type        = bool
+  default     = false
+}
+
 # --- END App Configuration --- #
