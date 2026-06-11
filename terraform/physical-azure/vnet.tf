@@ -12,6 +12,8 @@ resource "azurerm_subnet" "aks" {
   resource_group_name  = azurerm_resource_group.this.name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [cidrsubnet(var.vnet_cidr, 4, 0)] # e.g. 10.10.0.0/20
+
+  service_endpoints = ["Microsoft.KeyVault"]
 }
 
 # MySQL Flexible Server requires a delegated subnet.

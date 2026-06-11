@@ -117,3 +117,9 @@ variable "mysql_high_availability" {
   type        = bool
   default     = true
 }
+
+variable "kv_allowed_cidrs" {
+  description = "Public egress IPs/CIDRs of the deployment workstation or VM, allowed through the Key Vault firewall to seed secrets. Use bare IPs for single addresses (Azure rejects /32). Required at apply time."
+  type        = list(string)
+  default     = []
+}

@@ -1,7 +1,7 @@
 # Key Vault names: 3-24 chars, globally unique.
 # "kv-" + identifier_compact (max 15) + "-" + 4-char suffix = max 23.
-# v1 intentionally leaves the vault endpoint publicly reachable: deploys are
-# operator-driven from outside the VNet and ESO reaches it from the cluster.
+# Deny-by-default firewall: in-cluster access (ESO) rides the AKS subnet's
+# Key Vault service endpoint; the deployer seeds secrets through kv_allowed_cidrs.
 # Follow-up: private endpoint + public_network_access_enabled = false.
 resource "azurerm_key_vault" "this" {
   name                       = "kv-${local.identifier_compact}-${random_string.suffix.result}"
@@ -12,7 +12,15 @@ resource "azurerm_key_vault" "this" {
   rbac_authorization_enabled = true
   purge_protection_enabled   = var.protect_resources
   soft_delete_retention_days = 30
-  tags                       = local.tags
+
+  network_acls {
+    default_action             = "Deny"
+    bypass                     = "AzureServices"
+    virtual_network_subnet_ids = [azurerm_subnet.aks.id]
+    ip_rules                   = var.kv_allowed_cidrs
+  }
+
+  tags = local.tags
 }
 
 # The deploying principal seeds and manages secret content (e.g. database-credentials).
