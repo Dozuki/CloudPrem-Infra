@@ -237,3 +237,128 @@ variable "nlb_http_target_group_arn" {
 }
 
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #
+variable "cloud" {
+  description = "Cloud the physical layer runs on."
+  type        = string
+  default     = "aws"
+
+  validation {
+    condition     = contains(["aws", "azure"], var.cloud)
+    error_message = "cloud must be aws or azure."
+  }
+
+  validation {
+    # Cross-variable validation requires Terraform >= 1.9.
+    condition     = var.cloud == "aws" || (!var.enable_webhooks && !var.enable_bi)
+    error_message = "enable_webhooks and enable_bi are not supported on Azure."
+  }
+}
+
+variable "azure_subscription_id" {
+  description = "Azure subscription ID. Required when cloud = azure."
+  type        = string
+  default     = ""
+}
+
+variable "azure_environment" {
+  description = "Azure cloud environment: public or usgovernment."
+  type        = string
+  default     = "public"
+
+  validation {
+    condition     = contains(["public", "usgovernment"], var.azure_environment)
+    error_message = "azure_environment must be public or usgovernment."
+  }
+}
+
+variable "azure_resource_group" {
+  description = "Resource group containing the AKS cluster and Key Vault. Required when cloud = azure."
+  type        = string
+  default     = ""
+}
+
+variable "azure_key_vault_id" {
+  description = "Key Vault resource ID (physical output key_vault_id)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_key_vault_uri" {
+  description = "Key Vault URI for the ESO SecretStore (physical output key_vault_uri)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_tenant_id" {
+  description = "Entra tenant ID (physical output tenant_id)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_eso_identity_client_id" {
+  description = "Client ID of the ESO workload identity (physical output eso_identity_client_id)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_kubelogin_login" {
+  description = "kubelogin --login mode: azurecli on a workstation, msi on an Azure VM with managed identity."
+  type        = string
+  default     = "azurecli"
+
+  validation {
+    condition     = contains(["azurecli", "msi"], var.azure_kubelogin_login)
+    error_message = "azure_kubelogin_login must be azurecli or msi."
+  }
+}
+
+variable "seaweedfs_volume_size_gb" {
+  description = "PVC size in GB for each SeaweedFS volume server (Azure only)."
+  type        = number
+  default     = 100
+}
+
+# Global application secrets — on AWS these come from Dozuki's central Vault;
+# on Azure (which cannot reach Vault) the config layer supplies them and this
+# layer seeds them into the customer Key Vault for ESO.
+variable "sentry_dsn" {
+  description = "Sentry DSN (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "frontegg_client_id" {
+  description = "Frontegg client ID (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "frontegg_api_token" {
+  description = "Frontegg API token (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "surveyjs_license_key" {
+  description = "SurveyJS license key (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "rustici_password" {
+  description = "Rustici password (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "rustici_managed_password" {
+  description = "Rustici managed password (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
