@@ -166,12 +166,13 @@ resource "kubernetes_service_v1" "envoy_proxy_azure" {
   count      = var.cloud == "azure" ? 1 : 0
   depends_on = [helm_release.app]
 
+  # Azure LB uses its default TCP health probe. Do not set an HTTP
+  # health-probe-request-path annotation unless the Envoy proxy is verified to
+  # serve 200 on that path on the data ports (10443/10080) — a failing HTTP
+  # probe blackholes ingress.
   metadata {
     name      = "dozuki-envoy-proxy"
     namespace = "envoy-gateway-system"
-    annotations = {
-      "service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path" = "/healthz"
-    }
   }
   spec {
     type = "LoadBalancer"
