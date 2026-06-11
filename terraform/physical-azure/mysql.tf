@@ -13,20 +13,22 @@ resource "azurerm_mysql_flexible_server" "this" {
 
   version  = var.mysql_version
   sku_name = var.mysql_sku_name
-  zone     = "1"
+  zone     = var.mysql_zone
 
   delegated_subnet_id = azurerm_subnet.mysql.id
   private_dns_zone_id = azurerm_private_dns_zone.mysql.id
 
-  backup_retention_days        = 14
-  geo_redundant_backup_enabled = var.protect_resources
+  backup_retention_days        = var.mysql_backup_retention_days
+  geo_redundant_backup_enabled = var.mysql_geo_redundant_backup
 
+  # ZoneRedundant HA requires a region with availability zones; in zone-less
+  # regions set mysql_high_availability = false.
   dynamic "high_availability" {
     for_each = var.mysql_high_availability ? [1] : []
 
     content {
       mode                      = "ZoneRedundant"
-      standby_availability_zone = "2"
+      standby_availability_zone = var.mysql_standby_zone
     }
   }
 

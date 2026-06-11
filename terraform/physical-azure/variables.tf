@@ -123,3 +123,32 @@ variable "kv_allowed_cidrs" {
   type        = list(string)
   default     = []
 }
+
+variable "mysql_zone" {
+  description = "Availability zone for the MySQL primary. Null lets Azure choose; required null in regions without availability zones."
+  type        = string
+  default     = null
+}
+
+variable "mysql_standby_zone" {
+  description = "Availability zone for the MySQL HA standby. Null lets Azure choose. Only used when mysql_high_availability is true."
+  type        = string
+  default     = null
+}
+
+variable "mysql_backup_retention_days" {
+  description = "Backup retention in days for MySQL."
+  type        = number
+  default     = 14
+
+  validation {
+    condition     = var.mysql_backup_retention_days >= 1 && var.mysql_backup_retention_days <= 35
+    error_message = "mysql_backup_retention_days must be between 1 and 35."
+  }
+}
+
+variable "mysql_geo_redundant_backup" {
+  description = "Geo-redundant backups for MySQL. Immutable after server creation: changing it forces a destroy/recreate of the database server."
+  type        = bool
+  default     = true
+}
