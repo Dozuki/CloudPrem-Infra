@@ -27,7 +27,7 @@ jobs:
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: 1.5.7
+        terraform_version: 1.13.4
 
     - name: Terraform ${{ matrix.module }} Module Init
       run: terraform init
