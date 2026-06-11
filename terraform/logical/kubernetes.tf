@@ -1,4 +1,6 @@
 resource "kubernetes_storage_class_v1" "ebs_gp3" {
+  count = var.cloud == "aws" ? 1 : 0
+
   metadata {
     name = "ebs-gp3"
     annotations = {
@@ -130,6 +132,7 @@ resource "helm_release" "envoy_gateway" {
 # Stable Service in envoy-gateway-system targeting Envoy proxy pods.
 # Proxy pods are deployed in the controller namespace, not the Gateway namespace.
 resource "kubernetes_service_v1" "envoy_proxy" {
+  count      = var.cloud == "aws" ? 1 : 0
   depends_on = [helm_release.app]
 
   metadata {
@@ -157,7 +160,42 @@ resource "kubernetes_service_v1" "envoy_proxy" {
   }
 }
 
+# Azure twin of the Envoy proxy Service: exposes the proxy pods directly via an
+# Azure Load Balancer instead of NLB target group bindings.
+resource "kubernetes_service_v1" "envoy_proxy_azure" {
+  count      = var.cloud == "azure" ? 1 : 0
+  depends_on = [helm_release.app]
+
+  metadata {
+    name      = "dozuki-envoy-proxy"
+    namespace = "envoy-gateway-system"
+    annotations = {
+      "service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path" = "/healthz"
+    }
+  }
+  spec {
+    type = "LoadBalancer"
+    selector = {
+      "gateway.envoyproxy.io/owning-gateway-name"      = "dozuki-gateway"
+      "gateway.envoyproxy.io/owning-gateway-namespace" = kubernetes_namespace_v1.app.metadata[0].name
+    }
+    port {
+      name        = "https"
+      port        = 443
+      target_port = 10443
+      protocol    = "TCP"
+    }
+    port {
+      name        = "http"
+      port        = 80
+      target_port = 10080
+      protocol    = "TCP"
+    }
+  }
+}
+
 resource "kubernetes_manifest" "tgb_https" {
+  count      = var.cloud == "aws" ? 1 : 0
   depends_on = [kubernetes_service_v1.envoy_proxy]
 
   manifest = {
@@ -179,6 +217,7 @@ resource "kubernetes_manifest" "tgb_https" {
 }
 
 resource "kubernetes_manifest" "tgb_http" {
+  count      = var.cloud == "aws" ? 1 : 0
   depends_on = [kubernetes_service_v1.envoy_proxy]
 
   manifest = {
@@ -200,6 +239,8 @@ resource "kubernetes_manifest" "tgb_http" {
 }
 
 resource "kubernetes_manifest" "nodepool_spot" {
+  count = var.cloud == "aws" ? 1 : 0
+
   manifest = {
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
@@ -238,6 +279,8 @@ resource "kubernetes_manifest" "nodepool_spot" {
 }
 
 resource "kubernetes_manifest" "nodepool_on_demand" {
+  count = var.cloud == "aws" ? 1 : 0
+
   manifest = {
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
@@ -315,6 +358,7 @@ resource "kubernetes_service_account_v1" "eso_vault_auth" {
 # Auto Mode won't provision nodes until workloads are scheduled. cert-manager
 # and envoy-gateway trigger node creation; this addon installs after nodes exist.
 resource "aws_eks_addon" "cloudwatch_observability" {
+  count        = var.cloud == "aws" ? 1 : 0
   cluster_name = data.aws_eks_cluster.main[0].name
   addon_name   = "amazon-cloudwatch-observability"
   depends_on   = [helm_release.cert_manager]
@@ -578,4 +622,40 @@ resource "helm_release" "app" {
     name  = "connectivity.connectors-worker.redis.tls"
     value = "false"
   }
+}
+# Moved blocks: these resources gained `count` when Azure support was added.
+# They keep existing AWS state addresses from churning.
+moved {
+  from = kubernetes_storage_class_v1.ebs_gp3
+  to   = kubernetes_storage_class_v1.ebs_gp3[0]
+}
+
+moved {
+  from = kubernetes_service_v1.envoy_proxy
+  to   = kubernetes_service_v1.envoy_proxy[0]
+}
+
+moved {
+  from = kubernetes_manifest.tgb_https
+  to   = kubernetes_manifest.tgb_https[0]
+}
+
+moved {
+  from = kubernetes_manifest.tgb_http
+  to   = kubernetes_manifest.tgb_http[0]
+}
+
+moved {
+  from = kubernetes_manifest.nodepool_spot
+  to   = kubernetes_manifest.nodepool_spot[0]
+}
+
+moved {
+  from = kubernetes_manifest.nodepool_on_demand
+  to   = kubernetes_manifest.nodepool_on_demand[0]
+}
+
+moved {
+  from = aws_eks_addon.cloudwatch_observability
+  to   = aws_eks_addon.cloudwatch_observability[0]
 }
