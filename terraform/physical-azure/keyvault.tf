@@ -38,3 +38,11 @@ resource "azurerm_management_lock" "key_vault" {
   lock_level = "CanNotDelete"
   notes      = "protect_resources is enabled; remove this lock before destroying."
 }
+
+# Azure RBAC grants take time to propagate to the Key Vault data plane; without
+# this, the first secret write after vault creation often fails with 403.
+resource "time_sleep" "kv_rbac_propagation" {
+  create_duration = "60s"
+
+  depends_on = [azurerm_role_assignment.deployer_kv_secrets]
+}
