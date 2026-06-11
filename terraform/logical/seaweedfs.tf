@@ -49,6 +49,8 @@ resource "helm_release" "seaweedfs" {
     yamlencode({
       master = {
         replicas = 1
+        # 001 = one replica on a second volume server; a single PVC loss no longer loses data.
+        defaultReplication = "001"
         data = {
           type         = "persistentVolumeClaim"
           size         = "10Gi"
@@ -77,6 +79,8 @@ resource "helm_release" "seaweedfs" {
       filer = {
         enabled  = true
         replicas = 1
+        # 001 = one replica on a second volume server; a single PVC loss no longer loses data.
+        defaultReplicaPlacement = "001"
         data = {
           type         = "persistentVolumeClaim"
           size         = "10Gi"
@@ -114,10 +118,13 @@ resource "kubernetes_job_v1" "seaweedfs_buckets" {
   depends_on = [helm_release.seaweedfs]
 
   metadata {
-    name      = "seaweedfs-buckets"
+    # Hash-keyed name: a changed bucket list creates a new job instead of
+    # attempting an in-place update of the immutable job spec.
+    name      = "seaweedfs-buckets-${substr(sha1(join(",", local.seaweedfs_buckets)), 0, 8)}"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
   spec {
+    ttl_seconds_after_finished = 86400
     template {
       metadata {}
       spec {
