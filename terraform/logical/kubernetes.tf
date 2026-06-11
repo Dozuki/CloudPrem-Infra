@@ -352,6 +352,14 @@ resource "kubernetes_service_account_v1" "eso_vault_auth" {
   metadata {
     name      = "dozuki-external-secrets"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
+
+    annotations = var.cloud == "azure" ? {
+      "azure.workload.identity/client-id" = var.azure_eso_identity_client_id
+    } : {}
+
+    labels = var.cloud == "azure" ? {
+      "azure.workload.identity/use" = "true"
+    } : {}
   }
 }
 
@@ -366,7 +374,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, aws_eks_addon.cloudwatch_observability]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -391,7 +399,7 @@ resource "helm_release" "app" {
   }
   set {
     name  = "dns_validation"
-    value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
+    value = var.cloud == "aws" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
   }
   set {
     name  = "customer"
@@ -405,15 +413,15 @@ resource "helm_release" "app" {
   # --- AWS ---
   set {
     name  = "aws.region"
-    value = data.aws_region.current[0].id
+    value = var.cloud == "aws" ? data.aws_region.current[0].id : ""
   }
   set {
     name  = "aws.accountId"
-    value = data.aws_caller_identity.current[0].account_id
+    value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : ""
   }
   set {
     name  = "aws.enabled"
-    value = "true"
+    value = var.cloud == "aws" ? "true" : "false"
   }
 
   # --- Database ---
@@ -427,7 +435,7 @@ resource "helm_release" "app" {
   }
   set {
     name  = "db.rdsCaCert"
-    value = base64encode(file(local.ca_cert_pem_file))
+    value = var.cloud == "aws" ? base64encode(file(local.ca_cert_pem_file)) : ""
   }
   set_sensitive {
     name  = "db.password"
@@ -503,7 +511,7 @@ resource "helm_release" "app" {
   # --- Object Storage ---
   set {
     name  = "objectStorage.kmsKey"
-    value = data.aws_kms_key.s3[0].arn
+    value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : ""
   }
   set {
     name  = "objectStorage.imagesBucket"
@@ -525,17 +533,59 @@ resource "helm_release" "app" {
   # --- Memcached ---
   set {
     name  = "memcached.host"
-    value = var.memcached_cluster_address
+    value = var.cloud == "aws" ? var.memcached_cluster_address : "dozuki-memcached"
   }
 
   # --- Vault ---
   set {
     name  = "vault.enabled"
-    value = "true"
+    value = var.cloud == "aws" ? "true" : "false"
   }
   set {
     name  = "vault.address"
     value = var.vault_address
+  }
+
+  # --- Azure ---
+  set {
+    name  = "azure.enabled"
+    value = var.cloud == "azure" ? "true" : "false"
+  }
+  set {
+    name  = "azure.tenantId"
+    value = var.azure_tenant_id
+  }
+  set {
+    name  = "azure.keyVaultUri"
+    value = var.azure_key_vault_uri
+  }
+  set {
+    name  = "azure.environment"
+    value = var.azure_environment
+  }
+
+  # --- Monitoring ---
+  set {
+    name  = "monitoring.enabled"
+    value = "true"
+  }
+
+  # --- In-cluster services (Azure) ---
+  set {
+    name  = "memcached.enabled"
+    value = var.cloud == "azure" ? "true" : "false"
+  }
+  set {
+    name  = "objectStorage.endpoint"
+    value = var.cloud == "azure" ? local.seaweedfs_s3_endpoint : ""
+  }
+  set_sensitive {
+    name  = "objectStorage.credentials.accessKey"
+    value = var.cloud == "azure" ? try(random_password.seaweedfs_access_key[0].result, "") : ""
+  }
+  set_sensitive {
+    name  = "objectStorage.credentials.secretKey"
+    value = var.cloud == "azure" ? try(random_password.seaweedfs_secret_key[0].result, "") : ""
   }
 
   # --- Google Translate ---

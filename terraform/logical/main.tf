@@ -130,8 +130,8 @@ locals {
   base_config_values = {
     customer               = { value = coalesce(var.customer, "Dozuki") }
     environment            = { value = var.environment }
-    aws_acct_id            = { value = data.aws_caller_identity.current[0].account_id }
-    aws_region             = { value = data.aws_region.current[0].id }
+    aws_acct_id            = { value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" }
+    aws_region             = { value = var.cloud == "aws" ? data.aws_region.current[0].id : "" }
     hostname               = { value = var.dns_domain_name }
     ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
     bi_enabled             = { value = var.enable_bi ? "true" : "false" }
