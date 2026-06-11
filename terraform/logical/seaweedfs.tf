@@ -132,12 +132,25 @@ resource "kubernetes_job_v1" "seaweedfs_buckets" {
           name  = "seaweedfs-buckets"
           image = "amazon/aws-cli:2.17.0"
           env {
-            name  = "AWS_ACCESS_KEY_ID"
-            value = random_password.seaweedfs_access_key[0].result
+            name = "AWS_ACCESS_KEY_ID"
+
+            value_from {
+              secret_key_ref {
+                name = "seaweedfs-s3-secret"
+                key  = "admin_access_key_id"
+              }
+            }
           }
+
           env {
-            name  = "AWS_SECRET_ACCESS_KEY"
-            value = random_password.seaweedfs_secret_key[0].result
+            name = "AWS_SECRET_ACCESS_KEY"
+
+            value_from {
+              secret_key_ref {
+                name = "seaweedfs-s3-secret"
+                key  = "admin_secret_access_key"
+              }
+            }
           }
           env {
             name  = "AWS_DEFAULT_REGION"
