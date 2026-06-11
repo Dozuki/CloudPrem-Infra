@@ -152,3 +152,15 @@ variable "mysql_geo_redundant_backup" {
   type        = bool
   default     = true
 }
+
+variable "aks_api_allowed_cidrs" {
+  description = "Public IPs/CIDRs allowed to reach the AKS API server. Empty leaves the endpoint open (v1 default); the bootstrap passes the operator's egress IP."
+  type        = list(string)
+  default     = []
+}
+
+variable "aks_admin_group_object_ids" {
+  description = "Entra ID group object IDs granted cluster-admin via Azure RBAC. When set, local cluster accounts are disabled and kubectl requires kubelogin (az aks get-credentials without --admin)."
+  type        = list(string)
+  default     = []
+}

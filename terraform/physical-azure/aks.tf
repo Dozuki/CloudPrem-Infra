@@ -7,10 +7,33 @@ resource "azurerm_kubernetes_cluster" "this" {
 
   sku_tier                  = "Standard"
   automatic_upgrade_channel = "patch"
+  node_os_upgrade_channel   = "NodeImage"
 
   oidc_issuer_enabled       = true
   workload_identity_enabled = true
 
+  # Entra-integrated RBAC is opt-in: requires a customer-supplied admin group.
+  # Without it, operators use local accounts via az aks get-credentials.
+  local_account_disabled = length(var.aks_admin_group_object_ids) > 0
+
+  dynamic "azure_active_directory_role_based_access_control" {
+    for_each = length(var.aks_admin_group_object_ids) > 0 ? [1] : []
+
+    content {
+      azure_rbac_enabled     = true
+      admin_group_object_ids = var.aks_admin_group_object_ids
+    }
+  }
+
+  dynamic "api_server_access_profile" {
+    for_each = length(var.aks_api_allowed_cidrs) > 0 ? [1] : []
+
+    content {
+      authorized_ip_ranges = var.aks_api_allowed_cidrs
+    }
+  }
+
+  # Single shared pool for v1: no tainted system pool; "system" is just a name.
   default_node_pool {
     name                 = "system"
     vm_size              = var.aks_node_vm_size
@@ -32,6 +55,7 @@ resource "azurerm_kubernetes_cluster" "this" {
   network_profile {
     network_plugin      = "azure"
     network_plugin_mode = "overlay"
+    network_policy      = "azure"
     pod_cidr            = "192.168.0.0/16"
     service_cidr        = "172.16.0.0/16"
     dns_service_ip      = "172.16.0.10"
@@ -41,6 +65,25 @@ resource "azurerm_kubernetes_cluster" "this" {
 
   oms_agent {
     log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+  }
+
+  # Bound auto-upgrade disruption to a window (single pool hosts everything).
+  maintenance_window_auto_upgrade {
+    frequency   = "Weekly"
+    interval    = 1
+    duration    = 4
+    day_of_week = "Sunday"
+    start_time  = "03:00"
+    utc_offset  = "+00:00"
+  }
+
+  maintenance_window_node_os {
+    frequency   = "Weekly"
+    interval    = 1
+    duration    = 4
+    day_of_week = "Sunday"
+    start_time  = "03:00"
+    utc_offset  = "+00:00"
   }
 
   tags = local.tags
