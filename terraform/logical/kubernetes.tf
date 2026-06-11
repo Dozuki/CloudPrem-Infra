@@ -315,7 +315,7 @@ resource "kubernetes_service_account_v1" "eso_vault_auth" {
 # Auto Mode won't provision nodes until workloads are scheduled. cert-manager
 # and envoy-gateway trigger node creation; this addon installs after nodes exist.
 resource "aws_eks_addon" "cloudwatch_observability" {
-  cluster_name = data.aws_eks_cluster.main.name
+  cluster_name = data.aws_eks_cluster.main[0].name
   addon_name   = "amazon-cloudwatch-observability"
   depends_on   = [helm_release.cert_manager]
 }
@@ -360,11 +360,11 @@ resource "helm_release" "app" {
   # --- AWS ---
   set {
     name  = "aws.region"
-    value = data.aws_region.current.id
+    value = data.aws_region.current[0].id
   }
   set {
     name  = "aws.accountId"
-    value = data.aws_caller_identity.current.account_id
+    value = data.aws_caller_identity.current[0].account_id
   }
   set {
     name  = "aws.enabled"
@@ -458,7 +458,7 @@ resource "helm_release" "app" {
   # --- Object Storage ---
   set {
     name  = "objectStorage.kmsKey"
-    value = data.aws_kms_key.s3.arn
+    value = data.aws_kms_key.s3[0].arn
   }
   set {
     name  = "objectStorage.imagesBucket"

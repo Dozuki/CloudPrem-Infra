@@ -61,7 +61,7 @@ resource "vault_aws_auth_backend_role" "stack" {
   auth_type = "iam"
 
   bound_iam_principal_arns = [
-    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.vault_stack_label}-*",
+    "arn:${data.aws_partition.current[0].partition}:iam::${data.aws_caller_identity.current[0].account_id}:role/${local.vault_stack_label}-*",
   ]
 
   token_policies = [vault_policy.stack.name]
@@ -116,8 +116,8 @@ resource "kubernetes_secret_v1" "vault_auth_token" {
 
 resource "vault_kubernetes_auth_backend_config" "stack" {
   backend              = vault_auth_backend.kubernetes.path
-  kubernetes_host      = data.aws_eks_cluster.main.endpoint
-  kubernetes_ca_cert   = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
+  kubernetes_host      = data.aws_eks_cluster.main[0].endpoint
+  kubernetes_ca_cert   = base64decode(data.aws_eks_cluster.main[0].certificate_authority[0].data)
   token_reviewer_jwt   = kubernetes_secret_v1.vault_auth_token.data["token"]
   disable_local_ca_jwt = true
 }
