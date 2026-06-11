@@ -65,6 +65,32 @@ resource "azurerm_monitor_metric_alert" "mysql_storage" {
   tags = local.tags
 }
 
+resource "azurerm_monitor_metric_alert" "mysql_memory" {
+  count = var.alarm_email != "" ? 1 : 0
+
+  name                = "${local.identifier}-mysql-memory"
+  resource_group_name = azurerm_resource_group.this.name
+  scopes              = [azurerm_mysql_flexible_server.this.id]
+  description         = "MySQL memory above 90% for 15 minutes."
+  severity            = 2
+  frequency           = "PT5M"
+  window_size         = "PT15M"
+
+  criteria {
+    metric_namespace = "Microsoft.DBforMySQL/flexibleServers"
+    metric_name      = "memory_percent"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 90
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.alarms[0].id
+  }
+
+  tags = local.tags
+}
+
 resource "azurerm_monitor_metric_alert" "aks_node_cpu" {
   count = var.alarm_email != "" ? 1 : 0
 
