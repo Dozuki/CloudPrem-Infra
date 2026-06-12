@@ -14,6 +14,7 @@ ensure_tools() {
   read -r os arch <<<"$(os_arch)"
 
   command -v az >/dev/null 2>&1 || die "Azure CLI (az) is required. Install: https://learn.microsoft.com/cli/azure/install-azure-cli"
+  command -v unzip >/dev/null 2>&1 || die "unzip is required (apt-get install unzip / yum install unzip)"
 
   _ensure_terraform "$os" "$arch"
   _ensure_kubelogin "$os" "$arch"
