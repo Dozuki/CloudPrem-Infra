@@ -16,6 +16,7 @@ test_output*
 /live/logs/
 
 # Azure deploy kit
+dist/
 azure-config/.bin/
 azure-config/.state/
 azure-config/*.tfvars
