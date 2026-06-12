@@ -22,7 +22,8 @@ rsync -a "${REPO_ROOT}/terraform/physical-azure/" "${STAGE}/terraform/physical-a
 rsync -a "${REPO_ROOT}/terraform/logical/" "${STAGE}/terraform/logical/" \
   --exclude '.terraform' --exclude '.terraform.lock.hcl' --exclude 'examples' \
   --exclude '.terragrunt-cache' --exclude 'backend_override.tf' --exclude 'aws_stub_override.tf' \
-  --exclude 'charts/dozuki/.idea' --exclude 'charts/dozuki/utils'
+  --exclude 'charts/dozuki/.idea' --exclude 'charts/dozuki/utils' \
+  --exclude 'charts/dozuki/.claude' --exclude 'charts/dozuki/CODEOWNERS'
 cp "${REPO_ROOT}/terraform/CONTRACT.md" "${STAGE}/terraform/CONTRACT.md"
 
 # Strip submodule git metadata so the bundle is plain files.
@@ -47,6 +48,6 @@ for layer in physical-azure logical; do
 done
 
 tar -czf "${DIST}/${NAME}.tar.gz" -C "${DIST}" "${NAME}"
-( cd "${DIST}" && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" 2>/dev/null \
-  || shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
+( cd "${DIST}" && { sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" 2>/dev/null \
+  || shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"; } )
 echo "bundle: ${DIST}/${NAME}.tar.gz"

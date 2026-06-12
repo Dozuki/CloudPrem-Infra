@@ -134,7 +134,7 @@ phase_status() {
 case "${1:-}" in
   init)        phase_init ;;
   physical)    phase_init; phase_physical ;;
-  sync-images) phase_sync_images ;;
+  sync-images) phase_init; phase_sync_images ;;
   logical)     phase_init; phase_logical ;;
   status)      phase_status ;;
   all)         phase_init; phase_physical; phase_sync_images; phase_logical ;;

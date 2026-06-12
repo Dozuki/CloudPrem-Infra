@@ -22,8 +22,10 @@ Individual phases: `./bootstrap.sh init|physical|sync-images|logical|status`
 
 ## After deploy
 - `./status.sh` prints cluster, database, and application health.
-- Point a DNS A record for your `external_fqdn` at the `ingress_ip` shown by
+- Point a DNS A record for your `external_fqdn` at the LoadBalancer IP shown by
   `./bootstrap.sh status`.
+- `status` and `status.sh` assume an authenticated `az` session; run
+  `./bootstrap.sh init` first on a fresh shell.
 
 ## Upgrades
 Download the new bundle, copy your `*.tfvars` files in, rerun
