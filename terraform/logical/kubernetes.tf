@@ -421,7 +421,7 @@ resource "helm_release" "app" {
   # not a set{} block — so AWS releases see an empty list (a no-op with the
   # SDKv2-based helm provider, where [] and absent are indistinguishable).
   values = var.cloud == "azure" ? [yamlencode({
-    imagePullSecrets = [{ name = "ghcr-pull" }]
+    global = { imagePullSecrets = [{ name = "ghcr-pull" }] }
   })] : []
 
   # --- General ---
