@@ -15,19 +15,17 @@ rm -rf "${STAGE}" && mkdir -p "${STAGE}/terraform"
 rsync -a "${REPO_ROOT}/azure-config/" "${STAGE}/" \
   --exclude '.bin' --exclude '.state' --exclude 'scripts' --exclude '*.tfvars'
 
-# 2) Vendored terraform layers. The chart submodule must be materialized.
-git -C "${REPO_ROOT}" submodule update --init --recursive
+# 2) Vendored terraform layers.
 rsync -a "${REPO_ROOT}/terraform/physical-azure/" "${STAGE}/terraform/physical-azure/" \
   --exclude '.terraform' --exclude '.terraform.lock.hcl' --exclude 'examples'
+# The dozuki chart ships as an OCI artifact via sync-images, not as source.
 rsync -a "${REPO_ROOT}/terraform/logical/" "${STAGE}/terraform/logical/" \
   --exclude '.terraform' --exclude '.terraform.lock.hcl' --exclude 'examples' \
   --exclude '.terragrunt-cache' --exclude 'backend_override.tf' --exclude 'aws_stub_override.tf' \
-  --exclude 'charts/dozuki/.idea' --exclude 'charts/dozuki/utils' \
-  --exclude 'charts/dozuki/.claude' --exclude 'charts/dozuki/CODEOWNERS'
+  --exclude 'charts/dozuki'
 cp "${REPO_ROOT}/terraform/CONTRACT.md" "${STAGE}/terraform/CONTRACT.md"
 
 # Strip submodule git metadata so the bundle is plain files.
-rm -rf "${STAGE}/terraform/logical/charts/dozuki/.git"
 find "${STAGE}" -name '.gitmodules' -delete
 
 # 3) Self-containment guard: nothing may reference internal repos or AWS-hosted

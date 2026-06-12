@@ -13,11 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          # The chart submodule lives in Dozuki/helm; a PAT with read access is
-          # required if the default token cannot read it.
-          token: ${{ secrets.HELM_REPO_TOKEN || github.token }}
 
       - uses: hashicorp/setup-terraform@v3
         with:
