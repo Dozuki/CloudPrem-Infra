@@ -13,3 +13,8 @@ test_output*
 /live/standard/
 /live/logs
 /live/logs/
+
+# Azure deploy kit
+azure-config/.bin/
+azure-config/.state/
+azure-config/*.tfvars
