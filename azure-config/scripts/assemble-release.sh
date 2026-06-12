@@ -21,7 +21,8 @@ rsync -a "${REPO_ROOT}/terraform/physical-azure/" "${STAGE}/terraform/physical-a
   --exclude '.terraform' --exclude '.terraform.lock.hcl' --exclude 'examples'
 rsync -a "${REPO_ROOT}/terraform/logical/" "${STAGE}/terraform/logical/" \
   --exclude '.terraform' --exclude '.terraform.lock.hcl' --exclude 'examples' \
-  --exclude '.terragrunt-cache' --exclude 'backend_override.tf' --exclude 'aws_stub_override.tf'
+  --exclude '.terragrunt-cache' --exclude 'backend_override.tf' --exclude 'aws_stub_override.tf' \
+  --exclude 'charts/dozuki/.idea' --exclude 'charts/dozuki/utils'
 cp "${REPO_ROOT}/terraform/CONTRACT.md" "${STAGE}/terraform/CONTRACT.md"
 
 # Strip submodule git metadata so the bundle is plain files.
