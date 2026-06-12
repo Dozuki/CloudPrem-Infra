@@ -237,3 +237,8 @@ variable "nlb_http_target_group_arn" {
 }
 
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #
+variable "chart_version" {
+  description = "Dozuki chart version pulled from the registry (oci://<image_repository>/charts/dozuki)."
+  type        = string
+  default     = "0.3.0"
+}
