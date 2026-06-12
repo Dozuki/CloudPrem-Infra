@@ -62,7 +62,7 @@ EOF
     warn "could not detect egress IP - set kv_allowed_cidrs in physical.tfvars manually"
   fi
 
-  ensure_state_backend "$CUSTOMER" "$ENVIRONMENT" "$LOCATION"
+  ensure_state_backend "$CUSTOMER" "$ENVIRONMENT" "$LOCATION" "$AZ_ENV"
   write_aws_stub
   log "init complete"
 }
