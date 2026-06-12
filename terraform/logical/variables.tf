@@ -246,12 +246,6 @@ variable "cloud" {
     condition     = contains(["aws", "azure"], var.cloud)
     error_message = "cloud must be aws or azure."
   }
-
-  validation {
-    # Cross-variable validation requires Terraform >= 1.9.
-    condition     = var.cloud == "aws" || (!var.enable_webhooks && !var.enable_bi)
-    error_message = "enable_webhooks and enable_bi are not supported on Azure."
-  }
 }
 
 variable "azure_subscription_id" {

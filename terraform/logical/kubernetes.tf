@@ -673,6 +673,13 @@ resource "helm_release" "app" {
     name  = "connectivity.connectors-worker.redis.tls"
     value = "false"
   }
+
+  lifecycle {
+    precondition {
+      condition     = var.cloud == "aws" || (!var.enable_webhooks && !var.enable_bi)
+      error_message = "enable_webhooks and enable_bi are not supported on Azure."
+    }
+  }
 }
 # Moved blocks: these resources gained `count` when Azure support was added.
 # They keep existing AWS state addresses from churning.
