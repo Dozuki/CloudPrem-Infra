@@ -13,6 +13,14 @@ LOG_TFVARS="${KIT_ROOT}/logical.tfvars"
 
 usage() { die "usage: $0 init|physical|sync-images|logical|status|all"; }
 
+# Set CLOUDPREM_AUTO_APPROVE=1 to skip interactive confirmation (unattended runs).
+_confirm_apply() { # description
+  [[ "${CLOUDPREM_AUTO_APPROVE:-0}" == "1" ]] && return 0
+  local reply
+  read -r -p "Apply the $1 plan shown above? Type yes to continue: " reply
+  [[ "$reply" == "yes" ]] || die "aborted by operator"
+}
+
 _load_config() {
   need_file "$PHYS_TFVARS" "physical.tfvars not found - copy physical.tfvars.example and fill it in"
   need_file "$LOG_TFVARS"  "logical.tfvars not found - copy logical.tfvars.example and fill it in"
@@ -25,14 +33,23 @@ _load_config() {
     || die "physical.tfvars is missing required values (subscription_id, customer, location)"
 }
 
+# True if KEY in FILE is a non-empty list (operator set explicit values).
+_tfvar_list_set() { # file key
+  grep -E "^[[:space:]]*$2[[:space:]]*=" "$1" | grep -vE '=\s*\[\s*\]\s*(#.*)?$' | grep -q .
+}
+
 phase_init() {
   _load_config
   ensure_tools
   azure_login "$SUBSCRIPTION" "$AZ_ENV"
 
-  # Refresh deployer egress IP into the firewall allowlists (idempotent).
+  # Refresh deployer egress IP into the firewall allowlists (idempotent),
+  # unless the operator set explicit allowlists in physical.tfvars.
   local ip
-  if ip="$(egress_ip)"; then
+  if _tfvar_list_set "$PHYS_TFVARS" kv_allowed_cidrs || _tfvar_list_set "$PHYS_TFVARS" aks_api_allowed_cidrs; then
+    log "allowlists set in physical.tfvars - skipping egress IP auto-detection"
+    rm -f "${STATE_DIR}/deployer.auto.tfvars"
+  elif ip="$(egress_ip)"; then
     log "deployment egress IP: ${ip}"
     mkdir -p "${STATE_DIR}"
     cat > "${STATE_DIR}/deployer.auto.tfvars" <<EOF
@@ -59,7 +76,10 @@ phase_physical() {
   _tf "$PHYSICAL_DIR" init -upgrade -input=false
   local extra=()
   [[ -f "${STATE_DIR}/deployer.auto.tfvars" ]] && extra+=(-var-file="${STATE_DIR}/deployer.auto.tfvars")
-  _tf "$PHYSICAL_DIR" apply -input=false -var-file="$PHYS_TFVARS" "${extra[@]}"
+  _tf "$PHYSICAL_DIR" plan -input=false -out=tfplan -var-file="$PHYS_TFVARS" "${extra[@]}"
+  _confirm_apply "physical"
+  _tf "$PHYSICAL_DIR" apply -input=false tfplan
+  rm -f "${PHYSICAL_DIR}/tfplan"
   log "physical layer applied"
 }
 
@@ -82,6 +102,8 @@ s3_objects_bucket            = "$(o guide_objects_bucket)"
 s3_pdfs_bucket               = "$(o guide_pdfs_bucket)"
 s3_documents_bucket          = "$(o documents_bucket)"
 EOF
+  grep -q 'eks_cluster_id               = ""' "$out" \
+    && die "physical outputs missing (cluster_name empty) - did the physical phase complete?"
   log "wired physical outputs -> ${out}"
 }
 
@@ -90,8 +112,11 @@ phase_logical() {
   _write_wiring
   export VAULT_ADDR="${VAULT_ADDR:-http://vault.invalid}"
   _tf "$LOGICAL_DIR" init -upgrade -input=false
-  _tf "$LOGICAL_DIR" apply -input=false \
+  _tf "$LOGICAL_DIR" plan -input=false -out=tfplan \
     -var-file="$LOG_TFVARS" -var-file="${STATE_DIR}/logical.physical.auto.tfvars"
+  _confirm_apply "logical"
+  _tf "$LOGICAL_DIR" apply -input=false tfplan
+  rm -f "${LOGICAL_DIR}/tfplan"
   log "logical layer applied"
   phase_status
 }
