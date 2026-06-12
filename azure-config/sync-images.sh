@@ -14,12 +14,13 @@ ACR_ID="$(tfvar "$PHYS_TFVARS" acr_id)"
 ACR_NAME="${ACR_ID##*/}"
 
 # Optional pull credentials for private GHCR sources (provided with the bundle).
-GHCR_USER="${GHCR_USER:-}"
+GHCR_USER="${GHCR_USER:-token}"
 GHCR_TOKEN="${GHCR_TOKEN:-}"
 
 synced=0
-while read -r source target; do
+while read -r source target rest || [[ -n "$source" ]]; do
   [[ -z "$source" || "$source" == \#* ]] && continue
+  [[ -n "${rest:-}" ]] && die "malformed images.lock line (expected 2 fields): ${source} ${target} ${rest}"
   log "importing ${source} -> ${ACR_NAME}/${target}"
   args=(acr import --name "$ACR_NAME" --source "$source" --image "$target" --force)
   if [[ -n "$GHCR_TOKEN" ]]; then
