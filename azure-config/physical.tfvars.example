@@ -1,0 +1,36 @@
+# ── CloudPrem Azure: physical layer inputs ──────────────────────────────────
+# Copy to physical.tfvars and fill in. Lines marked REQUIRED must be set.
+
+subscription_id   = ""            # REQUIRED — Azure subscription ID
+azure_environment = "public"      # "public" or "usgovernment"
+location          = ""            # REQUIRED — e.g. eastus2, usgovvirginia
+customer          = ""            # REQUIRED — 2-10 chars, lowercase alphanumeric/hyphens
+environment       = "prod"        # max 5 chars
+external_fqdn     = ""            # REQUIRED — FQDN the app will serve (you manage DNS)
+
+protect_resources = true
+
+# REQUIRED — resource ID of your Azure Container Registry (images are synced
+# into it by sync-images.sh):
+#   az acr show --name <registry> --query id -o tsv
+acr_id = ""
+
+# REQUIRED — Entra group object ID for cluster admins (the deploying user must
+# be a member):
+#   az ad group create --display-name cloudprem-aks-admins --mail-nickname cloudprem-aks-admins
+#   az ad group show --group cloudprem-aks-admins --query id -o tsv
+aks_admin_group_object_ids = []
+
+# Deployment-machine egress IPs. bootstrap.sh fills/refreshes this
+# automatically during 'init'; override only if you know better.
+kv_allowed_cidrs     = []
+aks_api_allowed_cidrs = []
+
+alarm_email = ""
+
+# Sizing (defaults are production-reasonable; see terraform/physical-azure/variables.tf)
+# mysql_high_availability = true
+# mysql_zone              = null
+# mysql_standby_zone      = null
+# aks_node_count_min      = 2
+# aks_node_count_max      = 6

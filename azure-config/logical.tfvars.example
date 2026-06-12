@@ -1,0 +1,47 @@
+# ── CloudPrem Azure: logical layer inputs ───────────────────────────────────
+# Copy to logical.tfvars and fill in. Values produced by the physical layer
+# are wired automatically (logical.physical.auto.tfvars — do not edit that file).
+
+cloud = "azure"
+
+# REQUIRED — must match physical.tfvars
+azure_subscription_id = ""
+azure_environment     = "public"
+customer              = ""
+environment           = "prod"
+dns_domain_name       = ""        # same value as physical external_fqdn
+
+# REQUIRED — your ACR login server and image tags (synced by sync-images.sh)
+image_repository = ""             # e.g. myregistry.azurecr.io
+image_tag        = ""
+nextjs_tag       = ""
+
+# kubelogin auth mode: azurecli (workstation) or msi (Azure VM managed identity)
+azure_kubelogin_login = "azurecli"
+
+# ── Application secrets (provided by Dozuki with your release bundle) ──────
+sentry_dsn               = ""
+frontegg_client_id       = ""
+frontegg_api_token       = ""
+surveyjs_license_key     = ""
+rustici_password         = ""
+rustici_managed_password = ""
+
+# SMTP (optional)
+smtp_enabled  = true
+smtp_password = ""
+
+google_translate_api_token = ""
+
+# ── AWS-only inputs, inert on Azure (do not edit) ──────────────────────────
+primary_db_secret          = ""
+memcached_cluster_address  = ""
+msk_bootstrap_brokers      = ""
+dms_task_arn               = ""
+vault_address              = ""
+nlb_https_target_group_arn = ""
+nlb_http_target_group_arn  = ""
+s3_images_bucket           = ""   # auto-wired from physical outputs
+s3_objects_bucket          = ""
+s3_pdfs_bucket             = ""
+s3_documents_bucket        = ""
