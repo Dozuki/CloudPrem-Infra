@@ -19,6 +19,7 @@ terraform {
 
 provider "azurerm" {
   subscription_id = var.subscription_id
+  tenant_id       = var.tenant_id == "" ? null : var.tenant_id
   environment     = var.azure_environment
 
   features {
@@ -36,7 +37,7 @@ locals {
 
   tags = {
     Terraform   = "true"
-    Project     = "cloudprem"
+    Project     = "mpc"
     Identifier  = local.identifier
     Environment = var.environment
   }
@@ -55,7 +56,7 @@ resource "random_string" "suffix" {
 }
 
 resource "azurerm_resource_group" "this" {
-  name     = "${local.identifier}-cloudprem"
+  name     = "${local.identifier}-mpc"
   location = var.location
   tags     = local.tags
 }

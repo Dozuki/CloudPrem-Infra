@@ -3,7 +3,7 @@ resource "azurerm_monitor_action_group" "alarms" {
 
   name                = "${local.identifier}-alarms"
   resource_group_name = azurerm_resource_group.this.name
-  short_name          = "cpalarms"
+  short_name          = "mpcalarms"
 
   email_receiver {
     name          = "ops"

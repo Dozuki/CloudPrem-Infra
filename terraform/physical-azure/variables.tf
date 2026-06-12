@@ -164,3 +164,9 @@ variable "aks_admin_group_object_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "tenant_id" {
+  description = "Entra tenant ID to deploy into. Empty uses the az CLI's current tenant."
+  type        = string
+  default     = ""
+}

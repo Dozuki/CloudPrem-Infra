@@ -14,7 +14,7 @@ output "node_resource_group" {
 }
 
 output "resource_group_name" {
-  description = "Resource group containing all CloudPrem resources."
+  description = "Resource group containing all MPC resources."
   value       = azurerm_resource_group.this.name
 }
 
