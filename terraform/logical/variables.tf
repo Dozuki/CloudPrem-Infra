@@ -356,3 +356,9 @@ variable "rustici_managed_password" {
   sensitive   = true
   default     = ""
 }
+
+variable "chart_version" {
+  description = "Dozuki chart version to pull via OCI (Azure only; AWS uses the in-repo chart)."
+  type        = string
+  default     = ""
+}

@@ -379,7 +379,9 @@ resource "helm_release" "app" {
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
 
-  chart = "${path.module}/charts/dozuki/chart"
+  chart      = var.cloud == "aws" ? "${path.module}/charts/dozuki/chart" : "dozuki"
+  repository = var.cloud == "aws" ? null : "oci://${var.image_repository}/charts"
+  version    = var.cloud == "aws" ? null : var.chart_version
 
   # wait must be true so that on destroy, Helm waits for all resources
   # (including custom resources with finalizers like Gateway, HTTPRoute,
@@ -390,7 +392,7 @@ resource "helm_release" "app" {
   # the namespace to hang indefinitely.
   wait              = true
   timeout           = 900
-  dependency_update = true
+  dependency_update = var.cloud == "aws"
 
   # --- General ---
   set {
