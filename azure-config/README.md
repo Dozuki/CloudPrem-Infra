@@ -1,6 +1,6 @@
-# CloudPrem on Azure — Deploy Kit
+# Dozuki MPC on Azure — Deploy Kit
 
-Self-contained deployment bundle for Dozuki CloudPrem on Azure (AKS).
+Self-contained deployment bundle for Dozuki MPC (managed private cloud) on Azure (AKS).
 
 ## Prerequisites
 - Azure CLI (`az`) installed and able to reach your subscription

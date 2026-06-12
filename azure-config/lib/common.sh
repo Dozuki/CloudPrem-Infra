@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for the CloudPrem Azure deploy kit. Sourced, not executed.
+# Shared helpers for the MPC Azure deploy kit. Sourced, not executed.
 
 set -euo pipefail
 
@@ -19,9 +19,9 @@ fi
 
 export PATH="${BIN_DIR}:${PATH}"
 
-log()  { printf '\033[1;34m[cloudprem]\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[cloudprem]\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31m[cloudprem]\033[0m ERROR: %s\n' "$*" >&2; exit 1; }
+log()  { printf '\033[1;34m[mpc]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[mpc]\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m[mpc]\033[0m ERROR: %s\n' "$*" >&2; exit 1; }
 
 need_file() { [[ -f "$1" ]] || die "$2"; }
 

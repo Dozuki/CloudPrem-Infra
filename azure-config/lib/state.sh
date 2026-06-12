@@ -6,7 +6,7 @@ ensure_state_backend() {
   local customer="$1" environment="$2" location="$3"
   local rg="${customer}-${environment}-tfstate"
   local sa
-  sa="cp$(printf '%s%s' "$customer" "$environment" | tr -cd 'a-z0-9' | cut -c1-12)tf$(az account show --query id -o tsv | tr -d '-' | cut -c1-6)"
+  sa="mpc$(printf '%s%s' "$customer" "$environment" | tr -cd 'a-z0-9' | cut -c1-12)tf$(az account show --query id -o tsv | tr -d '-' | cut -c1-6)"
   local container="tfstate"
 
   az group create --name "$rg" --location "$location" --output none

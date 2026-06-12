@@ -10,7 +10,7 @@ need_file "$PHYS_TFVARS" "physical.tfvars not found"
 CUSTOMER="$(tfvar "$PHYS_TFVARS" customer)"
 ENVIRONMENT="$(tfvar "$PHYS_TFVARS" environment)"
 IDENT="${CUSTOMER}-${ENVIRONMENT}"
-RG="${IDENT}-cloudprem"
+RG="${IDENT}-mpc"
 mkdir -p "${STATE_DIR}"
 
 section() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }

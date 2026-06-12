@@ -8,7 +8,7 @@ _on_azure_vm() {
 }
 
 azure_login() {
-  local subscription="$1" env="$2"
+  local subscription="$1" env="$2" tenant="${3:-}"
 
   if [[ "$env" == "usgovernment" ]]; then
     az cloud set --name AzureUSGovernment >/dev/null
@@ -20,10 +20,15 @@ azure_login() {
     log "already logged in as $(az account show --query user.name -o tsv)"
   elif _on_azure_vm; then
     log "Azure VM detected - logging in with managed identity"
+    # az login --identity does not accept --tenant; the VM identity pins the tenant.
     az login --identity >/dev/null
   else
     log "opening device-code login (share this code on the call)"
-    az login --use-device-code >/dev/null
+    if [[ -n "$tenant" ]]; then
+      az login --use-device-code --tenant "$tenant" >/dev/null
+    else
+      az login --use-device-code >/dev/null
+    fi
   fi
 
   az account set --subscription "$subscription"

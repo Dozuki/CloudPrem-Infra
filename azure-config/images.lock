@@ -1,4 +1,4 @@
-# CloudPrem Azure image manifest — synced into the customer ACR by sync-images.sh.
+# MPC Azure image manifest — synced into the customer ACR by sync-images.sh.
 # Format: <source-image-ref> <target-repository>:<tag>
 # Source refs are GHCR (populated at release time by Dozuki CI). Lines starting
 # with # are ignored.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CloudPrem Azure deploy driver. Usage: ./bootstrap.sh init|physical|sync-images|logical|status|all
+# MPC Azure deploy driver. Usage: ./bootstrap.sh init|physical|sync-images|logical|status|all
 # shellcheck disable=SC1091  # libs are checked separately via shellcheck -x
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -13,9 +13,9 @@ LOG_TFVARS="${KIT_ROOT}/logical.tfvars"
 
 usage() { die "usage: $0 init|physical|sync-images|logical|status|all"; }
 
-# Set CLOUDPREM_AUTO_APPROVE=1 to skip interactive confirmation (unattended runs).
+# Set MPC_AUTO_APPROVE=1 to skip interactive confirmation (unattended runs).
 _confirm_apply() { # description
-  [[ "${CLOUDPREM_AUTO_APPROVE:-0}" == "1" ]] && return 0
+  [[ "${MPC_AUTO_APPROVE:-0}" == "1" ]] && return 0
   local reply
   read -r -p "Apply the $1 plan shown above? Type yes to continue: " reply
   [[ "$reply" == "yes" ]] || die "aborted by operator"
@@ -26,6 +26,7 @@ _load_config() {
   need_file "$LOG_TFVARS"  "logical.tfvars not found - copy logical.tfvars.example and fill it in"
   SUBSCRIPTION="$(tfvar "$PHYS_TFVARS" subscription_id)"
   AZ_ENV="$(tfvar "$PHYS_TFVARS" azure_environment)"
+  TENANT="$(tfvar "$PHYS_TFVARS" tenant_id)"
   CUSTOMER="$(tfvar "$PHYS_TFVARS" customer)"
   ENVIRONMENT="$(tfvar "$PHYS_TFVARS" environment)"
   LOCATION="$(tfvar "$PHYS_TFVARS" location)"
@@ -41,7 +42,7 @@ _tfvar_list_set() { # file key
 phase_init() {
   _load_config
   ensure_tools
-  azure_login "$SUBSCRIPTION" "$AZ_ENV"
+  azure_login "$SUBSCRIPTION" "$AZ_ENV" "$TENANT"
 
   # Refresh deployer egress IP into the firewall allowlists (idempotent),
   # unless the operator set explicit allowlists in physical.tfvars.

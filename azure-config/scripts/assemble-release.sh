@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Assembles the self-contained customer bundle. Run from anywhere inside the
-# repo; CI runs it on tag. Output: dist/cloudprem-azure-<version>.tar.gz
+# repo; CI runs it on tag. Output: dist/mpc-azure-<version>.tar.gz
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 VERSION="${1:-dev}"
 DIST="${REPO_ROOT}/dist"
-NAME="cloudprem-azure-${VERSION}"
+NAME="mpc-azure-${VERSION}"
 STAGE="${DIST}/${NAME}"
 
 rm -rf "${STAGE}" && mkdir -p "${STAGE}/terraform"

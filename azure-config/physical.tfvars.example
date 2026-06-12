@@ -1,7 +1,8 @@
-# ── CloudPrem Azure: physical layer inputs ──────────────────────────────────
+# ── MPC Azure: physical layer inputs ────────────────────────────────────────
 # Copy to physical.tfvars and fill in. Lines marked REQUIRED must be set.
 
 subscription_id   = ""            # REQUIRED — Azure subscription ID
+tenant_id         = ""            # Entra tenant ID (recommended if your account sees multiple tenants)
 azure_environment = "public"      # "public" or "usgovernment"
 location          = ""            # REQUIRED — e.g. eastus2, usgovvirginia
 customer          = ""            # REQUIRED — 2-10 chars, lowercase alphanumeric/hyphens
@@ -17,8 +18,8 @@ acr_id = ""
 
 # REQUIRED — Entra group object ID for cluster admins (the deploying user must
 # be a member):
-#   az ad group create --display-name cloudprem-aks-admins --mail-nickname cloudprem-aks-admins
-#   az ad group show --group cloudprem-aks-admins --query id -o tsv
+#   az ad group create --display-name mpc-aks-admins --mail-nickname mpc-aks-admins
+#   az ad group show --group mpc-aks-admins --query id -o tsv
 aks_admin_group_object_ids = []
 
 # Deployment-machine egress IPs. bootstrap.sh fills/refreshes this

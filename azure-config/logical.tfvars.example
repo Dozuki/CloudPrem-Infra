@@ -1,4 +1,4 @@
-# ── CloudPrem Azure: logical layer inputs ───────────────────────────────────
+# ── MPC Azure: logical layer inputs ─────────────────────────────────────────
 # Copy to logical.tfvars and fill in. Values produced by the physical layer
 # are wired automatically (logical.physical.auto.tfvars — do not edit that file).
 
