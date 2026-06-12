@@ -3,7 +3,7 @@
 
 # Detect Azure VM managed identity via IMDS (169.254.169.254).
 _on_azure_vm() {
-  curl -s -m 2 -H 'Metadata: true' \
+  curl -fs -m 2 -H 'Metadata: true' \
     'http://169.254.169.254/metadata/instance?api-version=2021-02-01' >/dev/null 2>&1
 }
 
