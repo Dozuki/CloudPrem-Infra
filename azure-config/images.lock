@@ -5,3 +5,6 @@
 #
 # ghcr.io/dozuki/app:RELEASE_TAG          app:RELEASE_TAG
 # ghcr.io/dozuki/web-nextjs:RELEASE_TAG   web-nextjs:RELEASE_TAG
+#
+# Helm charts are OCI artifacts and sync the same way:
+# ghcr.io/dozuki/charts/dozuki:CHART_VERSION   charts/dozuki:CHART_VERSION

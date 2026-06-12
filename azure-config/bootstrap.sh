@@ -107,9 +107,23 @@ EOF
   log "wired physical outputs -> ${out}"
 }
 
+# The logical layer pulls the dozuki chart via OCI from the customer ACR;
+# the terraform helm provider reads the default helm registry config.
+_acr_helm_login() {
+  local acr_host token
+  acr_host="$(tfvar "$LOG_TFVARS" image_repository)"
+  [[ -n "$acr_host" ]] || die "image_repository not set in logical.tfvars"
+  token="$(az acr login --name "${acr_host%%.*}" --expose-token --output tsv --query accessToken)" \
+    || die "az acr login failed for ${acr_host}"
+  printf '%s' "$token" | helm registry login "$acr_host" \
+    --username 00000000-0000-0000-0000-000000000000 --password-stdin >/dev/null
+  log "helm logged into ${acr_host}"
+}
+
 phase_logical() {
   _load_config
   _write_wiring
+  _acr_helm_login
   export VAULT_ADDR="${VAULT_ADDR:-http://vault.invalid}"
   _tf "$LOGICAL_DIR" init -upgrade -input=false
   _tf "$LOGICAL_DIR" plan -input=false -out=tfplan \

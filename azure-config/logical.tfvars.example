@@ -15,6 +15,7 @@ dns_domain_name       = ""        # same value as physical external_fqdn
 image_repository = ""             # e.g. myregistry.azurecr.io
 image_tag        = ""
 nextjs_tag       = ""
+chart_version    = ""             # dozuki chart version (synced into your ACR by sync-images.sh)
 
 # kubelogin auth mode: azurecli (workstation) or msi (Azure VM managed identity)
 azure_kubelogin_login = "azurecli"
