@@ -13,12 +13,13 @@ rm -rf "${STAGE}" && mkdir -p "${STAGE}/terraform"
 
 # 1) Deploy kit (scripts + examples), excluding dev-only artifacts.
 rsync -a "${REPO_ROOT}/azure-config/" "${STAGE}/" \
-  --exclude '.bin' --exclude '.state' --exclude 'scripts' --exclude '*.tfvars'
+  --exclude '.bin' --exclude '.state' --exclude 'scripts' --exclude '*.tfvars' \
+  --exclude 'ghcr.env'
 
 # 2) Vendored terraform layers.
 rsync -a "${REPO_ROOT}/terraform/physical-azure/" "${STAGE}/terraform/physical-azure/" \
   --exclude '.terraform' --exclude '.terraform.lock.hcl' --exclude 'examples'
-# The dozuki chart ships as an OCI artifact via sync-images, not as source.
+# The dozuki chart ships as an OCI artifact pulled from GHCR, not as source.
 rsync -a "${REPO_ROOT}/terraform/logical/" "${STAGE}/terraform/logical/" \
   --exclude '.terraform' --exclude '.terraform.lock.hcl' --exclude 'examples' \
   --exclude '.terragrunt-cache' --exclude 'backend_override.tf' --exclude 'aws_stub_override.tf' \

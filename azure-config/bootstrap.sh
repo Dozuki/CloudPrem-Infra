@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MPC Azure deploy driver. Usage: ./bootstrap.sh init|physical|sync-images|logical|status|all
+# MPC Azure deploy driver. Usage: ./bootstrap.sh init|physical|logical|status|all
 # shellcheck disable=SC1091  # libs are checked separately via shellcheck -x
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -11,7 +11,7 @@ source lib/state.sh
 PHYS_TFVARS="${KIT_ROOT}/physical.tfvars"
 LOG_TFVARS="${KIT_ROOT}/logical.tfvars"
 
-usage() { die "usage: $0 init|physical|sync-images|logical|status|all"; }
+usage() { die "usage: $0 init|physical|logical|status|all"; }
 
 # Set MPC_AUTO_APPROVE=1 to skip interactive confirmation (unattended runs).
 _confirm_apply() { # description
@@ -108,23 +108,24 @@ EOF
   log "wired physical outputs -> ${out}"
 }
 
-# The logical layer pulls the dozuki chart via OCI from the customer ACR;
-# the terraform helm provider reads the default helm registry config.
-_acr_helm_login() {
-  local acr_host token
-  acr_host="$(tfvar "$LOG_TFVARS" image_repository)"
-  [[ -n "$acr_host" ]] || die "image_repository not set in logical.tfvars"
-  token="$(az acr login --name "${acr_host%%.*}" --expose-token --output tsv --query accessToken)" \
-    || die "az acr login failed for ${acr_host}"
-  printf '%s' "$token" | helm registry login "$acr_host" \
-    --username 00000000-0000-0000-0000-000000000000 --password-stdin >/dev/null
-  log "helm logged into ${acr_host}"
+# Chart + images pull directly from GHCR; one credential file feeds the helm
+# registry login and the cluster's image pull secret (TF_VARs below).
+_ghcr_helm_login() {
+  local env_file="${KIT_ROOT}/ghcr.env"
+  need_file "$env_file" "ghcr.env not found - copy ghcr.env.example and fill in the credentials provided by Dozuki"
+  # shellcheck disable=SC1090
+  source "$env_file"
+  [[ -n "${GHCR_USER:-}" && -n "${GHCR_TOKEN:-}" ]] || die "GHCR_USER / GHCR_TOKEN not set in ghcr.env"
+  printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GHCR_USER" --password-stdin >/dev/null
+  export TF_VAR_ghcr_pull_username="$GHCR_USER"
+  export TF_VAR_ghcr_pull_token="$GHCR_TOKEN"
+  log "ghcr credentials loaded for ${GHCR_USER}"
 }
 
 phase_logical() {
   _load_config
   _write_wiring
-  _acr_helm_login
+  _ghcr_helm_login
   export VAULT_ADDR="${VAULT_ADDR:-http://vault.invalid}"
   _tf "$LOGICAL_DIR" init -upgrade -input=false
   _tf "$LOGICAL_DIR" plan -input=false -out=tfplan \
@@ -136,11 +137,6 @@ phase_logical() {
   phase_status
 }
 
-phase_sync_images() {
-  _load_config
-  "${KIT_ROOT}/sync-images.sh"
-}
-
 phase_status() {
   _load_config
   "${KIT_ROOT}/status.sh"
@@ -149,9 +145,8 @@ phase_status() {
 case "${1:-}" in
   init)        phase_init ;;
   physical)    phase_init; phase_physical ;;
-  sync-images) phase_init; phase_sync_images ;;
   logical)     phase_init; phase_logical ;;
   status)      phase_status ;;
-  all)         phase_init; phase_physical; phase_sync_images; phase_logical ;;
+  all)         phase_init; phase_physical; phase_logical ;;
   *)           usage ;;
 esac

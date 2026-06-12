@@ -11,11 +11,6 @@ external_fqdn     = ""            # REQUIRED — FQDN the app will serve (you ma
 
 protect_resources = true
 
-# REQUIRED — resource ID of your Azure Container Registry (images are synced
-# into it by sync-images.sh):
-#   az acr show --name <registry> --query id -o tsv
-acr_id = ""
-
 # REQUIRED — Entra group object ID for cluster admins (the deploying user must
 # be a member):
 #   az ad group create --display-name mpc-aks-admins --mail-nickname mpc-aks-admins

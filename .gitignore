@@ -20,6 +20,7 @@ dist/
 azure-config/.bin/
 azure-config/.state/
 azure-config/*.tfvars
+azure-config/ghcr.env
 terraform/physical-azure/backend_override.tf
 terraform/logical/backend_override.tf
 terraform/logical/aws_stub_override.tf

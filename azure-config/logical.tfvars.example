@@ -11,11 +11,11 @@ customer              = ""
 environment           = "prod"
 dns_domain_name       = ""        # same value as physical external_fqdn
 
-# REQUIRED — your ACR login server and image tags (synced by sync-images.sh)
-image_repository = ""             # e.g. myregistry.azurecr.io
+# REQUIRED — image tags; charts/images are pulled from GHCR (credentials in ghcr.env)
+image_repository = "ghcr.io/dozuki"  # images and chart pull directly from GHCR
 image_tag        = ""
 nextjs_tag       = ""
-chart_version    = ""             # dozuki chart version (synced into your ACR by sync-images.sh)
+chart_version    = ""             # dozuki chart version (pulled from GHCR)
 
 # kubelogin auth mode: azurecli (workstation) or msi (Azure VM managed identity)
 azure_kubelogin_login = "azurecli"

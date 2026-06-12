@@ -35,8 +35,7 @@ done
 
 cat <<EOF
 
-[mirror] done. images.lock lines for this release:
-
-ghcr.io/dozuki/app:${APP_TAG} app:${APP_TAG}
-ghcr.io/dozuki/web-nextjs:${NEXTJS_TAG} web-nextjs:${NEXTJS_TAG}
+[mirror] done. images now pullable by MPC deployments:
+  ghcr.io/dozuki/app:${APP_TAG}
+  ghcr.io/dozuki/web-nextjs:${NEXTJS_TAG}
 EOF
