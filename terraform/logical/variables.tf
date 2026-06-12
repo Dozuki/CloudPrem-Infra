@@ -362,3 +362,16 @@ variable "chart_version" {
   type        = string
   default     = ""
 }
+
+variable "ghcr_pull_username" {
+  description = "GitHub username for pulling MPC images from GHCR (Azure only)."
+  type        = string
+  default     = ""
+}
+
+variable "ghcr_pull_token" {
+  description = "GitHub token (read:packages) for pulling MPC images from GHCR (Azure only)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}

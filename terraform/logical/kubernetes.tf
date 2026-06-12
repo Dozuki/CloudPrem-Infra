@@ -363,6 +363,29 @@ resource "kubernetes_service_account_v1" "eso_vault_auth" {
   }
 }
 
+# Image pull secret for GHCR (Azure only) — MPC images are pulled directly
+# from ghcr.io instead of being mirrored into ACR.
+resource "kubernetes_secret_v1" "ghcr_pull" {
+  count = var.cloud == "azure" ? 1 : 0
+
+  metadata {
+    name      = "ghcr-pull"
+    namespace = kubernetes_namespace_v1.app.metadata[0].name
+  }
+
+  type = "kubernetes.io/dockerconfigjson"
+
+  data = {
+    ".dockerconfigjson" = jsonencode({
+      auths = {
+        "ghcr.io" = {
+          auth = base64encode("${var.ghcr_pull_username}:${var.ghcr_pull_token}")
+        }
+      }
+    })
+  }
+}
+
 # CloudWatch Observability add-on — installed in logical (not physical) because
 # Auto Mode won't provision nodes until workloads are scheduled. cert-manager
 # and envoy-gateway trigger node creation; this addon installs after nodes exist.
@@ -374,7 +397,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -393,6 +416,13 @@ resource "helm_release" "app" {
   wait              = true
   timeout           = 900
   dependency_update = var.cloud == "aws"
+
+  # GHCR pull secret for MPC images (Azure only). Conditional values list —
+  # not a set{} block — so AWS releases see an empty list (a no-op with the
+  # SDKv2-based helm provider, where [] and absent are indistinguishable).
+  values = var.cloud == "azure" ? [yamlencode({
+    imagePullSecrets = [{ name = "ghcr-pull" }]
+  })] : []
 
   # --- General ---
   set {
