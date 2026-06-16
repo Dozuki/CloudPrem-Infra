@@ -53,6 +53,12 @@ provider "helm" {
       args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.id]
     }
   }
+
+  registry {
+    url      = "oci://${var.image_repository}"
+    username = data.aws_ecr_authorization_token.chart.user_name
+    password = data.aws_ecr_authorization_token.chart.password
+  }
 }
 
 provider "vault" {
@@ -165,6 +171,8 @@ data "aws_eks_cluster" "main" {
 data "aws_partition" "current" {}
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+
+data "aws_ecr_authorization_token" "chart" {}
 
 data "aws_kms_key" "s3" {
   key_id = var.s3_kms_key_id

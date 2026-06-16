@@ -1,3 +1,0 @@
-[submodule "terraform/logical/charts/dozuki"]
-	path = terraform/logical/charts/dozuki
-	url = https://github.com/Dozuki/helm.git
