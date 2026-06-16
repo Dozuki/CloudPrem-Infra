@@ -21,6 +21,7 @@ func TestTGEnv(t *testing.T) {
 		"TG_AWS_PROFILE=ddvtest",
 		"TG_BUCKET_PREFIX=run123-",
 		"TG_STATE_PREFIX=run123-min/",
+		"TG_NON_INTERACTIVE=true",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("env missing %q", want)

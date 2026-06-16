@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 type TGOptions struct {
@@ -46,7 +47,7 @@ func (o TGOptions) Destroy() error {
 
 func (o TGOptions) Output(module, name string) (string, error) {
 	cmd := exec.Command("terragrunt", "output", "-raw", name)
-	cmd.Dir = o.WorkingDir + "/" + module
+	cmd.Dir = filepath.Join(o.WorkingDir, module)
 	cmd.Env = o.env()
 	out, err := cmd.Output()
 	if err != nil {
@@ -57,7 +58,7 @@ func (o TGOptions) Output(module, name string) (string, error) {
 
 func (o TGOptions) OutputJSON(module string) (map[string]interface{}, error) {
 	cmd := exec.Command("terragrunt", "output", "-json")
-	cmd.Dir = o.WorkingDir + "/" + module
+	cmd.Dir = filepath.Join(o.WorkingDir, module)
 	cmd.Env = o.env()
 	out, err := cmd.Output()
 	if err != nil {
@@ -67,7 +68,7 @@ func (o TGOptions) OutputJSON(module string) (map[string]interface{}, error) {
 		Value interface{} `json:"value"`
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse terragrunt output-json %s: %w", module, err)
 	}
 	m := map[string]interface{}{}
 	for k, v := range raw {

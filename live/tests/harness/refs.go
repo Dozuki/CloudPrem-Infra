@@ -72,7 +72,7 @@ func (w *Worktree) HasSubmodule() bool {
 }
 
 func sanitize(ref string) string {
-	return strings.NewReplacer("/", "_", ":", "_").Replace(ref)
+	return strings.NewReplacer("/", "_", ":", "_", " ", "_", "..", "_").Replace(ref)
 }
 
 func run(dir, name string, args ...string) error {

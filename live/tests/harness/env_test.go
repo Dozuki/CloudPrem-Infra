@@ -15,6 +15,7 @@ func TestRenderEnvHCL(t *testing.T) {
 		"image_tag":     "abc.1",
 		"chart_version": "0.3.0",
 		"alarm_email":   "devops@dozuki.com",
+		"replica_count": float64(3),
 	}
 	hcl := RenderEnvHCL(inputs)
 	for _, want := range []string{
@@ -24,6 +25,7 @@ func TestRenderEnvHCL(t *testing.T) {
 		`image_tag = "abc.1"`,
 		`chart_version = "0.3.0"`,
 		`alarm_email = "devops@dozuki.com"`,
+		`replica_count = 3`,
 	} {
 		if !strings.Contains(hcl, want) {
 			t.Errorf("rendered HCL missing %q\n---\n%s", want, hcl)

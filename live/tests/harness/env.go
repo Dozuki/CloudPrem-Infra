@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -33,6 +34,15 @@ func hclValue(v interface{}) string {
 		return fmt.Sprintf("%q", t)
 	case int:
 		return fmt.Sprintf("%d", t)
+	case int64:
+		return fmt.Sprintf("%d", t)
+	case float64:
+		// YAML decodes unquoted numbers as float64; render whole numbers
+		// without a trailing .0 so they remain valid HCL numbers.
+		if t == float64(int64(t)) {
+			return fmt.Sprintf("%d", int64(t))
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64)
 	default:
 		return fmt.Sprintf("%q", fmt.Sprintf("%v", t))
 	}
