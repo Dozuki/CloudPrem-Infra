@@ -1,0 +1,35 @@
+# Test matrix for the upgrade harness. The harness resolves from_ref/to_ref,
+# looks up each ref's version profile, merges it with a config's feature flags,
+# and writes the result as env.hcl into each worktree before applying.
+defaults:
+  from_ref: "auto:latest-1"   # second-newest git tag
+  to_ref: "auto:latest"       # newest git tag; override to a branch (e.g. v6.1-release) pre-tag
+  region: "us-east-1"
+  dr_region: "us-west-2"
+  env_path: "live/standard/us-east-1"   # parent dir holding region.hcl; the config's env dir is <env_path>/<env>
+  license_parameter_name: "/cloudprem/test-harness/license"
+
+# Version vars supplied per ref. Keys absent on a ref are simply not set.
+# (Undeclared TF_VAR_* are ignored by Terraform, so superset keys are safe on
+# older refs that don't declare them.)
+versions:
+  v6.0:
+    image_tag: "PLACEHOLDER-v6.0-app-tag"
+    nextjs_tag: "PLACEHOLDER-v6.0-nextjs-tag"
+  v6.1-release:
+    image_tag: "PLACEHOLDER-v6.1-app-tag"
+    nextjs_tag: "PLACEHOLDER-v6.1-nextjs-tag"
+    chart_version: "0.3.0"
+    image_repository: "PLACEHOLDER-dozukicloud-ecr-host"   # e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com
+
+configs:
+  - name: min_default
+    env: min
+    feature_flags:
+      enable_webhooks: false
+      enable_bi: false
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      protect_resources: false
+      enable_dr: false               # Plan 2: DR off; Plan 3 turns it on
+      alarm_email: "devops@dozuki.com"
