@@ -9,7 +9,10 @@ ensure_state_backend() {
   sa="mpc$(printf '%s%s' "$customer" "$environment" | tr -cd 'a-z0-9' | cut -c1-12)tf$(az account show --query id -o tsv | tr -d '-' | cut -c1-6)"
   local container="tfstate"
 
-  az group create --name "$rg" --location "$location" --output none
+  # Idempotent + location-tolerant: az group create errors if the RG already
+  # exists in a different region (harmless — state storage is region-agnostic).
+  az group show --name "$rg" >/dev/null 2>&1 \
+    || az group create --name "$rg" --location "$location" --output none
   if ! az storage account show --name "$sa" --resource-group "$rg" >/dev/null 2>&1; then
     log "creating state storage account ${sa}"
     az storage account create --name "$sa" --resource-group "$rg" \
