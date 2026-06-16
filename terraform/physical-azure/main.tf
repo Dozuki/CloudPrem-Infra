@@ -26,6 +26,12 @@ provider "azurerm" {
     key_vault {
       purge_soft_delete_on_destroy = !var.protect_resources
     }
+    # AKS's monitoring add-on auto-creates a ContainerInsights solution in the
+    # RG that isn't tracked in state; without this, destroying the RG fails
+    # because it "still contains resources". Let the provider clear it.
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
   }
 }
 

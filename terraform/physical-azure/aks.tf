@@ -29,7 +29,11 @@ resource "azurerm_kubernetes_cluster" "this" {
     for_each = length(var.aks_api_allowed_cidrs) > 0 ? [1] : []
 
     content {
-      authorized_ip_ranges = var.aks_api_allowed_cidrs
+      # Azure stores bare IPs as /32; normalize so a bare IP from the bootstrap
+      # egress-IP allowlist doesn't show a perpetual in-place diff every apply.
+      authorized_ip_ranges = [
+        for c in var.aks_api_allowed_cidrs : can(regex("/[0-9]+$", c)) ? c : "${c}/32"
+      ]
     }
   }
 
