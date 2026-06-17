@@ -16,7 +16,7 @@ terraform {
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 2.0"
+      version = "~> 3.0"
     }
     vault = {
       source  = "hashicorp/vault"
@@ -49,11 +49,12 @@ provider "kubernetes" {
 }
 
 provider "helm" {
-  kubernetes {
+  # helm provider 3.x (plugin framework): nested config is attribute syntax.
+  kubernetes = {
     host                   = local.cluster_host
     cluster_ca_certificate = base64decode(local.cluster_ca)
 
-    exec {
+    exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = local.k8s_exec_command
       args        = local.k8s_exec_args

@@ -104,18 +104,20 @@ resource "helm_release" "cert_manager" {
 
   wait = true
 
-  set {
-    name  = "crds.enabled"
-    value = "true"
-  }
-  set {
-    name  = "crds.keep"
-    value = "true"
-  }
-  set {
-    name  = "config.enableGatewayAPI"
-    value = "true"
-  }
+  set = [
+    {
+      name  = "crds.enabled"
+      value = "true"
+    },
+    {
+      name  = "crds.keep"
+      value = "true"
+    },
+    {
+      name  = "config.enableGatewayAPI"
+      value = "true"
+    },
+  ]
 }
 
 resource "helm_release" "envoy_gateway" {
@@ -336,14 +338,16 @@ resource "helm_release" "external_secrets" {
 
   wait = true
 
-  set {
-    name  = "crds.createClusterExternalSecret"
-    value = "true"
-  }
-  set {
-    name  = "crds.createClusterSecretStore"
-    value = "true"
-  }
+  set = [
+    {
+      name  = "crds.createClusterExternalSecret"
+      value = "true"
+    },
+    {
+      name  = "crds.createClusterSecretStore"
+      value = "true"
+    },
+  ]
 }
 
 # Service account for ESO to authenticate to Vault via K8s auth.
@@ -417,294 +421,112 @@ resource "helm_release" "app" {
   timeout           = 900
   dependency_update = var.cloud == "aws"
 
-  # GHCR pull secret for MPC images (Azure only). Conditional values list —
-  # not a set{} block — so AWS releases see an empty list (a no-op with the
-  # SDKv2-based helm provider, where [] and absent are indistinguishable).
+  # GHCR pull secret for MPC images (Azure only). On AWS this is an empty
+  # list of values files — a no-op, no value overrides applied.
   values = var.cloud == "azure" ? [yamlencode({
     global = { imagePullSecrets = [{ name = "ghcr-pull" }] }
   })] : []
 
-  # --- General ---
-  set {
-    name  = "hostname"
-    value = var.dns_domain_name
-  }
-  set {
-    name  = "dns_validation"
-    value = var.cloud == "aws" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
-  }
-  set {
-    name  = "customer"
-    value = coalesce(var.customer, "Dozuki")
-  }
-  set {
-    name  = "environment"
-    value = var.environment
-  }
+  # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
+  # repeatable blocks. Section groupings preserved as comments.
+  set = [
+    # --- General ---
+    { name = "hostname", value = var.dns_domain_name },
+    { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
+    { name = "customer", value = coalesce(var.customer, "Dozuki") },
+    { name = "environment", value = var.environment },
 
-  # --- AWS ---
-  set {
-    name  = "aws.region"
-    value = var.cloud == "aws" ? data.aws_region.current[0].id : ""
-  }
-  set {
-    name  = "aws.accountId"
-    value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : ""
-  }
-  set {
-    name  = "aws.enabled"
-    value = var.cloud == "aws" ? "true" : "false"
-  }
+    # --- AWS ---
+    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].id : "" },
+    { name = "aws.accountId", value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" },
+    { name = "aws.enabled", value = var.cloud == "aws" ? "true" : "false" },
 
-  # --- Database ---
-  set {
-    name  = "db.host"
-    value = local.db_master_host
-  }
-  set {
-    name  = "db.user"
-    value = local.db_master_username
-  }
-  set {
-    name  = "db.rdsCaCert"
-    value = var.cloud == "aws" ? base64encode(file(local.ca_cert_pem_file)) : ""
-  }
-  set_sensitive {
-    name  = "db.password"
-    value = local.db_master_password
-  }
+    # --- Database ---
+    { name = "db.host", value = local.db_master_host },
+    { name = "db.user", value = local.db_master_username },
+    { name = "db.rdsCaCert", value = var.cloud == "aws" ? base64encode(file(local.ca_cert_pem_file)) : "" },
 
-  # --- SMTP ---
-  set {
-    name  = "smtp.enabled"
-    value = var.smtp_enabled ? "true" : "false"
-  }
-  set {
-    name  = "smtp.host"
-    value = var.smtp_host
-  }
-  set {
-    name  = "smtp.from"
-    value = var.smtp_from_address
-  }
-  set {
-    name  = "smtp.auth.enabled"
-    value = var.smtp_auth_enabled ? "true" : "false"
-  }
-  set {
-    name  = "smtp.auth.username"
-    value = var.smtp_username
-  }
-  set_sensitive {
-    name  = "smtp.auth.password"
-    value = var.smtp_password
-  }
+    # --- SMTP ---
+    { name = "smtp.enabled", value = var.smtp_enabled ? "true" : "false" },
+    { name = "smtp.host", value = var.smtp_host },
+    { name = "smtp.from", value = var.smtp_from_address },
+    { name = "smtp.auth.enabled", value = var.smtp_auth_enabled ? "true" : "false" },
+    { name = "smtp.auth.username", value = var.smtp_username },
 
-  # --- Sentry ---
-  set {
-    name  = "sentry.customerName"
-    value = coalesce(var.customer, "Dozuki")
-  }
+    # --- Sentry ---
+    { name = "sentry.customerName", value = coalesce(var.customer, "Dozuki") },
 
-  # --- Images ---
-  set {
-    name  = "images.app.repository"
-    value = var.image_repository
-  }
-  set {
-    name  = "images.app.tag"
-    value = var.image_tag
-  }
-  set {
-    name  = "images.webnextjs.tag"
-    value = var.nextjs_tag
-  }
+    # --- Images ---
+    { name = "images.app.repository", value = var.image_repository },
+    { name = "images.app.tag", value = var.image_tag },
+    { name = "images.webnextjs.tag", value = var.nextjs_tag },
 
-  # --- Ingress / Gateway ---
-  set {
-    name  = "ingress.hosts[0].hostname"
-    value = coalesce(var.ingress_hostname, var.dns_domain_name)
-  }
-  set {
-    name  = "gateway.hosts[0].hostname"
-    value = coalesce(var.ingress_hostname, var.dns_domain_name)
-  }
-  set {
-    name  = "gateway.hosts[0].tlsSecretName"
-    value = "tls-secret"
-  }
+    # --- Ingress / Gateway ---
+    { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
+    { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
+    { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
 
-  # --- Webhooks ---
-  set {
-    name  = "webhooks.enabled"
-    value = var.enable_webhooks ? "true" : "false"
-  }
+    # --- Webhooks ---
+    { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
 
-  # --- Object Storage ---
-  set {
-    name  = "objectStorage.kmsKey"
-    value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : ""
-  }
-  set {
-    name  = "objectStorage.imagesBucket"
-    value = var.s3_images_bucket
-  }
-  set {
-    name  = "objectStorage.pdfsBucket"
-    value = var.s3_pdfs_bucket
-  }
-  set {
-    name  = "objectStorage.documentsBucket"
-    value = var.s3_documents_bucket
-  }
-  set {
-    name  = "objectStorage.objectsBucket"
-    value = var.s3_objects_bucket
-  }
+    # --- Object Storage ---
+    { name = "objectStorage.kmsKey", value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : "" },
+    { name = "objectStorage.imagesBucket", value = var.s3_images_bucket },
+    { name = "objectStorage.pdfsBucket", value = var.s3_pdfs_bucket },
+    { name = "objectStorage.documentsBucket", value = var.s3_documents_bucket },
+    { name = "objectStorage.objectsBucket", value = var.s3_objects_bucket },
 
-  # --- Memcached ---
-  set {
-    name  = "memcached.host"
-    value = var.cloud == "aws" ? var.memcached_cluster_address : "dozuki-memcached"
-  }
+    # --- Memcached ---
+    { name = "memcached.host", value = var.cloud == "aws" ? var.memcached_cluster_address : "dozuki-memcached" },
 
-  # --- Vault ---
-  set {
-    name  = "vault.enabled"
-    value = var.cloud == "aws" ? "true" : "false"
-  }
-  set {
-    name  = "vault.address"
-    value = var.vault_address
-  }
+    # --- Vault ---
+    { name = "vault.enabled", value = var.cloud == "aws" ? "true" : "false" },
+    { name = "vault.address", value = var.vault_address },
 
-  # --- Azure ---
-  set {
-    name  = "azure.enabled"
-    value = var.cloud == "azure" ? "true" : "false"
-  }
-  set {
-    name  = "azure.tenantId"
-    value = var.azure_tenant_id
-  }
-  set {
-    name  = "azure.keyVaultUri"
-    value = var.azure_key_vault_uri
-  }
-  set {
-    name  = "azure.environment"
-    value = var.azure_environment
-  }
+    # --- Azure ---
+    { name = "azure.enabled", value = var.cloud == "azure" ? "true" : "false" },
+    { name = "azure.tenantId", value = var.azure_tenant_id },
+    { name = "azure.keyVaultUri", value = var.azure_key_vault_uri },
+    { name = "azure.environment", value = var.azure_environment },
 
-  # --- Monitoring ---
-  set {
-    name  = "monitoring.enabled"
-    value = "true"
-  }
+    # --- Monitoring ---
+    { name = "monitoring.enabled", value = "true" },
 
-  # --- In-cluster services (Azure) ---
-  set {
-    name  = "memcached.enabled"
-    value = var.cloud == "azure" ? "true" : "false"
-  }
-  set {
-    name  = "objectStorage.endpoint"
-    value = var.cloud == "azure" ? local.seaweedfs_s3_endpoint : ""
-  }
-  set_sensitive {
-    name  = "objectStorage.credentials.accessKey"
-    value = var.cloud == "azure" ? try(random_password.seaweedfs_access_key[0].result, "") : ""
-  }
-  set_sensitive {
-    name  = "objectStorage.credentials.secretKey"
-    value = var.cloud == "azure" ? try(random_password.seaweedfs_secret_key[0].result, "") : ""
-  }
+    # --- In-cluster services (Azure) ---
+    { name = "memcached.enabled", value = var.cloud == "azure" ? "true" : "false" },
+    { name = "objectStorage.endpoint", value = var.cloud == "azure" ? local.seaweedfs_s3_endpoint : "" },
 
-  # --- Google Translate ---
-  set_sensitive {
-    name  = "googleTranslate.token"
-    value = var.google_translate_api_token
-  }
+    # --- Grafana ---
+    { name = "grafana.enabled", value = var.enable_bi ? "true" : "false" },
+    { name = "grafana.security.admin_user", value = local.grafana_admin_username },
+    { name = "grafana.datasource.host", value = local.db_bi_host },
 
-  # --- Grafana ---
-  set {
-    name  = "grafana.enabled"
-    value = var.enable_bi ? "true" : "false"
-  }
-  set {
-    name  = "grafana.security.admin_user"
-    value = local.grafana_admin_username
-  }
-  set {
-    name  = "grafana.datasource.host"
-    value = local.db_bi_host
-  }
-  set_sensitive {
-    name  = "grafana.security.admin_password"
-    value = local.grafana_admin_password
-  }
-  set_sensitive {
-    name  = "grafana.datasource.password"
-    value = local.db_bi_password
-  }
+    # --- Connectivity (sunset planned) ---
+    { name = "connectivity.webhook-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    { name = "connectivity.webhook-service.mysql.host", value = local.db_master_host },
+    { name = "connectivity.webhook-service.mysql.username", value = local.db_master_username },
+    { name = "connectivity.webhook-service.mongo.connectionString", value = "mongodb://dozuki-mongodb/webhooks" },
+    { name = "connectivity.integrations-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    { name = "connectivity.integrations-service.mongo.connectionString", value = "mongodb://dozuki-mongodb/integrations" },
+    { name = "connectivity.event-service.database.host", value = local.db_master_host },
+    { name = "connectivity.event-service.database.username", value = local.db_master_username },
+    { name = "connectivity.event-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    { name = "connectivity.event-service.redis.host", value = "dozuki-redis-master" },
+    { name = "connectivity.event-service.redis.tls", value = "false" },
+    { name = "connectivity.connectors-worker.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    { name = "connectivity.connectors-worker.redis.host", value = "dozuki-redis-master" },
+    { name = "connectivity.connectors-worker.redis.tls", value = "false" },
+  ]
 
-  # --- Connectivity (sunset planned) ---
-  set {
-    name  = "connectivity.webhook-service.messageBroker.brokerList"
-    value = var.msk_bootstrap_brokers
-  }
-  set {
-    name  = "connectivity.webhook-service.mysql.host"
-    value = local.db_master_host
-  }
-  set {
-    name  = "connectivity.webhook-service.mysql.username"
-    value = local.db_master_username
-  }
-  set {
-    name  = "connectivity.webhook-service.mongo.connectionString"
-    value = "mongodb://dozuki-mongodb/webhooks"
-  }
-  set {
-    name  = "connectivity.integrations-service.messageBroker.brokerList"
-    value = var.msk_bootstrap_brokers
-  }
-  set {
-    name  = "connectivity.integrations-service.mongo.connectionString"
-    value = "mongodb://dozuki-mongodb/integrations"
-  }
-  set {
-    name  = "connectivity.event-service.database.host"
-    value = local.db_master_host
-  }
-  set {
-    name  = "connectivity.event-service.database.username"
-    value = local.db_master_username
-  }
-  set {
-    name  = "connectivity.event-service.messageBroker.brokerList"
-    value = var.msk_bootstrap_brokers
-  }
-  set {
-    name  = "connectivity.event-service.redis.host"
-    value = "dozuki-redis-master"
-  }
-  set {
-    name  = "connectivity.event-service.redis.tls"
-    value = "false"
-  }
-  set {
-    name  = "connectivity.connectors-worker.messageBroker.brokerList"
-    value = var.msk_bootstrap_brokers
-  }
-  set {
-    name  = "connectivity.connectors-worker.redis.host"
-    value = "dozuki-redis-master"
-  }
-  set {
-    name  = "connectivity.connectors-worker.redis.tls"
-    value = "false"
-  }
+  set_sensitive = [
+    { name = "db.password", value = local.db_master_password },
+    { name = "smtp.auth.password", value = var.smtp_password },
+    { name = "objectStorage.credentials.accessKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_access_key[0].result, "") : "" },
+    { name = "objectStorage.credentials.secretKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_secret_key[0].result, "") : "" },
+    { name = "googleTranslate.token", value = var.google_translate_api_token },
+    { name = "grafana.security.admin_password", value = local.grafana_admin_password },
+    { name = "grafana.datasource.password", value = local.db_bi_password },
+  ]
 
   lifecycle {
     precondition {

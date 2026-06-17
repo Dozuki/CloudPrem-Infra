@@ -102,14 +102,16 @@ resource "helm_release" "seaweedfs" {
 
   # The chart's s3-secret.yaml only reads credentials from the top-level
   # s3.credentials key, even when the S3 gateway runs embedded in the filer.
-  set_sensitive {
-    name  = "s3.credentials.admin.accessKey"
-    value = random_password.seaweedfs_access_key[0].result
-  }
-  set_sensitive {
-    name  = "s3.credentials.admin.secretKey"
-    value = random_password.seaweedfs_secret_key[0].result
-  }
+  set_sensitive = [
+    {
+      name  = "s3.credentials.admin.accessKey"
+      value = random_password.seaweedfs_access_key[0].result
+    },
+    {
+      name  = "s3.credentials.admin.secretKey"
+      value = random_password.seaweedfs_secret_key[0].result
+    },
+  ]
 }
 
 resource "kubernetes_job_v1" "seaweedfs_buckets" {
