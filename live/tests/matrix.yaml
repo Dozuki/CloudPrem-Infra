@@ -33,6 +33,15 @@ configs:
       protect_resources: false
       enable_dr: false               # Plan 2: DR off; Plan 3 turns it on
       alarm_email: "devops@dozuki.com"
+      # Vault is mandatory in the physical/logical layers (no disable flag).
+      # Mirror the _mcp/dev (DDVtest 076248559428) env: shared standard Vault
+      # PrivateLink service + address. DDVtest must be an allowed principal on
+      # the service and Vault must hold this stack's secrets to converge.
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
+      sso_admin_role_arn: "arn:aws:iam::076248559428:role/aws-reserved/sso.amazonaws.com/us-west-2/AWSReservedSSO_AWSAdministratorAccess_4a1f558176c7c293"
   - name: bi_ha
     env: bi
     feature_flags:
