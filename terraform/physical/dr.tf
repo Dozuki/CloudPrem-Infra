@@ -19,7 +19,8 @@ locals {
 
   # RDS automated-backup cross-region replication is only possible when the DB
   # uses a customer-managed key (either our created CMK or an operator-pinned one).
-  dr_rds_enabled = var.enable_dr && (local.rds_use_dr_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
+  # Aurora DR uses Global Database (Plan B), not automated-backup replication.
+  dr_rds_enabled = var.db_engine == "rds" && var.enable_dr && (local.rds_use_dr_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
 }
 
 # Defense-in-depth guardrail. The real selection + blocklist enforcement happens
@@ -109,7 +110,7 @@ resource "aws_db_instance_automated_backups_replication" "primary" {
   source_db_instance_arn = local.dr_source_db_arn
   kms_key_id             = aws_kms_key.dr_rds[0].arn
 
-  depends_on = [module.primary_database, module.aurora]
+  depends_on = [module.primary_database]
 }
 
 # Destination buckets for S3 cross-region replication, one per content bucket.

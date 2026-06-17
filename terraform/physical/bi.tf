@@ -176,7 +176,7 @@ module "rds_replica_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "5.6.0"
 
-  count = var.enable_bi ? local.dms_enabled ? 0 : 1 : 0
+  count = var.enable_bi && !local.dms_enabled && var.db_engine == "rds" ? 1 : 0
 
   identifier = "${local.identifier}-rds-replica"
 
@@ -287,12 +287,12 @@ resource "aws_secretsmanager_secret_version" "replica_database_credentials" {
 
   secret_id = aws_secretsmanager_secret.replica_database_credentials[0].id
   secret_string = jsonencode({
-    dbInstanceIdentifier = local.bi_db.db_instance_id
-    resourceId           = local.bi_db.db_instance_resource_id
-    host                 = local.bi_db.db_instance_address
-    port                 = local.bi_db.db_instance_port
+    dbInstanceIdentifier = local.dms_enabled ? module.dms_replica_database[0].db_instance_id : local.db_identifier
+    resourceId           = local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
+    host                 = local.bi_host
+    port                 = local.dms_enabled ? module.dms_replica_database[0].db_instance_port : local.db_port
     engine               = "mysql"
-    username             = local.dms_enabled ? module.dms_replica_database[0].db_instance_username : module.primary_database[0].db_instance_username
-    password             = local.dms_enabled ? module.dms_replica_database[0].db_instance_password : module.primary_database[0].db_instance_password
+    username             = local.dms_enabled ? module.dms_replica_database[0].db_instance_username : local.db_username
+    password             = local.dms_enabled ? module.dms_replica_database[0].db_instance_password : local.db_password
   })
 }
