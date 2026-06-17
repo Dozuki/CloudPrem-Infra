@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local entrypoint for the upgrade harness. Example:
-#   AWS_PROFILE=ddvtest DDVTEST_ACCOUNT_ID=07XXXXXXXXXX \
+#   AWS_PROFILE=default DDVTEST_ACCOUNT_ID=07XXXXXXXXXX \
 #   FROM_REF=v6.0 TO_REF=v6.1-release CONFIGS=min_default ./run.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -8,7 +8,8 @@ cd "$(dirname "$0")"
 : "${DDVTEST_ACCOUNT_ID:?set DDVTEST_ACCOUNT_ID}"
 export RUN_INTEGRATION=1
 export RUN_ID="${RUN_ID:-local-$(date +%s)}"
-export AWS_PROFILE="${AWS_PROFILE:-ddvtest}"
+# Set to the AWS profile for the DDVtest account (the default profile maps to it).
+export AWS_PROFILE="${AWS_PROFILE:-default}"
 # The physical layer requires OpenTofu (master_password_wo, post-Aurora); drive
 # terragrunt with tofu.
 export TERRAGRUNT_TFPATH="${TERRAGRUNT_TFPATH:-tofu}"
