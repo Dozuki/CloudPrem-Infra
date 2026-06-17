@@ -55,7 +55,12 @@ func AddWorktree(repoDir, baseDir, ref string, initSubmodules bool) (*Worktree, 
 		return nil, fmt.Errorf("worktree add %s: %w", ref, err)
 	}
 	if initSubmodules {
-		if err := run(dir, "git", "submodule", "update", "--init", "--recursive"); err != nil {
+		// Baseline refs older than helm#143 pin the chart submodule via an SSH URL
+		// (git@github.com:Dozuki/helm.git). Rewrite to HTTPS for the clone so it
+		// uses the gh credential helper — SSH submodule clones fail in CI and some
+		// local contexts ("Repository not found") even when the repo is accessible.
+		if err := run(dir, "git", "-c", "url.https://github.com/.insteadOf=git@github.com:",
+			"submodule", "update", "--init", "--recursive"); err != nil {
 			return nil, fmt.Errorf("submodule init in %s: %w", ref, err)
 		}
 	}
