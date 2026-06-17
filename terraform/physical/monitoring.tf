@@ -175,6 +175,8 @@ module "rds_cpu_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
 
+  create_metric_alarm = var.db_engine == "rds"
+
   alarm_name        = "${local.identifier}-rds-cpu-usage"
   alarm_description = "CPU usage for RDS instance ${local.identifier}"
 
@@ -203,6 +205,8 @@ module "rds_cpu_alarm" {
 module "rds_free_memory_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
+
+  create_metric_alarm = var.db_engine == "rds"
 
   alarm_name        = "${local.identifier}-rds-free-memory"
   alarm_description = "Freeable Memory for RDS instance ${local.identifier}"
@@ -238,6 +242,8 @@ module "rds_swap_usage_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
 
+  create_metric_alarm = var.db_engine == "rds"
+
   alarm_name        = "${local.identifier}-rds-swap-usage"
   alarm_description = "Swap Usage for RDS instance ${local.identifier}"
 
@@ -264,6 +270,8 @@ module "rds_swap_usage_alarm" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_storage_space_alarm" {
+  count = var.db_engine == "rds" ? 1 : 0
+
   alarm_name          = "${local.identifier}-rds-storage-space"
   alarm_description   = "Storage space usage for RDS instance ${local.identifier}"
   comparison_operator = "GreaterThanOrEqualToThreshold"
@@ -297,6 +305,8 @@ module "rds_connections_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
 
+  create_metric_alarm = var.db_engine == "rds"
+
   alarm_name        = "${local.identifier}-rds-connections"
   alarm_description = "Connection count for RDS instance ${local.identifier}"
 
@@ -326,6 +336,8 @@ module "rds_read_latency_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
 
+  create_metric_alarm = var.db_engine == "rds"
+
   alarm_name          = "${local.identifier}-rds-read-latency"
   alarm_description   = "Read latency for RDS instance ${local.identifier}"
   comparison_operator = "GreaterThanOrEqualToThreshold"
@@ -348,6 +360,8 @@ module "rds_read_latency_alarm" {
 module "rds_write_latency_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
+
+  create_metric_alarm = var.db_engine == "rds"
 
   alarm_name          = "${local.identifier}-rds-write-latency"
   alarm_description   = "Write latency for RDS instance ${local.identifier}"
@@ -531,4 +545,74 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
 
   alarm_actions = [module.sns.topic_arn]
   ok_actions    = [module.sns.topic_arn]
+}
+
+# --- Aurora CloudWatch alarms (count-gated on aurora engine) --- #
+
+resource "aws_cloudwatch_metric_alarm" "aurora_cpu" {
+  count               = var.db_engine == "aurora" ? 1 : 0
+  alarm_name          = "${local.identifier}-aurora-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 85
+  alarm_description   = "Aurora cluster CPU high"
+  dimensions          = { DBClusterIdentifier = local.identifier }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "aurora_memory" {
+  count               = var.db_engine == "aurora" ? 1 : 0
+  alarm_name          = "${local.identifier}-aurora-freeable-memory"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "FreeableMemory"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 536870912 # 512 MiB
+  alarm_description   = "Aurora cluster freeable memory low"
+  dimensions          = { DBClusterIdentifier = local.identifier }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "aurora_connections" {
+  count               = var.db_engine == "aurora" ? 1 : 0
+  alarm_name          = "${local.identifier}-aurora-connections"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "DatabaseConnections"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 1000
+  alarm_description   = "Aurora cluster connection count high"
+  dimensions          = { DBClusterIdentifier = local.identifier }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "aurora_acu" {
+  count               = var.db_engine == "aurora" ? 1 : 0
+  alarm_name          = "${local.identifier}-aurora-acu-ceiling"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "ACUUtilization"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 90
+  alarm_description   = "Aurora Serverless v2 capacity near max ACU"
+  dimensions          = { DBClusterIdentifier = local.identifier }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
 }
