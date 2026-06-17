@@ -37,6 +37,7 @@ configs:
       # Mirror the _mcp/dev (DDVtest 076248559428) env: shared standard Vault
       # PrivateLink service + address. DDVtest must be an allowed principal on
       # the service and Vault must hold this stack's secrets to converge.
+      customer: "smoke"              # unique identity (smoke-min) — avoids the live dev-min/dozuki-min; logical self-seeds its Vault secrets
       enable_vault: true
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
