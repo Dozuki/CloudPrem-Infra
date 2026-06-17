@@ -13,13 +13,14 @@ defaults:
 # older refs that don't declare them.)
 versions:
   v6.0:
-    image_tag: "PLACEHOLDER-v6.0-app-tag"
-    nextjs_tag: "PLACEHOLDER-v6.0-nextjs-tag"
+    image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
+    nextjs_tag: "2.23.0"
+    image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # required by v6.0 logical (no default)
   v6.1-release:
-    image_tag: "PLACEHOLDER-v6.1-app-tag"
-    nextjs_tag: "PLACEHOLDER-v6.1-nextjs-tag"
+    image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
+    nextjs_tag: "2.23.0"
     chart_version: "0.3.0"
-    image_repository: "PLACEHOLDER-dozukicloud-ecr-host"   # e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com
+    image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com
 
 configs:
   - name: min_default
