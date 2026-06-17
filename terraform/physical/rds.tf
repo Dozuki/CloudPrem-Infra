@@ -90,6 +90,7 @@ module "bi_database_sg" {
 }
 
 resource "aws_db_parameter_group" "default" {
+  count = var.db_engine == "rds" ? 1 : 0
 
   name_prefix = local.identifier
   family      = "mysql${var.rds_engine_family}"
@@ -120,6 +121,8 @@ resource "aws_db_parameter_group" "default" {
 module "primary_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "5.6.0"
+
+  count = var.db_engine == "rds" ? 1 : 0
 
   identifier = local.identifier
 
@@ -167,7 +170,7 @@ module "primary_database" {
 
   # DB parameter group
   create_db_parameter_group = false
-  parameter_group_name      = aws_db_parameter_group.default.name
+  parameter_group_name      = aws_db_parameter_group.default[0].name
 
   create_db_option_group = false
 
@@ -191,12 +194,12 @@ resource "aws_secretsmanager_secret" "primary_database_credentials" {
 resource "aws_secretsmanager_secret_version" "primary_database_credentials" {
   secret_id = aws_secretsmanager_secret.primary_database_credentials.id
   secret_string = jsonencode({
-    dbInstanceIdentifier = module.primary_database.db_instance_id
-    resourceId           = module.primary_database.db_instance_resource_id
-    host                 = module.primary_database.db_instance_address
-    port                 = module.primary_database.db_instance_port
+    dbInstanceIdentifier = local.db_identifier
+    resourceId           = local.db_resource_id
+    host                 = local.db_host
+    port                 = local.db_port
     engine               = "mysql"
-    username             = module.primary_database.db_instance_username
-    password             = module.primary_database.db_instance_password
+    username             = local.db_username
+    password             = local.db_password
   })
 }

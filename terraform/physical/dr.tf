@@ -109,7 +109,7 @@ resource "aws_db_instance_automated_backups_replication" "primary" {
   source_db_instance_arn = local.dr_source_db_arn
   kms_key_id             = aws_kms_key.dr_rds[0].arn
 
-  depends_on = [module.primary_database]
+  depends_on = [module.primary_database, module.aurora]
 }
 
 # Destination buckets for S3 cross-region replication, one per content bucket.
