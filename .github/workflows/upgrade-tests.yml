@@ -1,0 +1,92 @@
+name: Upgrade Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_ref:
+        description: "baseline ref (default auto:latest-1)"
+        default: "auto:latest-1"
+      to_ref:
+        description: "target ref (default auto:latest)"
+        default: "auto:latest"
+      configs:
+        description: "comma-separated configs"
+        default: "min_default,bi_ha,full"
+      region:
+        description: "primary region"
+        default: "us-east-1"
+      dr_region:
+        description: "DR region"
+        default: "us-west-2"
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: upgrade-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  matrix:
+    # Run on manual dispatch always; on PRs only when the gate label is present.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-upgrade-tests')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [min_default, bi_ha, full]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags for worktree refs
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.12.2"
+
+      - name: Install terragrunt
+        run: |
+          curl -fsSLo /usr/local/bin/terragrunt \
+            https://github.com/gruntwork-io/terragrunt/releases/download/v0.99.4/terragrunt_linux_amd64
+          chmod +x /usr/local/bin/terragrunt
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install helm + kubectl
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl"
+          chmod +x /usr/local/bin/kubectl
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.region || 'us-east-1' }}
+
+      - name: Run upgrade harness (${{ matrix.config }})
+        env:
+          RUN_INTEGRATION: "1"
+          TERRAGRUNT_TFPATH: tofu # physical layer requires OpenTofu (master_password_wo)
+          DDVTEST_ACCOUNT_ID: ${{ vars.DDVTEST_ACCOUNT_ID }}
+          RUN_ID: gha-${{ github.run_id }}
+          CONFIGS: ${{ matrix.config }}
+          FROM_REF: ${{ github.event.inputs.from_ref || 'auto:latest-1' }}
+          # On a PR, validate the PR head (the staged release); else the dispatch input.
+          TO_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.inputs.to_ref || 'auto:latest' }}
+          DR_REGION: ${{ github.event.inputs.dr_region || 'us-west-2' }}
+          APP_NAMESPACE: dozuki
+        run: cd live/tests && go test ./scenarios/ -run TestUpgrade -v -timeout 350m
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terratest-${{ matrix.config }}-${{ github.run_id }}
+          path: live/tests/**/test_output*/**
+          if-no-files-found: ignore

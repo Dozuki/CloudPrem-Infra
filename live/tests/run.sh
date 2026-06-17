@@ -9,8 +9,11 @@ cd "$(dirname "$0")"
 export RUN_INTEGRATION=1
 export RUN_ID="${RUN_ID:-local-$(date +%s)}"
 export AWS_PROFILE="${AWS_PROFILE:-ddvtest}"
+# The physical layer requires OpenTofu (master_password_wo, post-Aurora); drive
+# terragrunt with tofu.
+export TERRAGRUNT_TFPATH="${TERRAGRUNT_TFPATH:-tofu}"
 
-for bin in git terraform terragrunt helm aws go; do
+for bin in git tofu terragrunt helm aws go; do
   command -v "$bin" >/dev/null || { echo "missing required tool: $bin" >&2; exit 1; }
 done
 
