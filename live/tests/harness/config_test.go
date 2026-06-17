@@ -29,3 +29,31 @@ func TestLoadMatrixAndMergeInputs(t *testing.T) {
 		t.Errorf("image_tag = %v, want tgt-app", tgt["image_tag"])
 	}
 }
+
+func TestMergedInputsExcludesHarnessOnlyKeys(t *testing.T) {
+	m, err := LoadMatrix("testdata/matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	full, err := m.Config("full")
+	if err != nil {
+		t.Fatalf("Config(full): %v", err)
+	}
+	inputs := m.MergedInputs(full, "v6.0")
+
+	// restore_drill is harness-only and must NOT appear in terraform inputs.
+	if _, ok := inputs["restore_drill"]; ok {
+		t.Errorf("restore_drill must be excluded from MergedInputs but was present")
+	}
+	// enable_dr is a real terraform var and must be included.
+	if v, ok := inputs["enable_dr"]; !ok || v != true {
+		t.Errorf("enable_dr = %v (present=%v), want true", v, ok)
+	}
+	// HarnessFlag must read restore_drill from the config.
+	if !full.HarnessFlag("restore_drill") {
+		t.Errorf("HarnessFlag(restore_drill) = false, want true")
+	}
+	if full.HarnessFlag("nonexistent") {
+		t.Errorf("HarnessFlag(nonexistent) = true, want false")
+	}
+}

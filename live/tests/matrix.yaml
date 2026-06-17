@@ -7,7 +7,6 @@ defaults:
   region: "us-east-1"
   dr_region: "us-west-2"
   env_path: "live/standard/us-east-1"   # parent dir holding region.hcl; the config's env dir is <env_path>/<env>
-  license_parameter_name: "/cloudprem/test-harness/license"
 
 # Version vars supplied per ref. Keys absent on a ref are simply not set.
 # (Undeclared TF_VAR_* are ignored by Terraform, so superset keys are safe on
@@ -32,4 +31,25 @@ configs:
       highly_available_nat_gateway: false
       protect_resources: false
       enable_dr: false               # Plan 2: DR off; Plan 3 turns it on
+      alarm_email: "devops@dozuki.com"
+  - name: bi_ha
+    env: bi
+    feature_flags:
+      enable_webhooks: false
+      enable_bi: true
+      rds_multi_az: true
+      enable_dr: true
+      rds_adopt_dr_cmk: true     # required for RDS automated-backup replication on new stacks
+      bi_dms_enabled: false
+      alarm_email: "devops@dozuki.com"
+  - name: full
+    env: full
+    feature_flags:
+      enable_webhooks: true
+      enable_bi: true
+      rds_multi_az: true
+      enable_dr: true
+      rds_adopt_dr_cmk: true
+      bi_dms_enabled: true
+      restore_drill: true         # consumed by the harness, NOT passed to terraform
       alarm_email: "devops@dozuki.com"

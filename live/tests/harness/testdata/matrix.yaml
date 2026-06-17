@@ -4,7 +4,6 @@ defaults:
   region: "us-east-1"
   dr_region: "us-west-2"
   env_path: "live/standard/us-east-1"
-  license_parameter_name: "/cloudprem/test-harness/license"
 versions:
   v6.0:
     image_tag: "base-app"
@@ -20,3 +19,9 @@ configs:
     feature_flags:
       enable_bi: false
       enable_webhooks: false
+  - name: full
+    env: full
+    feature_flags:
+      enable_bi: true
+      enable_dr: true
+      restore_drill: true

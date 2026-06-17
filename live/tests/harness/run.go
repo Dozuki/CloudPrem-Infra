@@ -10,15 +10,17 @@ import (
 
 // RunParams configures one upgrade run.
 type RunParams struct {
-	RepoDir    string
-	Matrix     *Matrix
-	ConfigName string
-	FromRef    string // resolved concrete ref
-	ToRef      string // resolved concrete ref
-	AccountID  string
-	Profile    string
-	RunID      string // unique per run; namespaces state
-	Namespace  string // app namespace, e.g. "dozuki"
+	RepoDir      string
+	Matrix       *Matrix
+	ConfigName   string
+	FromRef      string // resolved concrete ref
+	ToRef        string // resolved concrete ref
+	AccountID    string
+	Profile      string
+	RunID        string // unique per run; namespaces state
+	Namespace    string // app namespace, e.g. "dozuki"
+	DRRegion     string // DR region (e.g. "us-west-2"); wired in Task 6
+	RestoreDrill bool   // run the RDS restore drill; wired in Task 6
 }
 
 // RunUpgrade executes apply(baseline) -> validate -> apply(target) -> validate

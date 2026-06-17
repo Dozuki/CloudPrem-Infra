@@ -7,13 +7,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// harnessOnlyKeys are feature_flags keys consumed by the harness itself and
+// must NOT be written into env.hcl as terraform inputs.
+var harnessOnlyKeys = map[string]bool{
+	"restore_drill": true,
+}
+
 type Defaults struct {
-	FromRef              string `yaml:"from_ref"`
-	ToRef                string `yaml:"to_ref"`
-	Region               string `yaml:"region"`
-	DRRegion             string `yaml:"dr_region"`
-	EnvPath              string `yaml:"env_path"`
-	LicenseParameterName string `yaml:"license_parameter_name"`
+	FromRef  string `yaml:"from_ref"`
+	ToRef    string `yaml:"to_ref"`
+	Region   string `yaml:"region"`
+	DRRegion string `yaml:"dr_region"`
+	EnvPath  string `yaml:"env_path"`
 }
 
 type Config struct {
@@ -52,14 +57,26 @@ func (m *Matrix) Config(name string) (Config, error) {
 func (m *Matrix) MergedInputs(c Config, ref string) map[string]interface{} {
 	out := map[string]interface{}{}
 	for k, v := range c.FeatureFlags {
-		out[k] = v
+		if !harnessOnlyKeys[k] {
+			out[k] = v
+		}
 	}
 	for k, v := range m.Versions[ref] {
 		out[k] = v
 	}
 	out["environment"] = c.Env
-	out["dozuki_license_parameter_name"] = m.Defaults.LicenseParameterName
 	return out
+}
+
+// HarnessFlag returns the boolean value of a harness-only feature flag for
+// this config (e.g. "restore_drill"). Returns false if absent or non-bool.
+func (c Config) HarnessFlag(name string) bool {
+	if v, ok := c.FeatureFlags[name]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
 }
 
 func (m *Matrix) VersionProfileExists(ref string) bool {
