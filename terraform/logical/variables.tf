@@ -377,13 +377,13 @@ variable "ghcr_pull_token" {
 }
 
 variable "tls_cert" {
-  description = "Base64-encoded PEM TLS certificate for the gateway (azure). Empty = generate a self-signed cert for dev."
+  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set (any cloud), Terraform creates the tls-secret and the chart runs with tls.externallyManaged=true, bypassing cert-manager/ACME. Empty = cert-manager/ACME (AWS) or azure_tls_mode (azure)."
   type        = string
   default     = ""
 }
 
 variable "tls_key" {
-  description = "Base64-encoded PEM TLS private key matching tls_cert (azure). Empty = generate a self-signed cert for dev."
+  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set."
   type        = string
   default     = ""
 }
