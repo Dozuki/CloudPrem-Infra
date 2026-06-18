@@ -28,12 +28,14 @@ jobs:
 
             ✨ Features
 
-            - DR Phase 1: cross-region backup/restore data layer (#138) — new enable_dr / dr_region variables (off by default, with a region guardrail). When enabled: DR-region KMS keys for replicated RDS backups and S3 content, cross-region replication of primary RDS automated backups, versioned KMS-encrypted DR destination S3 buckets with a replication role and V2 replication config, and SNS alarms on S3 replication latency/failures. Exposes DR bucket names, KMS key, and backup-replication ARN as outputs.
+            - DR Phase 1: cross-region backup/restore data layer (#138) — new enable_dr / dr_region variables (on by default — ephemeral/dev stacks may set false — with a region guardrail). When enabled: DR-region KMS keys for replicated RDS backups and S3 content, cross-region replication of primary RDS automated backups, versioned KMS-encrypted DR destination S3 buckets with a replication role and V2 replication config, and SNS alarms on S3 replication latency/failures. Exposes DR bucket names, KMS key, and backup-replication ARN as outputs.
             - EKS control-plane audit logging (#132) — new eks_enabled_log_types variable defaulting to all 5 control-plane log types (api, audit, authenticator, controllerManager, scheduler), streamed to CloudWatch Logs at 90-day retention. Required by Vanta / SOC2 and matches the vault-cluster posture. Set to [] in env.hcl to disable (not recommended).
 
             🐛 Fixes
 
             - CloudWatch alarms stuck in INSUFFICIENT_DATA (#137) — two independent bugs left every alarm unable to pull metrics. RDS alarm dimensions now use local.identifier instead of the rds module's db_instance_id, which under AWS provider v5+ returns the resource ID (db-XXXX) rather than the DBInstanceIdentifier. The amazon-cloudwatch-observability addon is now managed in Terraform with a Pod Identity association binding the cloudwatch-agent SA to CloudWatchAgentServerPolicy (+ AWSXRayDaemonWriteAccess), fixing the empty ContainerInsights namespace on Auto Mode.
             - AWS_REGION on S3 replication job init (#133) — the s3_replication_job_init local-exec now sets AWS_REGION so the internal aws CLI calls succeed on Spacelift workers, which provide credentials but no default region.
+            - NLB deletion protection blocked teardown (#151) — terraform-aws-modules/alb ~> 10.0 defaults enable_deletion_protection to true, so NLBs could not be destroyed and their lingering ENIs pinned the Internet Gateway during destroy. nlb.tf now sets it from var.protect_resources, matching RDS/Aurora/BI.
+            - Missing aws.dr provider in the live root (#151) — physical/dr.tf references provider = aws.dr unconditionally, but live/terragrunt.hcl stopped generating it, so destroy/plan failed with "provider configuration not present." The root now generates the aws.dr provider (+ dr_region local), matching infra-live.
           draft: false
           prerelease: false
