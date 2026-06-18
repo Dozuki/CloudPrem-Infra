@@ -47,7 +47,7 @@ resource "aws_ssm_association" "bastion_mysql_config" {
   document_version = aws_ssm_document.bastion_mysql_config.latest_version
 
   parameters = {
-    RDSEndpoint : module.primary_database.db_instance_address
+    RDSEndpoint : local.db_host
     RDSCredentialSecret : aws_secretsmanager_secret.primary_database_credentials.id
     Region : data.aws_region.current.id
   }

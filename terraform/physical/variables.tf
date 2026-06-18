@@ -385,4 +385,39 @@ variable "rds_adopt_dr_cmk" {
   default     = false
 }
 
+variable "db_engine" {
+  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'."
+  type        = string
+  default     = "rds"
+
+  validation {
+    condition     = contains(["rds", "aurora"], var.db_engine)
+    error_message = "db_engine must be 'rds' or 'aurora'."
+  }
+}
+
+variable "aurora_min_acu" {
+  description = "Aurora Serverless v2 minimum capacity (ACUs)."
+  type        = number
+  default     = 0.5
+}
+
+variable "aurora_max_acu" {
+  description = "Aurora Serverless v2 maximum capacity (ACUs)."
+  type        = number
+  default     = 16
+}
+
+variable "aurora_engine_version" {
+  description = "Aurora MySQL engine version. Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
+  type        = string
+  default     = "8.4.7"
+}
+
+variable "aurora_snapshot_identifier" {
+  description = "Optional RDS DB snapshot ARN to restore the Aurora cluster from (migration path). Empty = fresh cluster."
+  type        = string
+  default     = ""
+}
+
 # --- END App Configuration --- #

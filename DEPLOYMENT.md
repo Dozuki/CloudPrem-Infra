@@ -43,14 +43,6 @@ aws sso login --profile <profile_name>
 aws sts get-caller-identity --profile <profile_name>
 ```
 
-### Git Submodules
-
-The Helm chart is a submodule. After cloning, initialize it:
-
-```bash
-git submodule update --init --recursive
-```
-
 ## Repository Structure
 
 ```
