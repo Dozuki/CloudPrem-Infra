@@ -25,11 +25,13 @@ jobs:
             ⚠️ Breaking changes / migration notes
 
             - Helm chart now consumed from ECR as an OCI artifact (#145). The dozuki chart is no longer a git submodule under terraform/logical/charts/dozuki. The logical layer pulls it from oci://<image_repository>/charts/dozuki at the chart_version variable (default 0.3.0) via an ECR registry login. The pinned chart version must be published to your ECR before applying — existing environments on the default need no tfvars change, but the chart must exist in the registry. .gitmodules and the submodule directory are removed.
+            - Physical layer now requires OpenTofu 1.12.x (#149). Adding the Aurora path pulls the terraform-aws-modules/rds-aurora module, whose required_version (>= 1.11.1) is evaluated at init even when db_engine = "rds" (the default) — so the physical layer can no longer run on Terraform 1.5.7. ALL physical stacks (RDS and Aurora alike) must run OpenTofu 1.12.x; switch Spacelift physical stacks to the OpenTofu workflow tool before applying v6.1. The logical layer is unchanged (Terraform 1.5.7).
 
             ✨ Features
 
             - DR Phase 1: cross-region backup/restore data layer (#138) — new enable_dr / dr_region variables (on by default — ephemeral/dev stacks may set false — with a region guardrail). When enabled: DR-region KMS keys for replicated RDS backups and S3 content, cross-region replication of primary RDS automated backups, versioned KMS-encrypted DR destination S3 buckets with a replication role and V2 replication config, and SNS alarms on S3 replication latency/failures. Exposes DR bucket names, KMS key, and backup-replication ARN as outputs.
             - EKS control-plane audit logging (#132) — new eks_enabled_log_types variable defaulting to all 5 control-plane log types (api, audit, authenticator, controllerManager, scheduler), streamed to CloudWatch Logs at 90-day retention. Required by Vanta / SOC2 and matches the vault-cluster posture. Set to [] in env.hcl to disable (not recommended).
+            - Aurora Serverless v2 path, opt-in (#149) — new db_engine variable ("rds" | "aurora", default "rds") adds an Aurora MySQL 8.4 Serverless v2 option (terraform-aws-modules/rds-aurora v10, serverlessv2 scaling with ACU min/max vars, write-only master password). The physical→logical contract (primary_db_secret) is unchanged, so logical/app/chart need no changes. Existing stacks default to "rds" and never auto-migrate. Requires the OpenTofu 1.12.x toolchain (see migration notes).
 
             🐛 Fixes
 
