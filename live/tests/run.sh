@@ -163,7 +163,7 @@ setup_vault() {
   echo ">> Vault: token acquired."
 }
 
-REQUIRED_BINS="git tofu terragrunt helm aws go"
+REQUIRED_BINS="git tofu terragrunt helm aws go openssl"
 DO_VAULT=1
 if [ -n "${VAULT_TOKEN:-}" ] || [ "${SKIP_VAULT_TUNNEL:-0}" = 1 ]; then
   DO_VAULT=0
@@ -177,6 +177,22 @@ for bin in $REQUIRED_BINS; do
 done
 
 [ "$DO_VAULT" = 1 ] && setup_vault
+
+# Generate a throwaway self-signed cert and supply it as tls_cert/tls_key so the
+# logical layer renders tls-secret directly (manual TLS), bypassing cert-manager/ACME
+# — which can't issue reliably in an ephemeral test cluster (DNS-01 propagation, LE
+# prod rate limits). Applies to both refs' logical (baseline v6.0.1+ and the upgrade);
+# the physical layer ignores the unused TF_VARs. Override by presetting TF_VAR_tls_cert.
+if [ -z "${TF_VAR_tls_cert:-}" ]; then
+  _tlsdir="$(mktemp -d)"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$_tlsdir/tls.key" -out "$_tlsdir/tls.crt" \
+    -subj "/O=Dozuki smoke test/CN=dozuki.cloud" \
+    -addext "subjectAltName=DNS:dozuki.cloud,DNS:*.dozuki.cloud" >/dev/null 2>&1
+  export TF_VAR_tls_cert="$(base64 < "$_tlsdir/tls.crt" | tr -d '\n')"
+  export TF_VAR_tls_key="$(base64 < "$_tlsdir/tls.key" | tr -d '\n')"
+  echo ">> TLS: generated self-signed cert -> manual TLS (no cert-manager/ACME)."
+fi
 
 # From here on, the run can create cloud resources — arm the backstop cleanup (see trap).
 STARTED_RUN=1
