@@ -428,3 +428,9 @@ variable "external_dns_sa_name" {
   type        = string
   default     = "external-dns"
 }
+
+variable "gateway_name" {
+  description = "Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon."
+  type        = string
+  default     = "dozuki-gateway"
+}
