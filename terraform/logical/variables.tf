@@ -393,3 +393,9 @@ variable "operator_image_tag" {
   type        = string
   default     = "3.0.3"
 }
+
+variable "gateway_dns_label" {
+  description = "Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label."
+  type        = string
+  default     = ""
+}

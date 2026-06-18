@@ -420,10 +420,18 @@ resource "helm_release" "app" {
   wait    = true
   timeout = 900
 
-  # GHCR pull secret for MPC images (Azure only). On AWS this is an empty
-  # list of values files — a no-op, no value overrides applied.
+  # Azure-only values: GHCR pull secret for MPC images, and expose the gateway
+  # via an Azure public LoadBalancer (no NLB on Azure). An azure-dns-label-name
+  # annotation gives the LB a stable <label>.<region>.cloudapp.azure.com FQDN.
+  # On AWS this is an empty list of values files — a no-op, no overrides applied.
   values = var.cloud == "azure" ? [yamlencode({
     global = { imagePullSecrets = [{ name = "ghcr-pull" }] }
+    gateway = {
+      service = {
+        type        = "LoadBalancer"
+        annotations = var.gateway_dns_label != "" ? { "service.beta.kubernetes.io/azure-dns-label-name" = var.gateway_dns_label } : {}
+      }
+    }
   })] : []
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
