@@ -16,6 +16,10 @@ versions:
     image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
     nextjs_tag: "2.23.0"
     image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # required by v6.0 logical (no default)
+  v6.0.1:                                                              # v6.0 + manual-TLS restore (self-signing baseline); same app images as v6.0
+    image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
+    nextjs_tag: "2.23.0"
+    image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
   v6.1-release:
     image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
     nextjs_tag: "2.23.0"
