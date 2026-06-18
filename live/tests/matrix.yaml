@@ -1,0 +1,70 @@
+# Test matrix for the upgrade harness. The harness resolves from_ref/to_ref,
+# looks up each ref's version profile, merges it with a config's feature flags,
+# and writes the result as env.hcl into each worktree before applying.
+defaults:
+  from_ref: "auto:latest-1"   # second-newest git tag
+  to_ref: "auto:latest"       # newest git tag; override to a branch (e.g. v6.1-release) pre-tag
+  region: "us-east-1"
+  dr_region: "us-west-2"
+  env_path: "live/standard/us-east-1"   # parent dir holding region.hcl; the config's env dir is <env_path>/<env>
+
+# Version vars supplied per ref. Keys absent on a ref are simply not set.
+# (Undeclared TF_VAR_* are ignored by Terraform, so superset keys are safe on
+# older refs that don't declare them.)
+versions:
+  v6.0:
+    image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
+    nextjs_tag: "2.23.0"
+    image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # required by v6.0 logical (no default)
+  v6.1-release:
+    image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
+    nextjs_tag: "2.23.0"
+    chart_version: "0.3.6"
+    image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com
+
+configs:
+  - name: min_default
+    env: min
+    feature_flags:
+      enable_webhooks: false
+      enable_bi: false
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      protect_resources: false
+      enable_dr: false               # Plan 2: DR off; Plan 3 turns it on
+      alarm_email: "devops@dozuki.com"
+      # Vault is mandatory in the physical/logical layers (no disable flag).
+      # Mirror the _mcp/dev (DDVtest 076248559428) env: shared standard Vault
+      # PrivateLink service + address. DDVtest must be an allowed principal on
+      # the service and Vault must hold this stack's secrets to converge.
+      customer: "smoke"              # unique identity (smoke-min) — avoids the live dev-min/dozuki-min; logical self-seeds its Vault secrets
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
+      # sso_admin_role_arn intentionally unset: when the harness runs AS the SSO
+      # admin role (local runs), that identity IS the EKS cluster creator, so an
+      # explicit access entry for it collides with the auto-created creator entry
+      # (ResourceInUseException). The creator already has cluster admin, so the
+      # harness needs no explicit entry; leaving it unset works for local + CI.
+  - name: bi_ha
+    env: bi
+    feature_flags:
+      enable_webhooks: false
+      enable_bi: true
+      rds_multi_az: true
+      enable_dr: true
+      rds_adopt_dr_cmk: true     # required for RDS automated-backup replication on new stacks
+      bi_dms_enabled: false
+      alarm_email: "devops@dozuki.com"
+  - name: full
+    env: full
+    feature_flags:
+      enable_webhooks: true
+      enable_bi: true
+      rds_multi_az: true
+      enable_dr: true
+      rds_adopt_dr_cmk: true
+      bi_dms_enabled: true
+      restore_drill: true         # consumed by the harness, NOT passed to terraform
+      alarm_email: "devops@dozuki.com"
