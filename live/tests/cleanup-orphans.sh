@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# cleanup-orphans.sh — tear down orphaned harness runs left behind when an upgrade
+# test fails or is aborted mid-apply (e.g. SSO expired mid-run, so the harness's own
+# deferred teardown couldn't authenticate).
+#
+# For each orphaned per-run state prefix (local-<ts>-<cfg>/...) it:
+#   1. disables NLB deletion protection (v6.0 baselines create the NLB protected),
+#   2. force-releases any held Terraform state lock,
+#   3. runs `terragrunt destroy` on the physical layer (deleting the EKS cluster also
+#      disposes of the in-cluster helm/k8s resources),
+#   4. purges the run's state objects — ONLY if the destroy succeeded,
+# then sweeps the addon-created containerinsights log groups (out-of-band, not TF
+# managed) and runs verify-clean.sh to confirm the account is clean.
+#
+# Run from your terminal AFTER `aws sso login` — each destroy can take ~25 min.
+#
+# Usage:
+#   ./cleanup-orphans.sh                       # auto-detect + tear down all local-* orphans
+#   ./cleanup-orphans.sh local-1700000000-min_default-min_default   # a specific prefix
+#   CUSTOMER=smoke ./cleanup-orphans.sh        # override the resource-name prefix (default: smoke)
+set -uo pipefail
+cd "$(dirname "$0")"
+HARNESS_DIR="$PWD"
+LIVE_ROOT="$(cd .. && pwd)"
+
+CUSTOMER="${CUSTOMER:-smoke}"
+P="${AWS_PROFILE:-default}"
+R="${AWS_REGION:-us-east-1}"
+DR="${DR_REGION:-us-west-2}"
+# Drop stale static creds so AWS_PROFILE (SSO) is authoritative.
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+export AWS_PROFILE="$P" TERRAGRUNT_TFPATH="${TERRAGRUNT_TFPATH:-tofu}"
+
+ACCT="$(aws sts get-caller-identity --profile "$P" --query Account --output text 2>/dev/null)" || {
+  echo "ERROR: no AWS identity (profile=$P). Run: aws sso login --profile $P" >&2; exit 1; }
+BUCKET="dozuki-terraform-state-${R}-${ACCT}"
+LOCK_TABLE="dozuki-terraform-lock"
+
+# Target prefixes: args if given, else every local-* prefix in the state bucket.
+if [ "$#" -gt 0 ]; then
+  PREFIXES="$(printf '%s\n' "$@" | sed 's:/*$::')"
+else
+  PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE local-/{gsub(/\//,"",$2); print $2}')"
+fi
+if [ -z "$PREFIXES" ]; then echo ">> No orphaned local-* state prefixes found in s3://$BUCKET/."; fi
+
+fail=0
+# Loop in the parent shell (process substitution, not a pipe) so set/exit behave.
+while IFS= read -r pfx; do
+  [ -z "$pfx" ] && continue
+  echo; echo "==================== orphan: $pfx ===================="
+
+  # Derive partition/region/env from the physical state key path.
+  key="$(aws s3 ls "s3://$BUCKET/$pfx/" --recursive --profile "$P" 2>/dev/null | awk '/physical\/terraform.tfstate$/{print $4; exit}')"
+  if [ -n "$key" ]; then
+    rel="${key#"$pfx"/}"                       # standard/us-east-1/min/physical/terraform.tfstate
+    envdir="$(dirname "$(dirname "$rel")")"    # standard/us-east-1/min
+    region="$(printf '%s' "$envdir" | awk -F/ '{print $2}')"; region="${region:-$R}"
+    env="$(printf '%s' "$envdir" | awk -F/ '{print $3}')"
+    echo "  partition path: $envdir  (region=$region env=$env customer=$CUSTOMER)"
+  else
+    echo "  no physical state under this prefix — will release locks + purge state only"
+    envdir=""; region="$R"; env=""
+  fi
+
+  # 1) Disable NLB deletion protection (<customer>-<env>).
+  if [ -n "$env" ]; then
+    arn="$(aws elbv2 describe-load-balancers --region "$region" --profile "$P" \
+          --query "LoadBalancers[?LoadBalancerName=='${CUSTOMER}-${env}'].LoadBalancerArn|[0]" --output text 2>/dev/null)"
+    if [ -n "$arn" ] && [ "$arn" != "None" ]; then
+      aws elbv2 modify-load-balancer-attributes --load-balancer-arn "$arn" \
+        --attributes Key=deletion_protection.enabled,Value=false --region "$region" --profile "$P" >/dev/null 2>&1 \
+        && echo "  NLB deletion protection disabled (${CUSTOMER}-${env})"
+    fi
+  fi
+
+  # 2) Force-release any held state locks for this prefix.
+  for lk in $(aws dynamodb scan --table-name "$LOCK_TABLE" --region "$R" --profile "$P" \
+        --query "Items[?contains(LockID.S, '$pfx') && !contains(LockID.S, '-md5')].LockID.S" --output text 2>/dev/null); do
+    aws dynamodb delete-item --table-name "$LOCK_TABLE" --region "$R" --profile "$P" \
+      --key "{\"LockID\":{\"S\":\"$lk\"}}" >/dev/null 2>&1 && echo "  released lock: $lk"
+  done
+
+  # 3) Destroy the physical layer (also disposes of in-cluster helm/k8s via the EKS delete).
+  destroyed_ok=1
+  if [ -n "$key" ] && [ -d "$LIVE_ROOT/$envdir/physical" ]; then
+    ( cd "$LIVE_ROOT/$envdir/physical"
+      rm -rf .terragrunt-cache
+      TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
+      TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+        terragrunt destroy --terragrunt-non-interactive -input=false )
+    destroyed_ok=$?
+  elif [ -n "$key" ]; then
+    echo "  WARNING: $LIVE_ROOT/$envdir/physical not found — cannot destroy via terragrunt; leaving state intact." >&2
+    destroyed_ok=1
+  fi
+
+  # 4) Purge state objects ONLY if the destroy succeeded (else keep state so it can retry).
+  if [ "$destroyed_ok" -eq 0 ] || [ -z "$key" ]; then
+    aws s3 rm "s3://$BUCKET/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
+  else
+    echo "  destroy did NOT fully succeed — state prefix kept for retry: $pfx" >&2
+    fail=1
+  fi
+done <<EOF
+$PREFIXES
+EOF
+
+# 5) Sweep addon-created containerinsights log groups (out-of-band; TF doesn't own them).
+for lg in $(aws logs describe-log-groups --region "$R" --profile "$P" \
+      --query "logGroups[?starts_with(logGroupName,'/aws/containerinsights/${CUSTOMER}-')].logGroupName" --output text 2>/dev/null); do
+  aws logs delete-log-group --log-group-name "$lg" --region "$R" --profile "$P" 2>/dev/null && echo "  deleted log group: $lg"
+done
+
+# 6) Verify.
+echo; echo "==================== verify-clean ===================="
+DR_REGION="$DR" AWS_PROFILE="$P" "$HARNESS_DIR/verify-clean.sh" "$CUSTOMER" || fail=1
+
+echo
+if [ "$fail" -eq 0 ]; then echo "CLEANUP COMPLETE — account is clean."; else
+  echo "CLEANUP INCOMPLETE — see warnings above (re-run after resolving)."; exit 1; fi
