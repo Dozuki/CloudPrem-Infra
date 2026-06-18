@@ -505,7 +505,8 @@ resource "helm_release" "app" {
 
     # --- In-cluster services (Azure) ---
     { name = "memcached.enabled", value = var.cloud == "azure" ? "true" : "false" },
-    { name = "objectStorage.endpoint", value = var.cloud == "azure" ? local.seaweedfs_s3_endpoint : "" },
+    { name = "objectStorage.endpoint", value = var.cloud == "azure" ? "https://s3.${var.dns_domain_name}" : "" },
+    { name = "objectStorage.publicHost", value = var.cloud == "azure" ? "s3.${var.dns_domain_name}" : "" },
 
     # --- Grafana ---
     { name = "grafana.enabled", value = var.enable_bi ? "true" : "false" },
