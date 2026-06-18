@@ -237,3 +237,14 @@ variable "nlb_http_target_group_arn" {
 }
 
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #
+variable "tls_cert" {
+  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set, the chart renders tls-secret from it and cert-manager's ClusterIssuer is disabled, bypassing ACME. Empty = cert-manager/ACME (default)."
+  type        = string
+  default     = ""
+}
+
+variable "tls_key" {
+  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set."
+  type        = string
+  default     = ""
+}

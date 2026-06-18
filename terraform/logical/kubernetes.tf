@@ -346,7 +346,27 @@ resource "helm_release" "app" {
   }
   set {
     name  = "dns_validation"
-    value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
+    value = var.tls_cert == "" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false"
+  }
+  # Manual TLS: when an operator supplies tls_cert/tls_key, render tls-secret directly
+  # from them and disable cert-manager's ClusterIssuer, so issuance never depends on
+  # ACME/public DNS (essential for ephemeral test clusters + air-gapped on-prem).
+  # Empty (default) = unchanged cert-manager/ACME behavior.
+  set {
+    name  = "tls.enabled"
+    value = var.tls_cert != "" ? "true" : "false"
+  }
+  set {
+    name  = "tls.cert"
+    value = var.tls_cert
+  }
+  set {
+    name  = "tls.key"
+    value = var.tls_key
+  }
+  set {
+    name  = "cert_manager.enabled"
+    value = var.tls_cert != "" ? "false" : "true"
   }
   set {
     name  = "customer"
