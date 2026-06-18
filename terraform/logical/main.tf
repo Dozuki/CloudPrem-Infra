@@ -104,8 +104,10 @@ provider "azurerm" {
 }
 
 locals {
-  is_us_gov        = var.cloud == "aws" ? data.aws_partition.current[0].partition == "aws-us-gov" : false
-  ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
+  is_us_gov = var.cloud == "aws" ? data.aws_partition.current[0].partition == "aws-us-gov" : false
+  ca_cert_pem_file = var.cloud == "azure" ? "vendor/azure-mysql-global.pem" : (
+    local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
+  )
 
   # Cluster auth (cloud-conditional)
   cluster_host = var.cloud == "aws" ? data.aws_eks_cluster.main[0].endpoint : data.azurerm_kubernetes_cluster.main[0].kube_config[0].host

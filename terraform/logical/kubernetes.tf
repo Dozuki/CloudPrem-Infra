@@ -443,7 +443,7 @@ resource "helm_release" "app" {
     # --- Database ---
     { name = "db.host", value = local.db_master_host },
     { name = "db.user", value = local.db_master_username },
-    { name = "db.rdsCaCert", value = var.cloud == "aws" ? base64encode(file(local.ca_cert_pem_file)) : "" },
+    { name = "db.rdsCaCert", value = base64encode(file(local.ca_cert_pem_file)) },
 
     # --- SMTP ---
     { name = "smtp.enabled", value = var.smtp_enabled ? "true" : "false" },
