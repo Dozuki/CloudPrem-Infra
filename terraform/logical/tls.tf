@@ -4,8 +4,10 @@
 # self-signed cert for dev smoke testing. AWS is unaffected (count = 0).
 
 locals {
-  tls_supplied   = var.cloud == "azure" && var.tls_cert != "" && var.tls_key != ""
-  tls_selfsigned = var.cloud == "azure" && !local.tls_supplied
+  # letsencrypt mode: cert-manager owns tls-secret, so Terraform creates nothing.
+  tls_supplied   = var.cloud == "azure" && var.azure_tls_mode == "supplied" && var.tls_cert != "" && var.tls_key != ""
+  tls_selfsigned = var.cloud == "azure" && var.azure_tls_mode == "self-signed"
+  tls_managed_tf = local.tls_supplied || local.tls_selfsigned
 }
 
 resource "tls_private_key" "gateway" {
@@ -35,7 +37,7 @@ resource "tls_self_signed_cert" "gateway" {
 }
 
 resource "kubernetes_secret_v1" "gateway_tls" {
-  count = var.cloud == "azure" ? 1 : 0
+  count = local.tls_managed_tf ? 1 : 0
 
   metadata {
     name      = "tls-secret"

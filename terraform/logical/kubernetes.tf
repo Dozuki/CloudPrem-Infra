@@ -472,7 +472,7 @@ resource "helm_release" "app" {
     { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
-    { name = "tls.externallyManaged", value = var.cloud == "azure" ? "true" : "false" },
+    { name = "tls.externallyManaged", value = (var.cloud == "azure" && var.azure_tls_mode != "letsencrypt") ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
