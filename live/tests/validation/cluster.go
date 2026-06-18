@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -43,15 +44,19 @@ func CheckClusterHealth(kubeconfig, namespace string, timeout time.Duration) err
 		return err
 	}
 	ctx := context.Background()
-	deadline := time.Now().Add(timeout)
+	started := time.Now()
+	deadline := started.Add(timeout)
 	for {
 		err := clusterReadyOnce(ctx, cs, namespace)
 		if err == nil {
+			fmt.Fprintf(os.Stderr, ">> [harness %s] cluster healthy — all workloads Ready (%s)\n", time.Now().Format("15:04:05"), time.Since(started).Round(time.Second))
 			return nil
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("cluster not healthy within %s: %w", timeout, err)
 		}
+		// Heartbeat so the (otherwise silent) up-to-20m wait shows progress.
+		fmt.Fprintf(os.Stderr, ">> [harness %s] waiting for cluster (%s elapsed): %v\n", time.Now().Format("15:04:05"), time.Since(started).Round(time.Second), err)
 		time.Sleep(30 * time.Second)
 	}
 }
