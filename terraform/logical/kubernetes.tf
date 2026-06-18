@@ -401,7 +401,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -464,6 +464,7 @@ resource "helm_release" "app" {
     { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
+    { name = "tls.externallyManaged", value = var.cloud == "azure" ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },

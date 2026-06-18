@@ -375,3 +375,15 @@ variable "ghcr_pull_token" {
   sensitive   = true
   default     = ""
 }
+
+variable "tls_cert" {
+  description = "Base64-encoded PEM TLS certificate for the gateway (azure). Empty = generate a self-signed cert for dev."
+  type        = string
+  default     = ""
+}
+
+variable "tls_key" {
+  description = "Base64-encoded PEM TLS private key matching tls_cert (azure). Empty = generate a self-signed cert for dev."
+  type        = string
+  default     = ""
+}
