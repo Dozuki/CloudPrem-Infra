@@ -36,13 +36,22 @@ ACCT="$(aws sts get-caller-identity --profile "$P" --query Account --output text
 BUCKET="dozuki-terraform-state-${R}-${ACCT}"
 LOCK_TABLE="dozuki-terraform-lock"
 
-# Target prefixes: args if given, else every local-* prefix in the state bucket.
+# Target prefixes: every local-* prefix in the state bucket, optionally filtered to
+# those that START WITH an arg — so a full prefix matches itself, and a RUN_ID like
+# "local-<ts>-" matches all of that run's per-config prefixes (and nothing else).
+ALL_PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE local-/{gsub(/\//,"",$2); print $2}')"
 if [ "$#" -gt 0 ]; then
-  PREFIXES="$(printf '%s\n' "$@" | sed 's:/*$::')"
+  PREFIXES=""
+  for arg in "$@"; do
+    arg="${arg%/}"
+    PREFIXES="$PREFIXES
+$(printf '%s\n' "$ALL_PREFIXES" | awk -v a="$arg" 'index($0,a)==1')"
+  done
+  PREFIXES="$(printf '%s\n' "$PREFIXES" | awk 'NF' | sort -u)"
 else
-  PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE local-/{gsub(/\//,"",$2); print $2}')"
+  PREFIXES="$ALL_PREFIXES"
 fi
-if [ -z "$PREFIXES" ]; then echo ">> No orphaned local-* state prefixes found in s3://$BUCKET/."; fi
+if [ -z "$PREFIXES" ]; then echo ">> No matching orphaned local-* state prefixes found in s3://$BUCKET/."; fi
 
 fail=0
 # Loop in the parent shell (process substitution, not a pipe) so set/exit behave.
