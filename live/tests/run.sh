@@ -36,6 +36,69 @@ export AWS_PROFILE="${AWS_PROFILE:-default}"
 # The physical layer requires OpenTofu (master_password_wo); drive terragrunt with tofu.
 export TERRAGRUNT_TFPATH="${TERRAGRUNT_TFPATH:-tofu}"
 
+# --- SSO session runway check ------------------------------------------------
+# A run can outlive the AWS SSO session (an upgrade run is ~1h; the full matrix is
+# several hours). If the session expires mid-apply, terraform loses its creds and
+# leaves a half-built, hard-to-clean stack. Refuse to start unless the SSO session
+# token has enough runway. Override with SKIP_SSO_CHECK=1; tune REQUIRED_SSO_HOURS.
+REQUIRED_SSO_HOURS="${REQUIRED_SSO_HOURS:-3}"
+sso_seconds_left() { # <profile> -> seconds left on the SSO session token (-1 if unknown)
+  command -v python3 >/dev/null 2>&1 || { echo -1; return; }
+  python3 - "$1" <<'PY'
+import configparser, glob, hashlib, json, os, sys
+from datetime import datetime, timezone
+profile = sys.argv[1]
+cfg = configparser.ConfigParser()
+cfg.read(os.path.expanduser("~/.aws/config"))
+sect = "default" if profile == "default" else "profile %s" % profile
+session = start = None
+if cfg.has_section(sect):
+    session = cfg.get(sect, "sso_session", fallback=None)
+    start = cfg.get(sect, "sso_start_url", fallback=None)
+if session and not start and cfg.has_section("sso-session %s" % session):
+    start = cfg.get("sso-session %s" % session, "sso_start_url", fallback=None)
+targets = set()
+for k in (session, start):
+    if k:
+        targets.add(os.path.expanduser("~/.aws/sso/cache/%s.json" % hashlib.sha1(k.encode()).hexdigest()))
+def newest(files):
+    best = None
+    for f in files:
+        try:
+            d = json.load(open(f))
+        except Exception:
+            continue
+        e = d.get("expiresAt")
+        if e and d.get("accessToken"):
+            best = e if best is None or e > best else best
+    return best
+allf = glob.glob(os.path.expanduser("~/.aws/sso/cache/*.json"))
+best = newest([f for f in allf if f in targets]) or newest(allf)
+if not best:
+    print(-1); sys.exit(0)
+try:
+    dt = datetime.fromisoformat(best.replace("Z", "+00:00"))
+except ValueError:
+    print(-1); sys.exit(0)
+print(int((dt - datetime.now(timezone.utc)).total_seconds()))
+PY
+}
+sso_rem="$(sso_seconds_left "$AWS_PROFILE")"
+if [ "$sso_rem" -ge 0 ] 2>/dev/null; then
+  if [ "$sso_rem" -lt $((REQUIRED_SSO_HOURS * 3600)) ]; then
+    echo "ERROR: AWS SSO session for '$AWS_PROFILE' has only $((sso_rem/3600))h$(((sso_rem%3600)/60))m left (< ${REQUIRED_SSO_HOURS}h)." >&2
+    echo "       A run can outlive it and strand a half-built stack. Refresh first:" >&2
+    echo "         aws sso login --profile $AWS_PROFILE" >&2
+    echo "       (override with SKIP_SSO_CHECK=1, or lower REQUIRED_SSO_HOURS, for a short run.)" >&2
+    [ "${SKIP_SSO_CHECK:-0}" = 1 ] || exit 1
+  else
+    echo ">> SSO: $((sso_rem/3600))h$(((sso_rem%3600)/60))m left on '$AWS_PROFILE' (>= ${REQUIRED_SSO_HOURS}h) — OK"
+  fi
+else
+  echo ">> SSO: could not read session expiry for '$AWS_PROFILE'; ensure 'aws sso login --profile $AWS_PROFILE' is fresh." >&2
+fi
+# -----------------------------------------------------------------------------
+
 VAULT_KUBE_CONTEXT="${VAULT_KUBE_CONTEXT:-vault-standard}"
 VAULT_AWS_PROFILE="${VAULT_AWS_PROFILE:-dozuki}"
 VAULT_AWS_ROLE="${VAULT_AWS_ROLE:-admin}"
