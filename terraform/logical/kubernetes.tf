@@ -401,7 +401,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls, helm_release.external_dns]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -424,15 +424,18 @@ resource "helm_release" "app" {
   # via an Azure public LoadBalancer (no NLB on Azure). An azure-dns-label-name
   # annotation gives the LB a stable <label>.<region>.cloudapp.azure.com FQDN.
   # On AWS this is an empty list of values files — a no-op, no overrides applied.
-  values = var.cloud == "azure" ? [yamlencode({
+  values = var.cloud == "azure" ? [yamlencode(merge({
     global = { imagePullSecrets = [{ name = "ghcr-pull" }] }
     gateway = {
       service = {
         type        = "LoadBalancer"
         annotations = var.gateway_dns_label != "" ? { "service.beta.kubernetes.io/azure-dns-label-name" = var.gateway_dns_label } : {}
       }
+      dnsTarget = local.lb_fqdn
     }
-  })] : []
+    }, var.azure_acme_server != "" ? {
+    cert_manager = { acmeServer = var.azure_acme_server }
+  } : {}))] : []
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
@@ -472,7 +475,7 @@ resource "helm_release" "app" {
     { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
-    { name = "tls.externallyManaged", value = var.cloud == "azure" ? "true" : "false" },
+    { name = "tls.externallyManaged", value = (var.cloud == "azure" && var.azure_tls_mode != "letsencrypt") ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
