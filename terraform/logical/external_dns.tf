@@ -20,9 +20,21 @@ resource "helm_release" "external_dns" {
   wait       = true
   timeout    = 300
 
+  # Use the chart's native value keys (it generates --registry/--policy/--source/
+  # --domain-filter/--txt-owner-id/--aws-zone-type itself). Do NOT also pass these
+  # via extraArgs — the chart already emits --registry by default, so duplicating
+  # any of them is a fatal "flag cannot be repeated".
   values = [yamlencode({
-    provider = { name = "aws" }
-    sources  = ["gateway-httproute"]
+    provider      = { name = "aws" }
+    sources       = ["gateway-httproute"]
+    domainFilters = ["dozuki.cloud"]
+    policy        = "sync"
+    registry      = "txt"
+    txtOwnerId    = "azure-mpc-${var.environment}"
+    # Prefix ownership TXT records so they never sit at the same name as a managed
+    # CNAME (a TXT and CNAME can't coexist at one name — Route53 rejects the batch).
+    txtPrefix = "edns-"
+    aws       = { zoneType = "public" }
 
     serviceAccount = {
       create = true
@@ -50,14 +62,6 @@ resource "helm_release" "external_dns" {
       { name = "AWS_ROLE_ARN", value = var.aws_external_dns_role_arn },
       { name = "AWS_WEB_IDENTITY_TOKEN_FILE", value = "/var/run/secrets/aws/token" },
       { name = "AWS_REGION", value = "us-east-1" },
-    ]
-
-    extraArgs = [
-      "--domain-filter=dozuki.cloud",
-      "--registry=txt",
-      "--txt-owner-id=azure-mpc-${var.environment}",
-      "--policy=sync",
-      "--aws-zone-type=public",
     ]
   })]
 }
