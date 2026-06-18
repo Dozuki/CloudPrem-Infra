@@ -428,7 +428,7 @@ resource "helm_release" "app" {
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
-  set = [
+  set = concat([
     # --- General ---
     { name = "hostname", value = var.dns_domain_name },
     { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
@@ -516,7 +516,11 @@ resource "helm_release" "app" {
     { name = "connectivity.connectors-worker.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
     { name = "connectivity.connectors-worker.redis.host", value = "dozuki-redis-master" },
     { name = "connectivity.connectors-worker.redis.tls", value = "false" },
-  ]
+    ], var.cloud == "azure" ? [
+    # --- Operator (azure: pull from GHCR mirror, not ECR) ---
+    { name = "dozuki-operator.image.repository", value = "${var.image_repository}/dozuki-operator" },
+    { name = "dozuki-operator.image.tag", value = var.operator_image_tag },
+  ] : [])
 
   set_sensitive = [
     { name = "db.password", value = local.db_master_password },

@@ -387,3 +387,9 @@ variable "tls_key" {
   type        = string
   default     = ""
 }
+
+variable "operator_image_tag" {
+  description = "dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion)."
+  type        = string
+  default     = "3.0.3"
+}
