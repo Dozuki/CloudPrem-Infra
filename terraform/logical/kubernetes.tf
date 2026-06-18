@@ -518,8 +518,11 @@ resource "helm_release" "app" {
     { name = "connectivity.connectors-worker.redis.tls", value = "false" },
     ], var.cloud == "azure" ? [
     # --- Operator (azure: pull from GHCR mirror, not ECR) ---
+    # The operator subchart reads its OWN imagePullSecrets (it does not honor
+    # global.imagePullSecrets), so the GHCR pull secret must be set explicitly.
     { name = "dozuki-operator.image.repository", value = "${var.image_repository}/dozuki-operator" },
     { name = "dozuki-operator.image.tag", value = var.operator_image_tag },
+    { name = "dozuki-operator.imagePullSecrets[0].name", value = "ghcr-pull" },
   ] : [])
 
   set_sensitive = [
