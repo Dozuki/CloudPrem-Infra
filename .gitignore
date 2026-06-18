@@ -3,6 +3,7 @@
 terraform.tfstate.d/
 **/.terragrunt*
 *.tfvars
+!terraform/physical-azure/examples/**/*.tfvars
 tfvars
 .idea
 *.iml
