@@ -44,6 +44,10 @@ func RunUpgrade(p RunParams) (err error) {
 	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
 	region := p.Matrix.Defaults.Region
 
+	// Refresh remote-tracking refs so branch refs (e.g. v6.1-release) are checked out
+	// at their pushed state, not a stale local branch.
+	FetchOrigin(p.RepoDir)
+
 	// Baseline worktree initializes the chart git submodule (pre-#145 refs use it).
 	fromWT, err := AddWorktree(p.RepoDir, base, p.FromRef, true)
 	if err != nil {
@@ -78,6 +82,16 @@ func RunUpgrade(p RunParams) (err error) {
 		}
 	}
 
+	// Write env.hcl into BOTH worktrees up front so the deferred destroy (which
+	// runs against toWT) always has a valid config to clean up with, even if the
+	// baseline apply fails before the target env.hcl would otherwise be written.
+	if werr := WriteEnvHCL(filepath.Join(fromWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.FromRef)); werr != nil {
+		return werr
+	}
+	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.ToRef)); werr != nil {
+		return werr
+	}
+
 	// Always attempt destroy (against the target/final code) without clobbering
 	// an earlier error. Registered last so it runs before the worktree removals.
 	defer func() {
@@ -87,9 +101,6 @@ func RunUpgrade(p RunParams) (err error) {
 	}()
 
 	// ---- Baseline apply + validate ----
-	if werr := WriteEnvHCL(filepath.Join(fromWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.FromRef)); werr != nil {
-		return werr
-	}
 	if aerr := tg(fromWT).Apply(); aerr != nil {
 		return fmt.Errorf("baseline apply: %w", aerr)
 	}

@@ -19,7 +19,7 @@ versions:
   v6.1-release:
     image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
     nextjs_tag: "2.23.0"
-    chart_version: "0.3.0"
+    chart_version: "0.3.6"
     image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com
 
 configs:
@@ -42,7 +42,11 @@ configs:
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
-      sso_admin_role_arn: "arn:aws:iam::076248559428:role/aws-reserved/sso.amazonaws.com/us-west-2/AWSReservedSSO_AWSAdministratorAccess_4a1f558176c7c293"
+      # sso_admin_role_arn intentionally unset: when the harness runs AS the SSO
+      # admin role (local runs), that identity IS the EKS cluster creator, so an
+      # explicit access entry for it collides with the auto-created creator entry
+      # (ResourceInUseException). The creator already has cluster admin, so the
+      # harness needs no explicit entry; leaving it unset works for local + CI.
   - name: bi_ha
     env: bi
     feature_flags:
