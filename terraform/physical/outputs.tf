@@ -41,7 +41,7 @@ output "s3_replicate_buckets" {
   value = local.use_existing_buckets
 }
 output "memcached_cluster_address" {
-  value = aws_elasticache_cluster.this.cluster_address
+  value = try(aws_elasticache_cluster.this[0].cluster_address, "")
 }
 output "vpc_id" {
   description = "VPC ID"

@@ -400,6 +400,10 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   depends_on   = [helm_release.cert_manager]
 }
 
+locals {
+  memcached_in_cluster = var.cloud == "azure" || var.memcached_in_cluster
+}
+
 resource "helm_release" "app" {
   depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls, helm_release.external_dns]
 
@@ -488,7 +492,7 @@ resource "helm_release" "app" {
     { name = "objectStorage.objectsBucket", value = var.s3_objects_bucket },
 
     # --- Memcached ---
-    { name = "memcached.host", value = var.cloud == "aws" ? var.memcached_cluster_address : "dozuki-memcached" },
+    { name = "memcached.host", value = local.memcached_in_cluster ? "dozuki-memcached" : var.memcached_cluster_address },
 
     # --- Vault ---
     { name = "vault.enabled", value = var.cloud == "aws" ? "true" : "false" },
@@ -504,7 +508,7 @@ resource "helm_release" "app" {
     { name = "monitoring.enabled", value = "true" },
 
     # --- In-cluster services (Azure) ---
-    { name = "memcached.enabled", value = var.cloud == "azure" ? "true" : "false" },
+    { name = "memcached.enabled", value = local.memcached_in_cluster ? "true" : "false" },
     { name = "objectStorage.endpoint", value = var.cloud == "azure" ? "https://s3.${var.dns_domain_name}" : "" },
     { name = "objectStorage.publicHost", value = var.cloud == "azure" ? "s3.${var.dns_domain_name}" : "" },
 

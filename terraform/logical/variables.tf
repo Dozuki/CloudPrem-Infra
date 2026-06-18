@@ -434,3 +434,9 @@ variable "gateway_name" {
   type        = string
   default     = "dozuki-gateway"
 }
+
+variable "memcached_in_cluster" {
+  description = "Run memcached in-cluster instead of ElastiCache (AWS). Azure is always in-cluster. Must match the physical layer's value."
+  type        = bool
+  default     = true
+}
