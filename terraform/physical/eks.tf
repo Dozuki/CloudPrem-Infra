@@ -199,6 +199,14 @@ module "eks_cluster" {
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
 
+  # The default 15m cluster-delete timeout can be exceeded when the cluster still has
+  # load-balancer/ENI resources to clean up (e.g. an automated teardown after a failed
+  # logical destroy leaves Service-type LoadBalancers behind). Give it headroom so the
+  # teardown completes instead of timing out mid-DELETING and stranding the VPC.
+  timeouts = {
+    delete = "30m"
+  }
+
   name = local.identifier
   # Default null lets EKS Auto Mode manage version via upgrade_policy.
   # Set eks_k8s_version to pin a specific version if needed.

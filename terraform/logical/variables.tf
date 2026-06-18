@@ -360,7 +360,7 @@ variable "rustici_managed_password" {
 variable "chart_version" {
   description = "Dozuki chart version pulled from the registry (oci://<image_repository>/charts/dozuki)."
   type        = string
-  default     = "0.3.0"
+  default     = "0.3.6"
 }
 
 variable "ghcr_pull_username" {
@@ -392,4 +392,39 @@ variable "operator_image_tag" {
   description = "dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion)."
   type        = string
   default     = "3.0.3"
+}
+
+variable "gateway_dns_label" {
+  description = "Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label."
+  type        = string
+  default     = ""
+}
+
+variable "aws_external_dns_role_arn" {
+  description = "AWS IAM role ARN that external-dns assumes via AKS workload identity (azure). Empty = external-dns disabled."
+  type        = string
+  default     = ""
+}
+
+variable "azure_tls_mode" {
+  description = "Azure gateway TLS strategy: self-signed (dev), letsencrypt (cert-manager HTTP-01), or supplied (tls_cert/tls_key)."
+  type        = string
+  default     = "self-signed"
+
+  validation {
+    condition     = contains(["self-signed", "letsencrypt", "supplied"], var.azure_tls_mode)
+    error_message = "azure_tls_mode must be self-signed, letsencrypt, or supplied."
+  }
+}
+
+variable "azure_acme_server" {
+  description = "ACME directory URL for the cert-issuer when azure_tls_mode=letsencrypt. Empty = chart default (LE prod). Use the staging URL during bring-up."
+  type        = string
+  default     = ""
+}
+
+variable "external_dns_sa_name" {
+  description = "external-dns service account name (must match the AWS role trust subject)."
+  type        = string
+  default     = "external-dns"
 }
