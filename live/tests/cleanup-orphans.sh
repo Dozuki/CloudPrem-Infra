@@ -54,6 +54,7 @@ fi
 if [ -z "$PREFIXES" ]; then echo ">> No matching orphaned local-* state prefixes found in s3://$BUCKET/."; fi
 
 fail=0
+STACKS=""   # collected <customer>-<env> stacks, for central-Vault cleanup after teardown
 # Loop in the parent shell (process substitution, not a pipe) so set/exit behave.
 while IFS= read -r pfx; do
   [ -z "$pfx" ] && continue
@@ -66,6 +67,7 @@ while IFS= read -r pfx; do
     envdir="$(dirname "$(dirname "$rel")")"    # standard/us-east-1/min
     region="$(printf '%s' "$envdir" | awk -F/ '{print $2}')"; region="${region:-$R}"
     env="$(printf '%s' "$envdir" | awk -F/ '{print $3}')"
+    [ -n "$env" ] && STACKS="$STACKS ${CUSTOMER}-${env}"
     echo "  partition path: $envdir  (region=$region env=$env customer=$CUSTOMER)"
   else
     echo "  no physical state under this prefix — will release locks + purge state only"
@@ -121,7 +123,43 @@ for lg in $(aws logs describe-log-groups --region "$R" --profile "$P" \
   aws logs delete-log-group --log-group-name "$lg" --region "$R" --profile "$P" 2>/dev/null && echo "  deleted log group: $lg"
 done
 
-# 6) Verify.
+# 6) Central Vault cleanup: disable each stack's k8s auth mount + delete its policy.
+# The mount k8s/<customer>-<env> lives in the central Vault (account 0106), keyed by
+# stack name, and is NOT torn down with the AWS stack. A leftover mount makes the next
+# run's `vault_auth_backend` create fail ("path already in use"), so kubernetes_host
+# stays pointed at the old cluster -> ESO gets 403 -> pods can't mount their secret ->
+# helm hangs. Reuses an inherited VAULT_ADDR/VAULT_TOKEN (e.g. from run.sh's trap) or
+# brings up its own tunnel + AWS-auth login. Skip with SKIP_VAULT_CLEANUP=1.
+STACKS="$(printf '%s\n' $STACKS | awk 'NF' | sort -u)"
+if [ -n "$STACKS" ] && [ "${SKIP_VAULT_CLEANUP:-0}" != 1 ]; then
+  echo; echo "==================== central-Vault cleanup ===================="
+  VPF=""
+  if [ -z "${VAULT_ADDR:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
+    VCTX="${VAULT_KUBE_CONTEXT:-vault-standard}"; VPROF="${VAULT_AWS_PROFILE:-dozuki}"; VROLE="${VAULT_AWS_ROLE:-admin}"
+    if command -v vault >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 \
+       && aws sts get-caller-identity --profile "$VPROF" >/dev/null 2>&1; then
+      kubectl --context "$VCTX" port-forward -n vault svc/vault-active 8204:8200 >/tmp/cleanup-vpf.log 2>&1 &
+      VPF=$!; sleep 4
+      export VAULT_ADDR="http://127.0.0.1:8204"
+      VAULT_TOKEN="$( eval "$(aws --profile "$VPROF" configure export-credentials --format env 2>/dev/null)"; \
+        vault login -method=aws role="$VROLE" -format=json 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["auth"]["client_token"])' 2>/dev/null )"
+      export VAULT_TOKEN
+    fi
+  fi
+  if [ -n "${VAULT_TOKEN:-}" ]; then
+    for stack in $STACKS; do
+      vault auth disable "k8s/$stack" >/dev/null 2>&1 && echo "  vault: disabled auth mount k8s/$stack"
+      vault policy delete "$stack" >/dev/null 2>&1 || true
+    done
+  else
+    echo "  WARNING: no Vault access — skipped central-Vault mount cleanup for: $STACKS" >&2
+    echo "           (a leftover k8s/<stack> mount will break the next run; disable it manually or set SKIP_VAULT_CLEANUP=1)" >&2
+    fail=1
+  fi
+  [ -n "$VPF" ] && kill "$VPF" 2>/dev/null || true
+fi
+
+# 7) Verify.
 echo; echo "==================== verify-clean ===================="
 DR_REGION="$DR" AWS_PROFILE="$P" "$HARNESS_DIR/verify-clean.sh" "$CUSTOMER" || fail=1
 

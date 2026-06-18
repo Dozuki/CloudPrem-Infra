@@ -105,17 +105,18 @@ VAULT_AWS_ROLE="${VAULT_AWS_ROLE:-admin}"
 VAULT_PF_PID=""
 
 cleanup() {
-  [ -n "$VAULT_PF_PID" ] && kill "$VAULT_PF_PID" 2>/dev/null || true
   # Backstop teardown: once the run has started, always sweep THIS run's resources +
   # state on exit — scoped to $RUN_ID so it never touches another run's stack — even
   # if the harness's own deferred destroy didn't run or finish (e.g. the test was
-  # interrupted/killed). It's a no-op once the run already cleaned itself, and it also
-  # purges the leftover state objects the in-test destroy leaves behind. Opt out with
-  # SKIP_AUTO_CLEANUP=1 to inspect a failed run's resources.
+  # interrupted/killed). It's a no-op once the run already cleaned itself, also purges
+  # the leftover state objects the in-test destroy leaves, and disables the stack's
+  # central-Vault auth mount. Runs BEFORE the tunnel is torn down so it can reuse this
+  # session's VAULT_ADDR/VAULT_TOKEN for that Vault cleanup. Opt out: SKIP_AUTO_CLEANUP=1.
   if [ "${STARTED_RUN:-0}" = 1 ] && [ "${SKIP_AUTO_CLEANUP:-0}" != 1 ]; then
     echo ">> Auto-cleanup: sweeping this run's resources + state (${RUN_ID}) ..." >&2
     ./cleanup-orphans.sh "${RUN_ID}-" || echo ">> Auto-cleanup reported issues — see verify-clean output above." >&2
   fi
+  [ -n "$VAULT_PF_PID" ] && kill "$VAULT_PF_PID" 2>/dev/null || true
   echo ">> Full run log saved to: $RUN_LOG" >&2
 }
 trap cleanup EXIT
