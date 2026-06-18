@@ -99,7 +99,7 @@ while IFS= read -r pfx; do
       rm -rf .terragrunt-cache
       TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
       TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
-        terragrunt destroy --terragrunt-non-interactive -input=false )
+        terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
     destroyed_ok=$?
   elif [ -n "$key" ]; then
     echo "  WARNING: $LIVE_ROOT/$envdir/physical not found — cannot destroy via terragrunt; leaving state intact." >&2
