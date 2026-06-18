@@ -1,4 +1,5 @@
 resource "aws_security_group" "elasticache" {
+  count = var.memcached_in_cluster ? 0 : 1
 
   name        = "${local.identifier}-elasticache"
   description = "Elasticache memcached SG. Allows access on the 11211 port"
@@ -17,31 +18,33 @@ resource "aws_security_group" "elasticache" {
 }
 
 resource "aws_security_group_rule" "egress" {
+  count             = var.memcached_in_cluster ? 0 : 1
   description       = "Allow all egress traffic"
   from_port         = 0
   to_port           = 0
   protocol          = "-1"
   cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:aws-ec2-no-public-egress-sgr
-  security_group_id = aws_security_group.elasticache.id
+  security_group_id = aws_security_group.elasticache[0].id
   type              = "egress"
 }
 
 resource "aws_security_group_rule" "ingress_cidr_blocks" {
+  count             = var.memcached_in_cluster ? 0 : 1
   description       = "Allow inbound traffic from CIDR blocks"
   from_port         = 11211
   to_port           = 11211
   protocol          = "tcp"
   cidr_blocks       = [local.vpc_cidr]
-  security_group_id = aws_security_group.elasticache.id
+  security_group_id = aws_security_group.elasticache[0].id
   type              = "ingress"
 }
 
 resource "null_resource" "cluster_urls" {
-  count = var.elasticache_cluster_size
+  count = var.memcached_in_cluster ? 0 : var.elasticache_cluster_size
 
   triggers = {
     name = "${replace(
-      aws_elasticache_cluster.this.cluster_address,
+      aws_elasticache_cluster.this[0].cluster_address,
       ".cfg.",
       format(".%04d.", count.index + 1)
     )}:11211"
@@ -53,16 +56,19 @@ resource "null_resource" "cluster_urls" {
 }
 
 resource "aws_elasticache_subnet_group" "this" {
+  count      = var.memcached_in_cluster ? 0 : 1
   name       = local.identifier
   subnet_ids = local.private_subnet_ids
 }
 
 resource "aws_elasticache_parameter_group" "this" {
+  count  = var.memcached_in_cluster ? 0 : 1
   name   = local.identifier
   family = "memcached1.5"
 }
 
 resource "random_id" "elasticache" {
+  count       = var.memcached_in_cluster ? 0 : 1
   byte_length = 4
   keepers = {
     node_type      = var.elasticache_instance_type
@@ -71,20 +77,21 @@ resource "random_id" "elasticache" {
 }
 
 resource "aws_elasticache_cluster" "this" {
-  cluster_id = "${local.identifier}-${random_id.elasticache.hex}"
+  count      = var.memcached_in_cluster ? 0 : 1
+  cluster_id = "${local.identifier}-${random_id.elasticache[0].hex}"
 
   engine         = "memcached"
-  engine_version = random_id.elasticache.keepers.engine_version
+  engine_version = random_id.elasticache[0].keepers.engine_version
   port           = 11211
 
   node_type       = var.elasticache_instance_type
   num_cache_nodes = var.elasticache_cluster_size
 
   az_mode            = var.elasticache_cluster_size == 1 ? "single-az" : "cross-az"
-  subnet_group_name  = aws_elasticache_subnet_group.this.name
-  security_group_ids = [aws_security_group.elasticache.id]
+  subnet_group_name  = aws_elasticache_subnet_group.this[0].name
+  security_group_ids = [aws_security_group.elasticache[0].id]
 
-  parameter_group_name = aws_elasticache_parameter_group.this.name
+  parameter_group_name = aws_elasticache_parameter_group.this[0].name
 
   apply_immediately = true
 
