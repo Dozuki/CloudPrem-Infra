@@ -422,3 +422,9 @@ variable "azure_acme_server" {
   type        = string
   default     = ""
 }
+
+variable "external_dns_sa_name" {
+  description = "external-dns service account name (must match the AWS role trust subject)."
+  type        = string
+  default     = "external-dns"
+}
