@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loadtest-${LABEL}
+  namespace: ${NAMESPACE}
+  labels: { app: loadtest }
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: loadtest }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: ${K6_IMAGE}
+          args: ["run", "/scripts/journeys.js"]
+          env:
+            - { name: K6_TARGET, value: "${TARGET}" }
+            - { name: K6_VUS, value: "${VUS}" }
+            - { name: DURATION, value: "${DURATION}" }
+            - { name: LABEL, value: "${LABEL}" }
+            - { name: INSECURE, value: "${INSECURE}" }
+            - { name: ADMIN_EMAIL, value: "${ADMIN_EMAIL}" }
+            - { name: ADMIN_PASSWORD, value: "${ADMIN_PASSWORD}" }
+            - { name: POOL_JSON, value: '${POOL_JSON}' }
+            - { name: K6_PROMETHEUS_RW_SERVER_URL, value: "${PROM_URL}" }
+            - { name: K6_OUT, value: "${K6_OUT}" }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+      volumes:
+        - name: scripts
+          configMap: { name: loadtest-${LABEL}-scripts }
