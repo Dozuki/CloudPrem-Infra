@@ -446,7 +446,7 @@ resource "helm_release" "app" {
   set = concat([
     # --- General ---
     { name = "hostname", value = var.dns_domain_name },
-    { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
+    { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && !local.tls_managed_tf && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
     { name = "customer", value = coalesce(var.customer, "Dozuki") },
     { name = "environment", value = var.environment },
 
@@ -479,7 +479,7 @@ resource "helm_release" "app" {
     { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
-    { name = "tls.externallyManaged", value = (var.cloud == "azure" && var.azure_tls_mode != "letsencrypt") ? "true" : "false" },
+    { name = "tls.externallyManaged", value = local.tls_managed_tf ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
