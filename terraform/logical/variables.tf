@@ -358,9 +358,9 @@ variable "rustici_managed_password" {
 }
 
 variable "chart_version" {
-  description = "Dozuki chart version to pull via OCI (Azure only; AWS uses the in-repo chart)."
+  description = "Dozuki chart version pulled from the registry (oci://<image_repository>/charts/dozuki)."
   type        = string
-  default     = ""
+  default     = "0.3.0"
 }
 
 variable "ghcr_pull_username" {

@@ -60,6 +60,17 @@ provider "helm" {
       args        = local.k8s_exec_args
     }
   }
+
+  # OCI chart-pull auth (helm provider 3.x: `registries` is a list attribute,
+  # replacing 2.x's repeatable `registry {}` block). AWS authenticates
+  # in-Terraform via the ECR token. Azure pulls the
+  # chart from GHCR using an ambient `helm registry login` performed by the
+  # azure-config bootstrap, so no provider-level registry creds are set there.
+  registries = var.cloud == "aws" ? [{
+    url      = "oci://${var.image_repository}"
+    username = data.aws_ecr_authorization_token.chart[0].user_name
+    password = data.aws_ecr_authorization_token.chart[0].password
+  }] : []
 }
 
 provider "vault" {
@@ -198,6 +209,10 @@ data "aws_region" "current" {
 }
 
 data "aws_caller_identity" "current" {
+  count = var.cloud == "aws" ? 1 : 0
+}
+
+data "aws_ecr_authorization_token" "chart" {
   count = var.cloud == "aws" ? 1 : 0
 }
 

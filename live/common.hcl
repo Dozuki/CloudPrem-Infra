@@ -25,11 +25,6 @@ locals {
   EOF
 }
 
-generate "dozuki_helmignore" {
-  path      = "charts/dozuki/chart/.helmignore"
-  if_exists = "overwrite_terragrunt"
-  contents  = local.helmignore
-}
 generate "metrics_server_helmignore" {
   path      = "charts/metrics-server/.helmignore"
   if_exists = "overwrite_terragrunt"

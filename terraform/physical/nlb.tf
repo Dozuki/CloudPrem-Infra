@@ -52,6 +52,11 @@ module "nlb" {
   internal                         = !var.app_public_access
   enable_cross_zone_load_balancing = true
 
+  # The alb module (~> 10.0) defaults enable_deletion_protection=true (since
+  # v9.0.0). Follow protect_resources like rds/aurora/bi so non-protected stacks
+  # (e.g. the test harness) can be torn down without manually clearing it.
+  enable_deletion_protection = var.protect_resources
+
   vpc_id  = local.vpc_id
   subnets = local.public_subnet_ids
 
