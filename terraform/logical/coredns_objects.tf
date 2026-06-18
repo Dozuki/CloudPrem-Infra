@@ -30,7 +30,12 @@ locals {
 # makes in-cluster lookups of the object host return the gateway ClusterIP;
 # fallthrough preserves all other resolution. Count is gated on the static azure
 # local (NOT the discovered IP) so it is known at plan time.
-resource "kubernetes_config_map_v1" "coredns_objects" {
+#
+# AKS pre-creates an empty `coredns-custom` ConfigMap (addon-manager EnsureExists),
+# so we PATCH its data rather than create the object (a create would 409). The
+# _data resource manages only this key via server-side apply; AKS keeps owning the
+# object and its labels.
+resource "kubernetes_config_map_v1_data" "coredns_objects" {
   count = local.coredns_objects_on ? 1 : 0
 
   metadata {
@@ -46,4 +51,7 @@ resource "kubernetes_config_map_v1" "coredns_objects" {
       }
     EOT
   }
+
+  field_manager = "dozuki-mpc-objects"
+  force         = true
 }
