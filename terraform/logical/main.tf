@@ -6,13 +6,17 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 2.0"
+      version = "~> 3.0"
     }
     vault = {
       source  = "hashicorp/vault"
@@ -34,31 +38,39 @@ terraform {
 }
 
 provider "kubernetes" {
-  host                   = data.aws_eks_cluster.main.endpoint
-  cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
+  host                   = local.cluster_host
+  cluster_ca_certificate = base64decode(local.cluster_ca)
+
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.id]
+    command     = local.k8s_exec_command
+    args        = local.k8s_exec_args
   }
 }
 
 provider "helm" {
-  kubernetes {
-    host                   = data.aws_eks_cluster.main.endpoint
-    cluster_ca_certificate = base64decode(data.aws_eks_cluster.main.certificate_authority[0].data)
-    exec {
+  # helm provider 3.x (plugin framework): nested config is attribute syntax.
+  kubernetes = {
+    host                   = local.cluster_host
+    cluster_ca_certificate = base64decode(local.cluster_ca)
+
+    exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args        = ["eks", "get-token", "--cluster-name", data.aws_eks_cluster.main.name, "--region", data.aws_region.current.id]
+      command     = local.k8s_exec_command
+      args        = local.k8s_exec_args
     }
   }
 
-  registry {
+  # OCI chart-pull auth (helm provider 3.x: `registries` is a list attribute,
+  # replacing 2.x's repeatable `registry {}` block). AWS authenticates
+  # in-Terraform via the ECR token. Azure pulls the
+  # chart from GHCR using an ambient `helm registry login` performed by the
+  # azure-config bootstrap, so no provider-level registry creds are set there.
+  registries = var.cloud == "aws" ? [{
     url      = "oci://${var.image_repository}"
-    username = data.aws_ecr_authorization_token.chart.user_name
-    password = data.aws_ecr_authorization_token.chart.password
-  }
+    username = data.aws_ecr_authorization_token.chart[0].user_name
+    password = data.aws_ecr_authorization_token.chart[0].password
+  }] : []
 }
 
 provider "vault" {
@@ -84,12 +96,31 @@ provider "vault" {
   }
 }
 
+provider "azurerm" {
+  subscription_id = var.azure_subscription_id == "" ? null : var.azure_subscription_id
+  environment     = var.azure_environment
+
+  features {}
+}
+
 locals {
-  is_us_gov        = data.aws_partition.current.partition == "aws-us-gov"
+  is_us_gov        = var.cloud == "aws" ? data.aws_partition.current[0].partition == "aws-us-gov" : false
   ca_cert_pem_file = local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
 
+  # Cluster auth (cloud-conditional)
+  cluster_host = var.cloud == "aws" ? data.aws_eks_cluster.main[0].endpoint : data.azurerm_kubernetes_cluster.main[0].kube_config[0].host
+  cluster_ca   = var.cloud == "aws" ? data.aws_eks_cluster.main[0].certificate_authority[0].data : data.azurerm_kubernetes_cluster.main[0].kube_config[0].cluster_ca_certificate
+
+  k8s_exec_command = var.cloud == "aws" ? "aws" : "kubelogin"
+  k8s_exec_args = var.cloud == "aws" ? [
+    "eks", "get-token", "--cluster-name", var.eks_cluster_id, "--region", data.aws_region.current[0].id
+    ] : concat(
+    ["get-token", "--server-id", "6dae42f8-4368-4678-94ff-3960e28e3630", "--login", var.azure_kubelogin_login],
+    var.azure_environment == "usgovernment" ? ["--environment", "AzureUSGovernmentCloud"] : []
+  )
+
   # Database
-  db_credentials = jsondecode(data.aws_secretsmanager_secret_version.db_master.secret_string)
+  db_credentials = var.cloud == "aws" ? jsondecode(data.aws_secretsmanager_secret_version.db_master[0].secret_string) : jsondecode(data.azurerm_key_vault_secret.db_master[0].value)
 
   db_master_host     = nonsensitive(local.db_credentials["host"])
   db_master_username = nonsensitive(local.db_credentials["username"])
@@ -111,14 +142,14 @@ locals {
   base_config_values = {
     customer               = { value = coalesce(var.customer, "Dozuki") }
     environment            = { value = var.environment }
-    aws_acct_id            = { value = data.aws_caller_identity.current.account_id }
-    aws_region             = { value = data.aws_region.current.id }
+    aws_acct_id            = { value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" }
+    aws_region             = { value = var.cloud == "aws" ? data.aws_region.current[0].id : "" }
     hostname               = { value = var.dns_domain_name }
     ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
     bi_enabled             = { value = var.enable_bi ? "true" : "false" }
     webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
     memcached_host         = { value = var.memcached_cluster_address }
-    s3_kms_key             = { value = data.aws_kms_key.s3.arn }
+    s3_kms_key             = { value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : "" }
     s3_images_bucket       = { value = var.s3_images_bucket }
     s3_objects_bucket      = { value = var.s3_objects_bucket }
     s3_documents_bucket    = { value = var.s3_documents_bucket }
@@ -165,23 +196,49 @@ check "vault_address_configured" {
 }
 
 data "aws_eks_cluster" "main" {
-  name = var.eks_cluster_id
+  count = var.cloud == "aws" ? 1 : 0
+  name  = var.eks_cluster_id
 }
 
-data "aws_partition" "current" {}
-data "aws_region" "current" {}
-data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {
+  count = var.cloud == "aws" ? 1 : 0
+}
 
-data "aws_ecr_authorization_token" "chart" {}
+data "aws_region" "current" {
+  count = var.cloud == "aws" ? 1 : 0
+}
+
+data "aws_caller_identity" "current" {
+  count = var.cloud == "aws" ? 1 : 0
+}
+
+data "aws_ecr_authorization_token" "chart" {
+  count = var.cloud == "aws" ? 1 : 0
+}
 
 data "aws_kms_key" "s3" {
+  count  = var.cloud == "aws" ? 1 : 0
   key_id = var.s3_kms_key_id
 }
 
 data "aws_secretsmanager_secret_version" "db_master" {
+  count     = var.cloud == "aws" ? 1 : 0
   secret_id = var.primary_db_secret
 }
+
 data "aws_secretsmanager_secret_version" "db_bi" {
-  count     = var.enable_bi ? 1 : 0
+  count     = var.cloud == "aws" && var.enable_bi ? 1 : 0
   secret_id = var.bi_database_credential_secret
+}
+
+data "azurerm_kubernetes_cluster" "main" {
+  count               = var.cloud == "azure" ? 1 : 0
+  name                = var.eks_cluster_id
+  resource_group_name = var.azure_resource_group
+}
+
+data "azurerm_key_vault_secret" "db_master" {
+  count        = var.cloud == "azure" ? 1 : 0
+  name         = "database-credentials"
+  key_vault_id = var.azure_key_vault_id
 }
