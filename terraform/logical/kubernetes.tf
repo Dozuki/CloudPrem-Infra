@@ -447,7 +447,7 @@ resource "helm_release" "app" {
     { name = "environment", value = var.environment },
 
     # --- AWS ---
-    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].id : "" },
+    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].id : "us-east-1" },
     { name = "aws.accountId", value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" },
     { name = "aws.enabled", value = var.cloud == "aws" ? "true" : "false" },
 
