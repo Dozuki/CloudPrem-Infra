@@ -2,7 +2,7 @@
 
 The logical layer consumes physical-layer outputs. On AWS this wiring lives in
 `live/common.hcl` (terragrunt dependency block). On Azure it lives in the
-`cloudprem-azure-config` boilerplate. A physical layer for any cloud MUST
+`mpc-azure-config` boilerplate. A physical layer for any cloud MUST
 provide the values below; "N/A" values are wired as literal constants in the
 config layer, not produced by the cloud layer.
 

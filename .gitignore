@@ -1,9 +1,11 @@
 *.tfstate*
 .terraform*
+tfplan
 terraform.tfstate.d/
 **/.terragrunt*
 *.tfvars
 !terraform/physical-azure/examples/**/*.tfvars
+!terraform/logical/examples/**/*.tfvars
 tfvars
 .idea
 *.iml
@@ -12,3 +14,13 @@ test_output*
 /live/standard/
 /live/logs
 /live/logs/
+
+# Azure deploy kit
+dist/
+azure-config/.bin/
+azure-config/.state/
+azure-config/*.tfvars
+azure-config/ghcr.env
+terraform/physical-azure/backend_override.tf
+terraform/logical/backend_override.tf
+terraform/logical/aws_stub_override.tf
