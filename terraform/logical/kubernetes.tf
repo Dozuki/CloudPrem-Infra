@@ -401,7 +401,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -428,7 +428,7 @@ resource "helm_release" "app" {
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
-  set = [
+  set = concat([
     # --- General ---
     { name = "hostname", value = var.dns_domain_name },
     { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
@@ -443,7 +443,7 @@ resource "helm_release" "app" {
     # --- Database ---
     { name = "db.host", value = local.db_master_host },
     { name = "db.user", value = local.db_master_username },
-    { name = "db.rdsCaCert", value = var.cloud == "aws" ? base64encode(file(local.ca_cert_pem_file)) : "" },
+    { name = "db.rdsCaCert", value = base64encode(file(local.ca_cert_pem_file)) },
 
     # --- SMTP ---
     { name = "smtp.enabled", value = var.smtp_enabled ? "true" : "false" },
@@ -464,6 +464,7 @@ resource "helm_release" "app" {
     { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
+    { name = "tls.externallyManaged", value = var.cloud == "azure" ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
@@ -515,7 +516,14 @@ resource "helm_release" "app" {
     { name = "connectivity.connectors-worker.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
     { name = "connectivity.connectors-worker.redis.host", value = "dozuki-redis-master" },
     { name = "connectivity.connectors-worker.redis.tls", value = "false" },
-  ]
+    ], var.cloud == "azure" ? [
+    # --- Operator (azure: pull from GHCR mirror, not ECR) ---
+    # The operator subchart reads its OWN imagePullSecrets (it does not honor
+    # global.imagePullSecrets), so the GHCR pull secret must be set explicitly.
+    { name = "dozuki-operator.image.repository", value = "${var.image_repository}/dozuki-operator" },
+    { name = "dozuki-operator.image.tag", value = var.operator_image_tag },
+    { name = "dozuki-operator.imagePullSecrets[0].name", value = "ghcr-pull" },
+  ] : [])
 
   set_sensitive = [
     { name = "db.password", value = local.db_master_password },
