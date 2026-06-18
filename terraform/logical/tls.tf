@@ -1,11 +1,16 @@
-# Azure gateway TLS. On Azure the chart runs with tls.externallyManaged=true
-# (ACME cannot issue without public DNS), so Terraform supplies the tls-secret:
-# operator-provided cert (tls_cert/tls_key) when set, otherwise a generated
-# self-signed cert for dev smoke testing. AWS is unaffected (count = 0).
+# Gateway TLS managed by Terraform. When an operator supplies a cert/key
+# (tls_cert/tls_key) — on ANY cloud — Terraform creates the tls-secret directly and
+# the chart runs with tls.externallyManaged=true, so cert-manager/ACME stays out of
+# the way (no public-DNS / ACME dependency, which is essential for ephemeral test
+# clusters and air-gapped on-prem). Azure additionally supports a generated
+# self-signed cert for dev (azure_tls_mode=self-signed); making the self-signed
+# generation cloud-agnostic is a follow-up. AWS with no supplied cert is unaffected
+# (cert-manager/ACME as before).
 
 locals {
-  # letsencrypt mode: cert-manager owns tls-secret, so Terraform creates nothing.
-  tls_supplied   = var.cloud == "azure" && var.azure_tls_mode == "supplied" && var.tls_cert != "" && var.tls_key != ""
+  # Operator-supplied cert/key — cloud-agnostic.
+  tls_supplied = var.tls_cert != "" && var.tls_key != ""
+  # Generated self-signed cert (dev). Azure-only for now; follow-up to generalize.
   tls_selfsigned = var.cloud == "azure" && var.azure_tls_mode == "self-signed"
   tls_managed_tf = local.tls_supplied || local.tls_selfsigned
 }

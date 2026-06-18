@@ -420,4 +420,10 @@ variable "aurora_snapshot_identifier" {
   default     = ""
 }
 
+variable "memcached_in_cluster" {
+  description = "Run memcached in-cluster (chart memcached deployment) instead of ElastiCache. When true (default), ElastiCache is not provisioned (and is destroyed if it exists)."
+  type        = bool
+  default     = true
+}
+
 # --- END App Configuration --- #

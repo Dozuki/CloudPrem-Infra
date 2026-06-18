@@ -400,6 +400,10 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   depends_on   = [helm_release.cert_manager]
 }
 
+locals {
+  memcached_in_cluster = var.cloud == "azure" || var.memcached_in_cluster
+}
+
 resource "helm_release" "app" {
   depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls, helm_release.external_dns]
 
@@ -442,12 +446,12 @@ resource "helm_release" "app" {
   set = concat([
     # --- General ---
     { name = "hostname", value = var.dns_domain_name },
-    { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
+    { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && !local.tls_managed_tf && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
     { name = "customer", value = coalesce(var.customer, "Dozuki") },
     { name = "environment", value = var.environment },
 
     # --- AWS ---
-    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].id : "" },
+    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].id : "us-east-1" },
     { name = "aws.accountId", value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" },
     { name = "aws.enabled", value = var.cloud == "aws" ? "true" : "false" },
 
@@ -475,7 +479,7 @@ resource "helm_release" "app" {
     { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
-    { name = "tls.externallyManaged", value = (var.cloud == "azure" && var.azure_tls_mode != "letsencrypt") ? "true" : "false" },
+    { name = "tls.externallyManaged", value = local.tls_managed_tf ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
@@ -488,7 +492,7 @@ resource "helm_release" "app" {
     { name = "objectStorage.objectsBucket", value = var.s3_objects_bucket },
 
     # --- Memcached ---
-    { name = "memcached.host", value = var.cloud == "aws" ? var.memcached_cluster_address : "dozuki-memcached" },
+    { name = "memcached.host", value = local.memcached_in_cluster ? "dozuki-memcached" : var.memcached_cluster_address },
 
     # --- Vault ---
     { name = "vault.enabled", value = var.cloud == "aws" ? "true" : "false" },
@@ -504,8 +508,9 @@ resource "helm_release" "app" {
     { name = "monitoring.enabled", value = "true" },
 
     # --- In-cluster services (Azure) ---
-    { name = "memcached.enabled", value = var.cloud == "azure" ? "true" : "false" },
-    { name = "objectStorage.endpoint", value = var.cloud == "azure" ? local.seaweedfs_s3_endpoint : "" },
+    { name = "memcached.enabled", value = local.memcached_in_cluster ? "true" : "false" },
+    { name = "objectStorage.endpoint", value = var.cloud == "azure" ? "https://s3.${var.dns_domain_name}" : "" },
+    { name = "objectStorage.publicHost", value = var.cloud == "azure" ? "s3.${var.dns_domain_name}" : "" },
 
     # --- Grafana ---
     { name = "grafana.enabled", value = var.enable_bi ? "true" : "false" },

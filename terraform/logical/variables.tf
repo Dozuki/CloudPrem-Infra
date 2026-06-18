@@ -377,13 +377,13 @@ variable "ghcr_pull_token" {
 }
 
 variable "tls_cert" {
-  description = "Base64-encoded PEM TLS certificate for the gateway (azure). Empty = generate a self-signed cert for dev."
+  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set (any cloud), Terraform creates the tls-secret and the chart runs with tls.externallyManaged=true, bypassing cert-manager/ACME. Empty = cert-manager/ACME (AWS) or azure_tls_mode (azure)."
   type        = string
   default     = ""
 }
 
 variable "tls_key" {
-  description = "Base64-encoded PEM TLS private key matching tls_cert (azure). Empty = generate a self-signed cert for dev."
+  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set."
   type        = string
   default     = ""
 }
@@ -427,4 +427,16 @@ variable "external_dns_sa_name" {
   description = "external-dns service account name (must match the AWS role trust subject)."
   type        = string
   default     = "external-dns"
+}
+
+variable "gateway_name" {
+  description = "Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon."
+  type        = string
+  default     = "dozuki-gateway"
+}
+
+variable "memcached_in_cluster" {
+  description = "Run memcached in-cluster instead of ElastiCache (AWS). Azure is always in-cluster. Must match the physical layer's value."
+  type        = bool
+  default     = true
 }
