@@ -31,70 +31,62 @@ module "karpenter" {
 
 # Cilium CNI (eBPF dataplane). Replaces both vpc-cni and kube-proxy (kubeProxyReplacement).
 # Pods get IPs from an off-VPC overlay (cluster-pool IPAM) tunnelled with VXLAN.
-resource "helm_release" "cilium" {
+#
+# Installed imperatively (helm via local-exec) rather than via the Terraform helm provider:
+# the provider would have to be configured from this same apply's cluster outputs, which
+# forces a -target on first create and deadlocks with the in-module bootstrap node group
+# (the node group waits for nodes to be Ready, but nodes can't be Ready until a CNI exists).
+# This null_resource intentionally has NO depends_on so it runs CONCURRENTLY with the module:
+# the script polls for the cluster by name, then installs Cilium, making the bootstrap nodes
+# Ready before the node group's create timeout.
+resource "null_resource" "cilium_bootstrap" {
   count = local.self_managed ? 1 : 0
 
-  name       = "cilium"
-  repository = "https://helm.cilium.io"
-  chart      = "cilium"
-  version    = var.cilium_chart_version
-  namespace  = "kube-system"
+  triggers = {
+    version   = var.cilium_chart_version
+    pod_cidr  = var.cilium_pod_cidr
+    hubble_ui = tostring(var.cilium_enable_hubble_ui)
+    wireguard = tostring(var.cilium_enable_wireguard)
+    cluster   = local.identifier
+  }
 
-  depends_on = [module.eks_cluster]
-
-  values = [yamlencode({
-    kubeProxyReplacement = true
-    k8sServiceHost       = replace(module.eks_cluster.cluster_endpoint, "https://", "")
-    k8sServicePort       = 443
-    ipam = {
-      mode = "cluster-pool"
-      operator = {
-        clusterPoolIPv4PodCIDRList = [var.cilium_pod_cidr]
-        clusterPoolIPv4MaskSize    = 24
-      }
-    }
-    routingMode    = "tunnel"
-    tunnelProtocol = "vxlan"
-    bpf = {
-      masquerade = true
-    }
-    encryption = var.cilium_enable_wireguard ? { enabled = true, type = "wireguard" } : { enabled = false }
-    hubble = {
-      enabled = true
-      relay   = { enabled = true }
-      ui      = { enabled = var.cilium_enable_hubble_ui }
-    }
-    # Tolerate the not-ready/uninitialized taints so Cilium can schedule onto fresh nodes
-    # (including the bootstrap node group) before any other CNI is present.
-    tolerations = [{ operator = "Exists" }]
-  })]
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command = templatefile("${path.module}/scripts/cilium-bootstrap.sh.tftpl", {
+      cluster_name  = local.identifier
+      region        = data.aws_region.current.id
+      chart_version = var.cilium_chart_version
+      pod_cidr      = var.cilium_pod_cidr
+      hubble_ui     = tostring(var.cilium_enable_hubble_ui)
+      wireguard     = tostring(var.cilium_enable_wireguard)
+    })
+  }
 }
 
 # Karpenter controller. Pinned to the bootstrap node group via nodeSelector so it has somewhere
-# to run before it provisions any nodes of its own. Installed after Cilium so its pods get IPs.
-resource "helm_release" "karpenter" {
+# to run before it provisions any nodes of its own. Installed (imperative helm via local-exec)
+# after the cluster, the Karpenter IAM/queue module, and Cilium are all up so its pods get IPs.
+resource "null_resource" "karpenter_bootstrap" {
   count = local.self_managed ? 1 : 0
 
-  name       = "karpenter"
-  repository = "oci://public.ecr.aws/karpenter"
-  chart      = "karpenter"
-  version    = var.karpenter_chart_version
-  namespace  = "kube-system"
+  depends_on = [module.eks_cluster, module.karpenter, null_resource.cilium_bootstrap]
 
-  depends_on = [helm_release.cilium, module.karpenter]
+  triggers = {
+    version = var.karpenter_chart_version
+    queue   = module.karpenter[0].queue_name
+    cluster = local.identifier
+  }
 
-  values = [yamlencode({
-    settings = {
-      clusterName       = module.eks_cluster.cluster_name
-      interruptionQueue = module.karpenter[0].queue_name
-    }
-    serviceAccount = {
-      name = module.karpenter[0].service_account
-    }
-    nodeSelector = {
-      "dozuki.com/node-role" = "bootstrap"
-    }
-  })]
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command = templatefile("${path.module}/scripts/karpenter-bootstrap.sh.tftpl", {
+      cluster_name    = local.identifier
+      region          = data.aws_region.current.id
+      chart_version   = var.karpenter_chart_version
+      queue_name      = module.karpenter[0].queue_name
+      service_account = module.karpenter[0].service_account
+    })
+  }
 }
 
 # The Karpenter NodePool + EC2NodeClass custom resources live in the logical layer
