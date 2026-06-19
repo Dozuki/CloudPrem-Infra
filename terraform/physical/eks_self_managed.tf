@@ -98,7 +98,8 @@ resource "helm_release" "karpenter" {
 }
 
 # EC2NodeClass: how Karpenter builds nodes (Bottlerocket AMI, node IAM role, subnet/SG discovery
-# via the karpenter.sh/discovery tag added to the private subnets and cluster SG).
+# via the karpenter.sh/discovery tag). The tag is applied to the private subnets (vpc.tf) and to
+# the EKS-created node security group (node_security_group_tags in eks.tf).
 resource "kubernetes_manifest" "karpenter_node_class" {
   count = local.self_managed ? 1 : 0
 

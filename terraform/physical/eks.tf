@@ -257,6 +257,11 @@ module "eks_cluster" {
   # auto mode declares no managed addons (EKS Auto Mode manages them) — empty map keeps that inert.
   addons = var.eks_compute_mode == "self_managed" ? { coredns = { most_recent = true } } : {}
 
+  # self_managed: tag the EKS-created node security group so Karpenter's EC2NodeClass
+  # securityGroupSelectorTerms (karpenter.sh/discovery) can discover it for launched nodes.
+  # auto mode uses the module default ({}), so this is inert there.
+  node_security_group_tags = var.eks_compute_mode == "self_managed" ? { "karpenter.sh/discovery" = local.identifier } : {}
+
   vpc_id     = local.vpc_id
   subnet_ids = local.private_subnet_ids
 

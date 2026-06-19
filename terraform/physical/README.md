@@ -6,6 +6,7 @@
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.1 |
 | <a name="requirement_archive"></a> [archive](#requirement\_archive) | ~> 2.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
+| <a name="requirement_helm"></a> [helm](#requirement\_helm) | ~> 2.17 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 2.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
 | <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.0 |
@@ -18,6 +19,8 @@
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.51.0 |
 | <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.51.0 |
 | <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.51.0 |
+| <a name="provider_helm"></a> [helm](#provider\_helm) | 2.17.0 |
+| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.38.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
@@ -33,6 +36,7 @@
 | <a name="module_disk_alarm"></a> [disk\_alarm](#module\_disk\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_dms_replica_database"></a> [dms\_replica\_database](#module\_dms\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | ~> 21.0 |
+| <a name="module_karpenter"></a> [karpenter](#module\_karpenter) | terraform-aws-modules/eks/aws//modules/karpenter | ~> 21.0 |
 | <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | ~> 10.0 |
 | <a name="module_node_cpu_alarm"></a> [node\_cpu\_alarm](#module\_node\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
@@ -164,6 +168,10 @@
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
+| [helm_release.cilium](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.karpenter](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [kubernetes_manifest.karpenter_node_class](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
+| [kubernetes_manifest.karpenter_node_pool](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
 | [null_resource.adopt_cloudwatch_observability_addon](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
