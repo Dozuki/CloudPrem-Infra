@@ -3,11 +3,19 @@ package harness
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
 )
+
+// step prints a timestamped progress marker to stderr (captured by run.sh's tee) so
+// the log shows what the harness is doing during the otherwise-silent gaps between
+// terragrunt stages (validation waits, output reads, validators, teardown).
+func step(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "\n>> [harness %s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+}
 
 // RunParams configures one upgrade run.
 type RunParams struct {
@@ -48,6 +56,7 @@ func RunUpgrade(p RunParams) (err error) {
 	// at their pushed state, not a stale local branch.
 	FetchOrigin(p.RepoDir)
 
+	step("preparing worktrees: %s (baseline) + %s (upgrade)", p.FromRef, p.ToRef)
 	// Baseline worktree initializes the chart git submodule (pre-#145 refs use it).
 	fromWT, err := AddWorktree(p.RepoDir, base, p.FromRef, true)
 	if err != nil {
@@ -95,19 +104,23 @@ func RunUpgrade(p RunParams) (err error) {
 	// Always attempt destroy (against the target/final code) without clobbering
 	// an earlier error. Registered last so it runs before the worktree removals.
 	defer func() {
+		step("TEARDOWN: destroy (logical best-effort, then ALWAYS physical)")
 		if derr := tg(toWT).Destroy(); derr != nil && err == nil {
 			err = fmt.Errorf("destroy: %w", derr)
 		}
 	}()
 
 	// ---- Baseline apply + validate ----
+	step("BASELINE apply: %s (terragrunt run-all apply — physical then logical)", p.FromRef)
 	if aerr := tg(fromWT).Apply(); aerr != nil {
 		return fmt.Errorf("baseline apply: %w", aerr)
 	}
+	step("baseline applied — validating: cluster health (waits for pods Ready, up to 20m), endpoints, helm release")
 	baselineRev, _, verr := validateStack(tg(fromWT), p, region)
 	if verr != nil {
 		return fmt.Errorf("baseline validation: %w", verr)
 	}
+	step("baseline validated ✓ (helm revision %d)", baselineRev)
 
 	// ---- Pre-upgrade: write continuity sentinel if guide buckets are present ----
 	// Read outputs from the baseline to get guide bucket names for the sentinel.
@@ -125,19 +138,23 @@ func RunUpgrade(p RunParams) (err error) {
 	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.ToRef)); werr != nil {
 		return werr
 	}
+	step("UPGRADE apply: %s -> %s (same state prefix; terragrunt run-all apply)", p.FromRef, p.ToRef)
 	if aerr := tg(toWT).Apply(); aerr != nil {
 		return fmt.Errorf("upgrade apply: %w", aerr)
 	}
+	step("upgrade applied — validating: cluster health (up to 20m), endpoints, helm release")
 	_, kc, verr := validateStack(tg(toWT), p, region)
 	if verr != nil {
 		return fmt.Errorf("upgrade validation: %w", verr)
 	}
 	wantChart, _ := p.Matrix.Versions[p.ToRef]["chart_version"].(string)
+	step("verifying upgrade proof (helm revision advanced from %d; chart %q)", baselineRev, wantChart)
 	if rerr := validation.AssertUpgraded(kc, p.Namespace, "dozuki", baselineRev, wantChart); rerr != nil {
 		return fmt.Errorf("upgrade proof: %w", rerr)
 	}
 
 	// ---- Post-upgrade validators ----
+	step("upgrade proven ✓ — post-upgrade validators (control-plane logging, continuity sentinel, DMS, DR)")
 	outs, err := readOutputs(tg(toWT), region)
 	if err != nil {
 		return fmt.Errorf("post-upgrade readOutputs: %w", err)
@@ -181,11 +198,13 @@ func RunUpgrade(p RunParams) (err error) {
 
 	// Restore drill — only when requested (full config).
 	if p.RestoreDrill {
+		step("restore drill: restoring %s from DR backup in %s", outs.DBIdentifier, p.DRRegion)
 		if rderr := validation.RestoreDrill(ctx, p.DRRegion, outs.DBIdentifier, p.RunID); rderr != nil {
 			return fmt.Errorf("restore drill: %w", rderr)
 		}
 	}
 
+	step("ALL VALIDATIONS PASSED ✓ — %s -> %s upgrade verified; tearing down next", p.FromRef, p.ToRef)
 	return nil
 }
 
