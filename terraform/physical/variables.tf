@@ -465,9 +465,9 @@ variable "cilium_chart_version" {
 }
 
 variable "karpenter_chart_version" {
-  description = "Karpenter Helm chart version (pinned). Must match the EKS/k8s version — confirm against the compatibility matrix before apply. self_managed only."
+  description = "Karpenter Helm chart version (pinned). Must be compatible with the cluster's EKS version (see karpenter.sh compatibility matrix). self_managed only."
   type        = string
-  default     = "1.6.0"
+  default     = "1.13.0"
 }
 
 variable "cilium_pod_cidr" {
