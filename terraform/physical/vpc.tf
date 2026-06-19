@@ -63,6 +63,9 @@ module "vpc" {
     "kubernetes.io/cluster/${local.identifier}" = "shared"
     "kubernetes.io/role/internal-elb"           = "1"
     "type"                                      = "private"
+    # self_managed only: lets Karpenter's EC2NodeClass discover these subnets. null in auto mode
+    # so the tag set is byte-for-byte unchanged for existing (Auto Mode) environments.
+    "karpenter.sh/discovery" = var.eks_compute_mode == "self_managed" ? local.identifier : null
   }
 
   tags = local.tags
