@@ -20,7 +20,11 @@ versions:
     image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
     nextjs_tag: "2.23.0"
     image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
-  v6.0.2:                                                              # v6.0.1 + KMS 7-day dev deletion window; preferred upgrade baseline. Same app images.
+  v6.0.2:                                                              # v6.0.1 + KMS 7-day dev deletion window. Same app images.
+    image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
+    nextjs_tag: "2.23.0"
+    image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
+  v6.0.3:                                                              # v6.0.2 + chart TLS-secret kubernetes.io/tls fix (serves HTTPS over Envoy Gateway). PREFERRED baseline. Same app images.
     image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
     nextjs_tag: "2.23.0"
     image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
