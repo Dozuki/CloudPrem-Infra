@@ -60,8 +60,9 @@ resource "aws_dms_replication_subnet_group" "this" {
 resource "aws_kms_key" "bi" {
   count = var.enable_bi ? 1 : 0
 
-  description         = "BI KMS key for replication credentials"
-  enable_key_rotation = true
+  description             = "BI KMS key for replication credentials"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
 }
 
 resource "aws_dms_replication_instance" "this" {
