@@ -168,8 +168,9 @@ resource "aws_iam_policy" "eks_worker_kms" {
 resource "aws_kms_key" "eks" {
   count = local.create_eks_kms ? 1 : 0
 
-  description         = "EKS Secret Encryption Key"
-  enable_key_rotation = true
+  description             = "EKS Secret Encryption Key"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
 }
 
 resource "aws_iam_policy" "assume_cross_account_role" {
