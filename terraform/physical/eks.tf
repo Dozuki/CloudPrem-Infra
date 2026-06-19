@@ -253,9 +253,14 @@ module "eks_cluster" {
     }
   } : {}
 
-  # self_managed: Cilium replaces vpc-cni and kube-proxy, so only CoreDNS is managed as an addon.
+  # self_managed: Cilium replaces vpc-cni and kube-proxy, so we manage only CoreDNS and the
+  # Pod Identity agent. Auto Mode bundles the pod-identity-agent automatically; without it,
+  # Pod Identity associations (Karpenter, cert-manager, the app SAs) yield no AWS credentials.
   # auto mode declares no managed addons (EKS Auto Mode manages them) — empty map keeps that inert.
-  addons = var.eks_compute_mode == "self_managed" ? { coredns = { most_recent = true } } : {}
+  addons = var.eks_compute_mode == "self_managed" ? {
+    coredns                  = { most_recent = true }
+    "eks-pod-identity-agent" = { most_recent = true }
+  } : {}
 
   # self_managed: tag the EKS-created node security group so Karpenter's EC2NodeClass
   # securityGroupSelectorTerms (karpenter.sh/discovery) can discover it for launched nodes.
