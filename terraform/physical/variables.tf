@@ -427,3 +427,77 @@ variable "memcached_in_cluster" {
 }
 
 # --- END App Configuration --- #
+
+# --- BEGIN EKS Compute Mode (self_managed / Cilium) --- #
+
+variable "eks_compute_mode" {
+  description = "EKS compute/dataplane mode. 'auto' = EKS Auto Mode (default, unchanged). 'self_managed' = Auto Mode off, bootstrap node group + Karpenter + Cilium CNI."
+  type        = string
+  default     = "auto"
+  validation {
+    condition     = contains(["auto", "self_managed"], var.eks_compute_mode)
+    error_message = "eks_compute_mode must be 'auto' or 'self_managed'."
+  }
+}
+
+variable "eks_bootstrap_instance_type" {
+  description = "Instance type for the self_managed bootstrap node group (system components only)."
+  type        = string
+  default     = "m5.large"
+}
+
+variable "eks_bootstrap_desired_size" {
+  description = "Node count for the self_managed bootstrap node group (2 = survives a node loss)."
+  type        = number
+  default     = 2
+}
+
+variable "eks_bootstrap_capacity_type" {
+  description = "Capacity type for the bootstrap node group (ON_DEMAND or SPOT)."
+  type        = string
+  default     = "ON_DEMAND"
+}
+
+variable "cilium_chart_version" {
+  description = "Cilium Helm chart version (pinned). self_managed only."
+  type        = string
+  default     = "1.17.4"
+}
+
+variable "karpenter_chart_version" {
+  description = "Karpenter Helm chart version (pinned). Must match the EKS/k8s version — confirm against the compatibility matrix before apply. self_managed only."
+  type        = string
+  default     = "1.6.0"
+}
+
+variable "cilium_pod_cidr" {
+  description = "Overlay pod CIDR for Cilium cluster-pool IPAM (off-VPC). self_managed only."
+  type        = string
+  default     = "10.244.0.0/16"
+}
+
+variable "cilium_enable_wireguard" {
+  description = "Enable Cilium WireGuard pod-to-pod encryption (off for research; prod/compliance toggle). self_managed only."
+  type        = bool
+  default     = false
+}
+
+variable "cilium_enable_hubble_ui" {
+  description = "Expose the Hubble UI (on for research; restrict for prod). self_managed only."
+  type        = bool
+  default     = true
+}
+
+variable "karpenter_node_capacity_types" {
+  description = "Capacity types Karpenter may provision (e.g. [\"spot\",\"on-demand\"])."
+  type        = list(string)
+  default     = ["spot", "on-demand"]
+}
+
+variable "karpenter_node_instance_families" {
+  description = "Instance families Karpenter may use."
+  type        = list(string)
+  default     = ["c", "m", "r"]
+}
+
+# --- END EKS Compute Mode (self_managed / Cilium) --- #
