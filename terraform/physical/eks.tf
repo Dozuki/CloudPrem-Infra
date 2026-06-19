@@ -236,10 +236,26 @@ module "eks_cluster" {
 
   # Auto Mode: Karpenter-based scaling, built-in EBS CSI, LB controller, and spot interruption handling.
   # bootstrap_self_managed_addons defaults to false when compute_config is enabled, triggering cluster replacement.
-  compute_config = {
-    enabled    = true
-    node_pools = ["system"]
-  }
+  # self_managed mode disables Auto Mode (compute_config = null) and runs a bootstrap node group + Karpenter + Cilium instead.
+  compute_config = var.eks_compute_mode == "auto" ? { enabled = true, node_pools = ["system"] } : null
+
+  # self_managed: a small bootstrap managed node group hosts CoreDNS/Cilium/Karpenter before
+  # Karpenter takes over node provisioning. Empty in auto mode (Auto Mode manages nodes).
+  eks_managed_node_groups = var.eks_compute_mode == "self_managed" ? {
+    bootstrap = {
+      ami_type       = "BOTTLEROCKET_x86_64"
+      instance_types = [var.eks_bootstrap_instance_type]
+      capacity_type  = var.eks_bootstrap_capacity_type
+      min_size       = var.eks_bootstrap_desired_size
+      max_size       = var.eks_bootstrap_desired_size
+      desired_size   = var.eks_bootstrap_desired_size
+      labels         = { "dozuki.com/node-role" = "bootstrap" }
+    }
+  } : {}
+
+  # self_managed: Cilium replaces vpc-cni and kube-proxy, so only CoreDNS is managed as an addon.
+  # auto mode declares no managed addons (EKS Auto Mode manages them) — empty map keeps that inert.
+  addons = var.eks_compute_mode == "self_managed" ? { coredns = { most_recent = true } } : {}
 
   vpc_id     = local.vpc_id
   subnet_ids = local.private_subnet_ids
