@@ -15,7 +15,8 @@ WIREGUARD="${wireguard}"
 
 # 1. Wait for the cluster to exist and reach ACTIVE. describe-cluster errors (not-found
 #    during concurrent creation) are swallowed so the loop keeps polling.
-max_attempts=60
+#    100 x 15s = 25m, comfortably covering EKS control-plane creation (~10-15m).
+max_attempts=100
 attempt=0
 status=""
 while [ "$status" != "ACTIVE" ]; do
