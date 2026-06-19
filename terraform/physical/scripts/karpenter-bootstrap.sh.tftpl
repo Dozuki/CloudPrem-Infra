@@ -17,6 +17,11 @@ KUBECONFIG_TMP="$(mktemp)"
 trap 'rm -f "$KUBECONFIG_TMP"' EXIT
 aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" --kubeconfig "$KUBECONFIG_TMP"
 
+# The Karpenter chart lives in public ECR. Anonymous pull tokens expire (and a
+# cached-stale token yields a 403), so fetch a fresh one. public.ecr.aws's token
+# API is only in us-east-1 regardless of the cluster region.
+aws ecr-public get-login-password --region us-east-1 | helm registry login --username AWS --password-stdin public.ecr.aws
+
 helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
   --version "$VERSION" \
   --namespace kube-system \

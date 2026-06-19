@@ -262,6 +262,29 @@ module "eks_cluster" {
   # auto mode uses the module default ({}), so this is inert there.
   node_security_group_tags = var.eks_compute_mode == "self_managed" ? { "karpenter.sh/discovery" = local.identifier } : {}
 
+  # self_managed: the EKS "recommended" node SG rules are written for the VPC CNI and
+  # do NOT allow Cilium's overlay traffic, so cross-node pod-to-pod (VXLAN) is dropped.
+  # Open Cilium's VXLAN data port (UDP 8472) and health-check port (TCP 4240) node-to-node.
+  # auto mode (EKS Auto Mode manages its own dataplane) gets the module default ({}).
+  node_security_group_additional_rules = var.eks_compute_mode == "self_managed" ? {
+    cilium_vxlan = {
+      description = "Cilium VXLAN overlay between nodes"
+      protocol    = "udp"
+      from_port   = 8472
+      to_port     = 8472
+      type        = "ingress"
+      self        = true
+    }
+    cilium_health = {
+      description = "Cilium agent health checks between nodes"
+      protocol    = "tcp"
+      from_port   = 4240
+      to_port     = 4240
+      type        = "ingress"
+      self        = true
+    }
+  } : {}
+
   vpc_id     = local.vpc_id
   subnet_ids = local.private_subnet_ids
 

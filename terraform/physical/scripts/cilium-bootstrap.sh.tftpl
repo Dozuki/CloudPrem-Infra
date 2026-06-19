@@ -42,7 +42,7 @@ ENDPOINT="$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
 API_HOST="$${ENDPOINT#https://}"
 
 # 4. Install/upgrade Cilium.
-helm repo add cilium https://helm.cilium.io
+helm repo add cilium https://helm.cilium.io --force-update
 helm repo update
 
 set -- \

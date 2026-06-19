@@ -311,6 +311,6 @@
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs for the VPC |
 | <a name="output_s3_kms_key_id"></a> [s3\_kms\_key\_id](#output\_s3\_kms\_key\_id) | n/a |
 | <a name="output_s3_replicate_buckets"></a> [s3\_replicate\_buckets](#output\_s3\_replicate\_buckets) | n/a |
-| <a name="output_vault_endpoint_dns"></a> [vault\_endpoint\_dns](#output\_vault\_endpoint\_dns) | Private DNS name for reaching Vault via PrivateLink |
+| <a name="output_vault_endpoint_dns"></a> [vault\_endpoint\_dns](#output\_vault\_endpoint\_dns) | Private DNS name for reaching Vault via PrivateLink (empty when no Vault endpoint is configured) |
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | VPC ID |
 <!-- END_TF_DOCS -->
