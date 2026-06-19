@@ -20,7 +20,6 @@
 | <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.51.0 |
 | <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.51.0 |
 | <a name="provider_helm"></a> [helm](#provider\_helm) | 2.17.0 |
-| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.38.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
@@ -170,8 +169,6 @@
 | [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [helm_release.cilium](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.karpenter](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
-| [kubernetes_manifest.karpenter_node_class](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
-| [kubernetes_manifest.karpenter_node_pool](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
 | [null_resource.adopt_cloudwatch_observability_addon](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
@@ -259,8 +256,6 @@
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_karpenter_chart_version"></a> [karpenter\_chart\_version](#input\_karpenter\_chart\_version) | Karpenter Helm chart version (pinned). Must match the EKS/k8s version — confirm against the compatibility matrix before apply. self\_managed only. | `string` | `"1.6.0"` | no |
-| <a name="input_karpenter_node_capacity_types"></a> [karpenter\_node\_capacity\_types](#input\_karpenter\_node\_capacity\_types) | Capacity types Karpenter may provision (e.g. ["spot","on-demand"]). | `list(string)` | <pre>[<br>  "spot",<br>  "on-demand"<br>]</pre> | no |
-| <a name="input_karpenter_node_instance_families"></a> [karpenter\_node\_instance\_families](#input\_karpenter\_node\_instance\_families) | Instance families Karpenter may use. | `list(string)` | <pre>[<br>  "c",<br>  "m",<br>  "r"<br>]</pre> | no |
 | <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
 | <a name="input_memcached_in_cluster"></a> [memcached\_in\_cluster](#input\_memcached\_in\_cluster) | Run memcached in-cluster (chart memcached deployment) instead of ElastiCache. When true (default), ElastiCache is not provisioned (and is destroyed if it exists). | `bool` | `true` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
@@ -309,6 +304,7 @@
 | <a name="output_guide_images_bucket"></a> [guide\_images\_bucket](#output\_guide\_images\_bucket) | n/a |
 | <a name="output_guide_objects_bucket"></a> [guide\_objects\_bucket](#output\_guide\_objects\_bucket) | n/a |
 | <a name="output_guide_pdfs_bucket"></a> [guide\_pdfs\_bucket](#output\_guide\_pdfs\_bucket) | n/a |
+| <a name="output_karpenter_node_iam_role_name"></a> [karpenter\_node\_iam\_role\_name](#output\_karpenter\_node\_iam\_role\_name) | IAM role name for Karpenter-launched nodes (self\_managed mode); empty otherwise. |
 | <a name="output_memcached_cluster_address"></a> [memcached\_cluster\_address](#output\_memcached\_cluster\_address) | n/a |
 | <a name="output_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#output\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list |
 | <a name="output_nlb_dns_name"></a> [nlb\_dns\_name](#output\_nlb\_dns\_name) | The FQDN of the NLB. |

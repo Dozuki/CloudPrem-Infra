@@ -488,16 +488,8 @@ variable "cilium_enable_hubble_ui" {
   default     = true
 }
 
-variable "karpenter_node_capacity_types" {
-  description = "Capacity types Karpenter may provision (e.g. [\"spot\",\"on-demand\"])."
-  type        = list(string)
-  default     = ["spot", "on-demand"]
-}
-
-variable "karpenter_node_instance_families" {
-  description = "Instance families Karpenter may use."
-  type        = list(string)
-  default     = ["c", "m", "r"]
-}
+# The karpenter_node_capacity_types and karpenter_node_instance_families variables now
+# live in the logical layer (terraform/logical/variables.tf), alongside the NodePool CR
+# that consumes them.
 
 # --- END EKS Compute Mode (self_managed / Cilium) --- #

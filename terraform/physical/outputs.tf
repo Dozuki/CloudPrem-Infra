@@ -113,3 +113,8 @@ output "dr_rds_backup_replication_arn" {
   description = "ARN of the replicated RDS automated backups in the DR region."
   value       = try(aws_db_instance_automated_backups_replication.primary[0].id, "")
 }
+
+output "karpenter_node_iam_role_name" {
+  description = "IAM role name for Karpenter-launched nodes (self_managed mode); empty otherwise."
+  value       = try(module.karpenter[0].node_iam_role_name, "")
+}

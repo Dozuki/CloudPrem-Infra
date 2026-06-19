@@ -2,7 +2,7 @@
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 4.0 |
@@ -11,17 +11,19 @@
 | <a name="requirement_local"></a> [local](#requirement\_local) | ~> 2.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
 | <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.0 |
+| <a name="requirement_tls"></a> [tls](#requirement\_tls) | ~> 4.0 |
 | <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 4.0 |
 
 ## Providers
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.51.0 |
 | <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | 4.77.0 |
 | <a name="provider_helm"></a> [helm](#provider\_helm) | 3.2.0 |
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.38.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+| <a name="provider_tls"></a> [tls](#provider\_tls) | 4.3.0 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 4.8.0 |
 
 ## Modules
@@ -31,12 +33,13 @@ No modules.
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [aws_eks_addon.cloudwatch_observability](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [azurerm_key_vault_secret.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault_secret) | resource |
 | [helm_release.app](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.cert_manager](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.envoy_gateway](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.external_dns](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.external_secrets](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.seaweedfs](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
@@ -44,10 +47,13 @@ No modules.
 | [kubernetes_cluster_role_v1.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_v1) | resource |
 | [kubernetes_config_map_v1.frontegg_db_script](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1) | resource |
 | [kubernetes_config_map_v1.grafana_create_db_script](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1) | resource |
+| [kubernetes_config_map_v1_data.coredns_objects](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1_data) | resource |
 | [kubernetes_job_v1.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
 | [kubernetes_job_v1.frontegg_db_create](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
 | [kubernetes_job_v1.grafana_db_create](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
 | [kubernetes_job_v1.seaweedfs_buckets](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
+| [kubernetes_manifest.karpenter_node_class](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
+| [kubernetes_manifest.karpenter_node_pool](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
 | [kubernetes_manifest.nodepool_on_demand](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
 | [kubernetes_manifest.nodepool_spot](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
 | [kubernetes_manifest.tgb_http](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
@@ -57,6 +63,7 @@ No modules.
 | [kubernetes_role_binding_v1.dozuki_subsite_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/role_binding_v1) | resource |
 | [kubernetes_role_v1.dozuki_subsite_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/role_v1) | resource |
 | [kubernetes_secret_v1.frontegg_db_credentials](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
+| [kubernetes_secret_v1.gateway_tls](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.ghcr_pull](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.grafana_db_credentials](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.vault_auth_token](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
@@ -68,6 +75,8 @@ No modules.
 | [random_password.grafana_admin](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.seaweedfs_access_key](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.seaweedfs_secret_key](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
+| [tls_private_key.gateway](https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/private_key) | resource |
+| [tls_self_signed_cert.gateway](https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/self_signed_cert) | resource |
 | [vault_auth_backend.kubernetes](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/auth_backend) | resource |
 | [vault_aws_auth_backend_role.stack](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/aws_auth_backend_role) | resource |
 | [vault_kubernetes_auth_backend_config.stack](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kubernetes_auth_backend_config) | resource |
@@ -89,6 +98,7 @@ No modules.
 | [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/secretsmanager_secret_version) | data source |
 | [azurerm_key_vault_secret.db_master](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/key_vault_secret) | data source |
 | [azurerm_kubernetes_cluster.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/kubernetes_cluster) | data source |
+| [kubernetes_resources.envoy_gateway_svc](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resources) | data source |
 | [vault_kv_secret_v2.global_frontegg](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
 | [vault_kv_secret_v2.global_ops](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
 | [vault_kv_secret_v2.global_rustici](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
@@ -99,8 +109,10 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
+| <a name="input_aws_external_dns_role_arn"></a> [aws\_external\_dns\_role\_arn](#input\_aws\_external\_dns\_role\_arn) | AWS IAM role ARN that external-dns assumes via AKS workload identity (azure). Empty = external-dns disabled. | `string` | `""` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
+| <a name="input_azure_acme_server"></a> [azure\_acme\_server](#input\_azure\_acme\_server) | ACME directory URL for the cert-issuer when azure\_tls\_mode=letsencrypt. Empty = chart default (LE prod). Use the staging URL during bring-up. | `string` | `""` | no |
 | <a name="input_azure_environment"></a> [azure\_environment](#input\_azure\_environment) | Azure cloud environment: public or usgovernment. | `string` | `"public"` | no |
 | <a name="input_azure_eso_identity_client_id"></a> [azure\_eso\_identity\_client\_id](#input\_azure\_eso\_identity\_client\_id) | Client ID of the ESO workload identity (physical output eso\_identity\_client\_id). | `string` | `""` | no |
 | <a name="input_azure_key_vault_id"></a> [azure\_key\_vault\_id](#input\_azure\_key\_vault\_id) | Key Vault resource ID (physical output key\_vault\_id). | `string` | `""` | no |
@@ -109,19 +121,24 @@ No modules.
 | <a name="input_azure_resource_group"></a> [azure\_resource\_group](#input\_azure\_resource\_group) | Resource group containing the AKS cluster and Key Vault. Required when cloud = azure. | `string` | `""` | no |
 | <a name="input_azure_subscription_id"></a> [azure\_subscription\_id](#input\_azure\_subscription\_id) | Azure subscription ID. Required when cloud = azure. | `string` | `""` | no |
 | <a name="input_azure_tenant_id"></a> [azure\_tenant\_id](#input\_azure\_tenant\_id) | Entra tenant ID (physical output tenant\_id). | `string` | `""` | no |
+| <a name="input_azure_tls_mode"></a> [azure\_tls\_mode](#input\_azure\_tls\_mode) | Azure gateway TLS strategy: self-signed (dev), letsencrypt (cert-manager HTTP-01), or supplied (tls\_cert/tls\_key). | `string` | `"self-signed"` | no |
 | <a name="input_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#input\_bi\_database\_credential\_secret) | ARN to secret containing bi db credentials | `string` | `""` | no |
-| <a name="input_chart_version"></a> [chart\_version](#input\_chart\_version) | Dozuki chart version pulled from the registry (oci://<image\_repository>/charts/dozuki). | `string` | `"0.3.0"` | no |
+| <a name="input_chart_version"></a> [chart\_version](#input\_chart\_version) | Dozuki chart version pulled from the registry (oci://<image\_repository>/charts/dozuki). | `string` | `"0.3.6"` | no |
 | <a name="input_cloud"></a> [cloud](#input\_cloud) | Cloud the physical layer runs on. | `string` | `"aws"` | no |
 | <a name="input_customer"></a> [customer](#input\_customer) | The customer name for resource names and tagging. This will also be the autogenerated subdomain. | `string` | `""` | no |
 | <a name="input_dms_enabled"></a> [dms\_enabled](#input\_dms\_enabled) | If BI is enabled, whether or not to use DMS for conditional replication if true or a basic RDS read replica if false. | `bool` | `false` | no |
 | <a name="input_dms_task_arn"></a> [dms\_task\_arn](#input\_dms\_task\_arn) | If BI is enabled, the DMS replication task arn. | `string` | n/a | yes |
 | <a name="input_dns_domain_name"></a> [dns\_domain\_name](#input\_dns\_domain\_name) | Auto-provisioned subdomain for this environment | `string` | n/a | yes |
 | <a name="input_eks_cluster_id"></a> [eks\_cluster\_id](#input\_eks\_cluster\_id) | ID of EKS cluster for app provisioning | `string` | n/a | yes |
+| <a name="input_eks_compute_mode"></a> [eks\_compute\_mode](#input\_eks\_compute\_mode) | EKS compute mode from the physical layer. 'self\_managed' renders the Karpenter NodePool/EC2NodeClass. | `string` | `"auto"` | no |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster | `bool` | `false` | no |
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
+| <a name="input_external_dns_sa_name"></a> [external\_dns\_sa\_name](#input\_external\_dns\_sa\_name) | external-dns service account name (must match the AWS role trust subject). | `string` | `"external-dns"` | no |
 | <a name="input_frontegg_api_token"></a> [frontegg\_api\_token](#input\_frontegg\_api\_token) | Frontegg API token (Azure only; AWS reads Vault). | `string` | `""` | no |
 | <a name="input_frontegg_client_id"></a> [frontegg\_client\_id](#input\_frontegg\_client\_id) | Frontegg client ID (Azure only; AWS reads Vault). | `string` | `""` | no |
+| <a name="input_gateway_dns_label"></a> [gateway\_dns\_label](#input\_gateway\_dns\_label) | Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label. | `string` | `""` | no |
+| <a name="input_gateway_name"></a> [gateway\_name](#input\_gateway\_name) | Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon. | `string` | `"dozuki-gateway"` | no |
 | <a name="input_ghcr_pull_token"></a> [ghcr\_pull\_token](#input\_ghcr\_pull\_token) | GitHub token (read:packages) for pulling MPC images from GHCR (Azure only). | `string` | `""` | no |
 | <a name="input_ghcr_pull_username"></a> [ghcr\_pull\_username](#input\_ghcr\_pull\_username) | GitHub username for pulling MPC images from GHCR (Azure only). | `string` | `""` | no |
 | <a name="input_google_translate_api_token"></a> [google\_translate\_api\_token](#input\_google\_translate\_api\_token) | If using machine translation, enter your google translate API token here. | `string` | `""` | no |
@@ -129,11 +146,16 @@ No modules.
 | <a name="input_image_repository"></a> [image\_repository](#input\_image\_repository) | Docker image repository (ECR) for app containers. | `string` | n/a | yes |
 | <a name="input_image_tag"></a> [image\_tag](#input\_image\_tag) | Docker image tag for the main Dozuki app container. Changes with every deploy. | `string` | n/a | yes |
 | <a name="input_ingress_hostname"></a> [ingress\_hostname](#input\_ingress\_hostname) | Hostname for the app ingress. Set to a wildcard (e.g. *.customer.com) for customer-provided certs. Defaults to dns\_domain\_name. | `string` | `""` | no |
+| <a name="input_karpenter_node_capacity_types"></a> [karpenter\_node\_capacity\_types](#input\_karpenter\_node\_capacity\_types) | Capacity types Karpenter may provision (e.g. ["spot","on-demand"]). | `list(string)` | <pre>[<br>  "spot",<br>  "on-demand"<br>]</pre> | no |
+| <a name="input_karpenter_node_iam_role_name"></a> [karpenter\_node\_iam\_role\_name](#input\_karpenter\_node\_iam\_role\_name) | IAM role name for Karpenter-launched nodes (from physical). self\_managed only. | `string` | `""` | no |
+| <a name="input_karpenter_node_instance_families"></a> [karpenter\_node\_instance\_families](#input\_karpenter\_node\_instance\_families) | Instance families Karpenter may use. | `list(string)` | <pre>[<br>  "c",<br>  "m",<br>  "r"<br>]</pre> | no |
 | <a name="input_memcached_cluster_address"></a> [memcached\_cluster\_address](#input\_memcached\_cluster\_address) | Address of the deployed memcached cluster | `string` | n/a | yes |
+| <a name="input_memcached_in_cluster"></a> [memcached\_in\_cluster](#input\_memcached\_in\_cluster) | Run memcached in-cluster instead of ElastiCache (AWS). Azure is always in-cluster. Must match the physical layer's value. | `bool` | `true` | no |
 | <a name="input_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#input\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list | `any` | n/a | yes |
 | <a name="input_nextjs_tag"></a> [nextjs\_tag](#input\_nextjs\_tag) | Docker image tag for the Next.js frontend container. Changes with every deploy. | `string` | n/a | yes |
 | <a name="input_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#input\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding | `string` | n/a | yes |
 | <a name="input_nlb_https_target_group_arn"></a> [nlb\_https\_target\_group\_arn](#input\_nlb\_https\_target\_group\_arn) | NLB HTTPS target group ARN for TargetGroupBinding | `string` | n/a | yes |
+| <a name="input_operator_image_tag"></a> [operator\_image\_tag](#input\_operator\_image\_tag) | dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion). | `string` | `"3.0.3"` | no |
 | <a name="input_primary_db_secret"></a> [primary\_db\_secret](#input\_primary\_db\_secret) | ARN to secret containing primary db credentials | `string` | n/a | yes |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | When true, retain Vault secrets on destroy (soft delete). When false, permanently purge all versions. | `bool` | `true` | no |
 | <a name="input_rustici_managed_password"></a> [rustici\_managed\_password](#input\_rustici\_managed\_password) | Rustici managed password (Azure only; AWS reads Vault). | `string` | `""` | no |
@@ -154,12 +176,14 @@ No modules.
 | <a name="input_smtp_username"></a> [smtp\_username](#input\_smtp\_username) | SMTP authentication username. | `string` | `"apikey"` | no |
 | <a name="input_spacelift"></a> [spacelift](#input\_spacelift) | Set to true when running in Spacelift. Enables IAM auth for the Vault provider. | `bool` | `false` | no |
 | <a name="input_surveyjs_license_key"></a> [surveyjs\_license\_key](#input\_surveyjs\_license\_key) | SurveyJS license key (Azure only; AWS reads Vault). | `string` | `""` | no |
+| <a name="input_tls_cert"></a> [tls\_cert](#input\_tls\_cert) | Base64-encoded PEM TLS certificate (full chain) for the gateway. When set (any cloud), Terraform creates the tls-secret and the chart runs with tls.externallyManaged=true, bypassing cert-manager/ACME. Empty = cert-manager/ACME (AWS) or azure\_tls\_mode (azure). | `string` | `""` | no |
+| <a name="input_tls_key"></a> [tls\_key](#input\_tls\_key) | Base64-encoded PEM TLS private key matching tls\_cert. Required when tls\_cert is set. | `string` | `""` | no |
 | <a name="input_vault_address"></a> [vault\_address](#input\_vault\_address) | Vault server address accessible from within the cluster (PrivateLink). | `string` | n/a | yes |
 
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_dozuki_url"></a> [dozuki\_url](#output\_dozuki\_url) | URL to your Dozuki Installation. |
 | <a name="output_grafana_admin_password"></a> [grafana\_admin\_password](#output\_grafana\_admin\_password) | Password for Grafana admin user |
 | <a name="output_grafana_admin_username"></a> [grafana\_admin\_username](#output\_grafana\_admin\_username) | n/a |
