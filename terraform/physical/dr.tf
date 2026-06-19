@@ -49,9 +49,10 @@ check "dr_rds_replicable" {
 resource "aws_kms_key" "rds_cmk" {
   count = local.rds_use_dr_cmk ? 1 : 0
 
-  description         = "${local.identifier} RDS encryption (DR-replicable)"
-  enable_key_rotation = true
-  tags                = local.tags
+  description             = "${local.identifier} RDS encryption (DR-replicable)"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
+  tags                    = local.tags
 }
 
 resource "aws_kms_alias" "rds_cmk" {
@@ -67,9 +68,10 @@ resource "aws_kms_key" "dr_rds" {
   count    = local.dr_rds_enabled ? 1 : 0
   provider = aws.dr
 
-  description         = "${local.identifier} DR replicated RDS backups"
-  enable_key_rotation = true
-  tags                = local.tags
+  description             = "${local.identifier} DR replicated RDS backups"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
+  tags                    = local.tags
 }
 
 resource "aws_kms_alias" "dr_rds" {
@@ -85,9 +87,10 @@ resource "aws_kms_key" "dr_s3" {
   count    = local.dr_enabled ? 1 : 0
   provider = aws.dr
 
-  description         = "${local.identifier} DR replicated S3 content"
-  enable_key_rotation = true
-  tags                = local.tags
+  description             = "${local.identifier} DR replicated S3 content"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
+  tags                    = local.tags
 }
 
 resource "aws_kms_alias" "dr_s3" {

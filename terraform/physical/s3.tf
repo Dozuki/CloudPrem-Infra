@@ -106,7 +106,7 @@ resource "aws_kms_key" "s3" {
   count = local.use_provided_s3_kms ? 0 : 1
 
   description             = "KMS key to encrypt S3 bucket contents"
-  deletion_window_in_days = 7
+  deletion_window_in_days = var.protect_resources ? 30 : 7
   policy                  = data.aws_iam_policy_document.s3_kms_key_policy.json
 }
 resource "aws_kms_alias" "s3" {
