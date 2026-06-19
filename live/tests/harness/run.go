@@ -80,6 +80,14 @@ func RunUpgrade(p RunParams) (err error) {
 
 	envSub := filepath.Join(p.Matrix.Defaults.EnvPath, cfg.Env)
 
+	// NLB is named "<customer>-<env>" (terraform local.identifier). The teardown clears
+	// its deletion protection before the physical destroy so a v6.0.x baseline failure
+	// doesn't stall on the IGW (the protected NLB pins it).
+	nlbName := ""
+	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
+		nlbName = customer + "-" + cfg.Env
+	}
+
 	tg := func(wt *Worktree) TGOptions {
 		return TGOptions{
 			WorkingDir:   filepath.Join(wt.Dir, envSub),
@@ -88,6 +96,7 @@ func RunUpgrade(p RunParams) (err error) {
 			Profile:      p.Profile,
 			BucketPrefix: "",
 			StatePrefix:  p.RunID + "-" + cfg.Name + "/",
+			NLBName:      nlbName,
 		}
 	}
 
