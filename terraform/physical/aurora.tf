@@ -32,6 +32,9 @@ module "aurora" {
     var.rds_multi_az ? { reader = { instance_class = "db.serverless", performance_insights_enabled = true } } : {}
   )
 
+  # We supply the shared primary_database_sg; don't let the module create its own SG
+  # (it has no vpc_id and would fall back to a default VPC, which doesn't exist here).
+  create_security_group  = false
   vpc_security_group_ids = [module.primary_database_sg.security_group_id]
   subnets                = local.private_subnet_ids
   create_db_subnet_group = true
