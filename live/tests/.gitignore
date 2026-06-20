@@ -2,3 +2,4 @@
 *.tfplan
 __worktrees__/
 .logs/
+.artifacts/
