@@ -35,6 +35,9 @@ resource "kubernetes_manifest" "karpenter_node_pool" {
           requirements = [
             { key = "karpenter.sh/capacity-type", operator = "In", values = var.karpenter_node_capacity_types },
             { key = "karpenter.k8s.aws/instance-category", operator = "In", values = var.karpenter_node_instance_families },
+            # The Dozuki app images are amd64-only; without this Karpenter also
+            # provisions Graviton (arm64) nodes and pods fail with "exec format error".
+            { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
           ]
         }
       }

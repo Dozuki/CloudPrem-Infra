@@ -36,6 +36,13 @@ module "primary_database_sg" {
       source_security_group_id = module.eks_cluster.cluster_primary_security_group_id
     },
     {
+      # Self-managed Cilium nodes carry the node SG (not the cluster primary SG that
+      # VPC-CNI pod ENIs would use). Pod->RDS traffic egresses masqueraded via the node
+      # ENI, so RDS must allow the node SG for the app to reach the database.
+      rule                     = "mysql-tcp"
+      source_security_group_id = module.eks_cluster.node_security_group_id
+    },
+    {
       rule                     = "mysql-tcp"
       source_security_group_id = module.bastion_sg.security_group_id
     },
