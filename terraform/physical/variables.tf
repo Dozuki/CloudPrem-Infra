@@ -470,6 +470,12 @@ variable "karpenter_chart_version" {
   default     = "1.13.0"
 }
 
+variable "aws_lb_controller_chart_version" {
+  description = "AWS Load Balancer Controller Helm chart version (pinned). Provides the TargetGroupBinding CRD + controller (NLB -> Envoy Gateway). self_managed only."
+  type        = string
+  default     = "3.4.0"
+}
+
 variable "cilium_pod_cidr" {
   description = "Overlay pod CIDR for Cilium cluster-pool IPAM (off-VPC). self_managed only."
   type        = string
