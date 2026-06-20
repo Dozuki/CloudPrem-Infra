@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Installs metrics-server via imperative helm (no Terraform helm provider) — it provides the
+# Kubernetes metrics API that HorizontalPodAutoscalers read. EKS Auto Mode and AKS bundle it;
+# self-managed EKS does not, so without it every HPA reads <unknown> CPU and the app never
+# autoscales (it stays pinned at minReplicas and queues under load).
+#
+# Runs on hostNetwork: Cilium overlay pod IPs are off-VPC and unreachable from the EKS managed
+# control plane, which proxies the aggregated metrics API (v1beta1.metrics.k8s.io) to the pod —
+# the same constraint that forces the admission webhooks onto hostNetwork. Serves on :10251, a
+# port the node SG already permits from the control plane and that is free on worker hosts (not
+# kubelet's 10250). --kubelet-insecure-tls because the EKS kubelet serving cert is not in
+# metrics-server's trust chain.
+set -euo pipefail
+
+CLUSTER="${cluster_name}"
+REGION="${region}"
+VERSION="${chart_version}"
+
+KUBECONFIG_TMP="$(mktemp)"
+trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" --kubeconfig "$KUBECONFIG_TMP"
+
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ --force-update
+helm repo update metrics-server
+
+helm upgrade --install metrics-server metrics-server/metrics-server \
+  --version "$VERSION" \
+  --namespace kube-system \
+  --kubeconfig "$KUBECONFIG_TMP" \
+  --set hostNetwork.enabled=true \
+  --set containerPort=10251 \
+  --set 'args={--kubelet-insecure-tls,--secure-port=10251}'
+
+echo "metrics-server $VERSION install/upgrade complete on $CLUSTER."

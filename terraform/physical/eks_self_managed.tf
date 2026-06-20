@@ -205,3 +205,26 @@ resource "aws_eks_pod_identity_association" "ebs_csi" {
   service_account = "ebs-csi-controller-sa"
   role_arn        = aws_iam_role.ebs_csi.arn
 }
+
+# --- metrics-server ---------------------------------------------------------------
+# Provides the Kubernetes metrics API that HorizontalPodAutoscalers read. EKS Auto Mode and AKS
+# bundle it; self-managed EKS does not, so without it HPAs read <unknown> and never scale the app
+# under load. Installed via helm on hostNetwork (the apiserver proxies the aggregated metrics API
+# to the pod, and overlay pod IPs are unreachable from the managed control plane — see the script).
+resource "null_resource" "metrics_server_bootstrap" {
+  depends_on = [module.eks_cluster, null_resource.cilium_bootstrap]
+
+  triggers = {
+    version = var.metrics_server_chart_version
+    cluster = local.identifier
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    command = templatefile("${path.module}/scripts/metrics-server-bootstrap.sh.tftpl", {
+      cluster_name  = local.identifier
+      region        = data.aws_region.current.id
+      chart_version = var.metrics_server_chart_version
+    })
+  }
+}

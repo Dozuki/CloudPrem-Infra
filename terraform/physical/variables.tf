@@ -466,6 +466,12 @@ variable "aws_lb_controller_chart_version" {
   default     = "3.4.0"
 }
 
+variable "metrics_server_chart_version" {
+  description = "metrics-server Helm chart version (pinned). Provides the metrics API HPAs read; EKS Auto Mode/AKS bundle it, self-managed EKS does not."
+  type        = string
+  default     = "3.13.1"
+}
+
 variable "cilium_pod_cidr" {
   description = "Overlay pod CIDR for Cilium cluster-pool IPAM (off-VPC). self_managed only."
   type        = string
