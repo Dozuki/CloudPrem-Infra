@@ -79,13 +79,14 @@ func RunUpgrade(p RunParams) (err error) {
 	}
 
 	envSub := filepath.Join(p.Matrix.Defaults.EnvPath, cfg.Env)
+	fromEnvHCL := filepath.Join(fromWT.Dir, envSub, "env.hcl")
+	toEnvHCL := filepath.Join(toWT.Dir, envSub, "env.hcl")
 
-	// NLB is named "<customer>-<env>" (terraform local.identifier). The teardown clears
-	// its deletion protection before the physical destroy so a v6.0.x baseline failure
-	// doesn't stall on the IGW (the protected NLB pins it).
-	nlbName := ""
+	// terraform local.identifier = "<customer>-<env>" — the name of both the NLB
+	// (teardown clears its deletion protection) and the EKS cluster (diagnostics dump).
+	identifier := ""
 	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
-		nlbName = customer + "-" + cfg.Env
+		identifier = customer + "-" + cfg.Env
 	}
 
 	tg := func(wt *Worktree) TGOptions {
@@ -96,7 +97,7 @@ func RunUpgrade(p RunParams) (err error) {
 			Profile:      p.Profile,
 			BucketPrefix: "",
 			StatePrefix:  p.RunID + "-" + cfg.Name + "/",
-			NLBName:      nlbName,
+			NLBName:      identifier,
 		}
 	}
 
@@ -113,6 +114,10 @@ func RunUpgrade(p RunParams) (err error) {
 	// Always attempt destroy (against the target/final code) without clobbering
 	// an earlier error. Registered last so it runs before the worktree removals.
 	defer func() {
+		// Capture artifacts BEFORE destroy (cluster) + before worktree removal (env.hcl).
+		// err (named return) reflects the run outcome here → full dump only on failure.
+		step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, err != nil)
+		captureDiagnostics(p, region, identifier, err != nil, tg(toWT), fromEnvHCL, toEnvHCL)
 		step("TEARDOWN: destroy (logical best-effort, then ALWAYS physical)")
 		if derr := tg(toWT).Destroy(); derr != nil && err == nil {
 			err = fmt.Errorf("destroy: %w", derr)
