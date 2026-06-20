@@ -402,6 +402,12 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 
 locals {
   memcached_in_cluster = var.cloud == "azure" || var.memcached_in_cluster
+  # The app's Hostname type rejects a bare single-label name ("Invalid hostname"), so
+  # in-cluster memcached must use the service FQDN. ElastiCache supplies a full host
+  # already. This single source feeds the chart value, the config-map values, AND the
+  # Vault-seeded cache secret (ESO-synced into memcached.json, which OVERRIDES the chart
+  # config map) — all three must agree or the app reads an empty/invalid host.
+  memcached_host = local.memcached_in_cluster ? "dozuki-memcached.${local.k8s_namespace_name}.svc.cluster.local" : var.memcached_cluster_address
 }
 
 resource "helm_release" "app" {
@@ -496,11 +502,10 @@ resource "helm_release" "app" {
     { name = "objectStorage.objectsBucket", value = var.s3_objects_bucket },
 
     # --- Memcached ---
-    # In-cluster memcached: use the service FQDN, not the bare name — the app's Hostname
-    # type rejects a single-label host ("Invalid hostname"), failing db-migrations and
-    # blocking the upgrade. (The bare name resolves via k8s DNS, but the app validates the
-    # string format.) ElastiCache supplies a full host already.
-    { name = "memcached.host", value = local.memcached_in_cluster ? "dozuki-memcached.${local.k8s_namespace_name}.svc.cluster.local" : var.memcached_cluster_address },
+    # Memcached host — see local.memcached_host (FQDN in-cluster). NOTE: this chart value
+    # is overridden by the ESO-synced memcached.json from Vault (vault.tf cache secret),
+    # so that path must use the same local too.
+    { name = "memcached.host", value = local.memcached_host },
 
     # --- Vault ---
     { name = "vault.enabled", value = var.cloud == "aws" ? "true" : "false" },
