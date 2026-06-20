@@ -154,7 +154,7 @@ locals {
     ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
     bi_enabled             = { value = var.enable_bi ? "true" : "false" }
     webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
-    memcached_host         = { value = var.memcached_cluster_address }
+    memcached_host         = { value = local.memcached_host }
     s3_kms_key             = { value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : "" }
     s3_images_bucket       = { value = var.s3_images_bucket }
     s3_objects_bucket      = { value = var.s3_objects_bucket }
