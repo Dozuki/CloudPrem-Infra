@@ -117,6 +117,19 @@ resource "helm_release" "cert_manager" {
       name  = "config.enableGatewayAPI"
       value = "true"
     },
+    # Cilium overlay puts pods on off-VPC IPs the EKS managed control plane can't
+    # route to, so apiserver->webhook calls fail. Run the webhook on hostNetwork (node
+    # VPC IP). securePort 8443 is one of the ports the EKS node SG already allows from
+    # the control plane (443/4443/6443/8443/9443/10250/10251); a node SG rule
+    # (physical) additionally lets the Cilium pod CIDR reach it for in-cluster callers.
+    {
+      name  = "webhook.hostNetwork"
+      value = "true"
+    },
+    {
+      name  = "webhook.securePort"
+      value = "8443"
+    },
   ]
 }
 
@@ -259,6 +272,18 @@ resource "helm_release" "external_secrets" {
     {
       name  = "crds.createClusterSecretStore"
       value = "true"
+    },
+    # hostNetwork so the EKS control plane can reach the validating/conversion webhook
+    # (Cilium overlay pod IPs are off-VPC and unroutable from the control plane). Port
+    # 4443 is a control-plane-allowed node SG port, distinct from cert-manager (8443)
+    # and the LB controller (9443) to avoid collisions on shared nodes.
+    {
+      name  = "webhook.hostNetwork"
+      value = "true"
+    },
+    {
+      name  = "webhook.port"
+      value = "4443"
     },
   ]
 }

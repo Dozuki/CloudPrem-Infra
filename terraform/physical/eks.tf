@@ -285,6 +285,19 @@ module "eks_cluster" {
       type        = "ingress"
       self        = true
     }
+    # Admission-webhook controllers run hostNetwork (so the EKS managed control plane
+    # can reach them — overlay pod IPs are off-VPC and unroutable from the control
+    # plane). In-cluster callers reach those webhooks from Cilium overlay pods, whose
+    # source IPs are NOT members of the node SG, so open the webhook ports to the pod
+    # CIDR. Covers cert-manager (8443), external-secrets (4443), LB controller (9443).
+    webhook_pods = {
+      description = "Cilium overlay pods to hostNetwork admission webhooks"
+      protocol    = "tcp"
+      from_port   = 4443
+      to_port     = 9443
+      type        = "ingress"
+      cidr_blocks = [var.cilium_pod_cidr]
+    }
   }
 
   vpc_id     = local.vpc_id
