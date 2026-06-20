@@ -42,6 +42,9 @@ ENDPOINT="$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
 API_HOST="$${ENDPOINT#https://}"
 
 # 4. Install/upgrade Cilium.
+# Prometheus metrics: agent (:9962), operator (:9963), and Hubble flow metrics (:9965),
+# each with a ServiceMonitor labelled release=dozuki to match kube-prometheus-stack's
+# serviceMonitorSelector (the app helm release is named "dozuki"), so it scrapes them.
 helm repo add cilium https://helm.cilium.io --force-update
 helm repo update
 
@@ -58,7 +61,16 @@ set -- \
   --set hubble.enabled=true \
   --set hubble.relay.enabled=true \
   --set hubble.ui.enabled="$HUBBLE_UI" \
-  --set tolerations[0].operator=Exists
+  --set tolerations[0].operator=Exists \
+  --set prometheus.enabled=true \
+  --set prometheus.serviceMonitor.enabled=true \
+  --set prometheus.serviceMonitor.labels.release=dozuki \
+  --set operator.prometheus.enabled=true \
+  --set operator.prometheus.serviceMonitor.enabled=true \
+  --set operator.prometheus.serviceMonitor.labels.release=dozuki \
+  --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp}" \
+  --set hubble.metrics.serviceMonitor.enabled=true \
+  --set hubble.metrics.serviceMonitor.labels.release=dozuki
 
 if [ "$WIREGUARD" = "true" ]; then
   set -- "$@" --set encryption.enabled=true --set encryption.type=wireguard
