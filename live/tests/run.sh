@@ -128,7 +128,11 @@ cleanup() {
     mkdir -p "$_adir"
     cp -f "$RUN_LOG" "$_adir/run.log" 2>/dev/null || true
     _bundle="$PWD/.artifacts/${RUN_ID}.tar.gz"
-    if tar -czf "$_bundle" -C "$PWD/.artifacts" "$RUN_ID" 2>/dev/null; then
+    # The harness writes per-config diagnostics to .artifacts/<RUN_ID>-<config>/ (its
+    # p.RunID includes the config name), so bundle those dirs too — not just the run-log
+    # dir — or the upload is just the log. Feed the dir list to tar via -T (robust to
+    # shell word-splitting).
+    if ( cd "$PWD/.artifacts" && ls -d "$RUN_ID" "$RUN_ID"-* 2>/dev/null | tar -czf "$_bundle" -T - ) 2>/dev/null; then
       _bucket="${ARTIFACTS_BUCKET:-dozuki-cloudprem-harness-artifacts-us-east-1-${DDVTEST_ACCOUNT_ID}}"
       if aws s3 cp "$_bundle" "s3://${_bucket}/${RUN_ID}.tar.gz" --profile "$AWS_PROFILE" >/dev/null 2>&1; then
         echo ">> Artifacts archived: s3://${_bucket}/${RUN_ID}.tar.gz" >&2
