@@ -125,6 +125,26 @@ resource "helm_release" "envoy_gateway" {
 
   create_namespace = true
   wait             = true
+
+  # Configure the controller's global rate-limit backend so the dozuki chart's
+  # rate-limit BackendTrafficPolicies actually enforce (otherwise they install
+  # but are inert). Backed by the in-cluster Redis (see ratelimit.tf).
+  values = [yamlencode({
+    config = {
+      envoyGateway = {
+        rateLimit = {
+          backend = {
+            type = "Redis"
+            redis = {
+              url = "redis.redis-system.svc.cluster.local:6379"
+            }
+          }
+        }
+      }
+    }
+  })]
+
+  depends_on = [kubernetes_service_v1.ratelimit_redis]
 }
 
 # Stable Service in envoy-gateway-system targeting Envoy proxy pods.
