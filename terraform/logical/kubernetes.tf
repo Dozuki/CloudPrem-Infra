@@ -121,17 +121,29 @@ resource "helm_release" "envoy_gateway" {
   namespace  = "envoy-gateway-system"
   repository = "oci://docker.io/envoyproxy"
   chart      = "gateway-helm"
-  version    = "v1.7.0"
+  version    = "v1.8.1"
 
   create_namespace = true
   wait             = true
 
-  # Configure the controller's global rate-limit backend so the dozuki chart's
-  # rate-limit BackendTrafficPolicies actually enforce (otherwise they install
-  # but are inert). Backed by the in-cluster Redis (see ratelimit.tf).
+  # CRD NOTE: gateway-helm bundles CRDs only on FIRST install; `helm upgrade` does
+  # NOT update them, and the separate gateway-crds-helm chart exceeds Helm's 1MB
+  # release-secret limit. On an EG version bump, apply the new CRDs server-side
+  # out-of-band (deploy step / CI), e.g.:
+  #   helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version 1.8.1 \
+  #     | kubectl apply --server-side --force-conflicts -f -
+  #
+  # Controller config:
+  #  - extensionApis.enableEnvoyPatchPolicy: required by the chart's GeoIP feature
+  #    (gateway.geoip.enabled injects an EnvoyPatchPolicy).
+  #  - rateLimit.backend -> in-cluster Redis (see ratelimit.tf) so the chart's
+  #    rate-limit BackendTrafficPolicies actually enforce (otherwise inert).
   values = [yamlencode({
     config = {
       envoyGateway = {
+        extensionApis = {
+          enableEnvoyPatchPolicy = true
+        }
         rateLimit = {
           backend = {
             type = "Redis"
