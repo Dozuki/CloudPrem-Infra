@@ -386,7 +386,7 @@ variable "rds_adopt_dr_cmk" {
 }
 
 variable "db_engine" {
-  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'."
+  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.0 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'."
   type        = string
   default     = "rds"
 
@@ -409,9 +409,15 @@ variable "aurora_max_acu" {
 }
 
 variable "aurora_engine_version" {
-  description = "Aurora MySQL engine version. Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
+  # Stays on the 8.0 family: the Dozuki baseline Guide schema dump
+  # (Migrations/SchemaSQL/ifixit_guide.sql) defines a FK on a non-unique column
+  # (approval_process_defaults.major_release_approval_processid -> approval_processes.approval_processid).
+  # MySQL/Aurora 8.4 removed that legacy InnoDB extension and rejects a fresh load
+  # with ER_FK_NO_UNIQUE_KEY (FOREIGN_KEY_CHECKS=0 does not suppress it). 8.4 is only
+  # reachable via in-place upgrade of an existing 8.0 cluster, not a fresh provision.
+  description = "Aurora MySQL engine version (full Aurora version string). Pin to an 8.0 family version for fresh provisions; the baseline schema is not fresh-loadable on 8.4."
   type        = string
-  default     = "8.4.7"
+  default     = "8.0.mysql_aurora.3.12.0"
 }
 
 variable "aurora_snapshot_identifier" {

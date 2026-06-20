@@ -1,4 +1,4 @@
-# Aurora MySQL 8.4 Serverless v2 cluster (active when var.db_engine == "aurora").
+# Aurora MySQL 8.0 Serverless v2 cluster (active when var.db_engine == "aurora").
 # Produces the same connection facts as the RDS path via local.db (db.tf).
 
 resource "random_password" "aurora" {
@@ -45,7 +45,7 @@ module "aurora" {
   snapshot_identifier = var.aurora_snapshot_identifier != "" ? var.aurora_snapshot_identifier : null
 
   cluster_parameter_group = {
-    family = "aurora-mysql8.4"
+    family = "aurora-mysql8.0"
     parameters = [
       { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
       { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
@@ -54,7 +54,7 @@ module "aurora" {
   }
 
   db_parameter_group = {
-    family = "aurora-mysql8.4"
+    family = "aurora-mysql8.0"
     parameters = [
       { name = "group_concat_max_len", value = "33554432", apply_method = "pending-reboot" },
     ]

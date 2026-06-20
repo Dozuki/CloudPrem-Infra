@@ -24,6 +24,13 @@ resource "kubernetes_manifest" "karpenter_node_class" {
 resource "kubernetes_manifest" "karpenter_node_pool" {
   count      = local.karpenter_enabled ? 1 : 0
   depends_on = [kubernetes_manifest.karpenter_node_class]
+
+  # Terraform owns this manifest via server-side apply; force past field-manager
+  # conflicts from any ad-hoc kubectl edits to the NodePool.
+  field_manager {
+    force_conflicts = true
+  }
+
   manifest = {
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
