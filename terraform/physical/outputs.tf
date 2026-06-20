@@ -115,6 +115,6 @@ output "dr_rds_backup_replication_arn" {
 }
 
 output "karpenter_node_iam_role_name" {
-  description = "IAM role name for Karpenter-launched nodes (self_managed mode); empty otherwise."
-  value       = try(module.karpenter[0].node_iam_role_name, "")
+  description = "IAM role name for Karpenter-launched nodes."
+  value       = module.karpenter.node_iam_role_name
 }

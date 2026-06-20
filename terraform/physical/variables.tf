@@ -430,18 +430,8 @@ variable "memcached_in_cluster" {
 
 # --- BEGIN EKS Compute Mode (self_managed / Cilium) --- #
 
-variable "eks_compute_mode" {
-  description = "EKS compute/dataplane mode. 'auto' = EKS Auto Mode (default, unchanged). 'self_managed' = Auto Mode off, bootstrap node group + Karpenter + Cilium CNI."
-  type        = string
-  default     = "auto"
-  validation {
-    condition     = contains(["auto", "self_managed"], var.eks_compute_mode)
-    error_message = "eks_compute_mode must be 'auto' or 'self_managed'."
-  }
-}
-
 variable "eks_bootstrap_instance_type" {
-  description = "Instance type for the self_managed bootstrap node group (system components only)."
+  description = "Instance type for the bootstrap node group (system components only)."
   type        = string
   default     = "m5.large"
 }

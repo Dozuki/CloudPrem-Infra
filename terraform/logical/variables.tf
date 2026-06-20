@@ -135,14 +135,8 @@ variable "eks_cluster_id" {
   type        = string
 }
 
-variable "eks_compute_mode" {
-  description = "EKS compute mode from the physical layer. 'self_managed' renders the Karpenter NodePool/EC2NodeClass."
-  type        = string
-  default     = "auto"
-}
-
 variable "karpenter_node_iam_role_name" {
-  description = "IAM role name for Karpenter-launched nodes (from physical). self_managed only."
+  description = "IAM role name for Karpenter-launched nodes (from physical)."
   type        = string
   default     = ""
 }

@@ -234,14 +234,13 @@ module "eks_cluster" {
     resources        = ["secrets"]
   }
 
-  # Auto Mode: Karpenter-based scaling, built-in EBS CSI, LB controller, and spot interruption handling.
-  # bootstrap_self_managed_addons defaults to false when compute_config is enabled, triggering cluster replacement.
-  # self_managed mode disables Auto Mode (compute_config = null) and runs a bootstrap node group + Karpenter + Cilium instead.
-  compute_config = var.eks_compute_mode == "auto" ? { enabled = true, node_pools = ["system"] } : null
+  # EKS Auto Mode is intentionally off (compute_config unset; v21 hardcodes
+  # bootstrap_self_managed_addons = false). The dataplane is self-managed: a bootstrap
+  # node group + Karpenter for scaling, Cilium as the CNI, and EKS managed addons below.
 
-  # self_managed: a small bootstrap managed node group hosts CoreDNS/Cilium/Karpenter before
-  # Karpenter takes over node provisioning. Empty in auto mode (Auto Mode manages nodes).
-  eks_managed_node_groups = var.eks_compute_mode == "self_managed" ? {
+  # A small bootstrap managed node group hosts CoreDNS/Cilium/Karpenter before
+  # Karpenter takes over node provisioning.
+  eks_managed_node_groups = {
     bootstrap = {
       ami_type       = "BOTTLEROCKET_x86_64"
       instance_types = [var.eks_bootstrap_instance_type]
@@ -251,27 +250,25 @@ module "eks_cluster" {
       desired_size   = var.eks_bootstrap_desired_size
       labels         = { "dozuki.com/node-role" = "bootstrap" }
     }
-  } : {}
+  }
 
-  # self_managed: Cilium replaces vpc-cni and kube-proxy, so we manage only CoreDNS and the
-  # Pod Identity agent. Auto Mode bundles the pod-identity-agent automatically; without it,
-  # Pod Identity associations (Karpenter, cert-manager, the app SAs) yield no AWS credentials.
-  # auto mode declares no managed addons (EKS Auto Mode manages them) — empty map keeps that inert.
-  addons = var.eks_compute_mode == "self_managed" ? {
+  # Cilium replaces vpc-cni and kube-proxy, so we manage only CoreDNS, the Pod Identity
+  # agent (Pod Identity associations for Karpenter/cert-manager/app SAs yield no AWS
+  # credentials without it), and the EBS CSI driver (provisions the ebs-gp3 StorageClass).
+  addons = {
     coredns                  = { most_recent = true }
     "eks-pod-identity-agent" = { most_recent = true }
-  } : {}
+    "aws-ebs-csi-driver"     = { most_recent = true }
+  }
 
   # self_managed: tag the EKS-created node security group so Karpenter's EC2NodeClass
   # securityGroupSelectorTerms (karpenter.sh/discovery) can discover it for launched nodes.
-  # auto mode uses the module default ({}), so this is inert there.
-  node_security_group_tags = var.eks_compute_mode == "self_managed" ? { "karpenter.sh/discovery" = local.identifier } : {}
+  node_security_group_tags = { "karpenter.sh/discovery" = local.identifier }
 
-  # self_managed: the EKS "recommended" node SG rules are written for the VPC CNI and
-  # do NOT allow Cilium's overlay traffic, so cross-node pod-to-pod (VXLAN) is dropped.
-  # Open Cilium's VXLAN data port (UDP 8472) and health-check port (TCP 4240) node-to-node.
-  # auto mode (EKS Auto Mode manages its own dataplane) gets the module default ({}).
-  node_security_group_additional_rules = var.eks_compute_mode == "self_managed" ? {
+  # The EKS "recommended" node SG rules are written for the VPC CNI and do NOT allow
+  # Cilium's overlay traffic, so cross-node pod-to-pod (VXLAN) is dropped. Open Cilium's
+  # VXLAN data port (UDP 8472) and health-check port (TCP 4240) node-to-node.
+  node_security_group_additional_rules = {
     cilium_vxlan = {
       description = "Cilium VXLAN overlay between nodes"
       protocol    = "udp"
@@ -288,7 +285,7 @@ module "eks_cluster" {
       type        = "ingress"
       self        = true
     }
-  } : {}
+  }
 
   vpc_id     = local.vpc_id
   subnet_ids = local.private_subnet_ids

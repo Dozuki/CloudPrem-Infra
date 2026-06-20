@@ -1,9 +1,8 @@
 # Karpenter NodePool + EC2NodeClass. These are Kubernetes custom resources, so
 # they live in the logical layer where the cluster is guaranteed live and the
-# Karpenter CRDs (installed by the controller in the physical layer) already
-# exist. Gated on self_managed; a no-op for auto (EKS Auto Mode) clusters.
+# Karpenter CRDs (installed by the controller in the physical layer) already exist.
 locals {
-  karpenter_enabled = var.eks_compute_mode == "self_managed"
+  karpenter_enabled = var.cloud == "aws"
 }
 
 resource "kubernetes_manifest" "karpenter_node_class" {

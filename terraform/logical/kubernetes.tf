@@ -7,7 +7,7 @@ resource "kubernetes_storage_class_v1" "ebs_gp3" {
       "storageclass.kubernetes.io/is-default-class" = "true"
     }
   }
-  storage_provisioner    = "ebs.csi.eks.amazonaws.com"
+  storage_provisioner    = "ebs.csi.aws.com"
   reclaim_policy         = "Delete"
   volume_binding_mode    = "WaitForFirstConsumer"
   allow_volume_expansion = true
@@ -202,7 +202,7 @@ resource "kubernetes_manifest" "tgb_https" {
   depends_on = [kubernetes_service_v1.envoy_proxy]
 
   manifest = {
-    apiVersion = "eks.amazonaws.com/v1"
+    apiVersion = "elbv2.k8s.aws/v1beta1"
     kind       = "TargetGroupBinding"
     metadata = {
       name      = "envoy-https"
@@ -224,7 +224,7 @@ resource "kubernetes_manifest" "tgb_http" {
   depends_on = [kubernetes_service_v1.envoy_proxy]
 
   manifest = {
-    apiVersion = "eks.amazonaws.com/v1"
+    apiVersion = "elbv2.k8s.aws/v1beta1"
     kind       = "TargetGroupBinding"
     metadata = {
       name      = "envoy-http"
@@ -237,93 +237,6 @@ resource "kubernetes_manifest" "tgb_http" {
       }
       targetGroupARN = var.nlb_http_target_group_arn
       targetType     = "ip"
-    }
-  }
-}
-
-resource "kubernetes_manifest" "nodepool_spot" {
-  count = var.cloud == "aws" ? 1 : 0
-
-  manifest = {
-    apiVersion = "karpenter.sh/v1"
-    kind       = "NodePool"
-    metadata = {
-      name = "spot"
-    }
-    spec = {
-      template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["spot"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
-            }
-          ]
-        }
-      }
-      disruption = {
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "1m"
-      }
-      weight = 100
-    }
-  }
-}
-
-resource "kubernetes_manifest" "nodepool_on_demand" {
-  count = var.cloud == "aws" ? 1 : 0
-
-  manifest = {
-    apiVersion = "karpenter.sh/v1"
-    kind       = "NodePool"
-    metadata = {
-      name = "on-demand"
-    }
-    spec = {
-      template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["on-demand"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
-            }
-          ]
-          taints = [
-            {
-              key    = "eks.amazonaws.com/capacity-type"
-              value  = "on-demand"
-              effect = "NoSchedule"
-            }
-          ]
-        }
-      }
-      disruption = {
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "1m"
-      }
-      weight = 10
     }
   }
 }
