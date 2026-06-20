@@ -496,7 +496,11 @@ resource "helm_release" "app" {
     { name = "objectStorage.objectsBucket", value = var.s3_objects_bucket },
 
     # --- Memcached ---
-    { name = "memcached.host", value = local.memcached_in_cluster ? "dozuki-memcached" : var.memcached_cluster_address },
+    # In-cluster memcached: use the service FQDN, not the bare name — the app's Hostname
+    # type rejects a single-label host ("Invalid hostname"), failing db-migrations and
+    # blocking the upgrade. (The bare name resolves via k8s DNS, but the app validates the
+    # string format.) ElastiCache supplies a full host already.
+    { name = "memcached.host", value = local.memcached_in_cluster ? "dozuki-memcached.${local.k8s_namespace_name}.svc.cluster.local" : var.memcached_cluster_address },
 
     # --- Vault ---
     { name = "vault.enabled", value = var.cloud == "aws" ? "true" : "false" },
