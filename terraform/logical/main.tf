@@ -101,22 +101,8 @@ provider "vault" {
 }
 
 provider "azurerm" {
-  # On AWS deploys there are no azurerm resources (all are count = cloud=="azure"
-  # ? 1 : 0), but Terraform still configures this provider during plan. azurerm v4
-  # requires a subscription_id and, with no credentials, falls back to Azure CLI
-  # auth — and `az` is not installed on the AWS Spacelift workers, which fails the
-  # plan. For cloud != "azure" we pin static placeholder credentials, disable the
-  # CLI, and skip resource-provider registration so the provider configures without
-  # any Azure API call (the placeholders are never used). Azure deploys keep CLI
-  # auth (operator `az login`) and the real subscription unchanged.
-  subscription_id = var.cloud == "azure" ? (var.azure_subscription_id == "" ? null : var.azure_subscription_id) : "00000000-0000-0000-0000-000000000000"
+  subscription_id = var.azure_subscription_id == "" ? null : var.azure_subscription_id
   environment     = var.azure_environment
-
-  use_cli                         = var.cloud == "azure"
-  client_id                       = var.cloud == "azure" ? null : "00000000-0000-0000-0000-000000000000"
-  tenant_id                       = var.cloud == "azure" ? null : "00000000-0000-0000-0000-000000000000"
-  client_secret                   = var.cloud == "azure" ? null : "placeholder-not-used-on-aws"
-  resource_provider_registrations = var.cloud == "azure" ? null : "none"
 
   features {}
 }
