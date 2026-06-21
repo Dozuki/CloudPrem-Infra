@@ -136,6 +136,30 @@ while IFS= read -r pfx; do
     echo "  destroy did NOT fully succeed — state prefix kept for retry: $pfx" >&2
     fail=1
   fi
+
+  # 4b) Reclaim resources terraform does not own: the app's dynamic PVCs create EBS
+  #     volumes via the CSI driver (not in TF state), so destroy never removes them —
+  #     they orphan as `available`. Also sweep orphaned launch templates. Detached/
+  #     unused only; reports every deletion (no silent caps).
+  if [ -n "$env" ]; then
+    stack="${CUSTOMER}-${env}"
+    for vol in $(aws ec2 describe-volumes --region "$region" --profile "$P" \
+          --filters "Name=tag:Name,Values=${stack}-dynamic-pvc-*" "Name=status,Values=available" \
+          --query 'Volumes[].VolumeId' --output text 2>/dev/null | tr '\t' '\n'); do
+      [ -z "$vol" ] && continue
+      if [ "${DRY_RUN:-0}" = 1 ]; then echo "  DRY_RUN: would delete orphan volume $vol"; continue; fi
+      aws ec2 delete-volume --region "$region" --profile "$P" --volume-id "$vol" >/dev/null 2>&1 \
+        && echo "  reclaimed orphan EBS volume: $vol" || echo "  WARNING: could not delete volume $vol" >&2
+    done
+    for lt in $(aws ec2 describe-launch-templates --region "$region" --profile "$P" \
+          --filters "Name=launch-template-name,Values=${stack}-*" \
+          --query 'LaunchTemplates[].LaunchTemplateId' --output text 2>/dev/null | tr '\t' '\n'); do
+      [ -z "$lt" ] && continue
+      if [ "${DRY_RUN:-0}" = 1 ]; then echo "  DRY_RUN: would delete launch template $lt"; continue; fi
+      aws ec2 delete-launch-template --region "$region" --profile "$P" --launch-template-id "$lt" >/dev/null 2>&1 \
+        && echo "  reclaimed orphan launch template: $lt"
+    done
+  fi
 done <<EOF
 $PREFIXES
 EOF
