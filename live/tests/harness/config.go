@@ -14,11 +14,12 @@ var harnessOnlyKeys = map[string]bool{
 }
 
 type Defaults struct {
-	FromRef  string `yaml:"from_ref"`
-	ToRef    string `yaml:"to_ref"`
-	Region   string `yaml:"region"`
-	DRRegion string `yaml:"dr_region"`
-	EnvPath  string `yaml:"env_path"`
+	FromRef           string   `yaml:"from_ref"`
+	ToRef             string   `yaml:"to_ref"`
+	Region            string   `yaml:"region"`
+	DRRegion          string   `yaml:"dr_region"`
+	EnvPath           string   `yaml:"env_path"`
+	CriticalWorkloads []string `yaml:"critical_workloads"`
 }
 
 type Config struct {
