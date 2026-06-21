@@ -118,16 +118,37 @@ data "aws_iam_policy_document" "eks_worker" {
   statement {
     actions = [
       "rds:CreateDBSnapshot",
-      "rds:DescribeDBSnapshots",
       "rds:AddTagsToResource"
     ]
 
+    # Scope snapshot creation to this stack's own DB instance (and the snapshots it produces),
+    # so the app role cannot snapshot other databases in the account.
+    resources = [
+      "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}*",
+      "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:snapshot:*",
+    ]
+  }
+
+  statement {
+    # List operation; does not support resource-level scoping.
+    actions   = ["rds:DescribeDBSnapshots"]
     resources = ["*"]
   }
 
   statement {
+    # Least-privilege CloudWatch Logs: create/write/read/tag only — drops the account-wide
+    # Delete*, PutResourcePolicy, AssociateKmsKey, etc. that "logs:*" granted. Resource stays
+    # "*" because the app's log-group names vary per feature/customer.
     actions = [
-      "logs:*",
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:PutRetentionPolicy",
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+      "logs:GetLogEvents",
+      "logs:FilterLogEvents",
+      "logs:TagResource",
     ]
 
     resources = ["*"]
@@ -138,7 +159,10 @@ data "aws_iam_policy_document" "eks_worker" {
       "dms:StartReplicationTask"
     ]
 
-    resources = ["*"]
+    # Dozuki uses DMS for data migration; restrict to this account/region's replication tasks.
+    resources = [
+      "arn:${data.aws_partition.current.partition}:dms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:task:*",
+    ]
   }
 
   statement {

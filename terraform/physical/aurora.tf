@@ -27,9 +27,13 @@ module "aurora" {
     min_capacity = var.aurora_min_acu
     max_capacity = var.aurora_max_acu
   }
+  # ca_cert_identifier pins the same CA as the RDS path (parity); performance_insights_kms_key_id
+  # encrypts PI data (which can include query text) with the customer CMK when one exists —
+  # null otherwise, since Performance Insights rejects the AWS-managed aws/rds key and falls
+  # back to its own default.
   instances = merge(
-    { writer = { instance_class = "db.serverless", performance_insights_enabled = true } },
-    var.rds_multi_az ? { reader = { instance_class = "db.serverless", performance_insights_enabled = true } } : {}
+    { writer = { instance_class = "db.serverless", performance_insights_enabled = true, performance_insights_kms_key_id = local.rds_kms_is_cmk ? local.rds_kms_key_arn : null, ca_cert_identifier = local.ca_cert_identifier } },
+    var.rds_multi_az ? { reader = { instance_class = "db.serverless", performance_insights_enabled = true, performance_insights_kms_key_id = local.rds_kms_is_cmk ? local.rds_kms_key_arn : null, ca_cert_identifier = local.ca_cert_identifier } } : {}
   )
 
   # We supply the shared primary_database_sg; don't let the module create its own SG
@@ -46,11 +50,13 @@ module "aurora" {
 
   cluster_parameter_group = {
     family = "aurora-mysql8.0"
-    parameters = [
+    # Opt-in TLS enforcement (var.db_require_secure_transport): reject plaintext connections.
+    # Off by default as a shared behavioral change; dynamic param, so no reboot required.
+    parameters = concat([
       { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
       { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
       { name = "binlog_checksum", value = "NONE", apply_method = "pending-reboot" },
-    ]
+    ], var.db_require_secure_transport ? [{ name = "require_secure_transport", value = "ON" }] : [])
   }
 
   db_parameter_group = {

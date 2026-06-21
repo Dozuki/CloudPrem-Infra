@@ -396,6 +396,12 @@ variable "db_engine" {
   }
 }
 
+variable "db_require_secure_transport" {
+  description = "Opt-in: enforce TLS on the database (require_secure_transport=ON), rejecting plaintext connections. Off by default because it is a shared behavioral change — enable per-stack only once every DB client (app, BI, DMS, bastion) is confirmed to connect over TLS."
+  type        = bool
+  default     = false
+}
+
 variable "aurora_min_acu" {
   description = "Aurora Serverless v2 minimum capacity (ACUs)."
   type        = number

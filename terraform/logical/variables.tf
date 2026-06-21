@@ -266,6 +266,12 @@ variable "cloud" {
   }
 }
 
+variable "enable_network_policies" {
+  description = "Opt-in: install CiliumNetworkPolicies that lock down the app tier (AWS/Cilium only). Default off so existing stacks are unaffected; enable per-environment after validating the allow-list against that deployment."
+  type        = bool
+  default     = false
+}
+
 variable "azure_subscription_id" {
   description = "Azure subscription ID. Required when cloud = azure."
   type        = string
