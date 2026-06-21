@@ -8,7 +8,7 @@ locals {
   # Extract the service region from the endpoint service name
   # (format: com.amazonaws.vpce.<region>.vpce-svc-xxx)
   vault_service_region  = element(split(".", var.vault_endpoint_service_name), 3)
-  vault_is_cross_region = local.vault_service_region != data.aws_region.current.id
+  vault_is_cross_region = local.vault_service_region != data.aws_region.current.region
 }
 
 # Look up endpoint service AZs for same-region deployments to filter subnets.
