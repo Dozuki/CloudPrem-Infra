@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Installs the Karpenter controller via imperative helm (no Terraform helm provider).
+# Depends (in TF) on the cluster, the Karpenter IAM/queue module, and the Cilium bootstrap,
+# so by the time this runs the cluster is ACTIVE, the bootstrap nodes are Ready (Cilium is
+# up), and the IAM/queue/service-account exist. Pinned to the bootstrap node group via
+# nodeSelector so the controller has somewhere to run before it provisions its own nodes.
+set -euo pipefail
+
+CLUSTER="${cluster_name}"
+REGION="${region}"
+VERSION="${chart_version}"
+QUEUE="${queue_name}"
+SERVICE_ACCOUNT="${service_account}"
+
+# Isolated kubeconfig so we never touch the operator's default config.
+KUBECONFIG_TMP="$(mktemp)"
+trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" --kubeconfig "$KUBECONFIG_TMP"
+
+# The Karpenter chart lives in public ECR. Anonymous pull tokens expire (and a
+# cached-stale token yields a 403), so fetch a fresh one. public.ecr.aws's token
+# API is only in us-east-1 regardless of the cluster region.
+aws ecr-public get-login-password --region us-east-1 | helm registry login --username AWS --password-stdin public.ecr.aws
+
+helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+  --version "$VERSION" \
+  --namespace kube-system \
+  --kubeconfig "$KUBECONFIG_TMP" \
+  --set settings.clusterName="$CLUSTER" \
+  --set settings.interruptionQueue="$QUEUE" \
+  --set serviceAccount.name="$SERVICE_ACCOUNT" \
+  --set nodeSelector."dozuki\.com/node-role"=bootstrap
+
+echo "Karpenter $VERSION install/upgrade complete on $CLUSTER."

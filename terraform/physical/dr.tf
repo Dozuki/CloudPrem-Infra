@@ -17,6 +17,12 @@ locals {
   rds_use_dr_cmk  = var.enable_dr && var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
   rds_kms_key_arn = local.rds_use_dr_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
 
+  # True when the resolved RDS key is a customer-managed CMK rather than the AWS-managed
+  # aws/rds key. Secrets Manager and Performance Insights both REJECT the aws/rds managed
+  # key, so a CMK is only handed to them when one genuinely exists; otherwise they fall
+  # back to their own service-default key (leave the attribute null).
+  rds_kms_is_cmk = local.rds_use_dr_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER"
+
   # RDS automated-backup cross-region replication is only possible when the DB
   # uses a customer-managed key (either our created CMK or an operator-pinned one).
   # Aurora DR uses Global Database (Plan B), not automated-backup replication.

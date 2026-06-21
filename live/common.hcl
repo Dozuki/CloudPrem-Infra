@@ -57,6 +57,7 @@ dependency "physical" {
     vault_endpoint_dns = "vault.internal.dozuki.com"
     nlb_https_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
     nlb_http_target_group_arn = "arn:aws:elasticloadbalancing:us-east-1:000000000000:targetgroup/dummy/dummy"
+    karpenter_node_iam_role_name = "dummy-karpenter-node-role"
   }
   mock_outputs_merge_strategy_with_state = "shallow"
 }
@@ -86,4 +87,5 @@ inputs = {
   vault_address = "http://${dependency.physical.outputs.vault_endpoint_dns}:8200"
   nlb_https_target_group_arn = dependency.physical.outputs.nlb_https_target_group_arn
   nlb_http_target_group_arn = dependency.physical.outputs.nlb_http_target_group_arn
+  karpenter_node_iam_role_name = dependency.physical.outputs.karpenter_node_iam_role_name
 }

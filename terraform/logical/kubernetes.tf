@@ -7,7 +7,7 @@ resource "kubernetes_storage_class_v1" "ebs_gp3" {
       "storageclass.kubernetes.io/is-default-class" = "true"
     }
   }
-  storage_provisioner    = "ebs.csi.eks.amazonaws.com"
+  storage_provisioner    = "ebs.csi.aws.com"
   reclaim_policy         = "Delete"
   volume_binding_mode    = "WaitForFirstConsumer"
   allow_volume_expansion = true
@@ -117,6 +117,19 @@ resource "helm_release" "cert_manager" {
       name  = "config.enableGatewayAPI"
       value = "true"
     },
+    # Cilium overlay puts pods on off-VPC IPs the EKS managed control plane can't
+    # route to, so apiserver->webhook calls fail. Run the webhook on hostNetwork (node
+    # VPC IP). securePort 8443 is one of the ports the EKS node SG already allows from
+    # the control plane (443/4443/6443/8443/9443/10250/10251); a node SG rule
+    # (physical) additionally lets the Cilium pod CIDR reach it for in-cluster callers.
+    {
+      name  = "webhook.hostNetwork"
+      value = "true"
+    },
+    {
+      name  = "webhook.securePort"
+      value = "8443"
+    },
   ]
 }
 
@@ -202,7 +215,7 @@ resource "kubernetes_manifest" "tgb_https" {
   depends_on = [kubernetes_service_v1.envoy_proxy]
 
   manifest = {
-    apiVersion = "eks.amazonaws.com/v1"
+    apiVersion = "elbv2.k8s.aws/v1beta1"
     kind       = "TargetGroupBinding"
     metadata = {
       name      = "envoy-https"
@@ -224,7 +237,7 @@ resource "kubernetes_manifest" "tgb_http" {
   depends_on = [kubernetes_service_v1.envoy_proxy]
 
   manifest = {
-    apiVersion = "eks.amazonaws.com/v1"
+    apiVersion = "elbv2.k8s.aws/v1beta1"
     kind       = "TargetGroupBinding"
     metadata = {
       name      = "envoy-http"
@@ -237,93 +250,6 @@ resource "kubernetes_manifest" "tgb_http" {
       }
       targetGroupARN = var.nlb_http_target_group_arn
       targetType     = "ip"
-    }
-  }
-}
-
-resource "kubernetes_manifest" "nodepool_spot" {
-  count = var.cloud == "aws" ? 1 : 0
-
-  manifest = {
-    apiVersion = "karpenter.sh/v1"
-    kind       = "NodePool"
-    metadata = {
-      name = "spot"
-    }
-    spec = {
-      template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["spot"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
-            }
-          ]
-        }
-      }
-      disruption = {
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "1m"
-      }
-      weight = 100
-    }
-  }
-}
-
-resource "kubernetes_manifest" "nodepool_on_demand" {
-  count = var.cloud == "aws" ? 1 : 0
-
-  manifest = {
-    apiVersion = "karpenter.sh/v1"
-    kind       = "NodePool"
-    metadata = {
-      name = "on-demand"
-    }
-    spec = {
-      template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["on-demand"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
-            }
-          ]
-          taints = [
-            {
-              key    = "eks.amazonaws.com/capacity-type"
-              value  = "on-demand"
-              effect = "NoSchedule"
-            }
-          ]
-        }
-      }
-      disruption = {
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "1m"
-      }
-      weight = 10
     }
   }
 }
@@ -346,6 +272,18 @@ resource "helm_release" "external_secrets" {
     {
       name  = "crds.createClusterSecretStore"
       value = "true"
+    },
+    # hostNetwork so the EKS control plane can reach the validating/conversion webhook
+    # (Cilium overlay pod IPs are off-VPC and unroutable from the control plane). Port
+    # 4443 is a control-plane-allowed node SG port, distinct from cert-manager (8443)
+    # and the LB controller (9443) to avoid collisions on shared nodes.
+    {
+      name  = "webhook.hostNetwork"
+      value = "true"
+    },
+    {
+      name  = "webhook.port"
+      value = "4443"
     },
   ]
 }

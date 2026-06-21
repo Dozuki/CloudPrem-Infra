@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Installs Cilium as the cluster CNI via imperative helm (no Terraform helm provider).
+# Runs concurrently with the in-module bootstrap node group: it polls for the cluster by
+# name, then installs the CNI so the fresh (NotReady) nodes become Ready before the node
+# group's create timeout. Templated by Terraform; all dynamic values arrive as template
+# vars so the bash body uses only literal $VAR references (no TF/bash $${} collisions).
+set -euo pipefail
+
+CLUSTER="${cluster_name}"
+REGION="${region}"
+VERSION="${chart_version}"
+POD_CIDR="${pod_cidr}"
+HUBBLE_UI="${hubble_ui}"
+WIREGUARD="${wireguard}"
+
+# 1. Wait for the cluster to exist and reach ACTIVE. describe-cluster errors (not-found
+#    during concurrent creation) are swallowed so the loop keeps polling.
+#    100 x 15s = 25m, comfortably covering EKS control-plane creation (~10-15m).
+max_attempts=100
+attempt=0
+status=""
+while [ "$status" != "ACTIVE" ]; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -gt "$max_attempts" ]; then
+    echo "Timed out waiting for EKS cluster $CLUSTER to become ACTIVE (last status: $status)" >&2
+    exit 1
+  fi
+  status="$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
+    --query 'cluster.status' --output text 2>/dev/null || true)"
+  echo "Waiting for cluster $CLUSTER (attempt $attempt/$max_attempts, status: $${status:-unknown})"
+  [ "$status" = "ACTIVE" ] || sleep 15
+done
+
+# 2. Write an isolated kubeconfig so we never touch the operator's default config.
+KUBECONFIG_TMP="$(mktemp)"
+trap 'rm -f "$KUBECONFIG_TMP"' EXIT
+aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION" --kubeconfig "$KUBECONFIG_TMP"
+
+# 3. Cilium kube-proxy replacement needs the apiserver host (endpoint minus scheme).
+ENDPOINT="$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" \
+  --query 'cluster.endpoint' --output text)"
+API_HOST="$${ENDPOINT#https://}"
+
+# 4. Install/upgrade Cilium.
+# Prometheus metrics: agent (:9962), operator (:9963), and Hubble flow metrics (:9965),
+# each with a ServiceMonitor labelled release=dozuki to match kube-prometheus-stack's
+# serviceMonitorSelector (the app helm release is named "dozuki"), so it scrapes them.
+helm repo add cilium https://helm.cilium.io --force-update
+helm repo update
+
+set -- \
+  --set kubeProxyReplacement=true \
+  --set k8sServiceHost="$API_HOST" \
+  --set k8sServicePort=443 \
+  --set ipam.mode=cluster-pool \
+  --set ipam.operator.clusterPoolIPv4PodCIDRList="{$POD_CIDR}" \
+  --set ipam.operator.clusterPoolIPv4MaskSize=24 \
+  --set routingMode=tunnel \
+  --set tunnelProtocol=vxlan \
+  --set bpf.masquerade=true \
+  --set hubble.enabled=true \
+  --set hubble.relay.enabled=true \
+  --set hubble.ui.enabled="$HUBBLE_UI" \
+  --set tolerations[0].operator=Exists \
+  --set prometheus.enabled=true \
+  --set prometheus.serviceMonitor.enabled=true \
+  --set prometheus.serviceMonitor.labels.release=dozuki \
+  --set operator.prometheus.enabled=true \
+  --set operator.prometheus.serviceMonitor.enabled=true \
+  --set operator.prometheus.serviceMonitor.labels.release=dozuki \
+  --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp}" \
+  --set hubble.metrics.serviceMonitor.enabled=true \
+  --set hubble.metrics.serviceMonitor.labels.release=dozuki
+
+if [ "$WIREGUARD" = "true" ]; then
+  set -- "$@" --set encryption.enabled=true --set encryption.type=wireguard
+fi
+
+helm upgrade --install cilium cilium/cilium \
+  --version "$VERSION" \
+  --namespace kube-system \
+  --kubeconfig "$KUBECONFIG_TMP" \
+  "$@"
+
+echo "Cilium $VERSION install/upgrade complete on $CLUSTER."

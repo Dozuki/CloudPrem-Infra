@@ -118,16 +118,37 @@ data "aws_iam_policy_document" "eks_worker" {
   statement {
     actions = [
       "rds:CreateDBSnapshot",
-      "rds:DescribeDBSnapshots",
       "rds:AddTagsToResource"
     ]
 
+    # Scope snapshot creation to this stack's own DB instance (and the snapshots it produces),
+    # so the app role cannot snapshot other databases in the account.
+    resources = [
+      "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}*",
+      "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:snapshot:*",
+    ]
+  }
+
+  statement {
+    # List operation; does not support resource-level scoping.
+    actions   = ["rds:DescribeDBSnapshots"]
     resources = ["*"]
   }
 
   statement {
+    # Least-privilege CloudWatch Logs: create/write/read/tag only — drops the account-wide
+    # Delete*, PutResourcePolicy, AssociateKmsKey, etc. that "logs:*" granted. Resource stays
+    # "*" because the app's log-group names vary per feature/customer.
     actions = [
-      "logs:*",
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:PutRetentionPolicy",
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+      "logs:GetLogEvents",
+      "logs:FilterLogEvents",
+      "logs:TagResource",
     ]
 
     resources = ["*"]
@@ -138,7 +159,10 @@ data "aws_iam_policy_document" "eks_worker" {
       "dms:StartReplicationTask"
     ]
 
-    resources = ["*"]
+    # Dozuki uses DMS for data migration; restrict to this account/region's replication tasks.
+    resources = [
+      "arn:${data.aws_partition.current.partition}:dms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:task:*",
+    ]
   }
 
   statement {
@@ -234,11 +258,70 @@ module "eks_cluster" {
     resources        = ["secrets"]
   }
 
-  # Auto Mode: Karpenter-based scaling, built-in EBS CSI, LB controller, and spot interruption handling.
-  # bootstrap_self_managed_addons defaults to false when compute_config is enabled, triggering cluster replacement.
-  compute_config = {
-    enabled    = true
-    node_pools = ["system"]
+  # EKS Auto Mode is intentionally off (compute_config unset; v21 hardcodes
+  # bootstrap_self_managed_addons = false). The dataplane is self-managed: a bootstrap
+  # node group + Karpenter for scaling, Cilium as the CNI, and EKS managed addons below.
+
+  # A small bootstrap managed node group hosts CoreDNS/Cilium/Karpenter before
+  # Karpenter takes over node provisioning.
+  eks_managed_node_groups = {
+    bootstrap = {
+      ami_type       = "BOTTLEROCKET_x86_64"
+      instance_types = [var.eks_bootstrap_instance_type]
+      capacity_type  = var.eks_bootstrap_capacity_type
+      min_size       = var.eks_bootstrap_desired_size
+      max_size       = var.eks_bootstrap_desired_size
+      desired_size   = var.eks_bootstrap_desired_size
+      labels         = { "dozuki.com/node-role" = "bootstrap" }
+    }
+  }
+
+  # Cilium replaces vpc-cni and kube-proxy, so we manage only CoreDNS, the Pod Identity
+  # agent (Pod Identity associations for Karpenter/cert-manager/app SAs yield no AWS
+  # credentials without it), and the EBS CSI driver (provisions the ebs-gp3 StorageClass).
+  addons = {
+    coredns                  = { most_recent = true }
+    "eks-pod-identity-agent" = { most_recent = true }
+    "aws-ebs-csi-driver"     = { most_recent = true }
+  }
+
+  # self_managed: tag the EKS-created node security group so Karpenter's EC2NodeClass
+  # securityGroupSelectorTerms (karpenter.sh/discovery) can discover it for launched nodes.
+  node_security_group_tags = { "karpenter.sh/discovery" = local.identifier }
+
+  # The EKS "recommended" node SG rules are written for the VPC CNI and do NOT allow
+  # Cilium's overlay traffic, so cross-node pod-to-pod (VXLAN) is dropped. Open Cilium's
+  # VXLAN data port (UDP 8472) and health-check port (TCP 4240) node-to-node.
+  node_security_group_additional_rules = {
+    cilium_vxlan = {
+      description = "Cilium VXLAN overlay between nodes"
+      protocol    = "udp"
+      from_port   = 8472
+      to_port     = 8472
+      type        = "ingress"
+      self        = true
+    }
+    cilium_health = {
+      description = "Cilium agent health checks between nodes"
+      protocol    = "tcp"
+      from_port   = 4240
+      to_port     = 4240
+      type        = "ingress"
+      self        = true
+    }
+    # Admission-webhook controllers run hostNetwork (so the EKS managed control plane
+    # can reach them — overlay pod IPs are off-VPC and unroutable from the control
+    # plane). In-cluster callers reach those webhooks from Cilium overlay pods, whose
+    # source IPs are NOT members of the node SG, so open the webhook ports to the pod
+    # CIDR. Covers cert-manager (8443), external-secrets (4443), LB controller (9443).
+    webhook_pods = {
+      description = "Cilium overlay pods to hostNetwork admission webhooks"
+      protocol    = "tcp"
+      from_port   = 4443
+      to_port     = 9443
+      type        = "ingress"
+      cidr_blocks = [var.cilium_pod_cidr]
+    }
   }
 
   vpc_id     = local.vpc_id

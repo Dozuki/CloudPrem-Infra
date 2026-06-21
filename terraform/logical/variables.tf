@@ -135,6 +135,24 @@ variable "eks_cluster_id" {
   type        = string
 }
 
+variable "karpenter_node_iam_role_name" {
+  description = "IAM role name for Karpenter-launched nodes (from physical)."
+  type        = string
+  default     = ""
+}
+
+variable "karpenter_node_capacity_types" {
+  description = "Capacity types Karpenter may provision (e.g. [\"spot\",\"on-demand\"])."
+  type        = list(string)
+  default     = ["spot", "on-demand"]
+}
+
+variable "karpenter_node_instance_families" {
+  description = "Instance families Karpenter may use."
+  type        = list(string)
+  default     = ["c", "m", "r"]
+}
+
 variable "primary_db_secret" {
   description = "ARN to secret containing primary db credentials"
   type        = string
@@ -246,6 +264,12 @@ variable "cloud" {
     condition     = contains(["aws", "azure"], var.cloud)
     error_message = "cloud must be aws or azure."
   }
+}
+
+variable "enable_network_policies" {
+  description = "Opt-in: install CiliumNetworkPolicies that lock down the app tier (AWS/Cilium only). Default off so existing stacks are unaffected; enable per-environment after validating the allow-list against that deployment."
+  type        = bool
+  default     = false
 }
 
 variable "azure_subscription_id" {

@@ -36,6 +36,13 @@ module "primary_database_sg" {
       source_security_group_id = module.eks_cluster.cluster_primary_security_group_id
     },
     {
+      # Self-managed Cilium nodes carry the node SG (not the cluster primary SG that
+      # VPC-CNI pod ENIs would use). Pod->RDS traffic egresses masqueraded via the node
+      # ENI, so RDS must allow the node SG for the app to reach the database.
+      rule                     = "mysql-tcp"
+      source_security_group_id = module.eks_cluster.node_security_group_id
+    },
+    {
       rule                     = "mysql-tcp"
       source_security_group_id = module.bastion_sg.security_group_id
     },
@@ -111,6 +118,17 @@ resource "aws_db_parameter_group" "default" {
     name  = "group_concat_max_len"
     value = "33554432"
   }
+  # Opt-in TLS enforcement: reject plaintext connections. Off by default because it is a
+  # behavioral change shared across every RDS stack — any client that connects in plaintext
+  # (a BI tool, DMS, a bastion script) would break. Enable per-stack once all DB clients are
+  # confirmed on TLS. Dynamic parameter, so no reboot required.
+  dynamic "parameter" {
+    for_each = var.db_require_secure_transport ? [1] : []
+    content {
+      name  = "require_secure_transport"
+      value = "ON"
+    }
+  }
 
   lifecycle {
     create_before_destroy = true
@@ -180,6 +198,12 @@ module "primary_database" {
 #tfsec:ignore:aws-ssm-secret-use-customer-key
 resource "aws_secretsmanager_secret" "primary_database_credentials" {
   name_prefix = "${local.identifier}-database"
+
+  # Encrypt the DB credential with the RDS customer CMK when one exists, for consistent
+  # key-access auditing/isolation. When the stack uses the AWS-managed aws/rds key, leave
+  # this null: Secrets Manager rejects another service's managed key and falls back to its
+  # own aws/secretsmanager key (hence the retained tfsec ignore).
+  kms_key_id = local.rds_kms_is_cmk ? local.rds_kms_key_arn : null
 
   recovery_window_in_days = var.protect_resources ? 7 : 0
 

@@ -82,8 +82,8 @@ output "private_subnet_ids" {
   value       = local.private_subnet_ids
 }
 output "vault_endpoint_dns" {
-  description = "Private DNS name for reaching Vault via PrivateLink"
-  value       = aws_route53_record.vault.fqdn
+  description = "Private DNS name for reaching Vault via PrivateLink (empty when no Vault endpoint is configured)"
+  value       = local.create_vault_endpoint ? aws_route53_record.vault[0].fqdn : ""
 }
 output "nlb_https_target_group_arn" {
   description = "NLB HTTPS target group ARN for TargetGroupBinding"
@@ -112,4 +112,9 @@ output "dr_s3_kms_key_arn" {
 output "dr_rds_backup_replication_arn" {
   description = "ARN of the replicated RDS automated backups in the DR region."
   value       = try(aws_db_instance_automated_backups_replication.primary[0].id, "")
+}
+
+output "karpenter_node_iam_role_name" {
+  description = "IAM role name for Karpenter-launched nodes."
+  value       = module.karpenter.node_iam_role_name
 }

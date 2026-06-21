@@ -386,7 +386,7 @@ variable "rds_adopt_dr_cmk" {
 }
 
 variable "db_engine" {
-  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'."
+  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.0 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'."
   type        = string
   default     = "rds"
 
@@ -394,6 +394,12 @@ variable "db_engine" {
     condition     = contains(["rds", "aurora"], var.db_engine)
     error_message = "db_engine must be 'rds' or 'aurora'."
   }
+}
+
+variable "db_require_secure_transport" {
+  description = "Opt-in: enforce TLS on the database (require_secure_transport=ON), rejecting plaintext connections. Off by default because it is a shared behavioral change — enable per-stack only once every DB client (app, BI, DMS, bastion) is confirmed to connect over TLS."
+  type        = bool
+  default     = false
 }
 
 variable "aurora_min_acu" {
@@ -409,9 +415,15 @@ variable "aurora_max_acu" {
 }
 
 variable "aurora_engine_version" {
-  description = "Aurora MySQL engine version. Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
+  # Stays on the 8.0 family: the Dozuki baseline Guide schema dump
+  # (Migrations/SchemaSQL/ifixit_guide.sql) defines a FK on a non-unique column
+  # (approval_process_defaults.major_release_approval_processid -> approval_processes.approval_processid).
+  # MySQL/Aurora 8.4 removed that legacy InnoDB extension and rejects a fresh load
+  # with ER_FK_NO_UNIQUE_KEY (FOREIGN_KEY_CHECKS=0 does not suppress it). 8.4 is only
+  # reachable via in-place upgrade of an existing 8.0 cluster, not a fresh provision.
+  description = "Aurora MySQL engine version (full Aurora version string). Pin to an 8.0 family version for fresh provisions; the baseline schema is not fresh-loadable on 8.4."
   type        = string
-  default     = "8.4.7"
+  default     = "8.0.mysql_aurora.3.12.0"
 }
 
 variable "aurora_snapshot_identifier" {
@@ -427,3 +439,71 @@ variable "memcached_in_cluster" {
 }
 
 # --- END App Configuration --- #
+
+# --- BEGIN EKS Compute Mode (self_managed / Cilium) --- #
+
+variable "eks_bootstrap_instance_type" {
+  description = "Instance type for the bootstrap node group (system components only)."
+  type        = string
+  default     = "m5.large"
+}
+
+variable "eks_bootstrap_desired_size" {
+  description = "Node count for the self_managed bootstrap node group (2 = survives a node loss)."
+  type        = number
+  default     = 2
+}
+
+variable "eks_bootstrap_capacity_type" {
+  description = "Capacity type for the bootstrap node group (ON_DEMAND or SPOT)."
+  type        = string
+  default     = "ON_DEMAND"
+}
+
+variable "cilium_chart_version" {
+  description = "Cilium Helm chart version (pinned). self_managed only."
+  type        = string
+  default     = "1.17.4"
+}
+
+variable "karpenter_chart_version" {
+  description = "Karpenter Helm chart version (pinned). Must be compatible with the cluster's EKS version (see karpenter.sh compatibility matrix). self_managed only."
+  type        = string
+  default     = "1.13.0"
+}
+
+variable "aws_lb_controller_chart_version" {
+  description = "AWS Load Balancer Controller Helm chart version (pinned). Provides the TargetGroupBinding CRD + controller (NLB -> Envoy Gateway). self_managed only."
+  type        = string
+  default     = "3.4.0"
+}
+
+variable "metrics_server_chart_version" {
+  description = "metrics-server Helm chart version (pinned). Provides the metrics API HPAs read; EKS Auto Mode/AKS bundle it, self-managed EKS does not."
+  type        = string
+  default     = "3.13.1"
+}
+
+variable "cilium_pod_cidr" {
+  description = "Overlay pod CIDR for Cilium cluster-pool IPAM (off-VPC). self_managed only."
+  type        = string
+  default     = "10.244.0.0/16"
+}
+
+variable "cilium_enable_wireguard" {
+  description = "Enable Cilium WireGuard pod-to-pod encryption (off for research; prod/compliance toggle). self_managed only."
+  type        = bool
+  default     = false
+}
+
+variable "cilium_enable_hubble_ui" {
+  description = "Expose the Hubble UI (on for research; restrict for prod). self_managed only."
+  type        = bool
+  default     = true
+}
+
+# The karpenter_node_capacity_types and karpenter_node_instance_families variables now
+# live in the logical layer (terraform/logical/variables.tf), alongside the NodePool CR
+# that consumes them.
+
+# --- END EKS Compute Mode (self_managed / Cilium) --- #

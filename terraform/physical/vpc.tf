@@ -63,6 +63,8 @@ module "vpc" {
     "kubernetes.io/cluster/${local.identifier}" = "shared"
     "kubernetes.io/role/internal-elb"           = "1"
     "type"                                      = "private"
+    # Lets Karpenter's EC2NodeClass discover these subnets (subnetSelectorTerms).
+    "karpenter.sh/discovery" = local.identifier
   }
 
   tags = local.tags
