@@ -104,8 +104,9 @@ func RunUpgrade(p RunParams) (err error) {
 	}
 
 	// Write env.hcl into BOTH worktrees up front so the deferred destroy (which
-	// runs against toWT) always has a valid config to clean up with, even if the
-	// baseline apply fails before the target env.hcl would otherwise be written.
+	// runs against the applied worktree, appliedWT) always has a valid config to
+	// clean up with, even if the baseline apply fails before the target env.hcl
+	// would otherwise be written.
 	if werr := WriteEnvHCL(filepath.Join(fromWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.FromRef)); werr != nil {
 		return werr
 	}
@@ -125,26 +126,32 @@ func RunUpgrade(p RunParams) (err error) {
 	// interrupt still leaves a correct from_ref marker).
 	_ = writeAppliedMarker(p.RepoDir, tg(fromWT).StatePrefix, tg(fromWT).WorkingDir)
 
-	// Single teardown, runnable from the normal defer OR the signal handler exactly
-	// once. Captures the named return err on the defer path; on the signal path the
-	// handler calls os.Exit afterward so the err write is moot.
 	var teardownOnce sync.Once
-	teardown := func() {
+	teardown := func(interrupted bool) {
 		teardownOnce.Do(func() {
 			wt := appliedWT.Load()
-			step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, err != nil)
-			captureDiagnostics(p, region, identifier, err != nil, tg(wt), fromEnvHCL, toEnvHCL)
+			// An interrupted run is never "clean": full diagnostics, keep the marker
+			// for the cleanup backstop, and don't touch the named return err — the
+			// signal handler exits via os.Exit, and reading err here would race the
+			// still-running main goroutine.
+			failed := interrupted
+			if !interrupted {
+				failed = err != nil
+			}
+			step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, failed)
+			captureDiagnostics(p, region, identifier, failed, tg(wt), fromEnvHCL, toEnvHCL)
 			step("TEARDOWN: destroy against %s (logical best-effort, then ALWAYS physical)", wt.Ref)
-			if derr := tg(wt).Destroy(); derr != nil && err == nil {
+			derr := tg(wt).Destroy()
+			if !interrupted && derr != nil && err == nil {
 				err = fmt.Errorf("destroy: %w", derr)
 			}
-			if err == nil {
+			if !failed {
 				removeAppliedMarker(p.RepoDir, tg(wt).StatePrefix)
 			}
 		})
 	}
-	defer teardown()
-	stopSig := installTeardownOnSignal(teardown, os.Exit)
+	defer teardown(false)
+	stopSig := installTeardownOnSignal(func() { teardown(true) }, os.Exit)
 	defer stopSig()
 
 	// ---- Baseline apply + validate ----
