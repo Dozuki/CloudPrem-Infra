@@ -1,18 +1,24 @@
-# Gateway TLS managed by Terraform. When an operator supplies a cert/key
-# (tls_cert/tls_key) — on ANY cloud — Terraform creates the tls-secret directly and
-# the chart runs with tls.externallyManaged=true, so cert-manager/ACME stays out of
-# the way (no public-DNS / ACME dependency, which is essential for ephemeral test
-# clusters and air-gapped on-prem). Azure additionally supports a generated
-# self-signed cert for dev (azure_tls_mode=self-signed); making the self-signed
-# generation cloud-agnostic is a follow-up. AWS with no supplied cert is unaffected
-# (cert-manager/ACME as before).
+# Gateway TLS. Manual TLS (supplied cert/key on ANY cloud, or a generated self-signed
+# cert) keeps cert-manager/ACME out of the way (no public-DNS / ACME dependency —
+# essential for ephemeral test clusters and air-gapped on-prem).
+#
+# SUPPLIED certs are rendered by the chart (tls.enabled + tls.cert/key, typed
+# kubernetes.io/tls since chart 0.3.12), NOT by Terraform — so a v6.0 (chart-owned
+# tls-secret) -> v6.1 upgrade keeps the same owner and doesn't collide ("secrets
+# tls-secret already exists"). Terraform only creates the secret for the GENERATED
+# self-signed case (Azure dev), which is greenfield. AWS with no supplied cert is
+# unaffected (cert-manager/ACME as before).
 
 locals {
-  # Operator-supplied cert/key — cloud-agnostic.
+  # Operator-supplied cert/key — cloud-agnostic; rendered by the chart.
   tls_supplied = var.tls_cert != "" && var.tls_key != ""
   # Generated self-signed cert (dev). Azure-only for now; follow-up to generalize.
   tls_selfsigned = var.cloud == "azure" && var.azure_tls_mode == "self-signed"
-  tls_managed_tf = local.tls_supplied || local.tls_selfsigned
+  # Any manual TLS -> cert-manager/ACME (dns_validation) stays out of the way.
+  tls_manual = local.tls_supplied || local.tls_selfsigned
+  # Terraform creates the tls-secret ONLY for the generated self-signed cert; supplied
+  # certs go through the chart (consistent owner across the v6.0->v6.1 upgrade).
+  tls_managed_tf = local.tls_selfsigned
 }
 
 resource "tls_private_key" "gateway" {
@@ -51,8 +57,9 @@ resource "kubernetes_secret_v1" "gateway_tls" {
 
   type = "kubernetes.io/tls"
 
+  # Self-signed only (supplied certs are rendered by the chart). count == tls_selfsigned.
   data = {
-    "tls.crt" = local.tls_supplied ? base64decode(var.tls_cert) : tls_self_signed_cert.gateway[0].cert_pem
-    "tls.key" = local.tls_supplied ? base64decode(var.tls_key) : tls_private_key.gateway[0].private_key_pem
+    "tls.crt" = tls_self_signed_cert.gateway[0].cert_pem
+    "tls.key" = tls_private_key.gateway[0].private_key_pem
   }
 }

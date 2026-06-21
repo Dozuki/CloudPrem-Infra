@@ -186,9 +186,9 @@ resource "vault_kv_secret_v2" "cache" {
   name                = "${local.vault_env_prefix}/cache"
   delete_all_versions = !var.protect_resources
 
+  # ESO syncs this into the app's memcached.json (overriding the chart config map), so it
+  # must be the in-cluster FQDN, not the (empty when in-cluster) ElastiCache address.
   data_json = jsonencode({
-    # ESO syncs this into the app's memcached.json (overriding the chart config map), so it
-    # must be the in-cluster FQDN, not the (empty when in-cluster) ElastiCache address.
     host = local.memcached_host
   })
 }

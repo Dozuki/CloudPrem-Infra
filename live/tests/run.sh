@@ -117,6 +117,31 @@ cleanup() {
     ./cleanup-orphans.sh "${RUN_ID}-" || echo ">> Auto-cleanup reported issues — see verify-clean output above." >&2
   fi
   [ -n "$VAULT_PF_PID" ] && kill "$VAULT_PF_PID" 2>/dev/null || true
+
+  # Archive this run's artifacts to S3 for post-mortem. The harness writes diagnostics
+  # to .artifacts/$RUN_ID BEFORE teardown (TF inventory, env.hcl, and — on failure — a
+  # live-cluster dump: pods/events/failed-pod logs/gateway status/configmaps), which are
+  # gone once the cluster + worktrees are torn down. Bundle that + the run log and upload.
+  # Best-effort; opt out with SKIP_ARTIFACTS=1.
+  if [ "${STARTED_RUN:-0}" = 1 ] && [ "${SKIP_ARTIFACTS:-0}" != 1 ]; then
+    _adir="$PWD/.artifacts/$RUN_ID"
+    mkdir -p "$_adir"
+    cp -f "$RUN_LOG" "$_adir/run.log" 2>/dev/null || true
+    _bundle="$PWD/.artifacts/${RUN_ID}.tar.gz"
+    # The harness writes per-config diagnostics to .artifacts/<RUN_ID>-<config>/ (its
+    # p.RunID includes the config name), so bundle those dirs too — not just the run-log
+    # dir — or the upload is just the log. Feed the dir list to tar via -T (robust to
+    # shell word-splitting).
+    if ( cd "$PWD/.artifacts" && ls -d "$RUN_ID" "$RUN_ID"-* 2>/dev/null | tar -czf "$_bundle" -T - ) 2>/dev/null; then
+      _bucket="${ARTIFACTS_BUCKET:-dozuki-cloudprem-harness-artifacts-us-east-1-${DDVTEST_ACCOUNT_ID}}"
+      if aws s3 cp "$_bundle" "s3://${_bucket}/${RUN_ID}.tar.gz" --profile "$AWS_PROFILE" >/dev/null 2>&1; then
+        echo ">> Artifacts archived: s3://${_bucket}/${RUN_ID}.tar.gz" >&2
+      else
+        echo ">> Artifacts: S3 upload failed (perms/SSO?); local bundle kept at $_bundle" >&2
+      fi
+    fi
+  fi
+
   echo ">> Full run log saved to: $RUN_LOG" >&2
 }
 trap cleanup EXIT

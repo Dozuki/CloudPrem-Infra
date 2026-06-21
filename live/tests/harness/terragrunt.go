@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,7 @@ type TGOptions struct {
 	Profile      string
 	BucketPrefix string
 	StatePrefix  string
+	NLBName      string // "<customer>-<env>" (e.g. smoke-min); for pre-destroy protection clear
 }
 
 func (o TGOptions) env() []string {
@@ -106,7 +108,35 @@ func (o TGOptions) Destroy() error {
 	if err := o.destroyModule("logical"); err != nil {
 		fmt.Fprintf(os.Stderr, "\n>> teardown: logical destroy failed (continuing to physical so infra isn't stranded): %v\n", err)
 	}
+	o.clearNLBProtection()
 	return o.destroyModule("physical")
+}
+
+// clearNLBProtection disables deletion protection on the stack's NLB before the
+// physical destroy. v6.0.x baselines create the NLB protected (no protect_resources
+// wiring on the alb module's default), so a baseline-failure teardown would otherwise
+// stall ~15-20min on the internet gateway — the protected NLB's public addresses pin
+// it (DependencyViolation) — before the cleanup-orphans backstop disables it. This
+// makes the harness's own teardown self-sufficient. Best-effort + idempotent: a
+// missing NLB or already-cleared protection is a silent no-op.
+func (o TGOptions) clearNLBProtection() {
+	if o.NLBName == "" {
+		return
+	}
+	out, err := exec.Command("aws", "elbv2", "describe-load-balancers",
+		"--region", o.Region, "--profile", o.Profile,
+		"--query", fmt.Sprintf("LoadBalancers[?LoadBalancerName=='%s'].LoadBalancerArn|[0]", o.NLBName),
+		"--output", "text").Output()
+	arn := strings.TrimSpace(string(out))
+	if err != nil || arn == "" || arn == "None" {
+		return
+	}
+	if e := exec.Command("aws", "elbv2", "modify-load-balancer-attributes",
+		"--load-balancer-arn", arn,
+		"--attributes", "Key=deletion_protection.enabled,Value=false",
+		"--region", o.Region, "--profile", o.Profile).Run(); e == nil {
+		fmt.Fprintf(os.Stderr, "\n>> teardown: cleared NLB deletion-protection on %s (avoids IGW stall)\n", o.NLBName)
+	}
 }
 
 func (o TGOptions) Output(module, name string) (string, error) {

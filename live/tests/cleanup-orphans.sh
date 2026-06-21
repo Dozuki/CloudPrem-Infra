@@ -134,8 +134,16 @@ STACKS="$(printf '%s\n' $STACKS | awk 'NF' | sort -u)"
 if [ -n "$STACKS" ] && [ "${SKIP_VAULT_CLEANUP:-0}" != 1 ]; then
   echo; echo "==================== central-Vault cleanup ===================="
   VPF=""
-  if [ -z "${VAULT_ADDR:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
-    VCTX="${VAULT_KUBE_CONTEXT:-vault-standard}"; VPROF="${VAULT_AWS_PROFILE:-dozuki}"; VROLE="${VAULT_AWS_ROLE:-admin}"
+  VCTX="${VAULT_KUBE_CONTEXT:-vault-standard}"; VPROF="${VAULT_AWS_PROFILE:-dozuki}"; VROLE="${VAULT_AWS_ROLE:-admin}"
+
+  # A token minted at run start (e.g. run.sh, up to ~1h ago) can EXPIRE during the run,
+  # so never trust an inherited VAULT_TOKEN blindly — verify it with a real call and
+  # re-authenticate if it's stale or missing. (The old code only re-authed when the
+  # token was unset, so a long run's expired token was reused -> `vault auth disable`
+  # failed silently -> the k8s/<stack> mount leaked into the next run.)
+  vault_token_ok() { [ -n "${VAULT_ADDR:-}" ] && [ -n "${VAULT_TOKEN:-}" ] && vault token lookup >/dev/null 2>&1; }
+
+  if ! vault_token_ok; then
     if command -v vault >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 \
        && aws sts get-caller-identity --profile "$VPROF" >/dev/null 2>&1; then
       kubectl --context "$VCTX" port-forward -n vault svc/vault-active 8204:8200 >/tmp/cleanup-vpf.log 2>&1 &
@@ -146,14 +154,23 @@ if [ -n "$STACKS" ] && [ "${SKIP_VAULT_CLEANUP:-0}" != 1 ]; then
       export VAULT_TOKEN
     fi
   fi
-  if [ -n "${VAULT_TOKEN:-}" ]; then
+
+  if vault_token_ok; then
     for stack in $STACKS; do
-      vault auth disable "k8s/$stack" >/dev/null 2>&1 && echo "  vault: disabled auth mount k8s/$stack"
+      derr="$(vault auth disable "k8s/$stack" 2>&1)"; rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "  WARNING: 'vault auth disable k8s/$stack' failed: $derr" >&2; fail=1
+      elif vault auth list 2>/dev/null | grep -q "^k8s/$stack/"; then
+        echo "  WARNING: k8s/$stack STILL present after disable — next run will hit 'path already in use'" >&2; fail=1
+      else
+        echo "  vault: disabled auth mount k8s/$stack"
+      fi
       vault policy delete "$stack" >/dev/null 2>&1 || true
     done
   else
-    echo "  WARNING: no Vault access — skipped central-Vault mount cleanup for: $STACKS" >&2
-    echo "           (a leftover k8s/<stack> mount will break the next run; disable it manually or set SKIP_VAULT_CLEANUP=1)" >&2
+    echo "  WARNING: no working Vault token (inherited token expired and re-auth failed — is the '$VPROF' SSO session alive?)." >&2
+    echo "           k8s/<stack> NOT disabled for: $STACKS -> the next run will fail on 'path already in use'." >&2
+    echo "           Fix: aws sso login --profile $VPROF, then re-run ./cleanup-orphans.sh; or SKIP_VAULT_CLEANUP=1 to bypass." >&2
     fail=1
   fi
   [ -n "$VPF" ] && kill "$VPF" 2>/dev/null || true
