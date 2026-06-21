@@ -5,16 +5,33 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
 )
 
+// phaseMark records one step() marker (time + message) for the end-of-run summary.
+type phaseMark struct {
+	at  time.Time
+	msg string
+}
+
+// Per-run phase tracking, reset at the start of each RunUpgrade. The harness runs
+// configs sequentially, so a package-level recorder is sufficient (no concurrency).
+var (
+	phaseMarks []phaseMark
+	runStart   time.Time
+)
+
 // step prints a timestamped progress marker to stderr (captured by run.sh's tee) so
 // the log shows what the harness is doing during the otherwise-silent gaps between
-// terragrunt stages (validation waits, output reads, validators, teardown).
+// terragrunt stages (validation waits, output reads, validators, teardown). Each
+// marker is also recorded for the end-of-run HARNESS RUN SUMMARY banner.
 func step(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "\n>> [harness %s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+	msg := fmt.Sprintf(format, args...)
+	phaseMarks = append(phaseMarks, phaseMark{at: time.Now(), msg: msg})
+	fmt.Fprintf(os.Stderr, "\n>> [harness %s] %s\n", time.Now().Format("15:04:05"), msg)
 }
 
 // RunParams configures one upgrade run.
@@ -47,6 +64,13 @@ func RunUpgrade(p RunParams) (err error) {
 	if !p.Matrix.VersionProfileExists(p.ToRef) {
 		return fmt.Errorf("no version profile for to_ref %q in matrix", p.ToRef)
 	}
+
+	// Track phases and print a final summary banner on the way out. Registered before
+	// the worktree/teardown defers so it runs LAST — the run's outcome, what ran (with
+	// per-phase durations), and artifact location at a glance, no log-grepping needed.
+	phaseMarks = nil
+	runStart = time.Now()
+	defer func() { printSummary(p, cfg, err) }()
 
 	ctx := context.Background()
 	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
@@ -323,4 +347,59 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		DRBucketNames: drBucketNames,
 		DBIdentifier:  str(physical, "db_identifier"),
 	}, nil
+}
+
+// printSummary writes a final, human-readable banner so a run's outcome, what ran
+// (with per-phase durations), and where the artifacts live are visible at a glance —
+// no scrolling or grepping the full log. Printed last, on pass or fail.
+func printSummary(p RunParams, cfg Config, err error) {
+	result := "PASS ✓"
+	if err != nil {
+		result = "FAIL ✗: " + err.Error()
+	}
+	dr := "(disabled)"
+	if p.EnableDR {
+		dr = p.DRRegion + " (enabled)"
+	}
+	customer, _ := cfg.FeatureFlags["customer"].(string)
+
+	var b strings.Builder
+	line := func(format string, a ...interface{}) { fmt.Fprintf(&b, format+"\n", a...) }
+	line("")
+	line("========================= HARNESS RUN SUMMARY =========================")
+	line(" Result:    %s", result)
+	line(" Config:    %s  (customer=%s, env=%s)", cfg.Name, customer, cfg.Env)
+	line(" Upgrade:   %s  ->  %s", p.FromRef, p.ToRef)
+	line(" Region:    %s    DR: %s", p.Matrix.Defaults.Region, dr)
+	line(" Run ID:    %s", p.RunID)
+	if !runStart.IsZero() {
+		line(" Duration:  %s", time.Since(runStart).Round(time.Second))
+		if len(phaseMarks) > 0 {
+			line(" Phases:")
+			for i, m := range phaseMarks {
+				next := time.Now()
+				if i+1 < len(phaseMarks) {
+					next = phaseMarks[i+1].at
+				}
+				line("   +%-8s %-56s %s",
+					m.at.Sub(runStart).Round(time.Second),
+					truncate(m.msg, 56),
+					next.Sub(m.at).Round(time.Second))
+			}
+		}
+	}
+	line(" Artifacts: live/tests/.artifacts/%s/  (run log + diagnostics; bundled to S3 by run.sh)", p.RunID)
+	line("======================================================================")
+	fmt.Fprint(os.Stderr, b.String())
+}
+
+// truncate collapses s to its first line and caps it at n bytes for the summary table.
+func truncate(s string, n int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }
