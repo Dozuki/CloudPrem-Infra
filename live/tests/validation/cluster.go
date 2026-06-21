@@ -83,7 +83,7 @@ func CheckClusterHealth(kubeconfig, namespace string, critical []string, timeout
 	started := time.Now()
 	deadline := started.Add(timeout)
 	for {
-		advisory, ready, err := evaluateWorkloads(ctx, cs, namespace, critical)
+		advisory, matched, ready, err := evaluateWorkloads(ctx, cs, namespace, critical)
 		if err != nil {
 			return nil, err
 		}
@@ -92,6 +92,9 @@ func CheckClusterHealth(kubeconfig, namespace string, critical []string, timeout
 			return advisory, nil
 		}
 		if time.Now().After(deadline) {
+			if len(critical) > 0 && !matched {
+				return nil, fmt.Errorf("no workload matched the critical set %v within %s (expected the release to deploy one)", critical, timeout)
+			}
 			return nil, fmt.Errorf("critical workloads not ready within %s", timeout)
 		}
 		fmt.Fprintf(os.Stderr, ">> [harness %s] waiting for critical workloads (%s elapsed)\n", time.Now().Format("15:04:05"), time.Since(started).Round(time.Second))
@@ -99,37 +102,37 @@ func CheckClusterHealth(kubeconfig, namespace string, critical []string, timeout
 	}
 }
 
-// evaluateWorkloads inspects current Deployments+StatefulSets: returns ready=false if
-// any CRITICAL workload is not ready, an error if a critical pattern matches nothing,
-// and the list of not-ready non-critical (advisory) workloads.
-func evaluateWorkloads(ctx context.Context, cs kubernetes.Interface, ns string, critical []string) (advisory []string, ready bool, err error) {
+// evaluateWorkloads inspects current Deployments+StatefulSets and reports: the
+// not-ready non-critical (advisory) workloads, whether any critical pattern matched
+// a workload (matched), and whether the critical set is satisfied (ready). It only
+// errors on an API list failure — "no critical match" is surfaced by the caller at
+// timeout, so a not-yet-listed critical workload is waited for rather than failed.
+func evaluateWorkloads(ctx context.Context, cs kubernetes.Interface, ns string, critical []string) (advisory []string, matched bool, ready bool, err error) {
 	type wl struct {
-		name            string
-		ready, desired  int32
+		name           string
+		ready, desired int32
 	}
 	var all []wl
 	deps, err := cs.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	for _, d := range deps.Items {
 		all = append(all, wl{d.Name, d.Status.ReadyReplicas, desired(d.Spec.Replicas)})
 	}
 	sss, err := cs.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	for _, s := range sss.Items {
 		all = append(all, wl{s.Name, s.Status.ReadyReplicas, desired(s.Spec.Replicas)})
 	}
 
-	matchedCritical := false
 	allCriticalReady := true
 	for _, w := range all {
-		isCrit := matchesAny(w.name, critical)
 		isReady := w.ready == w.desired
-		if isCrit {
-			matchedCritical = true
+		if matchesAny(w.name, critical) {
+			matched = true
 			if !isReady {
 				allCriticalReady = false
 			}
@@ -137,10 +140,12 @@ func evaluateWorkloads(ctx context.Context, cs kubernetes.Interface, ns string, 
 			advisory = append(advisory, w.name)
 		}
 	}
-	if len(critical) > 0 && !matchedCritical {
-		return nil, false, fmt.Errorf("no workload matched the critical set %v (expected the release to deploy one)", critical)
+	if len(critical) == 0 {
+		ready = true // no critical gate configured
+	} else {
+		ready = matched && allCriticalReady
 	}
-	return advisory, allCriticalReady, nil
+	return advisory, matched, ready, nil
 }
 
 func deploymentReady(d appsv1.Deployment) bool {

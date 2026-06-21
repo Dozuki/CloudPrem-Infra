@@ -20,11 +20,14 @@ func dep(name string, ready, desired int32) *appsv1.Deployment {
 func TestEvaluateWorkloads_criticalNotReadyIsError(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		dep("dozuki-app-deployment", 0, 1), // critical, not ready
-		dep("dozuki-memcached", 0, 1),       // advisory, not ready
+		dep("dozuki-memcached", 0, 1),      // advisory, not ready
 	)
-	advisory, ready, err := evaluateWorkloads(context.Background(), cs, "dozuki", []string{"dozuki-app*"})
+	advisory, matched, ready, err := evaluateWorkloads(context.Background(), cs, "dozuki", []string{"dozuki-app*"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
+	}
+	if !matched {
+		t.Fatal("expected matched=true (critical workload present)")
 	}
 	if ready {
 		t.Fatal("expected ready=false (critical not ready)")
@@ -35,11 +38,14 @@ func TestEvaluateWorkloads_criticalNotReadyIsError(t *testing.T) {
 func TestEvaluateWorkloads_advisoryNotReadyIsAdvisoryOnly(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		dep("dozuki-app-deployment", 1, 1), // critical, ready
-		dep("dozuki-memcached", 0, 1),       // advisory, not ready
+		dep("dozuki-memcached", 0, 1),      // advisory, not ready
 	)
-	advisory, ready, err := evaluateWorkloads(context.Background(), cs, "dozuki", []string{"dozuki-app*"})
+	advisory, matched, ready, err := evaluateWorkloads(context.Background(), cs, "dozuki", []string{"dozuki-app*"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
+	}
+	if !matched {
+		t.Fatal("expected matched=true (critical workload present)")
 	}
 	if !ready {
 		t.Fatal("expected ready=true (all critical ready)")
@@ -49,10 +55,16 @@ func TestEvaluateWorkloads_advisoryNotReadyIsAdvisoryOnly(t *testing.T) {
 	}
 }
 
-func TestEvaluateWorkloads_criticalAbsentIsError(t *testing.T) {
+func TestEvaluateWorkloads_criticalAbsentWaitsNotErrors(t *testing.T) {
 	cs := fake.NewSimpleClientset(dep("dozuki-memcached", 1, 1))
-	_, _, err := evaluateWorkloads(context.Background(), cs, "dozuki", []string{"dozuki-app*"})
-	if err == nil {
-		t.Fatal("expected error when a critical workload is absent")
+	_, matched, ready, err := evaluateWorkloads(context.Background(), cs, "dozuki", []string{"dozuki-app*"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if matched {
+		t.Fatal("expected matched=false (critical workload absent)")
+	}
+	if ready {
+		t.Fatal("expected ready=false (critical workload absent)")
 	}
 }

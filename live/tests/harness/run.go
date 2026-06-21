@@ -24,8 +24,8 @@ type RunParams struct {
 	RepoDir           string
 	Matrix            *Matrix
 	ConfigName        string
-	FromRef           string   // resolved concrete ref
-	ToRef             string   // resolved concrete ref
+	FromRef           string // resolved concrete ref
+	ToRef             string // resolved concrete ref
 	AccountID         string
 	Profile           string
 	RunID             string   // unique per run; namespaces state
