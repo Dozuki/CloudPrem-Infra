@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
@@ -111,18 +113,39 @@ func RunUpgrade(p RunParams) (err error) {
 		return werr
 	}
 
-	// Always attempt destroy (against the target/final code) without clobbering
-	// an earlier error. Registered last so it runs before the worktree removals.
-	defer func() {
-		// Capture artifacts BEFORE destroy (cluster) + before worktree removal (env.hcl).
-		// err (named return) reflects the run outcome here → full dump only on failure.
-		step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, err != nil)
-		captureDiagnostics(p, region, identifier, err != nil, tg(toWT), fromEnvHCL, toEnvHCL)
-		step("TEARDOWN: destroy (logical best-effort, then ALWAYS physical)")
-		if derr := tg(toWT).Destroy(); derr != nil && err == nil {
-			err = fmt.Errorf("destroy: %w", derr)
-		}
-	}()
+	// Track the worktree whose code matches what is deployed: baseline applies
+	// first, so default fromWT; flips to toWT only after the upgrade apply succeeds.
+	// The teardown destroys against THIS worktree (not always toWT) — essential for
+	// cross-architecture upgrades (e.g. v5.3->v6.1) where target code cannot destroy
+	// baseline state.
+	var appliedWT atomic.Pointer[Worktree]
+	appliedWT.Store(fromWT)
+	// Marker so the out-of-process cleanup-orphans backstop can destroy against the
+	// matching worktree too. Written for the baseline up front (a baseline-apply
+	// interrupt still leaves a correct from_ref marker).
+	_ = writeAppliedMarker(p.RepoDir, tg(fromWT).StatePrefix, tg(fromWT).WorkingDir)
+
+	// Single teardown, runnable from the normal defer OR the signal handler exactly
+	// once. Captures the named return err on the defer path; on the signal path the
+	// handler calls os.Exit afterward so the err write is moot.
+	var teardownOnce sync.Once
+	teardown := func() {
+		teardownOnce.Do(func() {
+			wt := appliedWT.Load()
+			step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, err != nil)
+			captureDiagnostics(p, region, identifier, err != nil, tg(wt), fromEnvHCL, toEnvHCL)
+			step("TEARDOWN: destroy against %s (logical best-effort, then ALWAYS physical)", wt.Ref)
+			if derr := tg(wt).Destroy(); derr != nil && err == nil {
+				err = fmt.Errorf("destroy: %w", derr)
+			}
+			if err == nil {
+				removeAppliedMarker(p.RepoDir, tg(wt).StatePrefix)
+			}
+		})
+	}
+	defer teardown()
+	stopSig := installTeardownOnSignal(teardown, os.Exit)
+	defer stopSig()
 
 	// ---- Baseline apply + validate ----
 	step("BASELINE apply: %s (terragrunt run-all apply — physical then logical)", p.FromRef)
@@ -156,6 +179,9 @@ func RunUpgrade(p RunParams) (err error) {
 	if aerr := tg(toWT).Apply(); aerr != nil {
 		return fmt.Errorf("upgrade apply: %w", aerr)
 	}
+	// Upgrade applied: target code now matches the deployed state.
+	appliedWT.Store(toWT)
+	_ = writeAppliedMarker(p.RepoDir, tg(toWT).StatePrefix, tg(toWT).WorkingDir)
 	step("upgrade applied — validating: cluster health (up to 20m), endpoints, helm release")
 	_, kc, verr := validateStack(tg(toWT), p, region)
 	if verr != nil {
