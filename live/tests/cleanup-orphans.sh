@@ -128,7 +128,9 @@ while IFS= read -r pfx; do
   fi
 
   # 4) Purge state objects ONLY if the destroy succeeded (else keep state so it can retry).
-  if [ "$destroyed_ok" -eq 0 ] || [ -z "$key" ]; then
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "  DRY_RUN: would purge state prefix $pfx (only if the real destroy succeeded)"
+  elif [ "$destroyed_ok" -eq 0 ] || [ -z "$key" ]; then
     aws s3 rm "s3://$BUCKET/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
   else
     echo "  destroy did NOT fully succeed — state prefix kept for retry: $pfx" >&2
