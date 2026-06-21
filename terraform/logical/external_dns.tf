@@ -5,7 +5,7 @@
 
 locals {
   external_dns_enabled = var.cloud == "azure" && var.aws_external_dns_role_arn != ""
-  azure_region         = var.cloud == "azure" ? data.azurerm_kubernetes_cluster.main[0].location : ""
+  azure_region         = var.cloud == "azure" ? data.azurerm_kubernetes_cluster.main["azure"].location : ""
   lb_fqdn              = var.gateway_dns_label != "" ? "${var.gateway_dns_label}.${local.azure_region}.cloudapp.azure.com" : ""
 }
 
