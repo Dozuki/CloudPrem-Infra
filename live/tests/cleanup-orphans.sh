@@ -21,6 +21,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 HARNESS_DIR="$PWD"
+MARKERS_DIR="$HARNESS_DIR/__worktrees__/.markers"
 LIVE_ROOT="$(cd .. && pwd)"
 
 CUSTOMER="${CUSTOMER:-smoke}"
@@ -92,17 +93,37 @@ while IFS= read -r pfx; do
       --key "{\"LockID\":{\"S\":\"$lk\"}}" >/dev/null 2>&1 && echo "  released lock: $lk"
   done
 
-  # 3) Destroy the physical layer (also disposes of in-cluster helm/k8s via the EKS delete).
+  # 3) Destroy against the worktree whose code matches the deployed state (recorded
+  #    by the harness in a marker). The live tree is the current branch's code, which
+  #    does NOT match for cross-architecture upgrades — use it only as a last resort.
   destroyed_ok=1
-  if [ -n "$key" ] && [ -d "$LIVE_ROOT/$envdir/physical" ]; then
-    ( cd "$LIVE_ROOT/$envdir/physical"
-      rm -rf .terragrunt-cache
-      TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
-      TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
-        terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
-    destroyed_ok=$?
+  marker="$MARKERS_DIR/$(printf '%s' "$pfx" | tr '/' '_')"
+  tgt=""
+  if [ -f "$marker" ] && [ -d "$(cat "$marker")/physical" ]; then
+    tgt="$(cat "$marker")"
+    echo "  destroy target: worktree $tgt (from marker)"
+  elif [ -n "$key" ] && [ -d "$LIVE_ROOT/$envdir/physical" ]; then
+    tgt="$LIVE_ROOT/$envdir"
+    echo "  WARNING: no worktree marker for $pfx — falling back to LIVE tree $tgt (may not match deployed code)" >&2
+  fi
+  if [ -n "$tgt" ]; then
+    if [ "${DRY_RUN:-0}" = 1 ]; then
+      echo "  DRY_RUN: would destroy logical (best-effort) then physical in $tgt"; destroyed_ok=0
+    else
+      ( cd "$tgt/logical" 2>/dev/null && rm -rf .terragrunt-cache && \
+        TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
+        TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+          terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) \
+        || echo "  logical destroy failed (continuing to physical so infra isn't stranded)" >&2
+      ( cd "$tgt/physical"
+        rm -rf .terragrunt-cache
+        TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
+        TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+          terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
+      destroyed_ok=$?
+    fi
   elif [ -n "$key" ]; then
-    echo "  WARNING: $LIVE_ROOT/$envdir/physical not found — cannot destroy via terragrunt; leaving state intact." >&2
+    echo "  WARNING: no worktree marker and no live $LIVE_ROOT/$envdir/physical — cannot destroy via terragrunt; leaving state intact." >&2
     destroyed_ok=1
   fi
 
