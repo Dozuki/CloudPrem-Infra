@@ -161,7 +161,7 @@ func RunUpgrade(p RunParams) (err error) {
 		return fmt.Errorf("baseline apply: %w", aerr)
 	}
 	step("baseline applied — validating: cluster health (waits for pods Ready, up to 20m), endpoints, helm release")
-	baselineRev, _, _, verr := validateStack(tg(fromWT), p, region)
+	baselineRev, _, baseCaps, verr := validateStack(tg(fromWT), p, region)
 	if verr != nil {
 		return fmt.Errorf("baseline validation: %w", verr)
 	}
@@ -173,7 +173,7 @@ func RunUpgrade(p RunParams) (err error) {
 	if err != nil {
 		return fmt.Errorf("baseline readOutputs (sentinel): %w", err)
 	}
-	if len(baseOuts.GuideBuckets) > 0 {
+	if baseCaps.HasGuideBuckets {
 		if serr := validation.WriteSentinel(ctx, region, baseOuts.GuideBuckets[0], p.RunID); serr != nil {
 			return fmt.Errorf("continuity sentinel write: %w", serr)
 		}
@@ -195,54 +195,55 @@ func RunUpgrade(p RunParams) (err error) {
 	if verr != nil {
 		return fmt.Errorf("upgrade validation: %w", verr)
 	}
-	_ = upCaps
 	wantChart, _ := p.Matrix.Versions[p.ToRef]["chart_version"].(string)
 	step("verifying upgrade proof (helm revision advanced from %d; chart %q)", baselineRev, wantChart)
 	if rerr := validation.AssertUpgraded(kc, p.Namespace, "dozuki", baselineRev, wantChart); rerr != nil {
 		return fmt.Errorf("upgrade proof: %w", rerr)
 	}
 
-	// ---- Post-upgrade validators ----
-	step("upgrade proven ✓ — post-upgrade validators (control-plane logging, continuity sentinel, DMS, DR)")
+	// Post-upgrade validators — gated by detected capabilities; skips are logged.
+	step("upgrade proven ✓ — capability-gated post-upgrade validators")
 	outs, err := readOutputs(tg(toWT), region)
 	if err != nil {
 		return fmt.Errorf("post-upgrade readOutputs: %w", err)
 	}
+	upCaps.HasLogging = validation.LoggingEnabled(ctx, region, outs.ClusterName)
 
-	// Logging guard — always run.
-	if lerr := validation.AssertControlPlaneLogging(ctx, region, outs.ClusterName); lerr != nil {
-		return fmt.Errorf("logging guard: %w", lerr)
+	if upCaps.HasLogging {
+		if lerr := validation.AssertControlPlaneLogging(ctx, region, outs.ClusterName); lerr != nil {
+			return fmt.Errorf("logging guard: %w", lerr)
+		}
+	} else {
+		step("skipped: control-plane logging (not enabled on %s)", p.ToRef)
 	}
 
-	// Continuity sentinel — verify if a guide bucket was available pre-upgrade.
-	if len(outs.GuideBuckets) > 0 {
+	if upCaps.HasGuideBuckets {
 		if serr := validation.VerifySentinel(ctx, region, outs.GuideBuckets[0], p.RunID); serr != nil {
 			return fmt.Errorf("continuity sentinel verify: %w", serr)
 		}
+	} else {
+		step("skipped: continuity sentinel (no guide buckets in %s)", p.ToRef)
 	}
 
-	// DMS check — no-ops when DMSTaskARN is empty.
-	if derr := validation.AssertDMSRunning(ctx, region, outs.DMSTaskARN); derr != nil {
-		return fmt.Errorf("DMS running: %w", derr)
+	if upCaps.HasDMS {
+		if derr := validation.AssertDMSRunning(ctx, region, outs.DMSTaskARN); derr != nil {
+			return fmt.Errorf("DMS running: %w", derr)
+		}
+	} else {
+		step("skipped: DMS (no dms_task_arn in %s)", p.ToRef)
 	}
 
-	// DR validators — only when enable_dr is set for this config.
-	if p.EnableDR && len(outs.DRBucketNames) > 0 {
-		// Existence check: DR buckets versioned + replicated RDS backup present.
+	if p.EnableDR && upCaps.HasDR {
 		if derr := validation.AssertDRExistence(ctx, p.DRRegion, outs.DRBucketNames, outs.DBIdentifier); derr != nil {
 			return fmt.Errorf("DR existence: %w", derr)
 		}
-
-		// S3 replication flow: one representative check — first guide bucket vs first
-		// DR bucket. A full per-bucket pairing is non-trivial (the map key ordering
-		// from dr_s3_bucket_names is not guaranteed to align with guide bucket order),
-		// so we validate a single representative pair; the existence check covers all
-		// DR buckets above.
-		if len(outs.GuideBuckets) > 0 {
+		if upCaps.HasGuideBuckets {
 			if rerr := validation.AssertS3ReplicationFlow(ctx, region, p.DRRegion, outs.GuideBuckets[0], outs.DRBucketNames[0], p.RunID); rerr != nil {
 				return fmt.Errorf("DR S3 replication flow: %w", rerr)
 			}
 		}
+	} else if p.EnableDR {
+		step("skipped: DR (enable_dr set but no DR outputs in %s)", p.ToRef)
 	}
 
 	// Restore drill — only when requested (full config).
