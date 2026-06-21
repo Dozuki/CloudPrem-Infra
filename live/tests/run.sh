@@ -221,4 +221,10 @@ fi
 
 # From here on, the run can create cloud resources — arm the backstop cleanup (see trap).
 STARTED_RUN=1
-go test ./scenarios/ -run TestUpgrade -v -timeout 180m
+if go test ./scenarios/ -run TestUpgrade -v -timeout 180m; then TEST_RC=0; else TEST_RC=$?; fi
+
+if [ "$TEST_RC" -ne 0 ] && [ "${RUN_POSTMORTEM:-0}" = 1 ]; then
+  ./postmortem.sh "$RUN_ID" "$RUN_LOG" || true
+fi
+
+exit "$TEST_RC"
