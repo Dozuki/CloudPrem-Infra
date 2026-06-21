@@ -1,35 +1,39 @@
 # Deploying a Test Environment Stack
 
-This guide covers deploying a new CloudPrem environment stack from a Mac workstation for development and testing.
+This guide covers deploying a new CloudPrem environment stack on **AWS** from a Mac
+workstation for development and testing. For **Azure** deployments, use the
+self-contained deploy kit and its runbook in [`azure-config/README.md`](./azure-config/README.md).
 
 ## Prerequisites
 
 ### Required Tools
 
 ```bash
-# Version managers for Terraform and Terragrunt
-brew install tfenv tgenv
-
-# Install the required versions
-tfenv install 1.13.4
-tfenv use 1.13.4
-tgenv install 0.80.6
-tgenv use 0.80.6
+# OpenTofu drives both layers locally — the physical layer requires >= 1.11.1, and
+# OpenTofu runs the logical layer too. Terragrunt orchestrates them.
+brew install opentofu terragrunt
 
 # Everything else
 brew install awscli helm kubectl hashicorp/tap/vault
+
+# Point Terragrunt at OpenTofu (add this to your shell profile):
+export TERRAGRUNT_TFPATH=tofu
 ```
 
 | Tool | Version | Verify |
 |------|---------|--------|
-| tfenv | latest | `tfenv --version` |
-| tgenv | latest | `tgenv --version` |
-| Terraform | 1.13.x (via tfenv) | `terraform version` |
-| Terragrunt | 0.80.x (via tgenv) | `terragrunt --version` |
+| OpenTofu | >= 1.11.1 | `tofu version` |
+| Terragrunt | 0.99.x | `terragrunt --version` |
 | AWS CLI | 2.x | `aws --version` |
 | Helm | 3.x | `helm version` |
 | kubectl | 1.28+ | `kubectl version --client` |
 | Vault CLI | 1.15+ | `vault version` |
+
+> **Toolchain note:** Production deploys run on **Spacelift**, which pins the
+> *logical* layer to Terraform 1.5.7 (the last MPL-licensed release). The modules
+> themselves only require Terraform/OpenTofu **>= 1.11.1** (physical — for the Aurora
+> module and write-only attributes) and **>= 1.5.0** (logical), so a single OpenTofu
+> binary runs both layers locally.
 
 ### AWS SSO Profiles
 
@@ -41,14 +45,6 @@ aws sso login --profile <profile_name>
 
 # Verify
 aws sts get-caller-identity --profile <profile_name>
-```
-
-### Git Submodules
-
-The Helm chart is a submodule. After cloning, initialize it:
-
-```bash
-git submodule update --init --recursive
 ```
 
 ## Repository Structure
@@ -118,8 +114,7 @@ Edit `env.hcl` for your environment:
 ```hcl
 locals {
   environment                   = "min"
-  enable_vault                  = true       # Vault secret management via ESO
-  enable_webhooks               = false      # MSK Kafka + Redis + Frontegg connectivity
+  enable_webhooks               = false      # MSK Kafka for webhooks
   enable_bi                     = false      # BI replica database + Grafana dashboards
   rds_multi_az                  = false      # Multi-AZ RDS (production only)
   highly_available_nat_gateway  = false      # NAT per AZ (production only)
@@ -136,10 +131,10 @@ locals {
 
 | Type | `enable_webhooks` | `enable_bi` | What it deploys |
 |------|:-:|:-:|---|
-| `min` | false | false | Core app + OpenSearch + monitoring |
-| `hooks` | **true** | false | min + MSK Kafka + Redis + MongoDB + Frontegg connectivity |
-| `bi` | false | **true** | min + BI replica DB + Grafana dashboards |
-| `full` | **true** | **true** | Everything |
+| `min` | false | false | Core application stack + monitoring |
+| `hooks` | **true** | false | Core + webhooks infrastructure (MSK Kafka) |
+| `bi` | false | **true** | Core + business-intelligence replica database |
+| `full` | **true** | **true** | All features (webhooks + BI); pair with multi-AZ + DR for production |
 
 ## Step 4: Configure Physical Inputs
 
@@ -147,8 +142,16 @@ Edit `physical/terragrunt.hcl` to add any required overrides:
 
 ```hcl
 inputs = {
-  # Required when enable_vault = true (get from vault-infrastructure deployment):
+  # Required — Vault is mandatory (get the PrivateLink service name from the
+  # central Vault deployment):
   vault_endpoint_service_name = "com.amazonaws.vpce.<region>.vpce-svc-xxxxxxxxxxxxxxxxx"
+
+  # Optional — names this stack and its subdomain. Resources are named
+  # "<customer>-<env>"; defaults to "dozuki-<env>" when unset.
+  # customer = "acme"
+
+  # Optional — "rds" (default, provisioned MySQL) or "aurora" (Serverless v2).
+  # db_engine = "aurora"
 }
 ```
 
@@ -172,9 +175,16 @@ eval "$(aws configure export-credentials --profile <profile> --format env)"
 TG_AWS_PROFILE='' AWS_PROFILE='' terragrunt run-all apply
 ```
 
-### Vault-Enabled Stacks (`enable_vault = true`)
+> **Heads-up:** these exported `AWS_*` env vars expire (~1 hour) and **override**
+> `AWS_PROFILE` while set — once they expire, profile-based commands fail with
+> confusing auth errors even though your SSO session is valid. Run
+> `unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN` when you're done
+> with the workaround.
 
-The logical layer's Vault provider needs connectivity and authentication. Before running apply:
+### Vault Setup (required)
+
+Vault is mandatory: the logical layer authenticates to the central Vault and seeds
+this stack's secrets. Its provider needs connectivity and authentication before apply:
 
 **1. Start a tunnel to Vault** (keep this running in a separate terminal):
 
@@ -222,17 +232,19 @@ TG_AWS_PROFILE='' AWS_PROFILE='' terragrunt run-all apply
 Set up kubectl and check the deployment:
 
 ```bash
+# The cluster name is "<customer>-<env>" (or "dozuki-<env>" when customer is unset).
+CLUSTER=dozuki-<env>
 aws eks update-kubeconfig \
-  --name dozuki-<env> \
+  --name "$CLUSTER" \
   --region <region> \
   --profile <profile> \
-  --alias dozuki-<env>
+  --alias "$CLUSTER"
 
 # Check all pods are running
-kubectl --context dozuki-<env> get pods -n dozuki
+kubectl --context "$CLUSTER" get pods -n dozuki
 
 # Check Helm releases
-helm --kube-context dozuki-<env> list -A
+helm --kube-context "$CLUSTER" list -A
 
 # Check the app URL (from Terraform output)
 cd logical && terragrunt output dozuki_url
@@ -265,7 +277,10 @@ Or from the environment root:
 terragrunt run-all destroy
 ```
 
-**Warning:** If `protect_resources = true`, RDS and S3 resources will block deletion. Set it to `false` first and apply before destroying.
+**Warning:** If `protect_resources = true`, RDS, S3, and the NLB get deletion
+protection and will block `destroy` — and a protected NLB keeps ENIs that pin the
+internet gateway, hanging the whole VPC teardown. Set `protect_resources = false` and
+apply once *before* destroying.
 
 ## Troubleshooting
 

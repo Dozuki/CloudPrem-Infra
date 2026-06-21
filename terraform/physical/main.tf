@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.11.1"
 
   required_providers {
     aws = {
@@ -84,7 +84,15 @@ locals {
   // If true we will use an empty RDS instance and setup replication via DMS.
   // If false we will use an RDS Read Replica and let RDS manage the replication for us.
   dms_enabled = var.enable_bi ? (var.bi_dms_enabled || var.bi_public_access) : false
-  bi_db       = var.enable_bi ? local.dms_enabled ? module.dms_replica_database[0] : module.rds_replica_database[0] : null
+
+  # BI source DB module (rds/dms paths only); null on the aurora private-BI path.
+  bi_db = var.enable_bi ? (local.dms_enabled ? module.dms_replica_database[0] : (var.db_engine == "rds" ? module.rds_replica_database[0] : null)) : null
+
+  # BI connection facts. aurora private BI = cluster reader endpoint + master creds.
+  bi_host = var.enable_bi ? (
+    local.dms_enabled ? module.dms_replica_database[0].db_instance_address :
+    (var.db_engine == "rds" ? module.rds_replica_database[0].db_instance_address : local.db_reader_endpoint)
+  ) : ""
 
   // Static map of all supported database instance types and their memory allocation, used for Memory Usage alarm.
   // (Neither RDS nor CloudWatch provides a metric or a queryable resource for instance memory size)

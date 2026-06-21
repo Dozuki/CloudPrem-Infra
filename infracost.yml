@@ -1,5 +1,10 @@
 version: 0.1
 
 projects:
-  - path: live/development
-    terraform_binary: terragrunt
+  # Representative Dozuki reference environment (all features enabled).
+  # Infracost auto-detects the Terragrunt physical/ and logical/ projects
+  # under this path; no terraform_binary field is needed (it was removed
+  # from the Infracost config schema).
+  - path: live/standard/us-east-1/full
+    name: standard-us-east-1-full
+    usage_file: infracost-usage.yml

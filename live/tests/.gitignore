@@ -1,0 +1,5 @@
+.test-artifacts/
+*.tfplan
+__worktrees__/
+.logs/
+.artifacts/

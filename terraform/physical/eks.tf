@@ -168,8 +168,9 @@ resource "aws_iam_policy" "eks_worker_kms" {
 resource "aws_kms_key" "eks" {
   count = local.create_eks_kms ? 1 : 0
 
-  description         = "EKS Secret Encryption Key"
-  enable_key_rotation = true
+  description             = "EKS Secret Encryption Key"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
 }
 
 resource "aws_iam_policy" "assume_cross_account_role" {
@@ -198,6 +199,14 @@ module "eks_cluster" {
   version = "~> 21.0"
 
   depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
+
+  # The default 15m cluster-delete timeout can be exceeded when the cluster still has
+  # load-balancer/ENI resources to clean up (e.g. an automated teardown after a failed
+  # logical destroy leaves Service-type LoadBalancers behind). Give it headroom so the
+  # teardown completes instead of timing out mid-DELETING and stranding the VPC.
+  timeouts = {
+    delete = "30m"
+  }
 
   name = local.identifier
   # Default null lets EKS Auto Mode manage version via upgrade_policy.
@@ -396,15 +405,45 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_agent_xray" {
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
+# EKS Auto Mode (and some cluster bootstraps) install the amazon-cloudwatch-observability
+# addon out-of-band. A plain CreateAddon then fails with 409 ResourceInUseException, and
+# resolve_conflicts_on_create=OVERWRITE only resolves field-level conflicts — it does NOT
+# adopt a pre-existing addon. To keep both fresh installs and v6.0->v6.1 upgrades hands-off,
+# delete any pre-existing copy with --preserve (the in-cluster cloudwatch-agent DaemonSet
+# stays up, so there's no observability gap) right before Terraform creates and manages it.
+# Runs once per cluster; a no-op when the addon isn't already present.
+resource "null_resource" "adopt_cloudwatch_observability_addon" {
+  triggers = {
+    cluster = module.eks_cluster.cluster_name
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      region="${data.aws_region.current.id}"
+      cluster="${module.eks_cluster.cluster_name}"
+      addon="amazon-cloudwatch-observability"
+      if aws eks describe-addon --cluster-name "$cluster" --addon-name "$addon" --region "$region" >/dev/null 2>&1; then
+        echo "Adopting pre-existing $addon addon: deleting with --preserve so Terraform can manage it."
+        aws eks delete-addon --cluster-name "$cluster" --addon-name "$addon" --preserve --region "$region"
+        aws eks wait addon-deleted --cluster-name "$cluster" --addon-name "$addon" --region "$region"
+      fi
+    EOT
+  }
+}
+
 # Managed addon. The pod_identity_association wires the role to the cloudwatch-agent SA
 # in the amazon-cloudwatch namespace (EKS creates the association and annotates the SA).
 # addon_version is left unset so EKS selects the default compatible with the cluster's
-# Kubernetes version. OVERWRITE resolves field-level conflicts on managed resources;
-# it does NOT adopt a pre-existing addon — a cluster that already has this addon
-# installed out-of-band must have it removed (or imported) once before first apply.
+# Kubernetes version. The null_resource above clears any out-of-band copy first, so this
+# create succeeds and adopts the preserved in-cluster resources (OVERWRITE then keeps
+# field-level conflicts resolved on subsequent updates).
 resource "aws_eks_addon" "cloudwatch_observability" {
   cluster_name = module.eks_cluster.cluster_name
   addon_name   = "amazon-cloudwatch-observability"
+
+  depends_on = [null_resource.adopt_cloudwatch_observability_addon]
 
   pod_identity_association {
     role_arn        = aws_iam_role.cloudwatch_agent_pod_identity.arn

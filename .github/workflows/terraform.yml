@@ -11,8 +11,16 @@ jobs:
     name: 'Terraform'
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        module: [physical, logical]
+        include:
+          # The physical layer uses the rds-aurora module (master_password_wo),
+          # which requires Terraform/OpenTofu >= 1.11.1 — run it on OpenTofu 1.12.x.
+          - module: physical
+            tool: tofu
+          # The logical layer stays on the Spacelift-pinned Terraform 1.5.7 toolchain.
+          - module: logical
+            tool: terraform
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
@@ -24,18 +32,25 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Setup OpenTofu
+      if: matrix.tool == 'tofu'
+      uses: opentofu/setup-opentofu@v1
+      with:
+        tofu_version: "1.12.2"
+
     - name: Setup Terraform
+      if: matrix.tool == 'terraform'
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: 1.5.7
 
-    - name: Terraform ${{ matrix.module }} Module Init
-      run: terraform init
+    - name: ${{ matrix.module }} Module Init
+      run: ${{ matrix.tool }} init
       working-directory: ./terraform/${{ matrix.module }}
 
-    # Checks that all Terraform configuration files adhere to a canonical format
-    - name: Terraform Format Check
-      run: terraform fmt -check
+    # Checks that all configuration files adhere to a canonical format
+    - name: Format Check
+      run: ${{ matrix.tool }} fmt -check
       working-directory: ./terraform/${{ matrix.module }}
 
     # Performs linting on the Terraform files
@@ -52,4 +67,3 @@ jobs:
     # tfsec removed — deprecated in favor of Trivy. The reviewdog/action-tfsec
     # action crashes on tfsec v1.28.0 output parsing. Migrate to Trivy in a
     # follow-up PR if static security scanning is needed in CI.
-

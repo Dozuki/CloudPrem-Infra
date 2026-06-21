@@ -60,8 +60,9 @@ resource "aws_dms_replication_subnet_group" "this" {
 resource "aws_kms_key" "bi" {
   count = var.enable_bi ? 1 : 0
 
-  description         = "BI KMS key for replication credentials"
-  enable_key_rotation = true
+  description             = "BI KMS key for replication credentials"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
 }
 
 resource "aws_dms_replication_instance" "this" {
@@ -104,9 +105,9 @@ resource "aws_dms_endpoint" "source" {
   port                        = 3306
   kms_key_arn                 = aws_kms_key.bi[0].arn
 
-  username    = module.primary_database.db_instance_username
-  password    = module.primary_database.db_instance_password
-  server_name = module.primary_database.db_instance_address
+  username    = local.db_username
+  password    = local.db_password
+  server_name = local.db_host
 
   tags = local.tags
 }
@@ -176,7 +177,7 @@ module "rds_replica_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "5.6.0"
 
-  count = var.enable_bi ? local.dms_enabled ? 0 : 1 : 0
+  count = var.enable_bi && !local.dms_enabled && var.db_engine == "rds" ? 1 : 0
 
   identifier = "${local.identifier}-rds-replica"
 
@@ -186,7 +187,7 @@ module "rds_replica_database" {
   port                        = 3306
   instance_class              = data.aws_rds_orderable_db_instance.default.instance_class
   max_allocated_storage       = var.rds_max_allocated_storage
-  replicate_source_db         = module.primary_database.db_instance_id
+  replicate_source_db         = module.primary_database[0].db_instance_id
   storage_encrypted           = true
   kms_key_id                  = data.aws_kms_key.rds.arn
   apply_immediately           = !var.protect_resources
@@ -207,7 +208,7 @@ module "rds_replica_database" {
 
   # DB parameter group
   create_db_parameter_group = false
-  parameter_group_name      = aws_db_parameter_group.default.name
+  parameter_group_name      = aws_db_parameter_group.default[0].name
 
   create_db_option_group = false
 
@@ -260,7 +261,7 @@ module "dms_replica_database" {
 
   # DB parameter group
   create_db_parameter_group = false
-  parameter_group_name      = aws_db_parameter_group.default.name
+  parameter_group_name      = aws_db_parameter_group.default[0].name
 
   create_db_option_group = false
 
@@ -287,12 +288,12 @@ resource "aws_secretsmanager_secret_version" "replica_database_credentials" {
 
   secret_id = aws_secretsmanager_secret.replica_database_credentials[0].id
   secret_string = jsonencode({
-    dbInstanceIdentifier = local.bi_db.db_instance_id
-    resourceId           = local.bi_db.db_instance_resource_id
-    host                 = local.bi_db.db_instance_address
-    port                 = local.bi_db.db_instance_port
+    dbInstanceIdentifier = local.dms_enabled ? module.dms_replica_database[0].db_instance_id : local.db_identifier
+    resourceId           = local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
+    host                 = local.bi_host
+    port                 = local.dms_enabled ? module.dms_replica_database[0].db_instance_port : local.db_port
     engine               = "mysql"
-    username             = local.dms_enabled ? module.dms_replica_database[0].db_instance_username : module.primary_database.db_instance_username
-    password             = local.dms_enabled ? module.dms_replica_database[0].db_instance_password : module.primary_database.db_instance_password
+    username             = local.dms_enabled ? module.dms_replica_database[0].db_instance_username : local.db_username
+    password             = local.dms_enabled ? module.dms_replica_database[0].db_instance_password : local.db_password
   })
 }

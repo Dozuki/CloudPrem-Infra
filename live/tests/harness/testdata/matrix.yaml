@@ -1,0 +1,27 @@
+defaults:
+  from_ref: "auto:latest-1"
+  to_ref: "auto:latest"
+  region: "us-east-1"
+  dr_region: "us-west-2"
+  env_path: "live/standard/us-east-1"
+versions:
+  v6.0:
+    image_tag: "base-app"
+    nextjs_tag: "base-nextjs"
+  v6.1-release:
+    image_tag: "tgt-app"
+    nextjs_tag: "tgt-nextjs"
+    chart_version: "0.3.0"
+    image_repository: "ecr.example/dozuki"
+configs:
+  - name: min_default
+    env: min
+    feature_flags:
+      enable_bi: false
+      enable_webhooks: false
+  - name: full
+    env: full
+    feature_flags:
+      enable_bi: true
+      enable_dr: true
+      restore_drill: true

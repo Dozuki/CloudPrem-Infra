@@ -19,7 +19,8 @@ locals {
 
   # RDS automated-backup cross-region replication is only possible when the DB
   # uses a customer-managed key (either our created CMK or an operator-pinned one).
-  dr_rds_enabled = var.enable_dr && (local.rds_use_dr_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
+  # Aurora DR uses Global Database (Plan B), not automated-backup replication.
+  dr_rds_enabled = var.db_engine == "rds" && var.enable_dr && (local.rds_use_dr_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
 }
 
 # Defense-in-depth guardrail. The real selection + blocklist enforcement happens
@@ -48,9 +49,10 @@ check "dr_rds_replicable" {
 resource "aws_kms_key" "rds_cmk" {
   count = local.rds_use_dr_cmk ? 1 : 0
 
-  description         = "${local.identifier} RDS encryption (DR-replicable)"
-  enable_key_rotation = true
-  tags                = local.tags
+  description             = "${local.identifier} RDS encryption (DR-replicable)"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
+  tags                    = local.tags
 }
 
 resource "aws_kms_alias" "rds_cmk" {
@@ -66,9 +68,10 @@ resource "aws_kms_key" "dr_rds" {
   count    = local.dr_rds_enabled ? 1 : 0
   provider = aws.dr
 
-  description         = "${local.identifier} DR replicated RDS backups"
-  enable_key_rotation = true
-  tags                = local.tags
+  description             = "${local.identifier} DR replicated RDS backups"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
+  tags                    = local.tags
 }
 
 resource "aws_kms_alias" "dr_rds" {
@@ -84,9 +87,10 @@ resource "aws_kms_key" "dr_s3" {
   count    = local.dr_enabled ? 1 : 0
   provider = aws.dr
 
-  description         = "${local.identifier} DR replicated S3 content"
-  enable_key_rotation = true
-  tags                = local.tags
+  description             = "${local.identifier} DR replicated S3 content"
+  enable_key_rotation     = true
+  deletion_window_in_days = var.protect_resources ? 30 : 7
+  tags                    = local.tags
 }
 
 resource "aws_kms_alias" "dr_s3" {

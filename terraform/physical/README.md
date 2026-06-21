@@ -3,7 +3,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.1 |
 | <a name="requirement_archive"></a> [archive](#requirement\_archive) | ~> 2.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 2.0 |
@@ -25,6 +25,7 @@
 
 | Name | Source | Version |
 |------|--------|---------|
+| <a name="module_aurora"></a> [aurora](#module\_aurora) | terraform-aws-modules/rds-aurora/aws | 10.2.0 |
 | <a name="module_bastion"></a> [bastion](#module\_bastion) | terraform-aws-modules/autoscaling/aws | ~> 9.0 |
 | <a name="module_bastion_sg"></a> [bastion\_sg](#module\_bastion\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
 | <a name="module_bi_database_sg"></a> [bi\_database\_sg](#module\_bi\_database\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
@@ -54,6 +55,10 @@
 |------|------|
 | [aws_cloudwatch_event_rule.dms_task_state_changed_rule](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_target.dms_task_state_changed_target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
+| [aws_cloudwatch_metric_alarm.aurora_acu](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
+| [aws_cloudwatch_metric_alarm.aurora_connections](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
+| [aws_cloudwatch_metric_alarm.aurora_cpu](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
+| [aws_cloudwatch_metric_alarm.aurora_memory](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.dr_s3_replication_failed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.dr_s3_replication_latency](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.rds_storage_space_alarm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
@@ -157,13 +162,16 @@
 | [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_association) | resource |
 | [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
+| [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
+| [null_resource.adopt_cloudwatch_observability_addon](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_vpc_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.s3_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [random_id.elasticache](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/id) | resource |
+| [random_password.aurora](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_ami.amazon_linux_2023](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) | data source |
@@ -206,6 +214,10 @@
 | <a name="input_alarm_email"></a> [alarm\_email](#input\_alarm\_email) | Email address to send status alarms to. | `string` | `""` | no |
 | <a name="input_app_access_cidrs"></a> [app\_access\_cidrs](#input\_app\_access\_cidrs) | These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
+| <a name="input_aurora_engine_version"></a> [aurora\_engine\_version](#input\_aurora\_engine\_version) | Aurora MySQL engine version. Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade. | `string` | `"8.4.7"` | no |
+| <a name="input_aurora_max_acu"></a> [aurora\_max\_acu](#input\_aurora\_max\_acu) | Aurora Serverless v2 maximum capacity (ACUs). | `number` | `16` | no |
+| <a name="input_aurora_min_acu"></a> [aurora\_min\_acu](#input\_aurora\_min\_acu) | Aurora Serverless v2 minimum capacity (ACUs). | `number` | `0.5` | no |
+| <a name="input_aurora_snapshot_identifier"></a> [aurora\_snapshot\_identifier](#input\_aurora\_snapshot\_identifier) | Optional RDS DB snapshot ARN to restore the Aurora cluster from (migration path). Empty = fresh cluster. | `string` | `""` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
 | <a name="input_azs_count"></a> [azs\_count](#input\_azs\_count) | The number of availability zones we should use for deployment. | `number` | `3` | no |
 | <a name="input_bi_access_cidrs"></a> [bi\_access\_cidrs](#input\_bi\_access\_cidrs) | If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. If left empty it will default to your VPC CIDR | `list(string)` | `[]` | no |
@@ -215,6 +227,7 @@
 | <a name="input_bi_vpn_user_list"></a> [bi\_vpn\_user\_list](#input\_bi\_vpn\_user\_list) | List of users to create OpenVPN configurations for usint mutual authentication. | `list(string)` | <pre>[<br>  "root"<br>]</pre> | no |
 | <a name="input_cf_template_version"></a> [cf\_template\_version](#input\_cf\_template\_version) | Version of the CloudFormation template that deployed this stack for validation | `number` | `0` | no |
 | <a name="input_customer"></a> [customer](#input\_customer) | The customer name for resource names and tagging. This will also be the autogenerated subdomain. | `string` | `""` | no |
+| <a name="input_db_engine"></a> [db\_engine](#input\_db\_engine) | Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'. | `string` | `"rds"` | no |
 | <a name="input_dms_allocated_storage"></a> [dms\_allocated\_storage](#input\_dms\_allocated\_storage) | How many GB to allocate for the DMS replication instance | `string` | `100` | no |
 | <a name="input_dms_instance_type"></a> [dms\_instance\_type](#input\_dms\_instance\_type) | The instance type for the DMS replication instance | `string` | `"dms.r5.large"` | no |
 | <a name="input_dr_region"></a> [dr\_region](#input\_dr\_region) | The DR region (concrete value). Normally injected by the Spacelift admin layer via TG\_AWS\_DR\_REGION; may be set explicitly to override. Never auto-derived in workload TF. | `string` | `""` | no |
@@ -230,6 +243,7 @@
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
+| <a name="input_memcached_in_cluster"></a> [memcached\_in\_cluster](#input\_memcached\_in\_cluster) | Run memcached in-cluster (chart memcached deployment) instead of ElastiCache. When true (default), ElastiCache is not provisioned (and is destroyed if it exists). | `bool` | `true` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
 | <a name="input_rds_adopt_dr_cmk"></a> [rds\_adopt\_dr\_cmk](#input\_rds\_adopt\_dr\_cmk) | When true (set for NEW DR-protected stacks only), the RDS instance is created with a Terraform-managed customer KMS key so its automated backups can be replicated cross-region for DR. MUST stay false for existing stacks created with the AWS-managed key — changing an existing DB's KMS key replaces the database. | `bool` | `false` | no |
 | <a name="input_rds_allocated_storage"></a> [rds\_allocated\_storage](#input\_rds\_allocated\_storage) | The initial size of the database (Gb) | `number` | `100` | no |

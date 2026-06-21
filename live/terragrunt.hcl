@@ -12,7 +12,12 @@ locals {
   account_id   = get_env("TG_AWS_ACCT_ID", local.account_vars.locals.aws_account_id)
   aws_region   = get_env("TG_AWS_REGION", local.region_vars.locals.aws_region)
   aws_profile  = get_env("TG_AWS_PROFILE", local.account_vars.locals.aws_profile)
-  
+
+  # DR region for the generated aws.dr provider. physical/dr.tf references
+  # provider = aws.dr statically (even with enable_dr=false), so the provider must
+  # always exist or plan/destroy fails. Falls back to us-west-2 when DR is off.
+  dr_region = get_env("TG_AWS_DR_REGION", try(local.environment_vars.locals.dr_region, "us-west-2"))
+
   dns_role = local.aws_region == "us-gov-west-1" ? "arn:aws-us-gov:iam::446787640263:role/Route53AccessRole" : "arn:aws:iam::010601635461:role/Route53AccessRole"
 }
 
@@ -35,6 +40,12 @@ provider "aws" {
   assume_role {
     role_arn = "${local.dns_role}"
   }
+}
+provider "aws" {
+  alias               = "dr"
+  region              = "${local.dr_region}"
+  allowed_account_ids = ["${local.account_id}"]
+  profile             = "${local.aws_profile}"
 }
 EOF
 }

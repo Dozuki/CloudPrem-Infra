@@ -1,79 +1,171 @@
-# Dozuki Cloudprem infrastructure
+# Dozuki CloudPrem Infrastructure
 
-![Terraform](https://github.com/nclouds/doz-cloudprem-infrastructure/workflows/Terraform/badge.svg)
+Infrastructure-as-code for deploying the **Dozuki** application as a managed private
+cloud (MPC) — a self-contained, customer-isolated stack on **AWS** (commercial and
+GovCloud) or **Azure**. The project provisions the cloud infrastructure, the
+Kubernetes platform, and the application itself, and is driven by
+[Terragrunt](https://terragrunt.gruntwork.io/) over Terraform / OpenTofu.
 
-The Terraform project automates the creation of AWS resources as well as some base Kubernetes components required for the Cloudprem application infrastructure.
+## Architecture
 
-![dozuki](https://app.lucidchart.com/publicSegments/view/c01199f1-8171-415f-b3ca-09206a593da5/image.png)
+A deployment is split into two layers that apply in order. The split keeps the
+expensive, slow-changing cloud infrastructure independent of the fast-moving
+application/Kubernetes layer, and lets each layer use the toolchain it needs.
 
-## Deployment
-
-The infrastructure is managed and deployed using [Terragrunt](https://terragrunt.gruntwork.io/docs/#features). By using terragrunt we are able to deploy the infrastructure to multiple environments, lock and version the infrastructure and keep Terraform code and state configuration DRY.
-
-The terragrunt configurations for each environment can be found in the [live](./live) directory. The outer [terragrunt.hcl](./live/terragrunt.hcl) file contains configurations for the backend state and locks. The [terragrunt.hcl](./live/development) files under each environment directory contain the parameters for that specific environment and the location of the Terraform stack. *(Note: For the Cloudprem infrastructure development, local references to the modules are used, eg. `../..//terraform`. For the customers deployment a reference to a specific version of the stack should be declared, eg. `git::https://github.com/dozuki/cloudprem-infrastructure.git//cloudprem?ref=v0.0.1`)*
-
-To deploy the stack, perform the following steps:
-
-1. Initialize the backend and install the required providers and modules using terragrunt:
-
-    ```console
-    $ cd live/development
-    $ terragrun init
-    ```
-
-2. Review the parameters in the [terragrunt.hcl](./live/development/terragrunt.hcl) file and execute the plan/apply
-
-    ```console
-    $ terragrunt apply
-    ```
-
-To delete the infrastructure for the environment execute terragrunt destroy
-
-```console
-$ terragrunt destroy
 ```
+┌─────────────────────────────────────────────────────────────┐
+│  logical   (terraform/logical)          Terraform 1.5.x       │
+│  Kubernetes + Helm: cert-manager, metrics-server, External    │
+│  Secrets Operator, Envoy Gateway, and the Dozuki app chart.   │
+│  Seeds per-stack secrets into Vault.                          │
+├─────────────────────────────────────────────────────────────┤
+│  physical  (terraform/physical)         OpenTofu 1.11+        │
+│  AWS: VPC, EKS (Auto Mode), RDS MySQL / Aurora Serverless v2, │
+│  S3, ElastiCache, MSK, NLB, KMS, IAM, Route53, bastion,       │
+│  cross-region DR, and a PrivateLink endpoint to central Vault.│
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Azure** deployments use a parallel `terraform/physical-azure` layer (AKS, Azure
+Database for MySQL, VNet, Key Vault, managed identity) plus the same `logical`
+layer, packaged with a self-contained deploy kit under [`azure-config/`](./azure-config).
+
+Secrets are managed centrally in **HashiCorp Vault** (reached over PrivateLink and
+surfaced into the cluster by the External Secrets Operator). The physical layer
+provisions the Vault endpoint; the logical layer authenticates (AWS + Kubernetes
+auth) and seeds each stack's secrets.
+
+## Repository layout
+
+```
+terraform/
+  physical/          AWS cloud infrastructure         (OpenTofu >= 1.11.1)
+  logical/           Kubernetes / Helm / app          (Terraform >= 1.5.0)
+  physical-azure/    Azure cloud infrastructure
+live/                Terragrunt deployment configs
+  terragrunt.hcl     Root: remote state, provider generation, input merge
+  common.hcl         Shared inputs + logical→physical dependency wiring
+  standard/          AWS commercial partition  (account.hcl → region → env)
+  gov/               AWS GovCloud partition
+  .skel/             Templates for scaffolding new partitions / environments
+  tests/             Upgrade + DR integration harness (Go / Terratest)
+azure-config/        Turnkey Azure deploy kit (image sync, charts, bootstrap)
+.github/workflows/   CI: validation, integration tests, releases
+DEPLOYMENT.md        Operator runbook for standing up / upgrading a stack
+```
+
+## The `live/` deployment model
+
+Terragrunt configuration is layered so values flow down a hierarchy and merge into
+each leaf module. The root [`live/terragrunt.hcl`](./live/terragrunt.hcl) generates
+the S3 remote-state backend (with DynamoDB locking) and the provider block — the
+primary `aws` provider plus the `aws.dns` (cross-account DNS) and `aws.dr`
+(disaster-recovery region) aliases.
+
+```
+live/standard/                       partition
+  account.hcl                        ← AWS account id + profile
+  us-east-1/
+    region.hcl                       ← region
+    full/
+      env.hcl                        ← feature flags for this environment
+      physical/terragrunt.hcl        ← sources terraform/physical
+      logical/terragrunt.hcl         ← sources terraform/logical
+```
+
+**Partitions:** `standard` (commercial AWS) and `gov` (AWS GovCloud).
+
+**Environments** are presets of the feature flags below:
+
+| Env                 | Purpose                                                        |
+|---------------------|---------------------------------------------------------------|
+| `min`               | Minimal single-AZ stack — dev / smoke testing                 |
+| `full`              | Production preset — multi-AZ, DR, webhooks, BI all on          |
+| `bi`                | Adds the business-intelligence database path                  |
+| `hooks`             | Adds the webhooks (Kafka) path                                 |
+| `workstation_setup` | Bootstrap/workstation tooling                                 |
+
+New partitions and environments are scaffolded from [`live/.skel/`](./live/.skel)
+via [`live/generate_live_env.sh`](./live/generate_live_env.sh).
+
+For the full step-by-step deploy and upgrade procedure, see **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+
+## Toolchain: the OpenTofu / Terraform split
+
+The two layers deliberately run on different binaries:
+
+- **`physical` → OpenTofu (`>= 1.11.1`).** It relies on write-only attributes
+  (e.g. `master_password_wo`) and the Aurora module, which require a newer core than
+  the logical layer is pinned to. Drive Terragrunt against it with
+  `TERRAGRUNT_TFPATH=tofu`.
+- **`logical` → Terraform (`1.5.7`).** Held at 1.5.7 for compatibility with the
+  production runner (Spacelift, MPL-licensed Terraform). Uses the Helm / Kubernetes
+  providers.
+
+CI enforces this per-layer (see [`.github/workflows/terraform.yml`](./.github/workflows/terraform.yml)),
+and the test harness selects the right binary per layer automatically.
+
+> **Production deployments** are executed by **Spacelift**, configured in the
+> separate `infra-live` repository (which wires each stack to the correct tool and
+> version). This repo holds the modules and the `live/` definitions; it is not the
+> Spacelift control plane.
+
+## Configuration
+
+Feature flags are set per-environment in `env.hcl` and flow through the root
+`terragrunt.hcl` `inputs` merge. The most common operator-facing toggles:
+
+| Variable                       | Layer    | Default | Purpose                                                        |
+|--------------------------------|----------|---------|----------------------------------------------------------------|
+| `customer`                     | physical | —       | Customer/stack name; drives resource naming and the subdomain  |
+| `protect_resources`            | both     | `true`  | Deletion protection on RDS, S3, Vault secrets                   |
+| `enable_dr`                    | physical | `true`  | Cross-region DR (RDS backup replication, S3 CRR)               |
+| `db_engine`                    | physical | `rds`   | `rds` (provisioned MySQL) or `aurora` (Aurora Serverless v2)    |
+| `rds_multi_az`                 | physical | `true`  | Multi-AZ RDS standby                                            |
+| `highly_available_nat_gateway` | physical | `true`  | One NAT gateway per AZ                                          |
+| `enable_webhooks`              | both     | `false` | Provision MSK (Kafka) for webhooks                             |
+| `enable_bi`                    | both     | `false` | Provision the business-intelligence database path             |
+| `image_tag` / `nextjs_tag`     | logical  | —       | Dozuki application image tags                                   |
+| `chart_version`                | logical  | —       | Dozuki Helm chart version (pulled from the OCI/ECR registry)   |
+| `image_repository`             | logical  | —       | Registry the app chart and images are pulled from              |
+
+## Testing
+
+[`live/tests/`](./live/tests) contains a Go/Terratest **upgrade harness**: it stands
+up a stack at a baseline release, validates it, upgrades to a target release,
+re-validates, and tears everything down — exercising the real upgrade path customers
+take. Scenarios are defined in `matrix.yaml` (`min_default`, `bi_ha`, `full`).
+
+- [`live/tests/verify-clean.sh`](./live/tests/verify-clean.sh) — read-only leak
+  detector that scans the cost-heavy / collision-prone services for harness residue;
+  use it as a post-run check or a gate before re-running.
+- The harness runs on demand against a dedicated test account — it stands up real
+  cloud resources — with a CI integration gate landing alongside the harness itself.
+
+## CI/CD
+
+| Workflow              | Trigger                     | Does                                                       |
+|-----------------------|-----------------------------|-----------------------------------------------------------|
+| `terraform.yml`       | push / PR                   | `fmt` + `tflint` per layer (OpenTofu for physical, Terraform for logical) |
+| `release.yml`         | push of a `v*` tag          | Publishes the AWS GitHub release from the curated notes    |
+| `release-azure.yml`   | Azure release tag           | Publishes the Azure deploy-kit release                     |
+
+## Releasing
+
+Releases are cut by tagging `vX.Y` (which fires `release.yml`). The working model is
+freeze a release branch, land any further fixes on `master`, re-sync them into the
+release branch, re-validate with the harness, then tag.
 
 ## Contributing
 
-To contribute to the project, make your changes to the Terraform code and deploy them to a local environment using the parameters in the [live/development](./live/development) directory by following the instructions in the [deploy](#deploy) section.
-
-### Pre-commit
-
-The project is configured with [pre-commit](https://pre-commit.com/) hooks to perform checks on the code and provide faster feedback. Consider using it on your development workflow.
-
-To enable the pre-commit hooks:
+Install the [pre-commit](https://pre-commit.com/) hooks (`terraform fmt`,
+`terraform-docs`, `tflint`) before committing:
 
 ```console
-$ pre-commit install
+pre-commit install
+pre-commit run -a       # run against all files
 ```
 
-The checks are going to be executed by default on every commit, if you want to perform the checks manually execute:
-
-```console
-$ pre-commit run -a
-```
-
-For more information about the pre-commit hooks configured check the [pre-commit configuration repository](https://github.com/nclouds/pre-commit-terraform)
-
-### CI / CD
-
-The repository is configured with two Github Workflows:
-
-1. Terraform: Performs validations using (terraform fmt, tflint and tfsec) for quality compliance. This CI pipeline is executed on every commit pushed github.
-2. Release: This workflow creates a github release of the Terraform project whenever a new tag of the form v* (i.e. v1.0, v20.15.10) is pushed to the repository. To control the Release notes and properties update the [release.yml](./.github/workflows/release.yml) file.
-
-#### Additional considerations
-
-By default only the user that creates the EKS cluster has permissions to access the cluster, for that reason if you create the Terraform stack with the pipeline and then try to update the stack manually you'll get an `Unauthorized` error when Terraform attempts to update or refresh the state of the kubernetes resources. To overcome that a role called *deployment_role* is created as part of the pipeline and used to deploy the infrastructure.
-
-To perform manual updates to the infrastructure after deploying it with the pipeline get the deployment role arn from the CloudFormation pipeline and assume the role:
-
-```console
-aws_credentials=$(aws sts assume-role --role-arn <deployment_role_arn> --role-session-name "Terraform")
-export AWS_ACCESS_KEY_ID=$(echo $aws_credentials|jq '.Credentials.AccessKeyId'|tr -d '"')
-export AWS_SECRET_ACCESS_KEY=$(echo $aws_credentials|jq '.Credentials.SecretAccessKey'|tr -d '"')
-export AWS_SESSION_TOKEN=$(echo $aws_credentials|jq '.Credentials.SessionToken'|tr -d '"')
-terragrunt apply
-```
-
-Note that the role session name is Terraform, you must use the exact same session name to perform updates.
+Make changes in `terraform/` (modules) and exercise them through a `min` environment
+under `live/` per [DEPLOYMENT.md](./DEPLOYMENT.md). Keep the `physical` layer
+OpenTofu-compatible and the `logical` layer Terraform 1.5.7-compatible.

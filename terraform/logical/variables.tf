@@ -237,3 +237,206 @@ variable "nlb_http_target_group_arn" {
 }
 
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #
+variable "cloud" {
+  description = "Cloud the physical layer runs on."
+  type        = string
+  default     = "aws"
+
+  validation {
+    condition     = contains(["aws", "azure"], var.cloud)
+    error_message = "cloud must be aws or azure."
+  }
+}
+
+variable "azure_subscription_id" {
+  description = "Azure subscription ID. Required when cloud = azure."
+  type        = string
+  default     = ""
+}
+
+variable "azure_environment" {
+  description = "Azure cloud environment: public or usgovernment."
+  type        = string
+  default     = "public"
+
+  validation {
+    condition     = contains(["public", "usgovernment"], var.azure_environment)
+    error_message = "azure_environment must be public or usgovernment."
+  }
+}
+
+variable "azure_resource_group" {
+  description = "Resource group containing the AKS cluster and Key Vault. Required when cloud = azure."
+  type        = string
+  default     = ""
+}
+
+variable "azure_key_vault_id" {
+  description = "Key Vault resource ID (physical output key_vault_id)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_key_vault_uri" {
+  description = "Key Vault URI for the ESO SecretStore (physical output key_vault_uri)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_tenant_id" {
+  description = "Entra tenant ID (physical output tenant_id)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_eso_identity_client_id" {
+  description = "Client ID of the ESO workload identity (physical output eso_identity_client_id)."
+  type        = string
+  default     = ""
+}
+
+variable "azure_kubelogin_login" {
+  description = "kubelogin --login mode: azurecli on a workstation, msi on an Azure VM with managed identity."
+  type        = string
+  default     = "azurecli"
+
+  validation {
+    condition     = contains(["azurecli", "msi"], var.azure_kubelogin_login)
+    error_message = "azure_kubelogin_login must be azurecli or msi."
+  }
+}
+
+variable "seaweedfs_volume_size_gb" {
+  description = "PVC size in GB for each SeaweedFS volume server (Azure only)."
+  type        = number
+  default     = 100
+}
+
+# Global application secrets — on AWS these come from Dozuki's central Vault;
+# on Azure (which cannot reach Vault) the config layer supplies them and this
+# layer seeds them into the customer Key Vault for ESO.
+variable "sentry_dsn" {
+  description = "Sentry DSN (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "frontegg_client_id" {
+  description = "Frontegg client ID (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "frontegg_api_token" {
+  description = "Frontegg API token (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "surveyjs_license_key" {
+  description = "SurveyJS license key (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "rustici_password" {
+  description = "Rustici password (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "rustici_managed_password" {
+  description = "Rustici managed password (Azure only; AWS reads Vault)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "chart_version" {
+  description = "Dozuki chart version pulled from the registry (oci://<image_repository>/charts/dozuki)."
+  type        = string
+  default     = "0.3.12"
+}
+
+variable "ghcr_pull_username" {
+  description = "GitHub username for pulling MPC images from GHCR (Azure only)."
+  type        = string
+  default     = ""
+}
+
+variable "ghcr_pull_token" {
+  description = "GitHub token (read:packages) for pulling MPC images from GHCR (Azure only)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "tls_cert" {
+  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set (any cloud), Terraform creates the tls-secret and the chart runs with tls.externallyManaged=true, bypassing cert-manager/ACME. Empty = cert-manager/ACME (AWS) or azure_tls_mode (azure)."
+  type        = string
+  default     = ""
+}
+
+variable "tls_key" {
+  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set."
+  type        = string
+  default     = ""
+}
+
+variable "operator_image_tag" {
+  description = "dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion)."
+  type        = string
+  default     = "3.0.3"
+}
+
+variable "gateway_dns_label" {
+  description = "Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label."
+  type        = string
+  default     = ""
+}
+
+variable "aws_external_dns_role_arn" {
+  description = "AWS IAM role ARN that external-dns assumes via AKS workload identity (azure). Empty = external-dns disabled."
+  type        = string
+  default     = ""
+}
+
+variable "azure_tls_mode" {
+  description = "Azure gateway TLS strategy: self-signed (dev), letsencrypt (cert-manager HTTP-01), or supplied (tls_cert/tls_key)."
+  type        = string
+  default     = "self-signed"
+
+  validation {
+    condition     = contains(["self-signed", "letsencrypt", "supplied"], var.azure_tls_mode)
+    error_message = "azure_tls_mode must be self-signed, letsencrypt, or supplied."
+  }
+}
+
+variable "azure_acme_server" {
+  description = "ACME directory URL for the cert-issuer when azure_tls_mode=letsencrypt. Empty = chart default (LE prod). Use the staging URL during bring-up."
+  type        = string
+  default     = ""
+}
+
+variable "external_dns_sa_name" {
+  description = "external-dns service account name (must match the AWS role trust subject)."
+  type        = string
+  default     = "external-dns"
+}
+
+variable "gateway_name" {
+  description = "Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon."
+  type        = string
+  default     = "dozuki-gateway"
+}
+
+variable "memcached_in_cluster" {
+  description = "Run memcached in-cluster instead of ElastiCache (AWS). Azure is always in-cluster. Must match the physical layer's value."
+  type        = bool
+  default     = true
+}
