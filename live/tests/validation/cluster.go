@@ -45,31 +45,6 @@ func matchesAny(name string, patterns []string) bool {
 	return false
 }
 
-// ListWorkloads returns the names of all Deployments and StatefulSets in namespace.
-func ListWorkloads(kubeconfig, namespace string) ([]string, error) {
-	cs, err := clientFor(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-	ctx := context.Background()
-	var names []string
-	deps, err := cs.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	for _, d := range deps.Items {
-		names = append(names, d.Name)
-	}
-	sss, err := cs.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range sss.Items {
-		names = append(names, s.Name)
-	}
-	return names, nil
-}
-
 // CheckClusterHealth blocks (up to timeout) until every workload whose name matches
 // the critical set reports ready==desired, then returns the names of NON-critical
 // workloads that are not ready (advisory; never an error). A critical workload absent

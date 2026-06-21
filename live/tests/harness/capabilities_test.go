@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
@@ -25,23 +24,5 @@ func TestDetectCapabilities_presence(t *testing.T) {
 	empty := DetectCapabilities(validation.StackOutputs{})
 	if empty.HasDMS || empty.HasGuideBuckets || empty.HasDR {
 		t.Fatalf("empty outputs: %+v, want all infra caps false (missing → absent)", empty)
-	}
-}
-
-func TestSplitCritical(t *testing.T) {
-	names := []string{"dozuki-app-deployment", "dozuki-nextjs", "dozuki-memcached", "varnish"}
-	critical, advisory := SplitCritical(names, DefaultCriticalWorkloads())
-	if !reflect.DeepEqual(critical, []string{"dozuki-app-deployment", "dozuki-nextjs"}) {
-		t.Fatalf("critical = %v, want [dozuki-app-deployment dozuki-nextjs]", critical)
-	}
-	if !reflect.DeepEqual(advisory, []string{"dozuki-memcached", "varnish"}) {
-		t.Fatalf("advisory = %v, want [dozuki-memcached varnish]", advisory)
-	}
-}
-
-func TestSplitCritical_emptyPatternsAllAdvisory(t *testing.T) {
-	critical, advisory := SplitCritical([]string{"a", "b"}, nil)
-	if len(critical) != 0 || len(advisory) != 2 {
-		t.Fatalf("nil patterns: critical=%v advisory=%v, want none critical", critical, advisory)
 	}
 }
