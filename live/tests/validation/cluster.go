@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -121,10 +120,6 @@ func evaluateWorkloads(ctx context.Context, cs kubernetes.Interface, ns string, 
 		ready = matched && allCriticalReady
 	}
 	return advisory, matched, ready, nil
-}
-
-func deploymentReady(d appsv1.Deployment) bool {
-	return d.Status.ReadyReplicas == desired(d.Spec.Replicas)
 }
 
 func desired(r *int32) int32 {
