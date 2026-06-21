@@ -45,18 +45,19 @@ func TestUpgrade(t *testing.T) {
 				t.Fatalf("config %s: %v", name, err)
 			}
 			err = harness.RunUpgrade(harness.RunParams{
-				RepoDir:      repoDir,
-				Matrix:       m,
-				ConfigName:   name,
-				FromRef:      fromRef,
-				ToRef:        toRef,
-				AccountID:    accountID,
-				Profile:      profile,
-				RunID:        runID + "-" + name,
-				Namespace:    namespace,
-				DRRegion:     m.Defaults.DRRegion,
-				RestoreDrill: cfg.HarnessFlag("restore_drill"),
-				EnableDR:     cfg.HarnessFlag("enable_dr"),
+				RepoDir:           repoDir,
+				Matrix:            m,
+				ConfigName:        name,
+				FromRef:           fromRef,
+				ToRef:             toRef,
+				AccountID:         accountID,
+				Profile:           profile,
+				RunID:             runID + "-" + name,
+				Namespace:         namespace,
+				DRRegion:          m.Defaults.DRRegion,
+				RestoreDrill:      cfg.HarnessFlag("restore_drill"),
+				EnableDR:          cfg.HarnessFlag("enable_dr"),
+				CriticalWorkloads: m.Defaults.CriticalWorkloads,
 			})
 			if err != nil {
 				t.Fatalf("upgrade %s (%s->%s): %v", name, fromRef, toRef, err)

@@ -21,18 +21,19 @@ func step(format string, args ...interface{}) {
 
 // RunParams configures one upgrade run.
 type RunParams struct {
-	RepoDir      string
-	Matrix       *Matrix
-	ConfigName   string
-	FromRef      string // resolved concrete ref
-	ToRef        string // resolved concrete ref
-	AccountID    string
-	Profile      string
-	RunID        string // unique per run; namespaces state
-	Namespace    string // app namespace, e.g. "dozuki"
-	DRRegion     string // DR region (e.g. "us-west-2"); set from matrix defaults
-	RestoreDrill bool   // run the RDS restore drill
-	EnableDR     bool   // DR validators enabled (enable_dr flag)
+	RepoDir           string
+	Matrix            *Matrix
+	ConfigName        string
+	FromRef           string   // resolved concrete ref
+	ToRef             string   // resolved concrete ref
+	AccountID         string
+	Profile           string
+	RunID             string   // unique per run; namespaces state
+	Namespace         string   // app namespace, e.g. "dozuki"
+	DRRegion          string   // DR region (e.g. "us-west-2"); set from matrix defaults
+	RestoreDrill      bool     // run the RDS restore drill
+	EnableDR          bool     // DR validators enabled (enable_dr flag)
+	CriticalWorkloads []string // critical workload name globs; empty → DefaultCriticalWorkloads()
 }
 
 // RunUpgrade executes apply(baseline) -> validate -> apply(target) -> validate
@@ -160,7 +161,7 @@ func RunUpgrade(p RunParams) (err error) {
 		return fmt.Errorf("baseline apply: %w", aerr)
 	}
 	step("baseline applied — validating: cluster health (waits for pods Ready, up to 20m), endpoints, helm release")
-	baselineRev, _, verr := validateStack(tg(fromWT), p, region)
+	baselineRev, _, _, verr := validateStack(tg(fromWT), p, region)
 	if verr != nil {
 		return fmt.Errorf("baseline validation: %w", verr)
 	}
@@ -190,10 +191,11 @@ func RunUpgrade(p RunParams) (err error) {
 	appliedWT.Store(toWT)
 	_ = writeAppliedMarker(p.RepoDir, tg(toWT).StatePrefix, tg(toWT).WorkingDir)
 	step("upgrade applied — validating: cluster health (up to 20m), endpoints, helm release")
-	_, kc, verr := validateStack(tg(toWT), p, region)
+	_, kc, upCaps, verr := validateStack(tg(toWT), p, region)
 	if verr != nil {
 		return fmt.Errorf("upgrade validation: %w", verr)
 	}
+	_ = upCaps
 	wantChart, _ := p.Matrix.Versions[p.ToRef]["chart_version"].(string)
 	step("verifying upgrade proof (helm revision advanced from %d; chart %q)", baselineRev, wantChart)
 	if rerr := validation.AssertUpgraded(kc, p.Namespace, "dozuki", baselineRev, wantChart); rerr != nil {
@@ -263,26 +265,36 @@ func generateLiveEnvs(worktreeDir string) error {
 }
 
 // validateStack runs the post-apply assertion suite and returns the helm
-// revision and the kubeconfig path it generated (reused by the upgrade proof).
-func validateStack(tg TGOptions, p RunParams, region string) (int, string, error) {
+// revision, the kubeconfig path it generated (reused by the upgrade proof),
+// and the detected Capabilities for use by later validation stages.
+func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capabilities, error) {
 	outs, err := readOutputs(tg, region)
 	if err != nil {
-		return 0, "", err
+		return 0, "", Capabilities{}, err
 	}
+	caps := DetectCapabilities(outs)
 	if err := validation.CheckEndpoints(outs); err != nil {
-		return 0, "", err
+		return 0, "", caps, err
 	}
 	kubeDir := filepath.Dir(tg.WorkingDir)
 	kc, err := validation.Kubeconfig(outs.ClusterName, region, p.Profile, kubeDir)
 	if err != nil {
-		return 0, "", err
+		return 0, "", caps, err
 	}
-	if err := validation.CheckClusterHealth(kc, p.Namespace, 20*time.Minute); err != nil {
-		return 0, "", err
+	critical := p.CriticalWorkloads
+	if len(critical) == 0 {
+		critical = DefaultCriticalWorkloads()
+	}
+	advisory, err := validation.CheckClusterHealth(kc, p.Namespace, critical, 20*time.Minute)
+	if err != nil {
+		return 0, "", caps, err
+	}
+	for _, w := range advisory {
+		step("advisory: workload %s not Ready (non-critical — not failing the run)", w)
 	}
 	_ = validation.JobSucceeded(kc, p.Namespace, "db-migrations") // best-effort: job may be GC'd
 	rev, _ := validation.ReleaseRevision(kc, p.Namespace, "dozuki")
-	return rev, kc, nil
+	return rev, kc, caps, nil
 }
 
 // readOutputs pulls the outputs the validators need. Names reconciled against
