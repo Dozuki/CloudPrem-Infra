@@ -63,27 +63,15 @@ resource "kubernetes_secret_v1" "redis_auth" {
 # EG manages the ratelimit Deployment in its own namespace, so the secret must
 # live there for valueFrom.secretKeyRef to resolve.
 #
-# envoy-gateway-system namespace is managed explicitly here (rather than relying
-# on helm_release.envoy_gateway create_namespace = true) so that:
-#   (a) this secret can be created before the helm release runs, and
-#   (b) helm_release.envoy_gateway can safely depend on both this secret and
-#       the namespace existing before the ratelimit Deployment is configured.
-resource "kubernetes_namespace_v1" "envoy_gateway_system" {
-  metadata {
-    name = "envoy-gateway-system"
-  }
-
-  lifecycle {
-    # Helm also owns this namespace (create_namespace = true). Ignore the
-    # label/annotation churn that Helm adds after initial creation.
-    ignore_changes = [metadata[0].labels, metadata[0].annotations]
-  }
-}
-
+# The envoy-gateway-system namespace is created by helm_release.envoy_gateway
+# (create_namespace = true). EG provisions the envoy-ratelimit Deployment lazily
+# — only after a Gateway + rate-limit BackendTrafficPolicy exists (both come from
+# helm_release.app, later). So this secret just needs to exist before app installs;
+# depends_on = [helm_release.envoy_gateway] ensures the namespace is present first.
 resource "kubernetes_secret_v1" "redis_auth_eg" {
   metadata {
     name      = "redis-auth"
-    namespace = kubernetes_namespace_v1.envoy_gateway_system.metadata[0].name
+    namespace = "envoy-gateway-system"
   }
 
   data = {
@@ -91,6 +79,8 @@ resource "kubernetes_secret_v1" "redis_auth_eg" {
   }
 
   type = "Opaque"
+
+  depends_on = [helm_release.envoy_gateway]
 }
 
 # ---------------------------------------------------------------------------
@@ -139,8 +129,8 @@ resource "kubernetes_deployment_v1" "ratelimit_redis" {
 
           # --save "" disables persistence (in-memory only).
           # --requirepass sources the password from the env var below.
-          # $(REDIS_PASSWORD) is expanded by the shell in the redis:7-alpine
-          # entrypoint (which uses sh -c).
+          # $(REDIS_PASSWORD) is Kubernetes' own container env-var substitution
+          # in args (exec form) — not shell expansion.
           command = ["redis-server"]
           args = [
             "--save", "",

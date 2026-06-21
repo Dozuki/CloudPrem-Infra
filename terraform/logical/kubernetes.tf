@@ -123,10 +123,10 @@ resource "helm_release" "envoy_gateway" {
   chart      = "gateway-helm"
   version    = "v1.8.1"
 
-  # create_namespace = false: the namespace is managed by kubernetes_namespace_v1.envoy_gateway_system
-  # in ratelimit.tf so the redis-auth secret can be pre-created in it before
-  # helm_release.envoy_gateway runs and EG starts the ratelimit Deployment.
-  create_namespace = false
+  # create_namespace = true: Helm owns the envoy-gateway-system namespace.
+  # The redis-auth secret in that namespace (kubernetes_secret_v1.redis_auth_eg)
+  # depends_on this release so it's written after the namespace exists.
+  create_namespace = true
   wait             = true
 
   # CRD NOTE: gateway-helm bundles CRDs only on FIRST install; `helm upgrade` does
@@ -185,9 +185,7 @@ resource "helm_release" "envoy_gateway" {
   })]
 
   depends_on = [
-    kubernetes_namespace_v1.envoy_gateway_system,
     kubernetes_secret_v1.redis_auth,
-    kubernetes_secret_v1.redis_auth_eg,
     kubernetes_service_v1.ratelimit_redis,
   ]
 }
@@ -386,7 +384,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, aws_eks_addon.cloudwatch_observability]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.redis_auth_eg]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
