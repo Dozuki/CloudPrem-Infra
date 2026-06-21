@@ -128,7 +128,11 @@ cleanup() {
     mkdir -p "$_adir"
     cp -f "$RUN_LOG" "$_adir/run.log" 2>/dev/null || true
     _bundle="$PWD/.artifacts/${RUN_ID}.tar.gz"
-    if tar -czf "$_bundle" -C "$PWD/.artifacts" "$RUN_ID" 2>/dev/null; then
+    # The harness writes per-config diagnostics to .artifacts/<RUN_ID>-<config>/ (its
+    # p.RunID includes the config name), so bundle those dirs too — not just the run-log
+    # dir — or the upload is just the log. Feed the dir list to tar via -T (robust to
+    # shell word-splitting).
+    if ( cd "$PWD/.artifacts" && ls -d "$RUN_ID" "$RUN_ID"-* 2>/dev/null | tar -czf "$_bundle" -T - ) 2>/dev/null; then
       _bucket="${ARTIFACTS_BUCKET:-dozuki-cloudprem-harness-artifacts-us-east-1-${DDVTEST_ACCOUNT_ID}}"
       if aws s3 cp "$_bundle" "s3://${_bucket}/${RUN_ID}.tar.gz" --profile "$AWS_PROFILE" >/dev/null 2>&1; then
         echo ">> Artifacts archived: s3://${_bucket}/${RUN_ID}.tar.gz" >&2
@@ -139,6 +143,16 @@ cleanup() {
   fi
 
   echo ">> Full run log saved to: $RUN_LOG" >&2
+
+  # Top-level result banner — the one line to look for. Per-config detail (refs,
+  # phases, durations) is in the "HARNESS RUN SUMMARY" block printed by the Go harness.
+  if [ "${STARTED_RUN:-0}" = 1 ]; then
+    if [ "${TEST_RC:-1}" = 0 ]; then
+      echo ">> ================ RESULT: PASS ✓  (run ${RUN_ID}) ================" >&2
+    else
+      echo ">> ================ RESULT: FAIL ✗  (run ${RUN_ID}, exit ${TEST_RC:-?}) ================" >&2
+    fi
+  fi
 }
 trap cleanup EXIT
 
@@ -217,4 +231,11 @@ fi
 
 # From here on, the run can create cloud resources — arm the backstop cleanup (see trap).
 STARTED_RUN=1
-go test ./scenarios/ -run TestUpgrade -v -timeout 180m
+# Capture the test result so the EXIT trap can print a top-level PASS/FAIL banner and
+# the script exits with the test's status. (if/else keeps it safe under `set -e`.)
+if go test ./scenarios/ -run TestUpgrade -v -timeout 180m; then
+  TEST_RC=0
+else
+  TEST_RC=$?
+fi
+exit "$TEST_RC"
