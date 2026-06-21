@@ -153,6 +153,12 @@ variable "mysql_geo_redundant_backup" {
   default     = true
 }
 
+variable "mysql_require_secure_transport" {
+  description = "Enforce TLS on the Azure MySQL Flexible Server (require_secure_transport). Default true (Azure's secure default). The app mounts the Azure MySQL CA (vendor/azure-mysql-global.pem) and sets CAFile on every DB connection, so ON does not break it. Set false only for a temporary migration where a client cannot yet use TLS."
+  type        = bool
+  default     = true
+}
+
 variable "aks_api_allowed_cidrs" {
   description = "Public IPs/CIDRs allowed to reach the AKS API server. Empty leaves the endpoint open (v1 default); the bootstrap passes the operator's egress IP."
   type        = list(string)
