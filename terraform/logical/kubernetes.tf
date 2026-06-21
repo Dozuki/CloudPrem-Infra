@@ -123,7 +123,10 @@ resource "helm_release" "envoy_gateway" {
   chart      = "gateway-helm"
   version    = "v1.8.1"
 
-  create_namespace = true
+  # create_namespace = false: the namespace is managed by kubernetes_namespace_v1.envoy_gateway_system
+  # in ratelimit.tf so the redis-auth secret can be pre-created in it before
+  # helm_release.envoy_gateway runs and EG starts the ratelimit Deployment.
+  create_namespace = false
   wait             = true
 
   # CRD NOTE: gateway-helm bundles CRDs only on FIRST install; `helm upgrade` does
@@ -138,11 +141,36 @@ resource "helm_release" "envoy_gateway" {
   #    (gateway.geoip.enabled injects an EnvoyPatchPolicy).
   #  - rateLimit.backend -> in-cluster Redis (see ratelimit.tf) so the chart's
   #    rate-limit BackendTrafficPolicies actually enforce (otherwise inert).
+  #  - provider.kubernetes.rateLimitDeployment.container.env injects REDIS_AUTH
+  #    from the redis-auth Secret (in redis-system) into the envoy-ratelimit pod
+  #    via valueFrom.secretKeyRef. The envoy-ratelimit binary reads REDIS_AUTH
+  #    and passes it as the Redis AUTH password. No plaintext password in the
+  #    EnvoyGateway ConfigMap. See ratelimit.tf for the Secret + Redis --requirepass.
   values = [yamlencode({
     config = {
       envoyGateway = {
         extensionApis = {
           enableEnvoyPatchPolicy = true
+        }
+        provider = {
+          type = "Kubernetes"
+          kubernetes = {
+            rateLimitDeployment = {
+              container = {
+                env = [
+                  {
+                    name = "REDIS_AUTH"
+                    valueFrom = {
+                      secretKeyRef = {
+                        name = "redis-auth"
+                        key  = "password"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
         }
         rateLimit = {
           backend = {
@@ -156,7 +184,12 @@ resource "helm_release" "envoy_gateway" {
     }
   })]
 
-  depends_on = [kubernetes_service_v1.ratelimit_redis]
+  depends_on = [
+    kubernetes_namespace_v1.envoy_gateway_system,
+    kubernetes_secret_v1.redis_auth,
+    kubernetes_secret_v1.redis_auth_eg,
+    kubernetes_service_v1.ratelimit_redis,
+  ]
 }
 
 # Stable Service in envoy-gateway-system targeting Envoy proxy pods.
