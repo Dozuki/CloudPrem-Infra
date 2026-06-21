@@ -416,3 +416,20 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 
   tags = local.tags
 }
+
+# Managed metrics-server addon. Provides the Kubernetes Metrics API (metrics.k8s.io) that
+# HorizontalPodAutoscalers read for their CPU/memory targets. EKS Auto Mode does NOT bundle
+# metrics-server, so without this every HPA reads <unknown> and never scales — the app stays
+# pinned at minReplicas under load. No IAM is needed: metrics-server reads kubelet metrics via
+# the Kubernetes API, not the AWS API. addon_version is left unset so EKS selects the default
+# compatible with the cluster's Kubernetes version. As with the addon above, a cluster that
+# already has metrics-server installed out-of-band must have it removed once before first apply.
+resource "aws_eks_addon" "metrics_server" {
+  cluster_name = module.eks_cluster.cluster_name
+  addon_name   = "metrics-server"
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  tags = local.tags
+}
