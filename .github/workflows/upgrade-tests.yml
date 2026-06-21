@@ -46,7 +46,7 @@ jobs:
 
       - uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: "1.12.2"
+          tofu_version: "1.12.1" # match Spacelift's max supported OpenTofu (hosted toolchain tops out at 1.12.1)
 
       - name: Install terragrunt
         run: |
