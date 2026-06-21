@@ -46,7 +46,7 @@ jobs:
 
       - uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: "1.11.10" # pair with Terragrunt 0.99.4 (Spacelift matrix: 0.99.x ↔ OpenTofu 1.11.x); satisfies physical's >= 1.11.1
+          tofu_version: "1.11.8" # highest 1.11.x in Spacelift's bundled set; pairs with Terragrunt 0.99.4, satisfies physical's >= 1.11.1
 
       - name: Install terragrunt
         run: |
