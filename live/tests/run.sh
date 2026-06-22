@@ -15,7 +15,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-: "${DDVTEST_ACCOUNT_ID:?set DDVTEST_ACCOUNT_ID}"
+# The harness only ever targets the DDVtest account (076248559428) — used for
+# state/resource/artifacts-bucket names and passed to the tests as AccountID.
+# Default it so it needn't be passed every run; override for another test account.
+export DDVTEST_ACCOUNT_ID="${DDVTEST_ACCOUNT_ID:-076248559428}"
 export RUN_INTEGRATION=1
 export RUN_ID="${RUN_ID:-local-$(date +%s)}"
 
