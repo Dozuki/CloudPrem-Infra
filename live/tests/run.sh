@@ -117,6 +117,7 @@ cleanup() {
     ./cleanup-orphans.sh "${RUN_ID}-" || echo ">> Auto-cleanup reported issues — see verify-clean output above." >&2
   fi
   [ -n "$VAULT_PF_PID" ] && kill "$VAULT_PF_PID" 2>/dev/null || true
+  [ -n "${AZ_SHIM_DIR:-}" ] && rm -rf "$AZ_SHIM_DIR" 2>/dev/null || true
 
   # Archive this run's artifacts to S3 for post-mortem. The harness writes diagnostics
   # to .artifacts/$RUN_ID BEFORE teardown (TF inventory, env.hcl, and — on failure — a
@@ -221,7 +222,38 @@ fi
 
 # From here on, the run can create cloud resources — arm the backstop cleanup (see trap).
 STARTED_RUN=1
-if go test ./scenarios/ -run TestUpgrade -v -timeout 180m; then TEST_RC=0; else TEST_RC=$?; fi
+
+# az-env-gap guard: simulate Spacelift's shared workers (no usable Azure CLI) by
+# shimming `az` to fail, so any AWS-path provider that depends on the Azure CLI breaks
+# the harness HERE instead of only at real deploy time (this is the gap that hid the
+# azurerm-on-AWS issue — the harness ran where `az` existed). On by default for AWS
+# runs; NO_AZ_SHIM=1 disables. Cleaned up by the EXIT trap.
+if [ "${NO_AZ_SHIM:-0}" != 1 ]; then
+  AZ_SHIM_DIR="$(mktemp -d)"
+  cat > "$AZ_SHIM_DIR/az" <<'AZEOF'
+#!/usr/bin/env bash
+echo ">> [harness] 'az' is intentionally shimmed to fail — simulating Spacelift workers (no Azure CLI). Set NO_AZ_SHIM=1 to disable." >&2
+exit 1
+AZEOF
+  chmod +x "$AZ_SHIM_DIR/az"
+  export PATH="$AZ_SHIM_DIR:$PATH"
+  echo ">> az-env-gap guard ACTIVE: 'az' shimmed to fail (NO_AZ_SHIM=1 to disable)." >&2
+else
+  echo ">> az-env-gap guard DISABLED (NO_AZ_SHIM=1) — 'az' uses the ambient PATH." >&2
+fi
+
+# Scenario selection: upgrade | fresh | both (default both). 'both' runs TestUpgrade
+# then TestFresh in one go-test process; a failure in EITHER makes go test exit non-zero.
+SCENARIO="${SCENARIO:-both}"
+case "$SCENARIO" in
+  upgrade) _run='TestUpgrade' ;;
+  fresh)   _run='TestFresh' ;;
+  both)    _run='TestUpgrade|TestFresh' ;;
+  *) echo ">> ERROR: invalid SCENARIO='$SCENARIO' (want upgrade|fresh|both)" >&2; exit 2 ;;
+esac
+echo ">> Running scenario(s): ${SCENARIO}  (go test -run '${_run}')" >&2
+
+if go test ./scenarios/ -run "$_run" -v -timeout 180m; then TEST_RC=0; else TEST_RC=$?; fi
 
 if [ "$TEST_RC" -ne 0 ] && [ "${RUN_POSTMORTEM:-0}" = 1 ]; then
   ./postmortem.sh "$RUN_ID" "$RUN_LOG" || true
