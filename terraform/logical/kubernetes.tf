@@ -395,36 +395,17 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
 # cert-manager triggers node creation, so this addon installs after nodes exist
 # (in physical it would sit DEGRADED with no nodes and time out). The IAM role +
 # pod-identity association for the cloudwatch-agent SA live in the physical layer.
-
-# EKS Auto Mode / some bootstraps may install this addon out-of-band; a plain
-# CreateAddon then 409s, and resolve_conflicts=OVERWRITE does NOT adopt a
-# pre-existing addon — so delete any out-of-band copy with --preserve first.
-resource "null_resource" "adopt_cloudwatch_observability_addon" {
-  count    = var.cloud == "aws" ? 1 : 0
-  triggers = { cluster = var.eks_cluster_id }
-
-  provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-c"]
-    command     = <<-EOT
-      set -euo pipefail
-      region="${data.aws_region.current[0].region}"
-      cluster="${var.eks_cluster_id}"
-      addon="amazon-cloudwatch-observability"
-      if aws eks describe-addon --cluster-name "$cluster" --addon-name "$addon" --region "$region" >/dev/null 2>&1; then
-        echo "Adopting pre-existing $addon addon: deleting with --preserve so Terraform can manage it."
-        aws eks delete-addon --cluster-name "$cluster" --addon-name "$addon" --preserve --region "$region"
-        aws eks wait addon-deleted --cluster-name "$cluster" --addon-name "$addon" --region "$region"
-      fi
-    EOT
-  }
-}
-
+#
+# We deliberately do NOT pre-delete a pre-existing copy: this addon is
+# terraform-managed here, so deleting it out-of-band turns an in-place update into
+# a failed modify against a just-deleted addon (ListTagsForResource 404).
+# resolve_conflicts_on_create=OVERWRITE handles field-level conflicts on adoption.
 resource "aws_eks_addon" "cloudwatch_observability" {
   count        = var.cloud == "aws" ? 1 : 0
   cluster_name = data.aws_eks_cluster.main[0].name
   addon_name   = "amazon-cloudwatch-observability"
 
-  depends_on = [helm_release.cert_manager, null_resource.adopt_cloudwatch_observability_addon]
+  depends_on = [helm_release.cert_manager]
 
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
