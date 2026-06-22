@@ -31,7 +31,7 @@ versions:
   v6.1-release:
     image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
     nextjs_tag: "2.23.0"
-    chart_version: "0.3.12"   # typed tls-secret (#54) + db-migrations upgrade-deadlock fix (#49); supplied TLS via chart
+    chart_version: "0.4.1"   # 0.4.0 MPC gateway edge (#55) + configurable app-tier securityContext (#56); 0.3.12 typed tls-secret (#54)
     image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com
 
 configs:

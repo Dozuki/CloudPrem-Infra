@@ -360,7 +360,7 @@ variable "rustici_managed_password" {
 variable "chart_version" {
   description = "Dozuki chart version pulled from the registry (oci://<image_repository>/charts/dozuki)."
   type        = string
-  default     = "0.3.12"
+  default     = "0.4.1"
 }
 
 variable "ghcr_pull_username" {
