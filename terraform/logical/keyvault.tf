@@ -32,6 +32,7 @@ locals {
 
 resource "azurerm_key_vault_secret" "app" {
   for_each = local.azure_kv_secrets
+  provider = azurerm.main["azure"]
 
   name         = each.key
   key_vault_id = var.azure_key_vault_id

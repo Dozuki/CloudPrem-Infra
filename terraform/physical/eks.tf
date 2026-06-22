@@ -405,50 +405,33 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_agent_xray" {
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
-# EKS Auto Mode (and some cluster bootstraps) install the amazon-cloudwatch-observability
-# addon out-of-band. A plain CreateAddon then fails with 409 ResourceInUseException, and
-# resolve_conflicts_on_create=OVERWRITE only resolves field-level conflicts — it does NOT
-# adopt a pre-existing addon. To keep both fresh installs and v6.0->v6.1 upgrades hands-off,
-# delete any pre-existing copy with --preserve (the in-cluster cloudwatch-agent DaemonSet
-# stays up, so there's no observability gap) right before Terraform creates and manages it.
-# Runs once per cluster; a no-op when the addon isn't already present.
-resource "null_resource" "adopt_cloudwatch_observability_addon" {
-  triggers = {
-    cluster = module.eks_cluster.cluster_name
-  }
+# CloudWatch Observability: the EKS ADDON itself is created in the LOGICAL layer,
+# because on EKS Auto Mode a fresh cluster has zero nodes until a workload is
+# scheduled — the addon's agent/DaemonSets can't go healthy until cert-manager/the
+# app trigger node provisioning, so installing it here (physical, pre-nodes) makes
+# it sit DEGRADED and time out. Physical keeps only the IAM role (above) and the
+# pod-identity association that wires it to the addon's cloudwatch-agent service
+# account. The association is created by (cluster, namespace, SA) name and is valid
+# before the SA/namespace exist — EKS applies it once the logical addon installs them.
+resource "aws_eks_pod_identity_association" "cloudwatch_agent" {
+  cluster_name    = module.eks_cluster.cluster_name
+  namespace       = "amazon-cloudwatch"
+  service_account = "cloudwatch-agent"
+  role_arn        = aws_iam_role.cloudwatch_agent_pod_identity.arn
 
-  provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-c"]
-    command     = <<-EOT
-      set -euo pipefail
-      region="${data.aws_region.current.region}"
-      cluster="${module.eks_cluster.cluster_name}"
-      addon="amazon-cloudwatch-observability"
-      if aws eks describe-addon --cluster-name "$cluster" --addon-name "$addon" --region "$region" >/dev/null 2>&1; then
-        echo "Adopting pre-existing $addon addon: deleting with --preserve so Terraform can manage it."
-        aws eks delete-addon --cluster-name "$cluster" --addon-name "$addon" --preserve --region "$region"
-        aws eks wait addon-deleted --cluster-name "$cluster" --addon-name "$addon" --region "$region"
-      fi
-    EOT
-  }
+  tags = local.tags
 }
 
-# Managed addon. The pod_identity_association wires the role to the cloudwatch-agent SA
-# in the amazon-cloudwatch namespace (EKS creates the association and annotates the SA).
-# addon_version is left unset so EKS selects the default compatible with the cluster's
-# Kubernetes version. The null_resource above clears any out-of-band copy first, so this
-# create succeeds and adopts the preserved in-cluster resources (OVERWRITE then keeps
-# field-level conflicts resolved on subsequent updates).
-resource "aws_eks_addon" "cloudwatch_observability" {
+# Managed metrics-server addon. Provides the Kubernetes Metrics API (metrics.k8s.io) that
+# HorizontalPodAutoscalers read for their CPU/memory targets. EKS Auto Mode does NOT bundle
+# metrics-server, so without this every HPA reads <unknown> and never scales — the app stays
+# pinned at minReplicas under load. No IAM is needed: metrics-server reads kubelet metrics via
+# the Kubernetes API, not the AWS API. addon_version is left unset so EKS selects the default
+# compatible with the cluster's Kubernetes version. As with the addon above, a cluster that
+# already has metrics-server installed out-of-band must have it removed once before first apply.
+resource "aws_eks_addon" "metrics_server" {
   cluster_name = module.eks_cluster.cluster_name
-  addon_name   = "amazon-cloudwatch-observability"
-
-  depends_on = [null_resource.adopt_cloudwatch_observability_addon]
-
-  pod_identity_association {
-    role_arn        = aws_iam_role.cloudwatch_agent_pod_identity.arn
-    service_account = "cloudwatch-agent"
-  }
+  addon_name   = "metrics-server"
 
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"

@@ -143,16 +143,6 @@ cleanup() {
   fi
 
   echo ">> Full run log saved to: $RUN_LOG" >&2
-
-  # Top-level result banner — the one line to look for. Per-config detail (refs,
-  # phases, durations) is in the "HARNESS RUN SUMMARY" block printed by the Go harness.
-  if [ "${STARTED_RUN:-0}" = 1 ]; then
-    if [ "${TEST_RC:-1}" = 0 ]; then
-      echo ">> ================ RESULT: PASS ✓  (run ${RUN_ID}) ================" >&2
-    else
-      echo ">> ================ RESULT: FAIL ✗  (run ${RUN_ID}, exit ${TEST_RC:-?}) ================" >&2
-    fi
-  fi
 }
 trap cleanup EXIT
 
@@ -231,11 +221,10 @@ fi
 
 # From here on, the run can create cloud resources — arm the backstop cleanup (see trap).
 STARTED_RUN=1
-# Capture the test result so the EXIT trap can print a top-level PASS/FAIL banner and
-# the script exits with the test's status. (if/else keeps it safe under `set -e`.)
-if go test ./scenarios/ -run TestUpgrade -v -timeout 180m; then
-  TEST_RC=0
-else
-  TEST_RC=$?
+if go test ./scenarios/ -run TestUpgrade -v -timeout 180m; then TEST_RC=0; else TEST_RC=$?; fi
+
+if [ "$TEST_RC" -ne 0 ] && [ "${RUN_POSTMORTEM:-0}" = 1 ]; then
+  ./postmortem.sh "$RUN_ID" "$RUN_LOG" || true
 fi
+
 exit "$TEST_RC"
