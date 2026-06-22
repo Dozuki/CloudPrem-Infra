@@ -409,9 +409,9 @@ variable "aurora_max_acu" {
 }
 
 variable "aurora_engine_version" {
-  description = "Aurora MySQL engine version. Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
+  description = "Aurora MySQL engine version, full aws RDS format (e.g. 8.4.mysql_aurora.8.4.7 — the bare 8.4.7 is rejected with 'Cannot find version'). Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
   type        = string
-  default     = "8.4.7"
+  default     = "8.4.mysql_aurora.8.4.7"
 }
 
 variable "aurora_snapshot_identifier" {
