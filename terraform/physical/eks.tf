@@ -453,6 +453,18 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
+  # Fresh EKS Auto Mode clusters have ZERO nodes until a pod is pending; the addon's
+  # controller-manager Deployment must wait for Karpenter to cold-provision the first
+  # node (and pull images) before its pods — and the cloudwatch-agent/fluent-bit
+  # DaemonSets — can become healthy. On a brand-new cluster that cold path can exceed
+  # the default 20m create wait, leaving the addon DEGRADED and failing the apply.
+  # Give it headroom. Established clusters already have nodes, so this only lengthens
+  # the (rare) cold create/update; it never slows steady-state.
+  timeouts {
+    create = "40m"
+    update = "40m"
+  }
+
   tags = local.tags
 }
 
