@@ -13,6 +13,30 @@ import (
 
 var wantLogTypes = map[string]bool{"api": true, "audit": true, "authenticator": true, "controllerManager": true, "scheduler": true}
 
+// LoggingEnabled reports whether the EKS cluster has any control-plane log types
+// enabled. Used to gate AssertControlPlaneLogging so older refs (no logging) skip
+// rather than fail. Best-effort: any error → false (treated as "capability absent").
+func LoggingEnabled(ctx context.Context, region, clusterName string) bool {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return false
+	}
+	ek := eks.NewFromConfig(cfg)
+	cl, err := ek.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &clusterName})
+	if err != nil {
+		return false
+	}
+	if cl.Cluster == nil || cl.Cluster.Logging == nil {
+		return false
+	}
+	for _, lc := range cl.Cluster.Logging.ClusterLogging {
+		if lc.Enabled != nil && *lc.Enabled && len(lc.Types) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // AssertControlPlaneLogging verifies all 5 control-plane log types are enabled,
 // the log group exists at 90-day retention, and audit events are flowing.
 func AssertControlPlaneLogging(ctx context.Context, region, clusterName string) error {
