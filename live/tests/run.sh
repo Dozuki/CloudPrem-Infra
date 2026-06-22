@@ -253,7 +253,17 @@ case "$SCENARIO" in
 esac
 echo ">> Running scenario(s): ${SCENARIO}  (go test -run '${_run}')" >&2
 
-if go test ./scenarios/ -run "$_run" -v -timeout 180m; then TEST_RC=0; else TEST_RC=$?; fi
+# Compile the test to a STABLE binary path, then run THAT binary — instead of
+# `go test`, which builds a throwaway scenarios.test at a fresh temp path every
+# run. Host firewalls (e.g. Little Snitch) treat each new temp path as a new
+# unknown process and re-prompt/deny it, silently blocking the in-process
+# endpoint-health HTTP checks when no one is there to approve. A fixed path lets
+# the allow-rule persist across runs (approve once). The binary is run from the
+# scenarios/ dir so its CWD matches `go test ./scenarios/` (relative paths intact).
+TEST_BIN="$PWD/.bin/scenarios.test"
+mkdir -p "$PWD/.bin"
+go test -c -o "$TEST_BIN" ./scenarios/
+if ( cd scenarios && "$TEST_BIN" -test.run "$_run" -test.v -test.timeout 180m ); then TEST_RC=0; else TEST_RC=$?; fi
 
 if [ "$TEST_RC" -ne 0 ] && [ "${RUN_POSTMORTEM:-0}" = 1 ]; then
   ./postmortem.sh "$RUN_ID" "$RUN_LOG" || true
