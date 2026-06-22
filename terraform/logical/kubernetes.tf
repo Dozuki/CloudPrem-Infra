@@ -391,13 +391,49 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
 }
 
 # CloudWatch Observability add-on — installed in logical (not physical) because
-# Auto Mode won't provision nodes until workloads are scheduled. cert-manager
-# and envoy-gateway trigger node creation; this addon installs after nodes exist.
+# on EKS Auto Mode a fresh cluster has zero nodes until a workload is scheduled;
+# cert-manager triggers node creation, so this addon installs after nodes exist
+# (in physical it would sit DEGRADED with no nodes and time out). The IAM role +
+# pod-identity association for the cloudwatch-agent SA live in the physical layer.
+
+# EKS Auto Mode / some bootstraps may install this addon out-of-band; a plain
+# CreateAddon then 409s, and resolve_conflicts=OVERWRITE does NOT adopt a
+# pre-existing addon — so delete any out-of-band copy with --preserve first.
+resource "null_resource" "adopt_cloudwatch_observability_addon" {
+  count    = var.cloud == "aws" ? 1 : 0
+  triggers = { cluster = var.eks_cluster_id }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      region="${data.aws_region.current[0].region}"
+      cluster="${var.eks_cluster_id}"
+      addon="amazon-cloudwatch-observability"
+      if aws eks describe-addon --cluster-name "$cluster" --addon-name "$addon" --region "$region" >/dev/null 2>&1; then
+        echo "Adopting pre-existing $addon addon: deleting with --preserve so Terraform can manage it."
+        aws eks delete-addon --cluster-name "$cluster" --addon-name "$addon" --preserve --region "$region"
+        aws eks wait addon-deleted --cluster-name "$cluster" --addon-name "$addon" --region "$region"
+      fi
+    EOT
+  }
+}
+
 resource "aws_eks_addon" "cloudwatch_observability" {
   count        = var.cloud == "aws" ? 1 : 0
   cluster_name = data.aws_eks_cluster.main[0].name
   addon_name   = "amazon-cloudwatch-observability"
-  depends_on   = [helm_release.cert_manager]
+
+  depends_on = [helm_release.cert_manager, null_resource.adopt_cloudwatch_observability_addon]
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  # Headroom for the first node's Karpenter cold-start on a brand-new cluster.
+  timeouts {
+    create = "40m"
+    update = "40m"
+  }
 }
 
 locals {
