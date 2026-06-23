@@ -11,7 +11,7 @@ module "cluster_access_role_assumable" {
 
   create = true
 
-  name            = "${local.identifier}-${data.aws_region.current.id}-cluster-access-assumable"
+  name            = "${local.identifier}-${data.aws_region.current.region}-cluster-access-assumable"
   use_name_prefix = false
 
   policies = {
@@ -40,13 +40,13 @@ data "aws_iam_policy_document" "cluster_access" {
     ]
 
     resources = [
-      "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:cluster/${local.identifier}",
+      "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:cluster/${local.identifier}",
     ]
   }
 }
 
 resource "aws_iam_policy" "cluster_access" {
-  name   = "${local.identifier}-${data.aws_region.current.id}-cluster-access"
+  name   = "${local.identifier}-${data.aws_region.current.region}-cluster-access"
   policy = data.aws_iam_policy_document.cluster_access.json
 }
 
@@ -154,14 +154,14 @@ data "aws_iam_policy_document" "eks_worker" {
 }
 
 resource "aws_iam_policy" "eks_worker" {
-  name   = "${local.identifier}-${data.aws_region.current.id}"
+  name   = "${local.identifier}-${data.aws_region.current.region}"
   policy = data.aws_iam_policy_document.eks_worker.json
 }
 
 # We need separate policies to maintain backwards compatibility with existing stacks. Modifying the existing policy
 # with new resources triggers a cluster breaking event.
 resource "aws_iam_policy" "eks_worker_kms" {
-  name   = "${local.identifier}-${data.aws_region.current.id}-kms"
+  name   = "${local.identifier}-${data.aws_region.current.region}-kms"
   policy = data.aws_iam_policy_document.eks_worker_kms.json
 }
 
@@ -174,7 +174,7 @@ resource "aws_kms_key" "eks" {
 }
 
 resource "aws_iam_policy" "assume_cross_account_role" {
-  name        = "${local.identifier}-${data.aws_region.current.id}-AssumeCrossAccountRole"
+  name        = "${local.identifier}-${data.aws_region.current.region}-AssumeCrossAccountRole"
   description = "Policy to assume the cross-account role for Route 53 hosted zone access"
 
   policy = jsonencode({
@@ -280,7 +280,7 @@ module "eks_cluster" {
 
 # Pod Identity: App workloads (S3, KMS, RDS, DMS, logs, ECR)
 resource "aws_iam_role" "app_pod_identity" {
-  name = "${local.identifier}-${data.aws_region.current.id}-app-pod-identity"
+  name = "${local.identifier}-${data.aws_region.current.region}-app-pod-identity"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -329,7 +329,7 @@ resource "aws_eks_pod_identity_association" "app_migration_wait" {
 
 # Pod Identity: cert-manager cross-account Route53
 resource "aws_iam_role" "cert_manager_pod_identity" {
-  name = "${local.identifier}-${data.aws_region.current.id}-cert-manager-pod-identity"
+  name = "${local.identifier}-${data.aws_region.current.region}-cert-manager-pod-identity"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -372,7 +372,7 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
 # INSUFFICIENT_DATA. Both the metrics agent and fluent-bit run as the cloudwatch-agent
 # SA, so one association covers metrics and logs.
 resource "aws_iam_role" "cloudwatch_agent_pod_identity" {
-  name = "${local.identifier}-${data.aws_region.current.id}-cw-agent-pod-identity"
+  name = "${local.identifier}-${data.aws_region.current.region}-cw-agent-pod-identity"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

@@ -64,7 +64,12 @@ module "nlb" {
   create_security_group = false
 
   # IP targeting: NLB sends directly to Envoy proxy pod IPs.
-  # No proxy protocol — NLB preserves client IP natively with IP targets.
+  # PROXY protocol v2 is required for real client IP delivery: with IP targets + TCP,
+  # the NLB does NOT preserve the source IP natively — Envoy would see the NLB ENI IP.
+  # proxy_protocol_v2=true instructs the NLB to prepend a PROXY v2 header with the
+  # original client IP/port; Envoy's ClientTrafficPolicy (proxyProtocol mode) reads it.
+  # Both target groups must send PROXY v2 because the Gateway-wide ClientTrafficPolicy
+  # applies to all listeners (443 app + 80 ACME/redirect).
   target_groups = {
     app = {
       name_prefix       = "app-"
@@ -72,6 +77,7 @@ module "nlb" {
       port              = 443
       target_type       = "ip"
       create_attachment = false
+      proxy_protocol_v2 = true
 
       # Auto Mode's LB controller requires this tag on externally-created target
       # groups so its scoped session policy allows RegisterTargets/DeregisterTargets.
@@ -85,6 +91,7 @@ module "nlb" {
       port              = 80
       target_type       = "ip"
       create_attachment = false
+      proxy_protocol_v2 = true
 
       tags = {
         "eks:eks-cluster-name" = module.eks_cluster.cluster_name

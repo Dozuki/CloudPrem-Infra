@@ -29,14 +29,14 @@ data "aws_iam_policy_document" "lambda_permissions" {
 resource "aws_iam_policy" "lambda_permissions" {
   count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
-  name   = "${local.identifier}-${data.aws_region.current.id}-lambda-alias"
+  name   = "${local.identifier}-${data.aws_region.current.region}-lambda-alias"
   policy = data.aws_iam_policy_document.lambda_permissions[0].json
 }
 
 resource "aws_iam_role" "lambda_execution" {
   count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
-  name               = "${local.identifier}-${data.aws_region.current.id}-lambda-execution"
+  name               = "${local.identifier}-${data.aws_region.current.region}-lambda-execution"
   assume_role_policy = data.aws_iam_policy_document.lambda_execution[0].json
 }
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
@@ -409,18 +409,25 @@ resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
 
 // -- Slack Notification Lambda
 
+# Content-based archive: zips the file's BYTES (not the on-disk file with its
+# metadata), so the zip is byte-identical on every machine/checkout, at plan and
+# apply. Paths anchored to path.module so they don't depend on the working dir.
 data "archive_file" "slack_sns_lambda" {
   count = var.slack_webhook_url != "" ? 1 : 0
 
   type        = "zip"
-  source_file = "util/sns_to_slack.py"
-  output_path = "sns_lambda_payload.zip"
+  output_path = "${path.module}/sns_lambda_payload.zip"
+
+  source {
+    content  = file("${path.module}/util/sns_to_slack.py")
+    filename = "sns_to_slack.py"
+  }
 }
 
 resource "aws_lambda_function" "sns_to_slack" {
   count = var.slack_webhook_url != "" ? 1 : 0
 
-  filename      = "sns_lambda_payload.zip"
+  filename      = data.archive_file.slack_sns_lambda[0].output_path
   function_name = "${local.identifier}-sns_to_slack"
   handler       = "sns_to_slack.lambda_handler"
   runtime       = "python3.8"
@@ -461,14 +468,18 @@ data "archive_file" "dms_restart_lambda" {
   count = local.dms_enabled ? 1 : 0
 
   type        = "zip"
-  source_file = "util/dms_restart.py"
-  output_path = "dms_restart_lambda_payload.zip"
+  output_path = "${path.module}/dms_restart_lambda_payload.zip"
+
+  source {
+    content  = file("${path.module}/util/dms_restart.py")
+    filename = "dms_restart.py"
+  }
 }
 
 resource "aws_lambda_function" "dms_restart" {
   count = local.dms_enabled ? 1 : 0
 
-  filename      = "dms_restart_lambda_payload.zip"
+  filename      = data.archive_file.dms_restart_lambda[0].output_path
   function_name = "${local.identifier}-dms_restart"
   handler       = "dms_restart.lambda_handler"
   runtime       = "python3.8"

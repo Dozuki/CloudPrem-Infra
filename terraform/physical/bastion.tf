@@ -49,7 +49,7 @@ resource "aws_ssm_association" "bastion_mysql_config" {
   parameters = {
     RDSEndpoint : local.db_host
     RDSCredentialSecret : aws_secretsmanager_secret.primary_database_credentials.id
-    Region : data.aws_region.current.id
+    Region : data.aws_region.current.region
   }
 
   targets {
@@ -73,7 +73,7 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
   parameters = {
     EKSClusterName : module.eks_cluster.cluster_name
     EKSClusterRole : module.cluster_access_role_assumable.arn
-    Region : data.aws_region.current.id
+    Region : data.aws_region.current.region
   }
 
   targets {
@@ -98,7 +98,7 @@ module "bastion" {
   name = "${local.identifier}-bastion"
 
   create_iam_instance_profile = true
-  iam_role_name               = "${local.identifier}-${data.aws_region.current.id}-bastion"
+  iam_role_name               = "${local.identifier}-${data.aws_region.current.region}-bastion"
   iam_role_path               = "/ec2/"
   iam_role_description        = "Bastion IAM Role"
   iam_role_tags = {

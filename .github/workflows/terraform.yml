@@ -18,9 +18,11 @@ jobs:
           # which requires Terraform/OpenTofu >= 1.11.1 — run it on OpenTofu 1.12.x.
           - module: physical
             tool: tofu
-          # The logical layer stays on the Spacelift-pinned Terraform 1.5.7 toolchain.
+          # The logical layer moved to OpenTofu: it uses provider for_each (azurerm
+          # gated on var.cloud), which is OpenTofu-only, and the Spacelift logical
+          # stacks run OPEN_TOFU. Validate it with tofu, not Terraform 1.5.7.
           - module: logical
-            tool: terraform
+            tool: tofu
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
