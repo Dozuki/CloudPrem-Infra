@@ -29,9 +29,15 @@ type Config struct {
 }
 
 type Matrix struct {
-	Defaults Defaults                          `yaml:"defaults"`
-	Versions map[string]map[string]interface{} `yaml:"versions"`
-	Configs  []Config                          `yaml:"configs"`
+	Defaults Defaults `yaml:"defaults"`
+	// VersionDefaults are version vars (image_tag, chart_version, …) applied to
+	// EVERY ref. A ref's entry in Versions overrides matching keys. This lets a
+	// ref with no explicit Versions entry (e.g. a freshly tagged release, or
+	// auto:latest) still resolve — most refs share the same images/charts, so
+	// you set them once here instead of per ref.
+	VersionDefaults map[string]interface{}            `yaml:"version_defaults"`
+	Versions        map[string]map[string]interface{} `yaml:"versions"`
+	Configs         []Config                          `yaml:"configs"`
 }
 
 func LoadMatrix(path string) (*Matrix, error) {
@@ -62,11 +68,26 @@ func (m *Matrix) MergedInputs(c Config, ref string) map[string]interface{} {
 			out[k] = v
 		}
 	}
+	// version_defaults first, then the ref-specific entry overrides them.
+	for k, v := range m.VersionDefaults {
+		out[k] = v
+	}
 	for k, v := range m.Versions[ref] {
 		out[k] = v
 	}
 	out["environment"] = c.Env
 	return out
+}
+
+// VersionVar returns a single version variable for a ref: the ref-specific
+// entry wins, otherwise the version_defaults value (nil if neither sets it).
+func (m *Matrix) VersionVar(ref, key string) interface{} {
+	if rv, ok := m.Versions[ref]; ok {
+		if v, ok := rv[key]; ok {
+			return v
+		}
+	}
+	return m.VersionDefaults[key]
 }
 
 // HarnessFlag returns the boolean value of a harness-only feature flag for
@@ -80,7 +101,11 @@ func (c Config) HarnessFlag(name string) bool {
 	return false
 }
 
+// VersionProfileExists reports whether a ref can be resolved: either it has an
+// explicit Versions entry, or version_defaults supplies a base for any ref.
 func (m *Matrix) VersionProfileExists(ref string) bool {
-	_, ok := m.Versions[ref]
-	return ok
+	if _, ok := m.Versions[ref]; ok {
+		return true
+	}
+	return len(m.VersionDefaults) > 0
 }
