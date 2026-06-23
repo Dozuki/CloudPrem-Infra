@@ -36,6 +36,13 @@ module "aurora" {
   subnets                = local.private_subnet_ids
   create_db_subnet_group = true
 
+  # Use primary_database_sg (in the app VPC, with the MySQL-from-EKS ingress) as the
+  # cluster's only security group. The rds-aurora module otherwise creates its own SG
+  # and, with no vpc_id passed, places it in the account's DEFAULT VPC — which fails
+  # CreateDBCluster ("DB instance and EC2 security group are in different VPCs"). The
+  # RDS path doesn't create its own SG, so only the aurora path needs this.
+  create_security_group = false
+
   storage_encrypted = true
   kms_key_id        = local.rds_kms_key_arn
 
