@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.2.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.1.2...v7.2.0) (2026-06-23)
+
+
+### Features
+
+* **harness:** version_defaults so new refs need no matrix entry ([#208](https://github.com/Dozuki/CloudPrem-Infra/issues/208)) ([2478f2d](https://github.com/Dozuki/CloudPrem-Infra/commit/2478f2d9cc075e69d255ad59318b8155e539f459))
+
 ## [7.1.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.1.1...v7.1.2) (2026-06-23)
 
 
