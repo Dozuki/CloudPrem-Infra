@@ -11,9 +11,13 @@ locals {
   # Source RDS instance ARN (the rds module exposes no ARN output, so construct it).
   dr_source_db_arn = "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}"
 
-  # Use a Terraform-created customer-managed key for RDS only when a new stack
-  # opts in AND no explicit key was given. Resolves to the SAME ARN as before for
-  # existing stacks (flag false), so it never triggers a DB replacement.
+  # Use a Terraform-created customer-managed key for the DB when DR is on and no
+  # explicit key was given. rds_adopt_dr_cmk now defaults TRUE (CMK is the default
+  # DR-ready posture), so this is the path for fresh stacks. EXISTING stacks on the
+  # AWS-managed key must pin rds_adopt_dr_cmk = false (or pin rds_kms_key_id to their
+  # adopted CMK) to keep the same key ARN — otherwise this flips and the KMS-key
+  # change replaces the DB. The db-replace-guard PLAN policy blocks that unless the
+  # stack carries the allow-db-replace label, so the aggressive default is fail-safe.
   rds_use_dr_cmk  = var.enable_dr && var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
   rds_kms_key_arn = local.rds_use_dr_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
 
@@ -32,14 +36,20 @@ check "dr_region_valid" {
   }
 }
 
-# Non-blocking warning: surfaced on every plan/apply when DR is on but the DB
-# uses an AWS-managed key, so RDS automated backups are NOT being replicated.
-# S3 content IS still replicated. Migrate the DB to a customer-managed key
-# (new stacks: rds_adopt_dr_cmk = true; or set rds_kms_key_id to a CMK).
+# Non-blocking warning surfaced on every plan/apply when DR is on but the primary
+# database's cross-region backup replication is NOT active. The reason differs by
+# engine, so the message is engine-aware (the old text wrongly blamed the KMS key
+# even for Aurora): RDS replicates its automated backups only under a customer-
+# managed key; Aurora has no automated-backup replication at all — cross-region
+# Aurora DR is the deferred Global Database "Plan B". S3 content replicates either way.
 check "dr_rds_replicable" {
   assert {
-    condition     = !var.enable_dr || local.dr_rds_enabled
-    error_message = "DR is enabled but the RDS instance uses an AWS-managed KMS key; its automated backups are NOT being replicated cross-region (S3 content IS). To enable RDS DR, the database must use a customer-managed key — see the DR cold-recovery runbook."
+    condition = !var.enable_dr || local.dr_rds_enabled
+    error_message = local.db_is_aurora ? (
+      "DR is enabled and S3 content replicates cross-region, but the Aurora database does NOT: cross-region Aurora DR (Global Database) is not yet implemented (the deferred \"Plan B\"). Only db_engine=\"rds\" currently supports automated-backup cross-region replication. The Aurora cluster is still encrypted with a customer-managed key when rds_adopt_dr_cmk is set."
+      ) : (
+      "DR is enabled and S3 content replicates cross-region, but the RDS database does NOT: it is encrypted with an AWS-managed KMS key, so its automated backups are ineligible for cross-region replication. Adopt a customer-managed key — rds_adopt_dr_cmk = true (the default) for a fresh DB, or pin rds_kms_key_id to an existing CMK (a key change replaces the DB). See the DR cold-recovery runbook."
+    )
   }
 }
 

@@ -380,9 +380,9 @@ variable "dr_region" {
 }
 
 variable "rds_adopt_dr_cmk" {
-  description = "When true (set for NEW DR-protected stacks only), the RDS instance is created with a Terraform-managed customer KMS key so its automated backups can be replicated cross-region for DR. MUST stay false for existing stacks created with the AWS-managed key — changing an existing DB's KMS key replaces the database."
+  description = "When true (the default DR-ready posture), the database is created with a Terraform-managed customer KMS key so it is encrypted under a CMK — the prerequisite for cross-region DR (RDS automated-backup replication; Aurora is CMK-encrypted but its cross-region replication is the deferred Global-Database Plan B). EXISTING stacks created with the AWS-managed key MUST pin this to false (or pin rds_kms_key_id to their already-adopted CMK): a KMS-key change replaces the database. The db-replace-guard PLAN policy blocks any such unintended replacement (it requires the allow-db-replace stack label), so this default is fail-safe."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "db_engine" {
