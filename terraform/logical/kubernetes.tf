@@ -125,7 +125,7 @@ resource "helm_release" "envoy_gateway" {
   namespace  = "envoy-gateway-system"
   repository = "oci://docker.io/envoyproxy"
   chart      = "gateway-helm"
-  version    = "v1.8.1"
+  version    = "v${local.envoy_gateway_version}"
 
   # create_namespace = true: Helm owns the envoy-gateway-system namespace.
   # The redis-auth secret in that namespace (kubernetes_secret_v1.redis_auth_eg)
@@ -133,13 +133,15 @@ resource "helm_release" "envoy_gateway" {
   create_namespace = true
   wait             = true
 
-  # CRD NOTE: gateway-helm bundles CRDs only on FIRST install; `helm upgrade` does
-  # NOT update them, and the separate gateway-crds-helm chart exceeds Helm's 1MB
-  # release-secret limit. On an EG version bump, apply the new CRDs server-side
-  # out-of-band (deploy step / CI), e.g.:
-  #   helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version 1.8.1 \
-  #     | kubectl apply --server-side --force-conflicts -f -
-  #
+  # CRDs are NOT managed by this release (skip_crds). Helm can't upgrade CRDs in a
+  # chart's crds/ dir on `helm upgrade`, so they're server-side-applied first by
+  # kubectl_manifest.envoy_gateway_crds (envoy_gateway_crds.tf). depends_on enforces
+  # EG's required "CRDs before gateway" upgrade order. timeout is raised above
+  # Helm's 300s default — the EG controller rollout on Auto Mode can exceed it
+  # (that timeout is what failed mpc-dev-min-logical before CRDs were managed here).
+  skip_crds = true
+  timeout   = 600
+
   # Controller config:
   #  - extensionApis.enableEnvoyPatchPolicy: required by the chart's GeoIP feature
   #    (gateway.geoip.enabled injects an EnvoyPatchPolicy).
@@ -191,6 +193,9 @@ resource "helm_release" "envoy_gateway" {
   depends_on = [
     kubernetes_secret_v1.redis_auth,
     kubernetes_service_v1.ratelimit_redis,
+    # CRDs must be applied before the gateway upgrade (Helm can't upgrade them) —
+    # see envoy_gateway_crds.tf.
+    kubectl_manifest.envoy_gateway_crds,
   ]
 }
 
