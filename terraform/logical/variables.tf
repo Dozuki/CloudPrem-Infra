@@ -388,6 +388,19 @@ variable "tls_key" {
   default     = ""
 }
 
+variable "customer_tls_externally_managed" {
+  description = <<-EOT
+    Customer-provided TLS where the cert+key live in VAULT (not in tls_cert/tls_key).
+    When true, an ExternalSecret syncs cert/key from Vault secret/<tenant>/<env>/tls
+    (keys: cert, key) into the tls-secret K8s Secret, and the chart's
+    tls.externallyManaged is set so it skips rendering tls-secret and drops the
+    cert-manager Gateway annotation. Cert/key are seeded into Vault out-of-band and
+    never enter Terraform state. Mutually exclusive with tls_cert/tls_key.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "operator_image_tag" {
   description = "dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion)."
   type        = string
