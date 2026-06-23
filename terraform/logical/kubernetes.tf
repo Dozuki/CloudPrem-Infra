@@ -125,10 +125,73 @@ resource "helm_release" "envoy_gateway" {
   namespace  = "envoy-gateway-system"
   repository = "oci://docker.io/envoyproxy"
   chart      = "gateway-helm"
-  version    = "v1.7.0"
+  version    = "v1.8.1"
 
+  # create_namespace = true: Helm owns the envoy-gateway-system namespace.
+  # The redis-auth secret in that namespace (kubernetes_secret_v1.redis_auth_eg)
+  # depends_on this release so it's written after the namespace exists.
   create_namespace = true
   wait             = true
+
+  # CRD NOTE: gateway-helm bundles CRDs only on FIRST install; `helm upgrade` does
+  # NOT update them, and the separate gateway-crds-helm chart exceeds Helm's 1MB
+  # release-secret limit. On an EG version bump, apply the new CRDs server-side
+  # out-of-band (deploy step / CI), e.g.:
+  #   helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version 1.8.1 \
+  #     | kubectl apply --server-side --force-conflicts -f -
+  #
+  # Controller config:
+  #  - extensionApis.enableEnvoyPatchPolicy: required by the chart's GeoIP feature
+  #    (gateway.geoip.enabled injects an EnvoyPatchPolicy).
+  #  - rateLimit.backend -> in-cluster Redis (see ratelimit.tf) so the chart's
+  #    rate-limit BackendTrafficPolicies actually enforce (otherwise inert).
+  #  - provider.kubernetes.rateLimitDeployment.container.env injects REDIS_AUTH
+  #    from the redis-auth Secret (in redis-system) into the envoy-ratelimit pod
+  #    via valueFrom.secretKeyRef. The envoy-ratelimit binary reads REDIS_AUTH
+  #    and passes it as the Redis AUTH password. No plaintext password in the
+  #    EnvoyGateway ConfigMap. See ratelimit.tf for the Secret + Redis --requirepass.
+  values = [yamlencode({
+    config = {
+      envoyGateway = {
+        extensionApis = {
+          enableEnvoyPatchPolicy = true
+        }
+        provider = {
+          type = "Kubernetes"
+          kubernetes = {
+            rateLimitDeployment = {
+              container = {
+                env = [
+                  {
+                    name = "REDIS_AUTH"
+                    valueFrom = {
+                      secretKeyRef = {
+                        name = "redis-auth"
+                        key  = "password"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+        rateLimit = {
+          backend = {
+            type = "Redis"
+            redis = {
+              url = "redis.redis-system.svc.cluster.local:6379"
+            }
+          }
+        }
+      }
+    }
+  })]
+
+  depends_on = [
+    kubernetes_secret_v1.redis_auth,
+    kubernetes_service_v1.ratelimit_redis,
+  ]
 }
 
 # Stable Service in envoy-gateway-system targeting Envoy proxy pods.
@@ -428,7 +491,7 @@ locals {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls, helm_release.external_dns]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
