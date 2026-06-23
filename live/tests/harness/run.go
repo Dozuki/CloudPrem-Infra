@@ -5,32 +5,52 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
 )
 
+// phaseMark records one step() marker (time + message) for the end-of-run summary.
+type phaseMark struct {
+	at  time.Time
+	msg string
+}
+
+// Per-run phase tracking, reset at the start of each RunUpgrade. The harness runs
+// configs sequentially, so a package-level recorder is sufficient (no concurrency).
+var (
+	phaseMarks []phaseMark
+	runStart   time.Time
+)
+
 // step prints a timestamped progress marker to stderr (captured by run.sh's tee) so
 // the log shows what the harness is doing during the otherwise-silent gaps between
-// terragrunt stages (validation waits, output reads, validators, teardown).
+// terragrunt stages (validation waits, output reads, validators, teardown). Each
+// marker is also recorded for the end-of-run HARNESS RUN SUMMARY banner.
 func step(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "\n>> [harness %s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+	msg := fmt.Sprintf(format, args...)
+	phaseMarks = append(phaseMarks, phaseMark{at: time.Now(), msg: msg})
+	fmt.Fprintf(os.Stderr, "\n>> [harness %s] %s\n", time.Now().Format("15:04:05"), msg)
 }
 
 // RunParams configures one upgrade run.
 type RunParams struct {
-	RepoDir      string
-	Matrix       *Matrix
-	ConfigName   string
-	FromRef      string // resolved concrete ref
-	ToRef        string // resolved concrete ref
-	AccountID    string
-	Profile      string
-	RunID        string // unique per run; namespaces state
-	Namespace    string // app namespace, e.g. "dozuki"
-	DRRegion     string // DR region (e.g. "us-west-2"); set from matrix defaults
-	RestoreDrill bool   // run the RDS restore drill
-	EnableDR     bool   // DR validators enabled (enable_dr flag)
+	RepoDir           string
+	Matrix            *Matrix
+	ConfigName        string
+	FromRef           string // resolved concrete ref
+	ToRef             string // resolved concrete ref
+	AccountID         string
+	Profile           string
+	RunID             string   // unique per run; namespaces state
+	Namespace         string   // app namespace, e.g. "dozuki"
+	DRRegion          string   // DR region (e.g. "us-west-2"); set from matrix defaults
+	RestoreDrill      bool     // run the RDS restore drill
+	EnableDR          bool     // DR validators enabled (enable_dr flag)
+	CriticalWorkloads []string // critical workload name globs; empty → DefaultCriticalWorkloads()
 }
 
 // RunUpgrade executes apply(baseline) -> validate -> apply(target) -> validate
@@ -47,6 +67,13 @@ func RunUpgrade(p RunParams) (err error) {
 	if !p.Matrix.VersionProfileExists(p.ToRef) {
 		return fmt.Errorf("no version profile for to_ref %q in matrix", p.ToRef)
 	}
+
+	// Track phases and print a final summary banner on the way out. Registered before
+	// the worktree/teardown defers so it runs LAST — the run's outcome, what ran (with
+	// per-phase durations), and artifact location at a glance, no log-grepping needed.
+	phaseMarks = nil
+	runStart = time.Now()
+	defer func() { printSummary(p, cfg, err) }()
 
 	ctx := context.Background()
 	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
@@ -102,8 +129,9 @@ func RunUpgrade(p RunParams) (err error) {
 	}
 
 	// Write env.hcl into BOTH worktrees up front so the deferred destroy (which
-	// runs against toWT) always has a valid config to clean up with, even if the
-	// baseline apply fails before the target env.hcl would otherwise be written.
+	// runs against the applied worktree, appliedWT) always has a valid config to
+	// clean up with, even if the baseline apply fails before the target env.hcl
+	// would otherwise be written.
 	if werr := WriteEnvHCL(filepath.Join(fromWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.FromRef)); werr != nil {
 		return werr
 	}
@@ -111,18 +139,45 @@ func RunUpgrade(p RunParams) (err error) {
 		return werr
 	}
 
-	// Always attempt destroy (against the target/final code) without clobbering
-	// an earlier error. Registered last so it runs before the worktree removals.
-	defer func() {
-		// Capture artifacts BEFORE destroy (cluster) + before worktree removal (env.hcl).
-		// err (named return) reflects the run outcome here → full dump only on failure.
-		step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, err != nil)
-		captureDiagnostics(p, region, identifier, err != nil, tg(toWT), fromEnvHCL, toEnvHCL)
-		step("TEARDOWN: destroy (logical best-effort, then ALWAYS physical)")
-		if derr := tg(toWT).Destroy(); derr != nil && err == nil {
-			err = fmt.Errorf("destroy: %w", derr)
-		}
-	}()
+	// Track the worktree whose code matches what is deployed: baseline applies
+	// first, so default fromWT; flips to toWT only after the upgrade apply succeeds.
+	// The teardown destroys against THIS worktree (not always toWT) — essential for
+	// cross-architecture upgrades (e.g. v5.3->v6.1) where target code cannot destroy
+	// baseline state.
+	var appliedWT atomic.Pointer[Worktree]
+	appliedWT.Store(fromWT)
+	// Marker so the out-of-process cleanup-orphans backstop can destroy against the
+	// matching worktree too. Written for the baseline up front (a baseline-apply
+	// interrupt still leaves a correct from_ref marker).
+	_ = writeAppliedMarker(p.RepoDir, tg(fromWT).StatePrefix, tg(fromWT).WorkingDir)
+
+	var teardownOnce sync.Once
+	teardown := func(interrupted bool) {
+		teardownOnce.Do(func() {
+			wt := appliedWT.Load()
+			// An interrupted run is never "clean": full diagnostics, keep the marker
+			// for the cleanup backstop, and don't touch the named return err — the
+			// signal handler exits via os.Exit, and reading err here would race the
+			// still-running main goroutine.
+			failed := interrupted
+			if !interrupted {
+				failed = err != nil
+			}
+			step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, failed)
+			captureDiagnostics(p, region, identifier, failed, tg(wt), fromEnvHCL, toEnvHCL)
+			step("TEARDOWN: destroy against %s (logical best-effort, then ALWAYS physical)", wt.Ref)
+			derr := tg(wt).Destroy()
+			if !interrupted && derr != nil && err == nil {
+				err = fmt.Errorf("destroy: %w", derr)
+			}
+			if !failed {
+				removeAppliedMarker(p.RepoDir, tg(wt).StatePrefix)
+			}
+		})
+	}
+	defer teardown(false)
+	stopSig := installTeardownOnSignal(func() { teardown(true) }, os.Exit)
+	defer stopSig()
 
 	// ---- Baseline apply + validate ----
 	step("BASELINE apply: %s (terragrunt run-all apply — physical then logical)", p.FromRef)
@@ -130,7 +185,7 @@ func RunUpgrade(p RunParams) (err error) {
 		return fmt.Errorf("baseline apply: %w", aerr)
 	}
 	step("baseline applied — validating: cluster health (waits for pods Ready, up to 20m), endpoints, helm release")
-	baselineRev, _, verr := validateStack(tg(fromWT), p, region)
+	baselineRev, _, baseCaps, verr := validateStack(tg(fromWT), p, region)
 	if verr != nil {
 		return fmt.Errorf("baseline validation: %w", verr)
 	}
@@ -142,7 +197,7 @@ func RunUpgrade(p RunParams) (err error) {
 	if err != nil {
 		return fmt.Errorf("baseline readOutputs (sentinel): %w", err)
 	}
-	if len(baseOuts.GuideBuckets) > 0 {
+	if baseCaps.HasGuideBuckets {
 		if serr := validation.WriteSentinel(ctx, region, baseOuts.GuideBuckets[0], p.RunID); serr != nil {
 			return fmt.Errorf("continuity sentinel write: %w", serr)
 		}
@@ -156,8 +211,11 @@ func RunUpgrade(p RunParams) (err error) {
 	if aerr := tg(toWT).Apply(); aerr != nil {
 		return fmt.Errorf("upgrade apply: %w", aerr)
 	}
+	// Upgrade applied: target code now matches the deployed state.
+	appliedWT.Store(toWT)
+	_ = writeAppliedMarker(p.RepoDir, tg(toWT).StatePrefix, tg(toWT).WorkingDir)
 	step("upgrade applied — validating: cluster health (up to 20m), endpoints, helm release")
-	_, kc, verr := validateStack(tg(toWT), p, region)
+	_, kc, upCaps, verr := validateStack(tg(toWT), p, region)
 	if verr != nil {
 		return fmt.Errorf("upgrade validation: %w", verr)
 	}
@@ -167,32 +225,39 @@ func RunUpgrade(p RunParams) (err error) {
 		return fmt.Errorf("upgrade proof: %w", rerr)
 	}
 
-	// ---- Post-upgrade validators ----
-	step("upgrade proven ✓ — post-upgrade validators (control-plane logging, continuity sentinel, DMS, DR)")
+	// Post-upgrade validators — gated by detected capabilities; skips are logged.
+	step("upgrade proven ✓ — capability-gated post-upgrade validators")
 	outs, err := readOutputs(tg(toWT), region)
 	if err != nil {
 		return fmt.Errorf("post-upgrade readOutputs: %w", err)
 	}
+	upCaps.HasLogging = validation.LoggingEnabled(ctx, region, outs.ClusterName)
 
-	// Logging guard — always run.
-	if lerr := validation.AssertControlPlaneLogging(ctx, region, outs.ClusterName); lerr != nil {
-		return fmt.Errorf("logging guard: %w", lerr)
+	if upCaps.HasLogging {
+		if lerr := validation.AssertControlPlaneLogging(ctx, region, outs.ClusterName); lerr != nil {
+			return fmt.Errorf("logging guard: %w", lerr)
+		}
+	} else {
+		step("skipped: control-plane logging (not enabled on %s)", p.ToRef)
 	}
 
-	// Continuity sentinel — verify if a guide bucket was available pre-upgrade.
-	if len(outs.GuideBuckets) > 0 {
+	if upCaps.HasGuideBuckets {
 		if serr := validation.VerifySentinel(ctx, region, outs.GuideBuckets[0], p.RunID); serr != nil {
 			return fmt.Errorf("continuity sentinel verify: %w", serr)
 		}
+	} else {
+		step("skipped: continuity sentinel (no guide buckets in %s)", p.ToRef)
 	}
 
-	// DMS check — no-ops when DMSTaskARN is empty.
-	if derr := validation.AssertDMSRunning(ctx, region, outs.DMSTaskARN); derr != nil {
-		return fmt.Errorf("DMS running: %w", derr)
+	if upCaps.HasDMS {
+		if derr := validation.AssertDMSRunning(ctx, region, outs.DMSTaskARN); derr != nil {
+			return fmt.Errorf("DMS running: %w", derr)
+		}
+	} else {
+		step("skipped: DMS (no dms_task_arn in %s)", p.ToRef)
 	}
 
-	// DR validators — only when enable_dr is set for this config.
-	if p.EnableDR && len(outs.DRBucketNames) > 0 {
+	if p.EnableDR && upCaps.HasDR {
 		// Existence check: DR buckets versioned + replicated RDS backup present.
 		if derr := validation.AssertDRExistence(ctx, p.DRRegion, outs.DRBucketNames, outs.DBIdentifier); derr != nil {
 			return fmt.Errorf("DR existence: %w", derr)
@@ -203,11 +268,13 @@ func RunUpgrade(p RunParams) (err error) {
 		// from dr_s3_bucket_names is not guaranteed to align with guide bucket order),
 		// so we validate a single representative pair; the existence check covers all
 		// DR buckets above.
-		if len(outs.GuideBuckets) > 0 {
+		if upCaps.HasGuideBuckets {
 			if rerr := validation.AssertS3ReplicationFlow(ctx, region, p.DRRegion, outs.GuideBuckets[0], outs.DRBucketNames[0], p.RunID); rerr != nil {
 				return fmt.Errorf("DR S3 replication flow: %w", rerr)
 			}
 		}
+	} else if p.EnableDR {
+		step("skipped: DR (enable_dr set but no DR outputs in %s)", p.ToRef)
 	}
 
 	// Restore drill — only when requested (full config).
@@ -230,26 +297,36 @@ func generateLiveEnvs(worktreeDir string) error {
 }
 
 // validateStack runs the post-apply assertion suite and returns the helm
-// revision and the kubeconfig path it generated (reused by the upgrade proof).
-func validateStack(tg TGOptions, p RunParams, region string) (int, string, error) {
+// revision, the kubeconfig path it generated (reused by the upgrade proof),
+// and the detected Capabilities for use by later validation stages.
+func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capabilities, error) {
 	outs, err := readOutputs(tg, region)
 	if err != nil {
-		return 0, "", err
+		return 0, "", Capabilities{}, err
 	}
+	caps := DetectCapabilities(outs)
 	if err := validation.CheckEndpoints(outs); err != nil {
-		return 0, "", err
+		return 0, "", caps, err
 	}
 	kubeDir := filepath.Dir(tg.WorkingDir)
 	kc, err := validation.Kubeconfig(outs.ClusterName, region, p.Profile, kubeDir)
 	if err != nil {
-		return 0, "", err
+		return 0, "", caps, err
 	}
-	if err := validation.CheckClusterHealth(kc, p.Namespace, 20*time.Minute); err != nil {
-		return 0, "", err
+	critical := p.CriticalWorkloads
+	if len(critical) == 0 {
+		critical = DefaultCriticalWorkloads()
+	}
+	advisory, err := validation.CheckClusterHealth(kc, p.Namespace, critical, 20*time.Minute)
+	if err != nil {
+		return 0, "", caps, err
+	}
+	for _, w := range advisory {
+		step("advisory: workload %s not Ready (non-critical — not failing the run)", w)
 	}
 	_ = validation.JobSucceeded(kc, p.Namespace, "db-migrations") // best-effort: job may be GC'd
 	rev, _ := validation.ReleaseRevision(kc, p.Namespace, "dozuki")
-	return rev, kc, nil
+	return rev, kc, caps, nil
 }
 
 // readOutputs pulls the outputs the validators need. Names reconciled against
@@ -323,4 +400,59 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		DRBucketNames: drBucketNames,
 		DBIdentifier:  str(physical, "db_identifier"),
 	}, nil
+}
+
+// printSummary writes a final, human-readable banner so a run's outcome, what ran
+// (with per-phase durations), and where the artifacts live are visible at a glance —
+// no scrolling or grepping the full log. Printed last, on pass or fail.
+func printSummary(p RunParams, cfg Config, err error) {
+	result := "PASS ✓"
+	if err != nil {
+		result = "FAIL ✗: " + err.Error()
+	}
+	dr := "(disabled)"
+	if p.EnableDR {
+		dr = p.DRRegion + " (enabled)"
+	}
+	customer, _ := cfg.FeatureFlags["customer"].(string)
+
+	var b strings.Builder
+	line := func(format string, a ...interface{}) { fmt.Fprintf(&b, format+"\n", a...) }
+	line("")
+	line("========================= HARNESS RUN SUMMARY =========================")
+	line(" Result:    %s", result)
+	line(" Config:    %s  (customer=%s, env=%s)", cfg.Name, customer, cfg.Env)
+	line(" Upgrade:   %s  ->  %s", p.FromRef, p.ToRef)
+	line(" Region:    %s    DR: %s", p.Matrix.Defaults.Region, dr)
+	line(" Run ID:    %s", p.RunID)
+	if !runStart.IsZero() {
+		line(" Duration:  %s", time.Since(runStart).Round(time.Second))
+		if len(phaseMarks) > 0 {
+			line(" Phases:")
+			for i, m := range phaseMarks {
+				next := time.Now()
+				if i+1 < len(phaseMarks) {
+					next = phaseMarks[i+1].at
+				}
+				line("   +%-8s %-56s %s",
+					m.at.Sub(runStart).Round(time.Second),
+					truncate(m.msg, 56),
+					next.Sub(m.at).Round(time.Second))
+			}
+		}
+	}
+	line(" Artifacts: live/tests/.artifacts/%s/  (run log + diagnostics; bundled to S3 by run.sh)", p.RunID)
+	line("======================================================================")
+	fmt.Fprint(os.Stderr, b.String())
+}
+
+// truncate collapses s to its first line and caps it at n bytes for the summary table.
+func truncate(s string, n int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }

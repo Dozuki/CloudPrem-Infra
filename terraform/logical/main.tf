@@ -100,7 +100,16 @@ provider "vault" {
   }
 }
 
+# azurerm is configured per-instance via OpenTofu provider for_each: exactly one
+# instance on Azure, ZERO on AWS. With an empty set the provider is never
+# configured and never authenticates — the only clean fix, because count=0 on the
+# azure resources does NOT stop Terraform/OpenTofu from configuring the provider,
+# and azurerm v4 authenticates eagerly at configure (no offline mode). Requires
+# OpenTofu >= 1.9 (provider for_each); the logical layer runs on OpenTofu.
 provider "azurerm" {
+  alias    = "main"
+  for_each = local.azure_instances
+
   subscription_id = var.azure_subscription_id == "" ? null : var.azure_subscription_id
   environment     = var.azure_environment
 
@@ -108,25 +117,29 @@ provider "azurerm" {
 }
 
 locals {
+  # Provider-instance set for the azurerm provider for_each above: one on Azure,
+  # none on AWS (so azurerm is never configured/authenticated on AWS deploys).
+  azure_instances = var.cloud == "azure" ? toset(["azure"]) : toset([])
+
   is_us_gov = var.cloud == "aws" ? data.aws_partition.current[0].partition == "aws-us-gov" : false
   ca_cert_pem_file = var.cloud == "azure" ? "vendor/azure-mysql-global.pem" : (
     local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
   )
 
   # Cluster auth (cloud-conditional)
-  cluster_host = var.cloud == "aws" ? data.aws_eks_cluster.main[0].endpoint : data.azurerm_kubernetes_cluster.main[0].kube_config[0].host
-  cluster_ca   = var.cloud == "aws" ? data.aws_eks_cluster.main[0].certificate_authority[0].data : data.azurerm_kubernetes_cluster.main[0].kube_config[0].cluster_ca_certificate
+  cluster_host = var.cloud == "aws" ? data.aws_eks_cluster.main[0].endpoint : data.azurerm_kubernetes_cluster.main["azure"].kube_config[0].host
+  cluster_ca   = var.cloud == "aws" ? data.aws_eks_cluster.main[0].certificate_authority[0].data : data.azurerm_kubernetes_cluster.main["azure"].kube_config[0].cluster_ca_certificate
 
   k8s_exec_command = var.cloud == "aws" ? "aws" : "kubelogin"
   k8s_exec_args = var.cloud == "aws" ? [
-    "eks", "get-token", "--cluster-name", var.eks_cluster_id, "--region", data.aws_region.current[0].id
+    "eks", "get-token", "--cluster-name", var.eks_cluster_id, "--region", data.aws_region.current[0].region
     ] : concat(
     ["get-token", "--server-id", "6dae42f8-4368-4678-94ff-3960e28e3630", "--login", var.azure_kubelogin_login],
     var.azure_environment == "usgovernment" ? ["--environment", "AzureUSGovernmentCloud"] : []
   )
 
   # Database
-  db_credentials = var.cloud == "aws" ? jsondecode(data.aws_secretsmanager_secret_version.db_master[0].secret_string) : jsondecode(data.azurerm_key_vault_secret.db_master[0].value)
+  db_credentials = var.cloud == "aws" ? jsondecode(data.aws_secretsmanager_secret_version.db_master[0].secret_string) : jsondecode(data.azurerm_key_vault_secret.db_master["azure"].value)
 
   db_master_host     = nonsensitive(local.db_credentials["host"])
   db_master_username = nonsensitive(local.db_credentials["username"])
@@ -149,7 +162,7 @@ locals {
     customer               = { value = coalesce(var.customer, "Dozuki") }
     environment            = { value = var.environment }
     aws_acct_id            = { value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" }
-    aws_region             = { value = var.cloud == "aws" ? data.aws_region.current[0].id : "us-east-1" }
+    aws_region             = { value = var.cloud == "aws" ? data.aws_region.current[0].region : "us-east-1" }
     hostname               = { value = var.dns_domain_name }
     ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
     bi_enabled             = { value = var.enable_bi ? "true" : "false" }
@@ -238,13 +251,15 @@ data "aws_secretsmanager_secret_version" "db_bi" {
 }
 
 data "azurerm_kubernetes_cluster" "main" {
-  count               = var.cloud == "azure" ? 1 : 0
+  for_each            = local.azure_instances
+  provider            = azurerm.main[each.key]
   name                = var.eks_cluster_id
   resource_group_name = var.azure_resource_group
 }
 
 data "azurerm_key_vault_secret" "db_master" {
-  count        = var.cloud == "azure" ? 1 : 0
+  for_each     = local.azure_instances
+  provider     = azurerm.main[each.key]
   name         = "database-credentials"
   key_vault_id = var.azure_key_vault_id
 }

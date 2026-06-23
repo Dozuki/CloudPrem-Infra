@@ -17,7 +17,7 @@ resource "kubernetes_job_v1" "dms_start" {
           command = [
             "/bin/sh",
             "-c",
-            "kubectl wait deploy/app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current[0].id}"
+            "kubectl wait deploy/dozuki-app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current[0].region}"
           ]
         }
         restart_policy = "Never"

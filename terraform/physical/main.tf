@@ -19,8 +19,12 @@ terraform {
       version = "~> 3.0"
     }
     archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.0"
+      source = "hashicorp/archive"
+      # Pinned exactly: archive output bytes (and therefore the lambda
+      # source_code_hash) can change between provider versions even for
+      # identical source, which produces a perpetual phantom diff on the
+      # lambda functions below. Pin so the computed hash is stable.
+      version = "2.8.0"
     }
   }
 }
@@ -30,7 +34,7 @@ provider "kubernetes" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks_cluster.cluster_name, "--region", data.aws_region.current.id]
+    args        = ["eks", "get-token", "--cluster-name", module.eks_cluster.cluster_name, "--region", data.aws_region.current.region]
   }
 }
 
@@ -39,7 +43,7 @@ locals {
   customer_name = var.subdomain_override != "" ? var.subdomain_override : var.customer == "" ? "dozuki" : var.customer
 
   # --EKS--
-  cluster_access_role_name = "${local.identifier}-${data.aws_region.current.id}-cluster-access"
+  cluster_access_role_name = "${local.identifier}-${data.aws_region.current.region}-cluster-access"
   create_eks_kms           = var.eks_kms_key_id == "" ? true : false
   eks_kms_key              = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
 
@@ -58,7 +62,7 @@ locals {
   subdomain_parts = {
     "%CUSTOMER%"    = local.customer_name
     "%ENVIRONMENT%" = var.environment
-    "%REGION%"      = data.aws_region.current.id
+    "%REGION%"      = data.aws_region.current.region
     "%ACCOUNT%"     = data.aws_caller_identity.current.account_id
   }
   subdomain = join("-", [for part in var.subdomain_format : local.subdomain_parts[part] if local.subdomain_parts[part] != ""])

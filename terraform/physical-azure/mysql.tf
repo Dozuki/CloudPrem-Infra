@@ -47,7 +47,10 @@ resource "azurerm_mysql_flexible_server_configuration" "require_secure_transport
   name                = "require_secure_transport"
   resource_group_name = azurerm_resource_group.this.name
   server_name         = azurerm_mysql_flexible_server.this.name
-  value               = "OFF"
+  # Enforce TLS by default. The app mounts the Azure MySQL CA (vendor/azure-mysql-global.pem,
+  # wired via local.ca_cert_pem_file -> db.rdsCaCert) and sets CAFile on every connection in
+  # db.json, so it already connects over TLS — a plaintext fallback is unnecessary and a risk.
+  value = var.mysql_require_secure_transport ? "ON" : "OFF"
 }
 
 resource "azurerm_management_lock" "mysql" {

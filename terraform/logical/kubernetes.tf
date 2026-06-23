@@ -454,13 +454,30 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
 }
 
 # CloudWatch Observability add-on — installed in logical (not physical) because
-# Auto Mode won't provision nodes until workloads are scheduled. cert-manager
-# and envoy-gateway trigger node creation; this addon installs after nodes exist.
+# on EKS Auto Mode a fresh cluster has zero nodes until a workload is scheduled;
+# cert-manager triggers node creation, so this addon installs after nodes exist
+# (in physical it would sit DEGRADED with no nodes and time out). The IAM role +
+# pod-identity association for the cloudwatch-agent SA live in the physical layer.
+#
+# We deliberately do NOT pre-delete a pre-existing copy: this addon is
+# terraform-managed here, so deleting it out-of-band turns an in-place update into
+# a failed modify against a just-deleted addon (ListTagsForResource 404).
+# resolve_conflicts_on_create=OVERWRITE handles field-level conflicts on adoption.
 resource "aws_eks_addon" "cloudwatch_observability" {
   count        = var.cloud == "aws" ? 1 : 0
   cluster_name = data.aws_eks_cluster.main[0].name
   addon_name   = "amazon-cloudwatch-observability"
-  depends_on   = [helm_release.cert_manager]
+
+  depends_on = [helm_release.cert_manager]
+
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  # Headroom for the first node's Karpenter cold-start on a brand-new cluster.
+  timeouts {
+    create = "40m"
+    update = "40m"
+  }
 }
 
 locals {
@@ -520,7 +537,7 @@ resource "helm_release" "app" {
     { name = "environment", value = var.environment },
 
     # --- AWS ---
-    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].id : "us-east-1" },
+    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].region : "us-east-1" },
     { name = "aws.accountId", value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" },
     { name = "aws.enabled", value = var.cloud == "aws" ? "true" : "false" },
 
@@ -551,7 +568,7 @@ resource "helm_release" "app" {
     # Manual TLS. Supplied certs: chart renders the typed tls-secret (externallyManaged
     # false). Generated self-signed: Terraform renders it (externallyManaged true).
     { name = "tls.enabled", value = local.tls_manual ? "true" : "false" },
-    { name = "tls.externallyManaged", value = local.tls_managed_tf ? "true" : "false" },
+    { name = "tls.externallyManaged", value = local.tls_externally_managed ? "true" : "false" },
     { name = "tls.cert", value = local.tls_supplied ? var.tls_cert : "" },
 
     # --- Webhooks ---

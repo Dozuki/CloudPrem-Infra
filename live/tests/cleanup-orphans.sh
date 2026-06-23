@@ -21,6 +21,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 HARNESS_DIR="$PWD"
+MARKERS_DIR="$HARNESS_DIR/__worktrees__/.markers"
 LIVE_ROOT="$(cd .. && pwd)"
 
 CUSTOMER="${CUSTOMER:-smoke}"
@@ -92,26 +93,72 @@ while IFS= read -r pfx; do
       --key "{\"LockID\":{\"S\":\"$lk\"}}" >/dev/null 2>&1 && echo "  released lock: $lk"
   done
 
-  # 3) Destroy the physical layer (also disposes of in-cluster helm/k8s via the EKS delete).
+  # 3) Destroy against the worktree whose code matches the deployed state (recorded
+  #    by the harness in a marker). The live tree is the current branch's code, which
+  #    does NOT match for cross-architecture upgrades — use it only as a last resort.
   destroyed_ok=1
-  if [ -n "$key" ] && [ -d "$LIVE_ROOT/$envdir/physical" ]; then
-    ( cd "$LIVE_ROOT/$envdir/physical"
-      rm -rf .terragrunt-cache
-      TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
-      TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
-        terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
-    destroyed_ok=$?
+  marker="$MARKERS_DIR/$(printf '%s' "$pfx" | tr '/' '_')"
+  tgt=""
+  if [ -f "$marker" ] && [ -d "$(cat "$marker")/physical" ]; then
+    tgt="$(cat "$marker")"
+    echo "  destroy target: worktree $tgt (from marker)"
+  elif [ -n "$key" ] && [ -d "$LIVE_ROOT/$envdir/physical" ]; then
+    tgt="$LIVE_ROOT/$envdir"
+    echo "  WARNING: no worktree marker for $pfx — falling back to LIVE tree $tgt (may not match deployed code)" >&2
+  fi
+  if [ -n "$tgt" ]; then
+    if [ "${DRY_RUN:-0}" = 1 ]; then
+      echo "  DRY_RUN: would destroy logical (best-effort) then physical in $tgt"; destroyed_ok=0
+    else
+      ( cd "$tgt/logical" 2>/dev/null && rm -rf .terragrunt-cache && \
+        TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
+        TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+          terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) \
+        || echo "  logical destroy failed (continuing to physical so infra isn't stranded)" >&2
+      ( cd "$tgt/physical"
+        rm -rf .terragrunt-cache
+        TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
+        TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+          terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
+      destroyed_ok=$?
+    fi
   elif [ -n "$key" ]; then
-    echo "  WARNING: $LIVE_ROOT/$envdir/physical not found — cannot destroy via terragrunt; leaving state intact." >&2
+    echo "  WARNING: no worktree marker and no live $LIVE_ROOT/$envdir/physical — cannot destroy via terragrunt; leaving state intact." >&2
     destroyed_ok=1
   fi
 
   # 4) Purge state objects ONLY if the destroy succeeded (else keep state so it can retry).
-  if [ "$destroyed_ok" -eq 0 ] || [ -z "$key" ]; then
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "  DRY_RUN: would purge state prefix $pfx (only if the real destroy succeeded)"
+  elif [ "$destroyed_ok" -eq 0 ] || [ -z "$key" ]; then
     aws s3 rm "s3://$BUCKET/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
   else
     echo "  destroy did NOT fully succeed — state prefix kept for retry: $pfx" >&2
     fail=1
+  fi
+
+  # 4b) Reclaim resources terraform does not own: the app's dynamic PVCs create EBS
+  #     volumes via the CSI driver (not in TF state), so destroy never removes them —
+  #     they orphan as `available`. Also sweep orphaned launch templates. Detached/
+  #     unused only; reports every deletion (no silent caps).
+  if [ -n "$env" ]; then
+    stack="${CUSTOMER}-${env}"
+    for vol in $(aws ec2 describe-volumes --region "$region" --profile "$P" \
+          --filters "Name=tag:Name,Values=${stack}-dynamic-pvc-*" "Name=status,Values=available" \
+          --query 'Volumes[].VolumeId' --output text 2>/dev/null | tr '\t' '\n'); do
+      [ -z "$vol" ] && continue
+      if [ "${DRY_RUN:-0}" = 1 ]; then echo "  DRY_RUN: would delete orphan volume $vol"; continue; fi
+      aws ec2 delete-volume --region "$region" --profile "$P" --volume-id "$vol" >/dev/null 2>&1 \
+        && echo "  reclaimed orphan EBS volume: $vol" || echo "  WARNING: could not delete volume $vol" >&2
+    done
+    for lt in $(aws ec2 describe-launch-templates --region "$region" --profile "$P" \
+          --filters "Name=launch-template-name,Values=${stack}-*" \
+          --query 'LaunchTemplates[].LaunchTemplateId' --output text 2>/dev/null | tr '\t' '\n'); do
+      [ -z "$lt" ] && continue
+      if [ "${DRY_RUN:-0}" = 1 ]; then echo "  DRY_RUN: would delete launch template $lt"; continue; fi
+      aws ec2 delete-launch-template --region "$region" --profile "$P" --launch-template-id "$lt" >/dev/null 2>&1 \
+        && echo "  reclaimed orphan launch template: $lt"
+    done
   fi
 done <<EOF
 $PREFIXES
