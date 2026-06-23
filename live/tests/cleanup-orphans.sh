@@ -86,11 +86,17 @@ while IFS= read -r pfx; do
     fi
   fi
 
-  # 2) Force-release any held state locks for this prefix.
+  # 2) Force-release held state locks AND clear the -md5 state digest for this prefix.
+  #    The digest item (LockID "<key>-md5") is the S3 backend's consistency check. An
+  #    interrupted apply leaves it out of sync with the S3 object, so a later destroy
+  #    aborts with "state data in S3 does not have the expected content" and strands
+  #    the infra. We are tearing down (state integrity is moot), so drop BOTH the lock
+  #    and the digest — terragrunt then reads the actual S3 state and writes a fresh
+  #    digest. (No -md5 filter here, unlike a normal lock-release.)
   for lk in $(aws dynamodb scan --table-name "$LOCK_TABLE" --region "$R" --profile "$P" \
-        --query "Items[?contains(LockID.S, '$pfx') && !contains(LockID.S, '-md5')].LockID.S" --output text 2>/dev/null); do
+        --query "Items[?contains(LockID.S, '$pfx')].LockID.S" --output text 2>/dev/null); do
     aws dynamodb delete-item --table-name "$LOCK_TABLE" --region "$R" --profile "$P" \
-      --key "{\"LockID\":{\"S\":\"$lk\"}}" >/dev/null 2>&1 && echo "  released lock: $lk"
+      --key "{\"LockID\":{\"S\":\"$lk\"}}" >/dev/null 2>&1 && echo "  cleared lock/digest: $lk"
   done
 
   # 3) Destroy against the worktree whose code matches the deployed state (recorded

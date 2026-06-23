@@ -3,3 +3,4 @@
 __worktrees__/
 .logs/
 .artifacts/
+.bin/

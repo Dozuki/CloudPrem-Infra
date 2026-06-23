@@ -89,12 +89,12 @@ func RunUpgrade(p RunParams) (err error) {
 	if err != nil {
 		return err
 	}
-	defer fromWT.Remove(p.RepoDir)
+	defer fromWT.removeUnlessFailed(p.RepoDir, &err)
 	toWT, err := AddWorktree(p.RepoDir, base, p.ToRef, false)
 	if err != nil {
 		return err
 	}
-	defer toWT.Remove(p.RepoDir)
+	defer toWT.removeUnlessFailed(p.RepoDir, &err)
 
 	// The concrete live/<partition>/<region>/<env> trees are gitignored (generated
 	// from live/.skel by generate_live_env.sh), so a fresh worktree doesn't contain
@@ -151,32 +151,8 @@ func RunUpgrade(p RunParams) (err error) {
 	// interrupt still leaves a correct from_ref marker).
 	_ = writeAppliedMarker(p.RepoDir, tg(fromWT).StatePrefix, tg(fromWT).WorkingDir)
 
-	var teardownOnce sync.Once
-	teardown := func(interrupted bool) {
-		teardownOnce.Do(func() {
-			wt := appliedWT.Load()
-			// An interrupted run is never "clean": full diagnostics, keep the marker
-			// for the cleanup backstop, and don't touch the named return err — the
-			// signal handler exits via os.Exit, and reading err here would race the
-			// still-running main goroutine.
-			failed := interrupted
-			if !interrupted {
-				failed = err != nil
-			}
-			step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, failed)
-			captureDiagnostics(p, region, identifier, failed, tg(wt), fromEnvHCL, toEnvHCL)
-			step("TEARDOWN: destroy against %s (logical best-effort, then ALWAYS physical)", wt.Ref)
-			derr := tg(wt).Destroy()
-			if !interrupted && derr != nil && err == nil {
-				err = fmt.Errorf("destroy: %w", derr)
-			}
-			if !failed {
-				removeAppliedMarker(p.RepoDir, tg(wt).StatePrefix)
-			}
-		})
-	}
+	teardown, stopSig := setupTeardown(p, region, identifier, &appliedWT, tg, fromEnvHCL, toEnvHCL, &err)
 	defer teardown(false)
-	stopSig := installTeardownOnSignal(func() { teardown(true) }, os.Exit)
 	defer stopSig()
 
 	// ---- Baseline apply + validate ----
@@ -231,9 +207,146 @@ func RunUpgrade(p RunParams) (err error) {
 	if err != nil {
 		return fmt.Errorf("post-upgrade readOutputs: %w", err)
 	}
-	upCaps.HasLogging = validation.LoggingEnabled(ctx, region, outs.ClusterName)
+	if verr := runInfraValidators(ctx, p, region, upCaps, outs, true); verr != nil {
+		return verr
+	}
 
-	if upCaps.HasLogging {
+	step("ALL VALIDATIONS PASSED ✓ — %s -> %s upgrade verified; tearing down next", p.FromRef, p.ToRef)
+	return nil
+}
+
+// RunFresh executes apply -> validate -> capability-gated infra validators ->
+// destroy for a SINGLE ref (p.ToRef). No baseline, no continuity sentinel, and no
+// upgrade proof — it verifies a clean from-scratch deploy of one release (a class
+// of bug that an in-place upgrade can mask). Returns the first error; always
+// attempts destroy.
+func RunFresh(p RunParams) (err error) {
+	cfg, err := p.Matrix.Config(p.ConfigName)
+	if err != nil {
+		return err
+	}
+	if !p.Matrix.VersionProfileExists(p.ToRef) {
+		return fmt.Errorf("no version profile for to_ref %q in matrix", p.ToRef)
+	}
+
+	phaseMarks = nil
+	runStart = time.Now()
+	defer func() { printSummary(p, cfg, err) }()
+
+	ctx := context.Background()
+	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
+	region := p.Matrix.Defaults.Region
+
+	FetchOrigin(p.RepoDir)
+
+	step("preparing worktree: %s (fresh deploy)", p.ToRef)
+	wt, err := AddWorktree(p.RepoDir, base, p.ToRef, true)
+	if err != nil {
+		return err
+	}
+	defer wt.removeUnlessFailed(p.RepoDir, &err)
+
+	if gerr := generateLiveEnvs(wt.Dir); gerr != nil {
+		return fmt.Errorf("generate live envs for %s: %w", wt.Ref, gerr)
+	}
+
+	envSub := filepath.Join(p.Matrix.Defaults.EnvPath, cfg.Env)
+	envHCL := filepath.Join(wt.Dir, envSub, "env.hcl")
+
+	identifier := ""
+	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
+		identifier = customer + "-" + cfg.Env
+	}
+
+	tg := func(w *Worktree) TGOptions {
+		return TGOptions{
+			WorkingDir:   filepath.Join(w.Dir, envSub),
+			AccountID:    p.AccountID,
+			Region:       region,
+			Profile:      p.Profile,
+			BucketPrefix: "",
+			StatePrefix:  p.RunID + "-" + cfg.Name + "/",
+			NLBName:      identifier,
+		}
+	}
+
+	if werr := WriteEnvHCL(filepath.Join(wt.Dir, envSub), p.Matrix.MergedInputs(cfg, p.ToRef)); werr != nil {
+		return werr
+	}
+
+	var appliedWT atomic.Pointer[Worktree]
+	appliedWT.Store(wt)
+	_ = writeAppliedMarker(p.RepoDir, tg(wt).StatePrefix, tg(wt).WorkingDir)
+	teardown, stopSig := setupTeardown(p, region, identifier, &appliedWT, tg, envHCL, "", &err)
+	defer teardown(false)
+	defer stopSig()
+
+	step("FRESH apply: %s (terragrunt run-all apply — physical then logical)", p.ToRef)
+	if aerr := tg(wt).Apply(); aerr != nil {
+		return fmt.Errorf("fresh apply: %w", aerr)
+	}
+	step("applied — validating: cluster health (waits for pods Ready, up to 20m), endpoints, helm release")
+	rev, _, caps, verr := validateStack(tg(wt), p, region)
+	if verr != nil {
+		return fmt.Errorf("fresh validation: %w", verr)
+	}
+	if rev < 1 {
+		return fmt.Errorf("helm release %q not deployed (revision %d)", "dozuki", rev)
+	}
+	step("fresh deploy validated ✓ (helm revision %d) — capability-gated infra validators", rev)
+
+	outs, err := readOutputs(tg(wt), region)
+	if err != nil {
+		return fmt.Errorf("fresh readOutputs: %w", err)
+	}
+	if ierr := runInfraValidators(ctx, p, region, caps, outs, false); ierr != nil {
+		return ierr
+	}
+
+	step("ALL VALIDATIONS PASSED ✓ — %s fresh deploy verified; tearing down next", p.ToRef)
+	return nil
+}
+
+// setupTeardown builds the sync.Once teardown closure (capture diagnostics, then
+// destroy against the APPLIED worktree) and installs the SIGINT/SIGTERM handler.
+// Shared by RunUpgrade and RunFresh. errp points at the caller's named return so a
+// destroy error can surface; it is read ONLY on the non-interrupted path — the
+// signal path exits via os.Exit while the main goroutine is still running, so
+// reading err there would race.
+func setupTeardown(p RunParams, region, identifier string, appliedWT *atomic.Pointer[Worktree], tg func(*Worktree) TGOptions, fromEnvHCL, toEnvHCL string, errp *error) (teardown func(bool), stop func()) {
+	var once sync.Once
+	teardown = func(interrupted bool) {
+		once.Do(func() {
+			wt := appliedWT.Load()
+			failed := interrupted
+			if !interrupted {
+				failed = *errp != nil
+			}
+			step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, failed)
+			captureDiagnostics(p, region, identifier, failed, tg(wt), fromEnvHCL, toEnvHCL)
+			step("TEARDOWN: destroy against %s (logical best-effort, then ALWAYS physical)", wt.Ref)
+			derr := tg(wt).Destroy()
+			if !interrupted && derr != nil && *errp == nil {
+				*errp = fmt.Errorf("destroy: %w", derr)
+			}
+			if !failed {
+				removeAppliedMarker(p.RepoDir, tg(wt).StatePrefix)
+			}
+		})
+	}
+	stop = installTeardownOnSignal(func() { teardown(true) }, os.Exit)
+	return teardown, stop
+}
+
+// runInfraValidators runs the capability-gated infra assertions shared by fresh and
+// upgrade runs: control-plane logging, DMS, DR (existence + a representative S3
+// replication-flow check), and the optional restore drill. Skips are logged, never
+// silent. It (re)probes logging from the live cluster, overriding caps.HasLogging.
+// verifyContinuity runs the continuity-sentinel verification (UPGRADE only — a fresh
+// deploy writes no baseline sentinel, so callers pass false).
+func runInfraValidators(ctx context.Context, p RunParams, region string, caps Capabilities, outs validation.StackOutputs, verifyContinuity bool) error {
+	caps.HasLogging = validation.LoggingEnabled(ctx, region, outs.ClusterName)
+	if caps.HasLogging {
 		if lerr := validation.AssertControlPlaneLogging(ctx, region, outs.ClusterName); lerr != nil {
 			return fmt.Errorf("logging guard: %w", lerr)
 		}
@@ -241,15 +354,17 @@ func RunUpgrade(p RunParams) (err error) {
 		step("skipped: control-plane logging (not enabled on %s)", p.ToRef)
 	}
 
-	if upCaps.HasGuideBuckets {
-		if serr := validation.VerifySentinel(ctx, region, outs.GuideBuckets[0], p.RunID); serr != nil {
-			return fmt.Errorf("continuity sentinel verify: %w", serr)
+	if verifyContinuity {
+		if caps.HasGuideBuckets {
+			if serr := validation.VerifySentinel(ctx, region, outs.GuideBuckets[0], p.RunID); serr != nil {
+				return fmt.Errorf("continuity sentinel verify: %w", serr)
+			}
+		} else {
+			step("skipped: continuity sentinel (no guide buckets in %s)", p.ToRef)
 		}
-	} else {
-		step("skipped: continuity sentinel (no guide buckets in %s)", p.ToRef)
 	}
 
-	if upCaps.HasDMS {
+	if caps.HasDMS {
 		if derr := validation.AssertDMSRunning(ctx, region, outs.DMSTaskARN); derr != nil {
 			return fmt.Errorf("DMS running: %w", derr)
 		}
@@ -257,7 +372,7 @@ func RunUpgrade(p RunParams) (err error) {
 		step("skipped: DMS (no dms_task_arn in %s)", p.ToRef)
 	}
 
-	if p.EnableDR && upCaps.HasDR {
+	if p.EnableDR && caps.HasDR {
 		// Existence check: DR buckets versioned + replicated RDS backup present.
 		if derr := validation.AssertDRExistence(ctx, p.DRRegion, outs.DRBucketNames, outs.DBIdentifier); derr != nil {
 			return fmt.Errorf("DR existence: %w", derr)
@@ -268,7 +383,7 @@ func RunUpgrade(p RunParams) (err error) {
 		// from dr_s3_bucket_names is not guaranteed to align with guide bucket order),
 		// so we validate a single representative pair; the existence check covers all
 		// DR buckets above.
-		if upCaps.HasGuideBuckets {
+		if caps.HasGuideBuckets {
 			if rerr := validation.AssertS3ReplicationFlow(ctx, region, p.DRRegion, outs.GuideBuckets[0], outs.DRBucketNames[0], p.RunID); rerr != nil {
 				return fmt.Errorf("DR S3 replication flow: %w", rerr)
 			}
@@ -284,8 +399,6 @@ func RunUpgrade(p RunParams) (err error) {
 			return fmt.Errorf("restore drill: %w", rderr)
 		}
 	}
-
-	step("ALL VALIDATIONS PASSED ✓ — %s -> %s upgrade verified; tearing down next", p.FromRef, p.ToRef)
 	return nil
 }
 
@@ -422,7 +535,11 @@ func printSummary(p RunParams, cfg Config, err error) {
 	line("========================= HARNESS RUN SUMMARY =========================")
 	line(" Result:    %s", result)
 	line(" Config:    %s  (customer=%s, env=%s)", cfg.Name, customer, cfg.Env)
-	line(" Upgrade:   %s  ->  %s", p.FromRef, p.ToRef)
+	if p.FromRef == "" {
+		line(" Deploy:    %s  (fresh)", p.ToRef)
+	} else {
+		line(" Upgrade:   %s  ->  %s", p.FromRef, p.ToRef)
+	}
 	line(" Region:    %s    DR: %s", p.Matrix.Defaults.Region, dr)
 	line(" Run ID:    %s", p.RunID)
 	if !runStart.IsZero() {
