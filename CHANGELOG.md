@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.1.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.1.0...v7.1.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* omit service_region for same-region Vault VPC endpoint (GovCloud) ([#204](https://github.com/Dozuki/CloudPrem-Infra/issues/204)) ([e3c8bde](https://github.com/Dozuki/CloudPrem-Infra/commit/e3c8bde5d68b16f7ee8b934ddedccf78b6acea0f))
+
 ## [7.1.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.0.0...v7.1.0) (2026-06-23)
 
 
