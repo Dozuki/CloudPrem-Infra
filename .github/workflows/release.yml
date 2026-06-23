@@ -24,37 +24,35 @@ jobs:
           body: |
             ⚠️ Breaking changes / migration notes
 
-            - EKS Auto Mode migration (#129). Replaces the ASG worker-group pattern with Karpenter-managed node pools, switches all workload IAM from IRSA to Pod Identity, and removes four bundled charts
-            (cluster-autoscaler, aws-ebs-csi-driver, aws-for-fluent-bit, adot-exporter) — these are all native to Auto Mode now. scaling.tf and termination.tf removed. CloudWatch Observability addon replaces ADOT +
-            FluentBit. NLB upgraded to IP targeting (needed for Envoy Gateway).
-            - image_tag / nextjs_tag are now required variables (#129) — no defaults; must be set per environment.
-            - Helm values architecture rewrite (#128). The 1076-line static/app-values.yaml template is deleted. The chart's own values.yaml is now the single source of truth; Terraform overrides ~35 env-specific values
-            via jsonencode() and uses set_sensitive for ~19 secrets (which are now redacted in plan output). Any custom overrides previously made in app-values.yaml need to migrate to either the chart or jsonencode.
-            - Kubernetes resources upgraded to _v1 variants (#129).
-            - MSK Kafka 2.7.0 → 3.7.x (#123). AWS no longer accepts 2.7.0 for new clusters. Existing clusters on 2.7.0 need a separate in-place version upgrade applied; this PR only changes the version used at creation.
-          
+            - Helm chart now consumed from ECR as an OCI artifact (#145). The dozuki chart is no longer a git submodule under terraform/logical/charts/dozuki. The logical layer pulls it from oci://<image_repository>/charts/dozuki at the chart_version variable (default 0.4.1) via an ECR registry login. The pinned chart version must be published to your ECR before applying — existing environments on the default need no tfvars change, but the chart must exist in the registry. .gitmodules and the submodule directory are removed.
+            - Physical layer now requires OpenTofu 1.12.x (#149). Adding the Aurora path pulls the terraform-aws-modules/rds-aurora module, whose required_version (>= 1.11.1) is evaluated at init even when db_engine = "rds" — so the physical layer can no longer run on Terraform 1.5.7. ALL physical stacks (RDS and Aurora alike) must run OpenTofu 1.12.x; switch Spacelift physical stacks to the OpenTofu workflow tool before applying v7.0. The logical layer also now runs OpenTofu (provider for_each for the azurerm provider).
+            - In-cluster memcached is now the default on AWS (#166). memcached_in_cluster defaults to true, so the chart runs memcached in-cluster and ElastiCache is no longer provisioned — and is DESTROYED if it already exists. Existing AWS stacks that want to keep ElastiCache must set memcached_in_cluster = false in env.hcl before applying. Azure is always in-cluster.
+
             ✨ Features
-          
-            - Vault + ESO integration (#129, #130) — central Vault cluster integration via PrivateLink, AWS IAM auth from Terraform for secret seeding, K8s auth for ESO. Cross-region PrivateLink supported via
-            aws_vpc_endpoint.service_region (#130).
-            - Spacelift compatibility (#130) — spacelift variable for conditional IAM auth; uses VAULT_ADDR env var; conditional AZ filtering for same-region vs cross-region PrivateLink.
-            - Gateway API support in cert-manager (#124) — config.enableGatewayAPI enabled so Gateway listener annotations actually trigger cert issuance.
-            - Wildcard ingress hostname (#122) — new ingress_hostname variable, defaults to dns_domain_name. When set to a wildcard (e.g., *.customer.com), cert-manager annotations are suppressed to allow customer-provided
-              wildcard certs (airgapped envs).
-            - eks_k8s_version override (#130) — Auto Mode normally manages K8s upgrades automatically; this var pins a version when needed.
-            - Pod Identity for dozuki-migration-wait SA (#130) — needed for EKS 1.35+.
-          
-            🐛 Fixes                                                                                                                                                                                                          ─
-          
-            - Vault provider auth workaround (#130) — uses generic auth_login with method=aws to sidestep vault-provider v4.x bug #1655 with auth_login_aws.
-            - Modernized deprecated AWS provider attributes (#129).
-            - NextJS repository path (#121) — corrected an incorrect reference.
-          
-            🔧 Dependency upgrades                                                                                                                                                                                            ─
-          
-            - terraform-aws-modules/eks ~17 → ~21
-            - All other terraform-aws-modules/* modules to latest majors (#129)
-            - cert-manager v1.19.3 → v1.19.4 (#124)
-            - MSK Kafka 2.7.0 → 3.7.x (#123)
+
+            - DR Phase 1: cross-region backup/restore data layer (#138) — new enable_dr / dr_region variables (on by default — ephemeral/dev stacks may set false — with a region guardrail). When enabled: DR-region KMS keys for replicated RDS backups and S3 content, cross-region replication of primary RDS automated backups, versioned KMS-encrypted DR destination S3 buckets with a replication role and V2 replication config, and SNS alarms on S3 replication latency/failures. Exposes DR bucket names, KMS key, and backup-replication ARN as outputs.
+            - EKS control-plane audit logging (#132) — new eks_enabled_log_types variable defaulting to all 5 control-plane log types (api, audit, authenticator, controllerManager, scheduler), streamed to CloudWatch Logs at 90-day retention. Required by Vanta / SOC2 and matches the vault-cluster posture. Set to [] in env.hcl to disable (not recommended).
+            - Aurora Serverless v2 is now the default for new stacks (#149) — db_engine ("rds" | "aurora", default "aurora") selects Aurora MySQL 8.4 Serverless v2 (terraform-aws-modules/rds-aurora v10, serverlessv2 ACU min/max vars, write-only master password). The physical→logical contract (primary_db_secret) is unchanged, so logical/app/chart need no changes. aurora_engine_version uses the full RDS format (8.4.mysql_aurora.8.4.7). Switching an existing stack's db_engine REPLACES the database — a Spacelift PLAN policy (db-replace-guard, in infra-live) fails any plan that deletes/replaces an aws_db_instance/aws_rds_cluster unless the stack carries the allow-db-replace label, so existing rds stacks must pin db_engine="rds" (the guard protects the fleet either way). Requires the OpenTofu 1.12.x toolchain (see migration notes).
+            - Azure support — multi-cloud foundation (#140, #152) — new terraform/physical-azure layer (VNet, AKS, MySQL Flexible Server, Key Vault, managed identity) behind a documented physical→logical contract (terraform/CONTRACT.md) that makes the logical layer cloud-agnostic. The logical layer is parameterized for Azure (Key Vault secrets, SeaweedFS object storage) with the AWS path unchanged. Adds the azure-config deploy kit (bootstrap, ECR→registry image mirror, release bundle) for turnkey Azure Gov deploys. AWS deployments are unaffected.
+            - Gateway rate limiting + Envoy Gateway 1.8.1 (#184) — opt-in global rate limiting backed by Redis (new terraform/logical/ratelimit.tf), Envoy Gateway upgraded to 1.8.1, PROXY protocol v2 on the NLB→Envoy path so the app sees real client IPs, and a Redis lockdown (auth + restricted access).
+            - Customer-provided TLS via Vault (#194) — new customer_tls_externally_managed variable adds a third gateway-TLS path alongside supplied-cert and self-signed: an ExternalSecret syncs the cert+key from Vault (secret/<tenant>/<env>/tls) into tls-secret, with the chart's tls.externallyManaged set so it skips rendering the secret and drops the cert-manager annotation. The cert never enters Terraform state.
+            - Managed metrics-server addon for EKS Auto Mode (#186) — adds the metrics-server EKS addon so kubectl top / HPA metrics work on Auto Mode clusters, which don't bundle it.
+            - S3 Gateway VPC endpoint for created VPCs (#168) — created VPCs now get an S3 Gateway endpoint so in-VPC S3 traffic stays off the NAT gateway (cost + reliability).
+            - Azure deploy enhancements (#157, #158, #161, #163, #169) — gateway exposed via an Azure LoadBalancer with an optional DNS label, auto-DNS via external-dns + Let's Encrypt TLS (cert-manager HTTP-01), Azure objects served from a public S3 host for image display, and cloud-agnostic manual TLS (supplied cert/key now works on AWS too, not just Azure).
+
+            🐛 Fixes
+
+            - CloudWatch alarms stuck in INSUFFICIENT_DATA (#137) — two independent bugs left every alarm unable to pull metrics. RDS alarm dimensions now use local.identifier instead of the rds module's db_instance_id, which under AWS provider v5+ returns the resource ID (db-XXXX) rather than the DBInstanceIdentifier. The amazon-cloudwatch-observability addon is now managed in Terraform with a Pod Identity association binding the cloudwatch-agent SA to CloudWatchAgentServerPolicy (+ AWSXRayDaemonWriteAccess), fixing the empty ContainerInsights namespace on Auto Mode.
+            - AWS_REGION on S3 replication job init (#133) — the s3_replication_job_init local-exec now sets AWS_REGION so the internal aws CLI calls succeed on Spacelift workers, which provide credentials but no default region.
+            - NLB deletion protection blocked teardown (#151) — terraform-aws-modules/alb ~> 10.0 defaults enable_deletion_protection to true, so NLBs could not be destroyed and their lingering ENIs pinned the Internet Gateway during destroy. nlb.tf now sets it from var.protect_resources, matching RDS/Aurora/BI.
+            - Missing aws.dr provider in the live root (#151) — physical/dr.tf references provider = aws.dr unconditionally, but live/terragrunt.hcl stopped generating it, so destroy/plan failed with "provider configuration not present." The root now generates the aws.dr provider (+ dr_region local), matching infra-live.
+            - Deprecated data.aws_region.current.id (#192) — switched to .region (the .id attribute is deprecated under AWS provider v6) across the physical and logical layers.
+            - azurerm provider no longer needs the Azure CLI on AWS deploys — the azurerm provider is configured via provider for_each gated on var.cloud, so it has zero instances on AWS Spacelift workers (which have no az CLI) instead of failing at plan.
+            - amazon-cloudwatch-observability addon moved to the logical layer — on EKS Auto Mode a fresh cluster has no nodes until workloads schedule, so installing the node-dependent addon in the physical layer timed out DEGRADED on first deploy; it now installs in logical after cert-manager triggers nodes.
+            - Deterministic lambda packaging + DMS-start wait (#193, forward-port) — the SNS/DMS-restart lambda archives pin output_path to ${path.module} (fixing phantom source_code_hash diffs), and the DMS start-replication kubectl wait now targets deploy/dozuki-app-deployment (the chart's actual deploy name).
+            - Supplied manual-TLS rendered by the chart, not Terraform (#178) — fixes the v6.0→v7.0 upgrade collision ("secret tls-secret already exists") by keeping the chart as the tls-secret owner for supplied certs (Terraform only creates it for the generated self-signed case).
+            - KMS key deletion window gated on protect_resources (#173) — 30 days for protected (prod) stacks, 7 for ephemeral/dev, so disposable test stacks tear down without a long pending-deletion window.
+            - In-cluster memcached host seeded as the service FQDN (#180, #181) — the bare service name didn't resolve from the app pods; all paths (incl. the Vault cache secret) now use the fully-qualified service name.
+            - TLS enforced on Azure MySQL (#191) — require_secure_transport is ON for the Azure MySQL Flexible Server.
           draft: false
           prerelease: false
