@@ -6,7 +6,8 @@
     ".": {
       "release-type": "simple",
       "package-name": "cloudprem-infra",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "exclude-paths": ["live/tests"]
     }
   }
 }
