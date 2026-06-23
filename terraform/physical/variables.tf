@@ -386,9 +386,9 @@ variable "rds_adopt_dr_cmk" {
 }
 
 variable "db_engine" {
-  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'."
+  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'aurora' for new stacks. EXISTING rds stacks must pin db_engine='rds' in env.hcl, or a deploy will try to replace the DB — the Spacelift db-replace-guard plan policy blocks that accidental rds->aurora switch (override per stack with the allow-db-replace label for a deliberate migration)."
   type        = string
-  default     = "rds"
+  default     = "aurora"
 
   validation {
     condition     = contains(["rds", "aurora"], var.db_engine)
@@ -409,9 +409,9 @@ variable "aurora_max_acu" {
 }
 
 variable "aurora_engine_version" {
-  description = "Aurora MySQL engine version. Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
+  description = "Aurora MySQL engine version, full aws RDS format (e.g. 8.4.mysql_aurora.8.4.7 — the bare 8.4.7 is rejected with 'Cannot find version'). Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
   type        = string
-  default     = "8.4.7"
+  default     = "8.4.mysql_aurora.8.4.7"
 }
 
 variable "aurora_snapshot_identifier" {
