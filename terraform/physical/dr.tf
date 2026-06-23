@@ -11,9 +11,13 @@ locals {
   # Source RDS instance ARN (the rds module exposes no ARN output, so construct it).
   dr_source_db_arn = "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}"
 
-  # Use a Terraform-created customer-managed key for RDS only when a new stack
-  # opts in AND no explicit key was given. Resolves to the SAME ARN as before for
-  # existing stacks (flag false), so it never triggers a DB replacement.
+  # Use a Terraform-created customer-managed key for the DB when DR is on and no
+  # explicit key was given. rds_adopt_dr_cmk now defaults TRUE (CMK is the default
+  # DR-ready posture), so this is the path for fresh stacks. EXISTING stacks on the
+  # AWS-managed key must pin rds_adopt_dr_cmk = false (or pin rds_kms_key_id to their
+  # adopted CMK) to keep the same key ARN — otherwise this flips and the KMS-key
+  # change replaces the DB. The db-replace-guard PLAN policy blocks that unless the
+  # stack carries the allow-db-replace label, so the aggressive default is fail-safe.
   rds_use_dr_cmk  = var.enable_dr && var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
   rds_kms_key_arn = local.rds_use_dr_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
 

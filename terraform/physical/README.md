@@ -4,7 +4,7 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.1 |
-| <a name="requirement_archive"></a> [archive](#requirement\_archive) | ~> 2.0 |
+| <a name="requirement_archive"></a> [archive](#requirement\_archive) | 2.8.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 2.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
@@ -15,11 +15,11 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.51.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.51.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.51.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | ~> 6.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | ~> 6.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 
 ## Modules
 
@@ -70,11 +70,11 @@
 | [aws_dms_replication_instance.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_instance) | resource |
 | [aws_dms_replication_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_subnet_group) | resource |
 | [aws_dms_replication_task.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_task) | resource |
-| [aws_eks_addon.cloudwatch_observability](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_addon.metrics_server](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_pod_identity_association.app_default](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.app_migration_wait](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.cert_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
+| [aws_eks_pod_identity_association.cloudwatch_agent](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_elasticache_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_cluster) | resource |
 | [aws_elasticache_parameter_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_parameter_group) | resource |
 | [aws_elasticache_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_subnet_group) | resource |
@@ -165,7 +165,6 @@
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
-| [null_resource.adopt_cloudwatch_observability_addon](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_vpc_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
@@ -173,8 +172,8 @@
 | [null_resource.s3_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [random_id.elasticache](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/id) | resource |
 | [random_password.aurora](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
-| [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
-| [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
+| [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
+| [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
 | [aws_ami.amazon_linux_2023](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
@@ -215,7 +214,7 @@
 | <a name="input_alarm_email"></a> [alarm\_email](#input\_alarm\_email) | Email address to send status alarms to. | `string` | `""` | no |
 | <a name="input_app_access_cidrs"></a> [app\_access\_cidrs](#input\_app\_access\_cidrs) | These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR. | `list(string)` | <pre>[<br>  "0.0.0.0/0"<br>]</pre> | no |
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
-| <a name="input_aurora_engine_version"></a> [aurora\_engine\_version](#input\_aurora\_engine\_version) | Aurora MySQL engine version. Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade. | `string` | `"8.4.7"` | no |
+| <a name="input_aurora_engine_version"></a> [aurora\_engine\_version](#input\_aurora\_engine\_version) | Aurora MySQL engine version, full aws RDS format (e.g. 8.4.mysql\_aurora.8.4.7 — the bare 8.4.7 is rejected with 'Cannot find version'). Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade. | `string` | `"8.4.mysql_aurora.8.4.7"` | no |
 | <a name="input_aurora_max_acu"></a> [aurora\_max\_acu](#input\_aurora\_max\_acu) | Aurora Serverless v2 maximum capacity (ACUs). | `number` | `16` | no |
 | <a name="input_aurora_min_acu"></a> [aurora\_min\_acu](#input\_aurora\_min\_acu) | Aurora Serverless v2 minimum capacity (ACUs). | `number` | `0.5` | no |
 | <a name="input_aurora_snapshot_identifier"></a> [aurora\_snapshot\_identifier](#input\_aurora\_snapshot\_identifier) | Optional RDS DB snapshot ARN to restore the Aurora cluster from (migration path). Empty = fresh cluster. | `string` | `""` | no |
@@ -228,7 +227,7 @@
 | <a name="input_bi_vpn_user_list"></a> [bi\_vpn\_user\_list](#input\_bi\_vpn\_user\_list) | List of users to create OpenVPN configurations for usint mutual authentication. | `list(string)` | <pre>[<br>  "root"<br>]</pre> | no |
 | <a name="input_cf_template_version"></a> [cf\_template\_version](#input\_cf\_template\_version) | Version of the CloudFormation template that deployed this stack for validation | `number` | `0` | no |
 | <a name="input_customer"></a> [customer](#input\_customer) | The customer name for resource names and tagging. This will also be the autogenerated subdomain. | `string` | `""` | no |
-| <a name="input_db_engine"></a> [db\_engine](#input\_db\_engine) | Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'. | `string` | `"rds"` | no |
+| <a name="input_db_engine"></a> [db\_engine](#input\_db\_engine) | Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'aurora' for new stacks. EXISTING rds stacks must pin db\_engine='rds' in env.hcl, or a deploy will try to replace the DB — the Spacelift db-replace-guard plan policy blocks that accidental rds->aurora switch (override per stack with the allow-db-replace label for a deliberate migration). | `string` | `"aurora"` | no |
 | <a name="input_dms_allocated_storage"></a> [dms\_allocated\_storage](#input\_dms\_allocated\_storage) | How many GB to allocate for the DMS replication instance | `string` | `100` | no |
 | <a name="input_dms_instance_type"></a> [dms\_instance\_type](#input\_dms\_instance\_type) | The instance type for the DMS replication instance | `string` | `"dms.r5.large"` | no |
 | <a name="input_dr_region"></a> [dr\_region](#input\_dr\_region) | The DR region (concrete value). Normally injected by the Spacelift admin layer via TG\_AWS\_DR\_REGION; may be set explicitly to override. Never auto-derived in workload TF. | `string` | `""` | no |
@@ -246,7 +245,7 @@
 | <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
 | <a name="input_memcached_in_cluster"></a> [memcached\_in\_cluster](#input\_memcached\_in\_cluster) | Run memcached in-cluster (chart memcached deployment) instead of ElastiCache. When true (default), ElastiCache is not provisioned (and is destroyed if it exists). | `bool` | `true` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
-| <a name="input_rds_adopt_dr_cmk"></a> [rds\_adopt\_dr\_cmk](#input\_rds\_adopt\_dr\_cmk) | When true (set for NEW DR-protected stacks only), the RDS instance is created with a Terraform-managed customer KMS key so its automated backups can be replicated cross-region for DR. MUST stay false for existing stacks created with the AWS-managed key — changing an existing DB's KMS key replaces the database. | `bool` | `false` | no |
+| <a name="input_rds_adopt_dr_cmk"></a> [rds\_adopt\_dr\_cmk](#input\_rds\_adopt\_dr\_cmk) | When true (the default DR-ready posture), the database is created with a Terraform-managed customer KMS key so it is encrypted under a CMK — the prerequisite for cross-region DR (RDS automated-backup replication; Aurora is CMK-encrypted but its cross-region replication is the deferred Global-Database Plan B). EXISTING stacks created with the AWS-managed key MUST pin this to false (or pin rds\_kms\_key\_id to their already-adopted CMK): a KMS-key change replaces the database. The db-replace-guard PLAN policy blocks any such unintended replacement (it requires the allow-db-replace stack label), so this default is fail-safe. | `bool` | `true` | no |
 | <a name="input_rds_allocated_storage"></a> [rds\_allocated\_storage](#input\_rds\_allocated\_storage) | The initial size of the database (Gb) | `number` | `100` | no |
 | <a name="input_rds_backup_retention_period"></a> [rds\_backup\_retention\_period](#input\_rds\_backup\_retention\_period) | The number of days to keep automatic database backups. Setting this value to 0 disables automatic backups. | `number` | `30` | no |
 | <a name="input_rds_engine_family"></a> [rds\_engine\_family](#input\_rds\_engine\_family) | To support legacy systems on mysql5.7 we allow setting the engine version here. Only 5.7 or 8.0 are allowed. | `string` | `"8.0"` | no |
