@@ -19,8 +19,12 @@ terraform {
       version = "~> 3.0"
     }
     archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.0"
+      source = "hashicorp/archive"
+      # Pinned exactly: archive output bytes (and therefore the lambda
+      # source_code_hash) can change between provider versions even for
+      # identical source, which produces a perpetual phantom diff on the
+      # lambda functions below. Pin so the computed hash is stable.
+      version = "2.8.0"
     }
   }
 }
