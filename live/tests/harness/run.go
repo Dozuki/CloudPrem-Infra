@@ -195,7 +195,7 @@ func RunUpgrade(p RunParams) (err error) {
 	if verr != nil {
 		return fmt.Errorf("upgrade validation: %w", verr)
 	}
-	wantChart, _ := p.Matrix.Versions[p.ToRef]["chart_version"].(string)
+	wantChart, _ := p.Matrix.VersionVar(p.ToRef, "chart_version").(string)
 	step("verifying upgrade proof (helm revision advanced from %d; chart %q)", baselineRev, wantChart)
 	if rerr := validation.AssertUpgraded(kc, p.Namespace, "dozuki", baselineRev, wantChart); rerr != nil {
 		return fmt.Errorf("upgrade proof: %w", rerr)

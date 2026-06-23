@@ -57,3 +57,57 @@ func TestMergedInputsExcludesHarnessOnlyKeys(t *testing.T) {
 		t.Errorf("HarnessFlag(nonexistent) = true, want false")
 	}
 }
+
+func TestVersionDefaults(t *testing.T) {
+	m := &Matrix{
+		VersionDefaults: map[string]interface{}{
+			"image_tag":     "default-app",
+			"chart_version": "0.4.1",
+		},
+		Versions: map[string]map[string]interface{}{
+			"v6.0": {"image_tag": "old-app"}, // overrides image_tag; inherits chart_version
+		},
+		Configs: []Config{{Name: "min_default", Env: "min", FeatureFlags: map[string]interface{}{"enable_bi": false}}},
+	}
+	cfg, _ := m.Config("min_default")
+
+	// A ref with NO explicit entry inherits all defaults.
+	newRef := m.MergedInputs(cfg, "v7.1.2")
+	if newRef["image_tag"] != "default-app" {
+		t.Errorf("v7.1.2 image_tag = %v, want default-app (inherited)", newRef["image_tag"])
+	}
+	if newRef["chart_version"] != "0.4.1" {
+		t.Errorf("v7.1.2 chart_version = %v, want 0.4.1 (inherited)", newRef["chart_version"])
+	}
+
+	// A ref-specific key overrides the default; unspecified keys still inherit.
+	old := m.MergedInputs(cfg, "v6.0")
+	if old["image_tag"] != "old-app" {
+		t.Errorf("v6.0 image_tag = %v, want old-app (override)", old["image_tag"])
+	}
+	if old["chart_version"] != "0.4.1" {
+		t.Errorf("v6.0 chart_version = %v, want 0.4.1 (inherited default)", old["chart_version"])
+	}
+
+	// VersionVar: ref override wins, else default.
+	if got := m.VersionVar("v6.0", "image_tag"); got != "old-app" {
+		t.Errorf("VersionVar(v6.0,image_tag) = %v, want old-app", got)
+	}
+	if got := m.VersionVar("v7.1.2", "chart_version"); got != "0.4.1" {
+		t.Errorf("VersionVar(v7.1.2,chart_version) = %v, want 0.4.1", got)
+	}
+
+	// VersionProfileExists is true for ANY ref once defaults are set.
+	if !m.VersionProfileExists("v7.1.2") {
+		t.Errorf("VersionProfileExists(v7.1.2) = false, want true (defaults set)")
+	}
+
+	// Without defaults, only refs with an explicit entry resolve.
+	empty := &Matrix{Versions: map[string]map[string]interface{}{"v6.0": {}}}
+	if empty.VersionProfileExists("v7.1.2") {
+		t.Errorf("VersionProfileExists(v7.1.2) = true with no defaults, want false")
+	}
+	if !empty.VersionProfileExists("v6.0") {
+		t.Errorf("VersionProfileExists(v6.0) = false, want true (explicit entry)")
+	}
+}
