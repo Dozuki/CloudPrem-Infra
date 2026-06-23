@@ -65,9 +65,13 @@ resource "aws_security_group" "vault_endpoint" {
 }
 
 resource "aws_vpc_endpoint" "vault" {
-  vpc_id             = local.vpc_id
-  service_name       = var.vault_endpoint_service_name
-  service_region     = local.vault_service_region
+  vpc_id       = local.vpc_id
+  service_name = var.vault_endpoint_service_name
+  # Only set service_region for a genuine cross-region endpoint. GovCloud's EC2 API
+  # rejects ServiceRegion entirely ("InvalidParameter: The input serviceRegion is
+  # invalid"), so passing it for a same-region endpoint (the common case) breaks the
+  # apply. null omits it → standard same-region interface endpoint.
+  service_region     = local.vault_is_cross_region ? local.vault_service_region : null
   vpc_endpoint_type  = "Interface"
   subnet_ids         = local.vault_is_cross_region ? local.private_subnet_ids : data.aws_subnets.vault_compatible[0].ids
   security_group_ids = [aws_security_group.vault_endpoint.id]
