@@ -29,14 +29,14 @@ data "aws_iam_policy_document" "lambda_permissions" {
 resource "aws_iam_policy" "lambda_permissions" {
   count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
-  name   = "${local.identifier}-${data.aws_region.current.id}-lambda-alias"
+  name   = "${local.identifier}-${data.aws_region.current.region}-lambda-alias"
   policy = data.aws_iam_policy_document.lambda_permissions[0].json
 }
 
 resource "aws_iam_role" "lambda_execution" {
   count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
 
-  name               = "${local.identifier}-${data.aws_region.current.id}-lambda-execution"
+  name               = "${local.identifier}-${data.aws_region.current.region}-lambda-execution"
   assume_role_policy = data.aws_iam_policy_document.lambda_execution[0].json
 }
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {

@@ -132,7 +132,7 @@ locals {
 
   k8s_exec_command = var.cloud == "aws" ? "aws" : "kubelogin"
   k8s_exec_args = var.cloud == "aws" ? [
-    "eks", "get-token", "--cluster-name", var.eks_cluster_id, "--region", data.aws_region.current[0].id
+    "eks", "get-token", "--cluster-name", var.eks_cluster_id, "--region", data.aws_region.current[0].region
     ] : concat(
     ["get-token", "--server-id", "6dae42f8-4368-4678-94ff-3960e28e3630", "--login", var.azure_kubelogin_login],
     var.azure_environment == "usgovernment" ? ["--environment", "AzureUSGovernmentCloud"] : []
@@ -162,7 +162,7 @@ locals {
     customer               = { value = coalesce(var.customer, "Dozuki") }
     environment            = { value = var.environment }
     aws_acct_id            = { value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" }
-    aws_region             = { value = var.cloud == "aws" ? data.aws_region.current[0].id : "us-east-1" }
+    aws_region             = { value = var.cloud == "aws" ? data.aws_region.current[0].region : "us-east-1" }
     hostname               = { value = var.dns_domain_name }
     ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
     bi_enabled             = { value = var.enable_bi ? "true" : "false" }

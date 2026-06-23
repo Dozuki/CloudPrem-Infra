@@ -474,7 +474,7 @@ resource "helm_release" "app" {
     { name = "environment", value = var.environment },
 
     # --- AWS ---
-    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].id : "us-east-1" },
+    { name = "aws.region", value = var.cloud == "aws" ? data.aws_region.current[0].region : "us-east-1" },
     { name = "aws.accountId", value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" },
     { name = "aws.enabled", value = var.cloud == "aws" ? "true" : "false" },
 
@@ -505,7 +505,7 @@ resource "helm_release" "app" {
     # Manual TLS. Supplied certs: chart renders the typed tls-secret (externallyManaged
     # false). Generated self-signed: Terraform renders it (externallyManaged true).
     { name = "tls.enabled", value = local.tls_manual ? "true" : "false" },
-    { name = "tls.externallyManaged", value = local.tls_managed_tf ? "true" : "false" },
+    { name = "tls.externallyManaged", value = local.tls_externally_managed ? "true" : "false" },
     { name = "tls.cert", value = local.tls_supplied ? var.tls_cert : "" },
 
     # --- Webhooks ---
