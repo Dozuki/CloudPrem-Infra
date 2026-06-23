@@ -386,9 +386,9 @@ variable "rds_adopt_dr_cmk" {
 }
 
 variable "db_engine" {
-  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'rds' so existing stacks never auto-migrate; new stacks set 'aurora'."
+  description = "Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'aurora' for new stacks. EXISTING rds stacks must pin db_engine='rds' in env.hcl, or a deploy will try to replace the DB — the Spacelift db-replace-guard plan policy blocks that accidental rds->aurora switch (override per stack with the allow-db-replace label for a deliberate migration)."
   type        = string
-  default     = "rds"
+  default     = "aurora"
 
   validation {
     condition     = contains(["rds", "aurora"], var.db_engine)
