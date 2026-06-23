@@ -9,7 +9,7 @@ locals {
   dr_enabled = var.enable_dr
 
   # Source RDS instance ARN (the rds module exposes no ARN output, so construct it).
-  dr_source_db_arn = "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}"
+  dr_source_db_arn = "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}"
 
   # Use a Terraform-created customer-managed key for RDS only when a new stack
   # opts in AND no explicit key was given. Resolves to the SAME ARN as before for
@@ -27,8 +27,8 @@ locals {
 # in the admin layer; this only catches a missing/echoed injection.
 check "dr_region_valid" {
   assert {
-    condition     = !var.enable_dr || (var.dr_region != "" && var.dr_region != data.aws_region.current.id)
-    error_message = "enable_dr is true but dr_region is empty or equals the primary region (${data.aws_region.current.id}). The admin layer must inject TG_AWS_DR_REGION, or set dr_region explicitly."
+    condition     = !var.enable_dr || (var.dr_region != "" && var.dr_region != data.aws_region.current.region)
+    error_message = "enable_dr is true but dr_region is empty or equals the primary region (${data.aws_region.current.region}). The admin layer must inject TG_AWS_DR_REGION, or set dr_region explicitly."
   }
 }
 
@@ -178,7 +178,7 @@ data "aws_iam_policy_document" "dr_s3_replication_assume" {
 
 resource "aws_iam_role" "dr_s3_replication" {
   count              = local.dr_enabled ? 1 : 0
-  name               = "${local.identifier}-${data.aws_region.current.id}-dr-s3-replication"
+  name               = "${local.identifier}-${data.aws_region.current.region}-dr-s3-replication"
   assume_role_policy = data.aws_iam_policy_document.dr_s3_replication_assume[0].json
   tags               = local.tags
 }
@@ -218,7 +218,7 @@ data "aws_iam_policy_document" "dr_s3_replication" {
 
 resource "aws_iam_policy" "dr_s3_replication" {
   count  = local.dr_enabled ? 1 : 0
-  name   = "${local.identifier}-${data.aws_region.current.id}-dr-s3-replication"
+  name   = "${local.identifier}-${data.aws_region.current.region}-dr-s3-replication"
   policy = data.aws_iam_policy_document.dr_s3_replication[0].json
 }
 
