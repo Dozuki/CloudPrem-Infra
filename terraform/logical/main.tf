@@ -38,12 +38,45 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    # kubectl provider — used ONLY to server-side-apply the Envoy Gateway CRDs that
+    # Helm cannot upgrade (see envoy_gateway_crds.tf). It applies raw manifests via
+    # the Kubernetes API (client-go); it does NOT shell out to a kubectl binary, so
+    # nothing extra is needed on the Spacelift/CI runners.
+    #
+    # Why a third-party provider (intentional — please don't "fix" this to a
+    # first-party one):
+    #   - hashicorp/kubernetes' `kubernetes_manifest` requires the CRD schema to
+    #     exist at PLAN time (forces a two-apply workflow) and deep-diffs the whole
+    #     object, which chokes on the oversized Gateway API CRDs. Unusable here.
+    #   - The original gavinbunney/kubectl is abandoned (no Plugin Framework, no
+    #     server-side apply).
+    #   - alekc/kubectl is the actively-maintained community fork everyone migrated
+    #     to (Plugin Framework + server-side apply + OpenTofu support); it's the
+    #     de-facto standard for raw-manifest management. HashiCorp never shipped a
+    #     first-party kubectl provider.
+    # Pinned EXACT (third-party supply chain) and scoped to the EG CRDs only.
+    kubectl = {
+      source  = "alekc/kubectl"
+      version = "2.1.5"
+    }
   }
 }
 
 provider "kubernetes" {
   host                   = local.cluster_host
   cluster_ca_certificate = base64decode(local.cluster_ca)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = local.k8s_exec_command
+    args        = local.k8s_exec_args
+  }
+}
+
+provider "kubectl" {
+  host                   = local.cluster_host
+  cluster_ca_certificate = base64decode(local.cluster_ca)
+  load_config_file       = false
 
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
