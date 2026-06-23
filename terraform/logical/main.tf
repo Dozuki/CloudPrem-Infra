@@ -126,9 +126,20 @@ provider "vault" {
     content {
       path   = "auth/aws/login"
       method = "aws"
-      parameters = {
-        role = "deployer"
-      }
+      # On GovCloud the AWS-auth login must sign sts:GetCallerIdentity against the
+      # gov regional STS endpoint. The SDK/env default to the commercial global
+      # endpoint (sts.amazonaws.com), which rejects gov credentials with
+      # "Credential should be scoped to a valid region" — even with AWS_REGION /
+      # AWS_STS_REGIONAL_ENDPOINTS set, the generic auth_login doesn't pick them up.
+      # aws_region + aws_sts_endpoint in parameters ARE consumed by the provider's
+      # AWS signing. (Assumes us-gov-west-1, the only gov region in use.)
+      parameters = merge(
+        { role = "deployer" },
+        local.is_us_gov ? {
+          aws_region       = "us-gov-west-1"
+          aws_sts_endpoint = "https://sts.us-gov-west-1.amazonaws.com"
+        } : {}
+      )
     }
   }
 }
