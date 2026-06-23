@@ -24,3 +24,4 @@ azure-config/ghcr.env
 terraform/physical-azure/backend_override.tf
 terraform/logical/backend_override.tf
 terraform/logical/aws_stub_override.tf
+.superpowers/

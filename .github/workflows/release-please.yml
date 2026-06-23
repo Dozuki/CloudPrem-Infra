@@ -1,0 +1,33 @@
+name: release-please
+
+# Conventional-commits release automation. On pushes to master, release-please
+# maintains a "release PR" that bumps .release-please-manifest.json and prepends
+# CHANGELOG.md from feat:/fix:/etc. commits since the last release. Merging that
+# PR creates the v<version> tag + a GitHub Release with the generated changelog.
+#
+# Replaces the old hand-written release.yml. Version is computed from commit
+# types: a `feat:` -> minor bump, a `fix:` -> patch, and a `feat!:` / `fix!:` or
+# a `BREAKING CHANGE:` footer -> major bump.
+#
+# Uses the default GITHUB_TOKEN: release-please creates the release/tag directly
+# via the API, and nothing else fires on the v* tag (release-azure.yml is
+# azure-v* only), so no machine-user PAT is needed.
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # config-file + manifest-file use the default names
+          # (release-please-config.json / .release-please-manifest.json).
