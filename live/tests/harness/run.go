@@ -89,12 +89,12 @@ func RunUpgrade(p RunParams) (err error) {
 	if err != nil {
 		return err
 	}
-	defer fromWT.Remove(p.RepoDir)
+	defer fromWT.removeUnlessFailed(p.RepoDir, &err)
 	toWT, err := AddWorktree(p.RepoDir, base, p.ToRef, false)
 	if err != nil {
 		return err
 	}
-	defer toWT.Remove(p.RepoDir)
+	defer toWT.removeUnlessFailed(p.RepoDir, &err)
 
 	// The concrete live/<partition>/<region>/<env> trees are gitignored (generated
 	// from live/.skel by generate_live_env.sh), so a fresh worktree doesn't contain
@@ -244,7 +244,7 @@ func RunFresh(p RunParams) (err error) {
 	if err != nil {
 		return err
 	}
-	defer wt.Remove(p.RepoDir)
+	defer wt.removeUnlessFailed(p.RepoDir, &err)
 
 	if gerr := generateLiveEnvs(wt.Dir); gerr != nil {
 		return fmt.Errorf("generate live envs for %s: %w", wt.Ref, gerr)

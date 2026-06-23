@@ -104,6 +104,21 @@ func (w *Worktree) Remove(repoDir string) error {
 	return run(repoDir, "git", "worktree", "remove", "--force", w.Dir)
 }
 
+// removeUnlessFailed removes the worktree only when the run succeeded
+// (*runErr == nil). On failure we KEEP it: the applied-worktree marker points at
+// this worktree, and the out-of-process cleanup-orphans backstop destroys against
+// the marked worktree. If we removed it here, the backstop would find a stale
+// marker and fall back to the LIVE tree (current branch's code/refs), which won't
+// match the deployed stack and strands the infra. Mirrors the marker's own
+// keep-on-failure rule. Stale kept worktrees are 'git worktree remove'-able after cleanup.
+func (w *Worktree) removeUnlessFailed(repoDir string, runErr *error) {
+	if runErr != nil && *runErr != nil {
+		fmt.Fprintf(os.Stderr, "\n>> keeping worktree %s (run failed) so the cleanup backstop can destroy against the deployed code; 'git worktree remove' it after cleanup\n", w.Dir)
+		return
+	}
+	_ = w.Remove(repoDir)
+}
+
 func (w *Worktree) HasSubmodule() bool {
 	_, err := os.Stat(filepath.Join(w.Dir, ".gitmodules"))
 	return err == nil

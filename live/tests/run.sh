@@ -105,6 +105,10 @@ fi
 VAULT_KUBE_CONTEXT="${VAULT_KUBE_CONTEXT:-vault-standard}"
 VAULT_AWS_PROFILE="${VAULT_AWS_PROFILE:-dozuki}"
 VAULT_AWS_ROLE="${VAULT_AWS_ROLE:-admin}"
+# Exported so the Go harness's teardown can re-login to Vault with the same
+# profile/role if the inherited token expired during a long run (see
+# refreshVaultToken in harness/terragrunt.go).
+export VAULT_AWS_PROFILE VAULT_AWS_ROLE
 VAULT_PF_PID=""
 
 cleanup() {

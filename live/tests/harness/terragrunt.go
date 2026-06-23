@@ -105,11 +105,68 @@ func (o TGOptions) destroyModule(module string) error {
 // the logical destroy couldn't, and physical is the layer that actually costs
 // money and collides with the next run.
 func (o TGOptions) Destroy() error {
+	refreshVaultToken()
 	if err := o.destroyModule("logical"); err != nil {
 		fmt.Fprintf(os.Stderr, "\n>> teardown: logical destroy failed (continuing to physical so infra isn't stranded): %v\n", err)
 	}
 	o.clearNLBProtection()
 	return o.destroyModule("physical")
+}
+
+// refreshVaultToken best-effort re-logs-in to Vault before the teardown and updates
+// VAULT_TOKEN in the process env. A long run can outlast the AWS-auth token's TTL,
+// so the token run.sh logged in with is stale by teardown — the logical destroy then
+// 403s on every vault data source (lookup-self against VAULT_ADDR). run.sh's
+// port-forward is still up, so we re-login the same way it did. Best-effort: if the
+// vault/aws CLIs or VAULT_ADDR are absent, keep the inherited token — the logical
+// destroy is best-effort anyway and the cleanup-orphans backstop re-auths too.
+func refreshVaultToken() {
+	if os.Getenv("VAULT_ADDR") == "" {
+		return // no Vault tunnel in this run (e.g. azure / SKIP_VAULT_TUNNEL)
+	}
+	if _, err := exec.LookPath("vault"); err != nil {
+		return
+	}
+	profile := os.Getenv("VAULT_AWS_PROFILE")
+	if profile == "" {
+		profile = "dozuki"
+	}
+	role := os.Getenv("VAULT_AWS_ROLE")
+	if role == "" {
+		role = "admin"
+	}
+	// Export the profile's AWS creds, then run `vault login` with those creds in its
+	// env. No shell (`sh -c`): args are passed directly, so profile/role can't be
+	// interpreted as shell metacharacters (avoids command injection).
+	credsOut, err := exec.Command("aws", "--profile", profile, "configure",
+		"export-credentials", "--format", "env-no-export").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, ">> teardown: Vault re-login skipped (aws creds for %q: %v) — using inherited token\n", profile, err)
+		return
+	}
+	loginEnv := os.Environ()
+	for _, line := range strings.Split(strings.TrimSpace(string(credsOut)), "\n") {
+		if strings.HasPrefix(line, "AWS_") {
+			loginEnv = append(loginEnv, line)
+		}
+	}
+	login := exec.Command("vault", "login", "-method=aws", "role="+role, "-format=json")
+	login.Env = loginEnv
+	out, err := login.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, ">> teardown: Vault re-login skipped (%v) — using inherited token; backstop re-auths if needed\n", err)
+		return
+	}
+	var resp struct {
+		Auth struct {
+			ClientToken string `json:"client_token"`
+		} `json:"auth"`
+	}
+	if json.Unmarshal(out, &resp) != nil || resp.Auth.ClientToken == "" {
+		return
+	}
+	_ = os.Setenv("VAULT_TOKEN", resp.Auth.ClientToken)
+	fmt.Fprintf(os.Stderr, ">> teardown: refreshed Vault token (re-login via aws role=%s) so the logical destroy uses a live token\n", role)
 }
 
 // clearNLBProtection disables deletion protection on the stack's NLB before the
