@@ -36,14 +36,20 @@ check "dr_region_valid" {
   }
 }
 
-# Non-blocking warning: surfaced on every plan/apply when DR is on but the DB
-# uses an AWS-managed key, so RDS automated backups are NOT being replicated.
-# S3 content IS still replicated. Migrate the DB to a customer-managed key
-# (new stacks: rds_adopt_dr_cmk = true; or set rds_kms_key_id to a CMK).
+# Non-blocking warning surfaced on every plan/apply when DR is on but the primary
+# database's cross-region backup replication is NOT active. The reason differs by
+# engine, so the message is engine-aware (the old text wrongly blamed the KMS key
+# even for Aurora): RDS replicates its automated backups only under a customer-
+# managed key; Aurora has no automated-backup replication at all — cross-region
+# Aurora DR is the deferred Global Database "Plan B". S3 content replicates either way.
 check "dr_rds_replicable" {
   assert {
-    condition     = !var.enable_dr || local.dr_rds_enabled
-    error_message = "DR is enabled but the RDS instance uses an AWS-managed KMS key; its automated backups are NOT being replicated cross-region (S3 content IS). To enable RDS DR, the database must use a customer-managed key — see the DR cold-recovery runbook."
+    condition = !var.enable_dr || local.dr_rds_enabled
+    error_message = local.db_is_aurora ? (
+      "DR is enabled and S3 content replicates cross-region, but the Aurora database does NOT: cross-region Aurora DR (Global Database) is not yet implemented (the deferred \"Plan B\"). Only db_engine=\"rds\" currently supports automated-backup cross-region replication. The Aurora cluster is still encrypted with a customer-managed key when rds_adopt_dr_cmk is set."
+      ) : (
+      "DR is enabled and S3 content replicates cross-region, but the RDS database does NOT: it is encrypted with an AWS-managed KMS key, so its automated backups are ineligible for cross-region replication. Adopt a customer-managed key — rds_adopt_dr_cmk = true (the default) for a fresh DB, or pin rds_kms_key_id to an existing CMK (a key change replaces the DB). See the DR cold-recovery runbook."
+    )
   }
 }
 
