@@ -2,6 +2,19 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.1.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.0.0...v7.1.0) (2026-06-23)
+
+
+### Features
+
+* **logical:** manage Envoy Gateway CRDs via kubectl provider (fix EG upgrade timeout) ([#201](https://github.com/Dozuki/CloudPrem-Infra/issues/201)) ([085ab33](https://github.com/Dozuki/CloudPrem-Infra/commit/085ab3331907a964cfffee3a0c2a2c9a7c5bf899))
+* **physical:** default RDS to a customer-managed KMS key (DR-ready posture) ([#199](https://github.com/Dozuki/CloudPrem-Infra/issues/199)) ([a70605c](https://github.com/Dozuki/CloudPrem-Infra/commit/a70605ce503a90fbcd90de84c7b3ad9974e5a8ea))
+
+
+### Bug Fixes
+
+* **physical:** stop Aurora module creating a 2nd SG in the default VPC ([#202](https://github.com/Dozuki/CloudPrem-Infra/issues/202)) ([24b6d13](https://github.com/Dozuki/CloudPrem-Infra/commit/24b6d13781fccaa9332ad34778bd8605adc9c919))
+
 ## 7.0.0
 
 The biggest release since the v6.0 EKS Auto Mode rearchitecture — adds a second cloud (Azure) and changes several defaults. Read the migration notes before upgrading.
