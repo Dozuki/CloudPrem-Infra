@@ -9,9 +9,9 @@ locals {
   environment_vars = read_terragrunt_config(find_in_parent_folders("env.hcl"))
 
   # Extract the variables we need for easy access
-  account_id   = get_env("TG_AWS_ACCT_ID", local.account_vars.locals.aws_account_id)
-  aws_region   = get_env("TG_AWS_REGION", local.region_vars.locals.aws_region)
-  aws_profile  = get_env("TG_AWS_PROFILE", local.account_vars.locals.aws_profile)
+  account_id  = get_env("TG_AWS_ACCT_ID", local.account_vars.locals.aws_account_id)
+  aws_region  = get_env("TG_AWS_REGION", local.region_vars.locals.aws_region)
+  aws_profile = get_env("TG_AWS_PROFILE", local.account_vars.locals.aws_profile)
 
   # DR region for the generated aws.dr provider. physical/dr.tf references
   # provider = aws.dr statically (even with enable_dr=false), so the provider must
@@ -59,7 +59,7 @@ remote_state {
     key            = "${get_env("TG_STATE_PREFIX", "")}${path_relative_to_include()}/terraform.tfstate"
     region         = local.aws_region
     dynamodb_table = "dozuki-terraform-lock"
-    profile = local.aws_profile
+    profile        = local.aws_profile
   }
   generate = {
     path      = "backend.tf"
@@ -77,7 +77,7 @@ remote_state {
 # Configure root level variables that all resources can inherit. This is especially helpful with multi-account configs
 # where terraform_remote_state data sources are placed directly into the modules.
 inputs = merge(
-local.account_vars.locals,
-local.region_vars.locals,
-local.environment_vars.locals,
+  local.account_vars.locals,
+  local.region_vars.locals,
+  local.environment_vars.locals,
 )
