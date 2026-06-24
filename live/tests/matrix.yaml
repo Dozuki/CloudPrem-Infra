@@ -7,6 +7,7 @@ defaults:
   region: "us-east-1"
   dr_region: "us-west-2"
   env_path: "live/standard/us-east-1"   # parent dir holding region.hcl; the config's env dir is <env_path>/<env>
+  reaper_ttl_hours: 24   # resources get deleteAfter = run start + this; the reaper purges them after, if teardown failed
 
 # Default version vars applied to EVERY ref (image_tag, chart_version, …). A ref
 # only needs an entry under `versions:` below if it DIFFERS from these. A freshly
