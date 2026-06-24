@@ -49,12 +49,15 @@ locals {
 
   # --Tags for all resources--
   // If you add a tag, it must never be blank.
-  tags = {
-    Terraform   = "true"
-    Project     = "Dozuki"
-    Identifier  = coalesce(var.customer, "Dozuki")
-    Environment = var.environment
-  }
+  tags = merge(
+    {
+      Terraform   = "true"
+      Project     = "Dozuki"
+      Identifier  = coalesce(var.customer, "Dozuki")
+      Environment = var.environment
+    },
+    var.delete_after != "" ? { deleteAfter = var.delete_after } : {},
+  )
 
   is_us_gov = data.aws_partition.current.partition == "aws-us-gov"
 
