@@ -432,4 +432,10 @@ variable "memcached_in_cluster" {
   default     = true
 }
 
+variable "delete_after" {
+  description = "Optional RFC3339 timestamp. When set, every resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys)."
+  type        = string
+  default     = ""
+}
+
 # --- END App Configuration --- #

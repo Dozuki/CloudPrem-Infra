@@ -58,6 +58,13 @@ func TestMergedInputsExcludesHarnessOnlyKeys(t *testing.T) {
 	}
 }
 
+func TestWithDeleteAfter(t *testing.T) {
+	out := withDeleteAfter(map[string]interface{}{"x": 1}, "2026-06-24T00:00:00Z")
+	if out["delete_after"] != "2026-06-24T00:00:00Z" {
+		t.Errorf("delete_after = %v", out["delete_after"])
+	}
+}
+
 func TestVersionDefaults(t *testing.T) {
 	m := &Matrix{
 		VersionDefaults: map[string]interface{}{

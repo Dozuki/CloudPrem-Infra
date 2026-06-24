@@ -20,6 +20,7 @@ type Defaults struct {
 	DRRegion          string   `yaml:"dr_region"`
 	EnvPath           string   `yaml:"env_path"`
 	CriticalWorkloads []string `yaml:"critical_workloads"`
+	ReaperTTLHours    int      `yaml:"reaper_ttl_hours"`
 }
 
 type Config struct {
