@@ -100,14 +100,22 @@ provider "helm" {
 
   # OCI chart-pull auth (helm provider 3.x: `registries` is a list attribute,
   # replacing 2.x's repeatable `registry {}` block). AWS authenticates
-  # in-Terraform via the ECR token. Azure pulls the
-  # chart from GHCR using an ambient `helm registry login` performed by the
-  # azure-config bootstrap, so no provider-level registry creds are set there.
-  registries = var.cloud == "aws" ? [{
-    url      = "oci://${var.image_repository}"
-    username = data.aws_ecr_authorization_token.chart[0].user_name
-    password = data.aws_ecr_authorization_token.chart[0].password
-  }] : []
+  # in-Terraform via the ECR token. Azure authenticates to GHCR with the
+  # ghcr_pull_* creds (same ones used for the cluster image-pull secret) — the
+  # kit does an ambient `helm registry login`, but a Spacelift worker has no
+  # such login, so the provider must carry the creds itself.
+  registries = (
+    var.cloud == "aws" ? [{
+      url      = "oci://${var.image_repository}"
+      username = data.aws_ecr_authorization_token.chart[0].user_name
+      password = data.aws_ecr_authorization_token.chart[0].password
+    }] :
+    var.ghcr_pull_token != "" ? [{
+      url      = "oci://${var.image_repository}"
+      username = var.ghcr_pull_username
+      password = var.ghcr_pull_token
+    }] : []
+  )
 }
 
 provider "vault" {
