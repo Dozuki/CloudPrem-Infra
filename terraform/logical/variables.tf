@@ -296,13 +296,13 @@ variable "azure_eso_identity_client_id" {
 }
 
 variable "azure_kubelogin_login" {
-  description = "kubelogin --login mode: azurecli on a workstation, msi on an Azure VM with managed identity."
+  description = "kubelogin --login mode: azurecli on a workstation, msi on an Azure VM, or workloadidentity for OIDC federation (Spacelift — reads AZURE_FEDERATED_TOKEN_FILE / AZURE_CLIENT_ID / AZURE_TENANT_ID from the run env)."
   type        = string
   default     = "azurecli"
 
   validation {
-    condition     = contains(["azurecli", "msi"], var.azure_kubelogin_login)
-    error_message = "azure_kubelogin_login must be azurecli or msi."
+    condition     = contains(["azurecli", "msi", "workloadidentity"], var.azure_kubelogin_login)
+    error_message = "azure_kubelogin_login must be azurecli, msi, or workloadidentity."
   }
 }
 
