@@ -426,6 +426,19 @@ variable "aurora_snapshot_identifier" {
   default     = ""
 }
 
+variable "aurora_clone_source_cluster_id" {
+  description = "When set (and db_engine='aurora'), create the Aurora cluster as a fast copy-on-write CLONE of this source ('golden') cluster instead of provisioning from scratch — for ephemeral test/dev DBs. The clone inherits the source's data, schema, master credentials, and KMS key. Mutually exclusive with aurora_snapshot_identifier. Empty = normal create."
+  type        = string
+  default     = ""
+}
+
+variable "aurora_clone_master_password" {
+  description = "Master password of the clone source cluster. Required when aurora_clone_source_cluster_id is set: a copy-on-write clone inherits the source's password, so the app's stored credentials (Secrets Manager/Vault/Helm) must be seeded with it rather than a freshly generated one."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "memcached_in_cluster" {
   description = "Run memcached in-cluster (chart memcached deployment) instead of ElastiCache. When true (default), ElastiCache is not provisioned (and is destroyed if it exists)."
   type        = bool
