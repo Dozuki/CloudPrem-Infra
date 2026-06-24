@@ -6,11 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // phaseMark records one step() marker (time + message) for the end-of-run summary.
@@ -19,8 +18,8 @@ type phaseMark struct {
 	msg string
 }
 
-// Per-run phase tracking, reset at the start of each RunUpgrade. The harness runs
-// configs sequentially, so a package-level recorder is sufficient (no concurrency).
+// Per-run phase tracking, reset at the start of each run. The harness runs configs
+// sequentially, so a package-level recorder is sufficient (no concurrency).
 var (
 	phaseMarks []phaseMark
 	runStart   time.Time
@@ -36,7 +35,7 @@ func step(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "\n>> [harness %s] %s\n", time.Now().Format("15:04:05"), msg)
 }
 
-// RunParams configures one upgrade run.
+// RunParams configures one upgrade/fresh run (the local, single-process driver).
 type RunParams struct {
 	RepoDir           string
 	Matrix            *Matrix
@@ -54,29 +53,44 @@ type RunParams struct {
 	StartTime         time.Time // wall-clock run start; used to compute deleteAfter (zero → time.Now())
 }
 
-// RunUpgrade executes apply(baseline) -> validate -> apply(target) -> validate
-// -> prove -> destroy for one config. Returns the first error; always attempts
-// destroy.
+// phaseParamsFromRun adapts a local RunParams into PhaseParams, using an S3-backed
+// manifest store on the harness state bucket so local runs share the exact code path
+// (and S3 state) the Argo phases use. RunParams.RunID already includes the per-config
+// suffix from the scenario test, so strip it back to the base id that statePrefix
+// re-appends "-<config>/" to.
+func phaseParamsFromRun(p RunParams) (PhaseParams, error) {
+	ctx := context.Background()
+	awsCfg, err := awsConfigFor(ctx, p.Profile, p.Matrix.Defaults.Region)
+	if err != nil {
+		return PhaseParams{}, err
+	}
+	bucket := stateBucket(p.AccountID, p.Matrix.Defaults.Region)
+	base := strings.TrimSuffix(p.RunID, "-"+p.ConfigName)
+	return PhaseParams{
+		RepoDir: p.RepoDir, Matrix: p.Matrix, Store: NewS3Store(s3.NewFromConfig(awsCfg), bucket),
+		ConfigName: p.ConfigName, RunID: base, AccountID: p.AccountID,
+		Profile: p.Profile, Region: p.Matrix.Defaults.Region,
+	}, nil
+}
+
+// RunUpgrade executes provision(baseline) -> upgrade(target) -> validate for one
+// config, with teardown via defer. Returns the first error; always attempts teardown.
+// It composes the same re-entrant phases the Argo Workflow drives — this is the
+// local, single-process driver of them.
 func RunUpgrade(p RunParams) (err error) {
 	cfg, err := p.Matrix.Config(p.ConfigName)
 	if err != nil {
 		return err
 	}
-	if !p.Matrix.VersionProfileExists(p.FromRef) {
-		return fmt.Errorf("no version profile for from_ref %q in matrix", p.FromRef)
-	}
-	if !p.Matrix.VersionProfileExists(p.ToRef) {
-		return fmt.Errorf("no version profile for to_ref %q in matrix", p.ToRef)
-	}
-
-	// Track phases and print a final summary banner on the way out. Registered before
-	// the worktree/teardown defers so it runs LAST — the run's outcome, what ran (with
-	// per-phase durations), and artifact location at a glance, no log-grepping needed.
 	phaseMarks = nil
 	runStart = time.Now()
 	defer func() { printSummary(p, cfg, err) }()
 
-	// Compute deleteAfter once so both worktrees of this upgrade share the same value.
+	pp, derr := phaseParamsFromRun(p)
+	if derr != nil {
+		return derr
+	}
+	ctx := context.Background()
 	startTime := p.StartTime
 	if startTime.IsZero() {
 		startTime = runStart
@@ -87,165 +101,41 @@ func RunUpgrade(p RunParams) (err error) {
 	}
 	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
 
-	ctx := context.Background()
-	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
-	region := p.Matrix.Defaults.Region
+	// Teardown always runs (defer); the signal handler runs it on SIGINT/SIGTERM too.
+	defer func() { _ = pp.Teardown(ctx, false, err != nil) }()
+	stop := installTeardownOnSignal(func() { _ = pp.Teardown(ctx, false, true) }, os.Exit)
+	defer stop()
 
-	// Refresh remote-tracking refs so branch refs (e.g. v6.1-release) are checked out
-	// at their pushed state, not a stale local branch.
-	FetchOrigin(p.RepoDir)
-
-	step("preparing worktrees: %s (baseline) + %s (upgrade)", p.FromRef, p.ToRef)
-	// Baseline worktree initializes the chart git submodule (pre-#145 refs use it).
-	fromWT, err := AddWorktree(p.RepoDir, base, p.FromRef, true)
-	if err != nil {
+	if err = pp.Provision(ctx, "upgrade", p.FromRef, p.ToRef, deleteAfter, p.Namespace); err != nil {
 		return err
 	}
-	defer fromWT.removeUnlessFailed(p.RepoDir, &err)
-	toWT, err := AddWorktree(p.RepoDir, base, p.ToRef, false)
-	if err != nil {
+	if err = pp.Upgrade(ctx); err != nil {
 		return err
 	}
-	defer toWT.removeUnlessFailed(p.RepoDir, &err)
-
-	// The concrete live/<partition>/<region>/<env> trees are gitignored (generated
-	// from live/.skel by generate_live_env.sh), so a fresh worktree doesn't contain
-	// them. Scaffold them in each worktree before writing env.hcl / applying.
-	for _, wt := range []*Worktree{fromWT, toWT} {
-		if gerr := generateLiveEnvs(wt.Dir); gerr != nil {
-			return fmt.Errorf("generate live envs for %s: %w", wt.Ref, gerr)
-		}
+	if err = pp.Validate(ctx); err != nil {
+		return err
 	}
-
-	envSub := filepath.Join(p.Matrix.Defaults.EnvPath, cfg.Env)
-	fromEnvHCL := filepath.Join(fromWT.Dir, envSub, "env.hcl")
-	toEnvHCL := filepath.Join(toWT.Dir, envSub, "env.hcl")
-
-	// terraform local.identifier = "<customer>-<env>" — the name of both the NLB
-	// (teardown clears its deletion protection) and the EKS cluster (diagnostics dump).
-	identifier := ""
-	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
-		identifier = customer + "-" + cfg.Env
-	}
-
-	tg := func(wt *Worktree) TGOptions {
-		return TGOptions{
-			WorkingDir:   filepath.Join(wt.Dir, envSub),
-			AccountID:    p.AccountID,
-			Region:       region,
-			Profile:      p.Profile,
-			BucketPrefix: "",
-			StatePrefix:  p.RunID + "-" + cfg.Name + "/",
-			NLBName:      identifier,
-		}
-	}
-
-	// Write env.hcl into BOTH worktrees up front so the deferred destroy (which
-	// runs against the applied worktree, appliedWT) always has a valid config to
-	// clean up with, even if the baseline apply fails before the target env.hcl
-	// would otherwise be written.
-	if werr := WriteEnvHCL(filepath.Join(fromWT.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.FromRef), deleteAfter)); werr != nil {
-		return werr
-	}
-	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.ToRef), deleteAfter)); werr != nil {
-		return werr
-	}
-
-	// Track the worktree whose code matches what is deployed: baseline applies
-	// first, so default fromWT; flips to toWT only after the upgrade apply succeeds.
-	// The teardown destroys against THIS worktree (not always toWT) — essential for
-	// cross-architecture upgrades (e.g. v5.3->v6.1) where target code cannot destroy
-	// baseline state.
-	var appliedWT atomic.Pointer[Worktree]
-	appliedWT.Store(fromWT)
-	// Marker so the out-of-process cleanup-orphans backstop can destroy against the
-	// matching worktree too. Written for the baseline up front (a baseline-apply
-	// interrupt still leaves a correct from_ref marker).
-	_ = writeAppliedMarker(p.RepoDir, tg(fromWT).StatePrefix, tg(fromWT).WorkingDir)
-
-	teardown, stopSig := setupTeardown(p, region, identifier, &appliedWT, tg, fromEnvHCL, toEnvHCL, &err)
-	defer teardown(false)
-	defer stopSig()
-
-	// ---- Baseline apply + validate ----
-	step("BASELINE apply: %s (terragrunt run-all apply — physical then logical)", p.FromRef)
-	if aerr := tg(fromWT).Apply(); aerr != nil {
-		return fmt.Errorf("baseline apply: %w", aerr)
-	}
-	step("baseline applied — validating: cluster health (waits for pods Ready, up to 20m), endpoints, helm release")
-	baselineRev, _, baseCaps, verr := validateStack(tg(fromWT), p, region)
-	if verr != nil {
-		return fmt.Errorf("baseline validation: %w", verr)
-	}
-	step("baseline validated ✓ (helm revision %d)", baselineRev)
-
-	// ---- Pre-upgrade: write continuity sentinel if guide buckets are present ----
-	// Read outputs from the baseline to get guide bucket names for the sentinel.
-	baseOuts, err := readOutputs(tg(fromWT), region)
-	if err != nil {
-		return fmt.Errorf("baseline readOutputs (sentinel): %w", err)
-	}
-	if baseCaps.HasGuideBuckets {
-		if serr := validation.WriteSentinel(ctx, region, baseOuts.GuideBuckets[0], p.RunID); serr != nil {
-			return fmt.Errorf("continuity sentinel write: %w", serr)
-		}
-	}
-
-	// ---- Target (upgrade) apply against the SAME state prefix + validate ----
-	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.ToRef), deleteAfter)); werr != nil {
-		return werr
-	}
-	step("UPGRADE apply: %s -> %s (same state prefix; terragrunt run-all apply)", p.FromRef, p.ToRef)
-	if aerr := tg(toWT).Apply(); aerr != nil {
-		return fmt.Errorf("upgrade apply: %w", aerr)
-	}
-	// Upgrade applied: target code now matches the deployed state.
-	appliedWT.Store(toWT)
-	_ = writeAppliedMarker(p.RepoDir, tg(toWT).StatePrefix, tg(toWT).WorkingDir)
-	step("upgrade applied — validating: cluster health (up to 20m), endpoints, helm release")
-	_, kc, upCaps, verr := validateStack(tg(toWT), p, region)
-	if verr != nil {
-		return fmt.Errorf("upgrade validation: %w", verr)
-	}
-	wantChart, _ := p.Matrix.VersionVar(p.ToRef, "chart_version").(string)
-	step("verifying upgrade proof (helm revision advanced from %d; chart %q)", baselineRev, wantChart)
-	if rerr := validation.AssertUpgraded(kc, p.Namespace, "dozuki", baselineRev, wantChart); rerr != nil {
-		return fmt.Errorf("upgrade proof: %w", rerr)
-	}
-
-	// Post-upgrade validators — gated by detected capabilities; skips are logged.
-	step("upgrade proven ✓ — capability-gated post-upgrade validators")
-	outs, err := readOutputs(tg(toWT), region)
-	if err != nil {
-		return fmt.Errorf("post-upgrade readOutputs: %w", err)
-	}
-	if verr := runInfraValidators(ctx, p, region, upCaps, outs, true); verr != nil {
-		return verr
-	}
-
 	step("ALL VALIDATIONS PASSED ✓ — %s -> %s upgrade verified; tearing down next", p.FromRef, p.ToRef)
 	return nil
 }
 
-// RunFresh executes apply -> validate -> capability-gated infra validators ->
-// destroy for a SINGLE ref (p.ToRef). No baseline, no continuity sentinel, and no
-// upgrade proof — it verifies a clean from-scratch deploy of one release (a class
-// of bug that an in-place upgrade can mask). Returns the first error; always
-// attempts destroy.
+// RunFresh executes provision -> validate for a SINGLE ref (p.ToRef): no baseline, no
+// upgrade proof, no continuity sentinel — it verifies a clean from-scratch deploy (a
+// class of bug an in-place upgrade can mask). Teardown via defer; first error wins.
 func RunFresh(p RunParams) (err error) {
 	cfg, err := p.Matrix.Config(p.ConfigName)
 	if err != nil {
 		return err
 	}
-	if !p.Matrix.VersionProfileExists(p.ToRef) {
-		return fmt.Errorf("no version profile for to_ref %q in matrix", p.ToRef)
-	}
-
 	phaseMarks = nil
 	runStart = time.Now()
 	defer func() { printSummary(p, cfg, err) }()
 
-	// Compute deleteAfter for this run.
+	pp, derr := phaseParamsFromRun(p)
+	if derr != nil {
+		return derr
+	}
+	ctx := context.Background()
 	startTime := p.StartTime
 	if startTime.IsZero() {
 		startTime = runStart
@@ -256,109 +146,18 @@ func RunFresh(p RunParams) (err error) {
 	}
 	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
 
-	ctx := context.Background()
-	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
-	region := p.Matrix.Defaults.Region
+	defer func() { _ = pp.Teardown(ctx, false, err != nil) }()
+	stop := installTeardownOnSignal(func() { _ = pp.Teardown(ctx, false, true) }, os.Exit)
+	defer stop()
 
-	FetchOrigin(p.RepoDir)
-
-	step("preparing worktree: %s (fresh deploy)", p.ToRef)
-	wt, err := AddWorktree(p.RepoDir, base, p.ToRef, true)
-	if err != nil {
+	if err = pp.Provision(ctx, "fresh", "", p.ToRef, deleteAfter, p.Namespace); err != nil {
 		return err
 	}
-	defer wt.removeUnlessFailed(p.RepoDir, &err)
-
-	if gerr := generateLiveEnvs(wt.Dir); gerr != nil {
-		return fmt.Errorf("generate live envs for %s: %w", wt.Ref, gerr)
+	if err = pp.Validate(ctx); err != nil {
+		return err
 	}
-
-	envSub := filepath.Join(p.Matrix.Defaults.EnvPath, cfg.Env)
-	envHCL := filepath.Join(wt.Dir, envSub, "env.hcl")
-
-	identifier := ""
-	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
-		identifier = customer + "-" + cfg.Env
-	}
-
-	tg := func(w *Worktree) TGOptions {
-		return TGOptions{
-			WorkingDir:   filepath.Join(w.Dir, envSub),
-			AccountID:    p.AccountID,
-			Region:       region,
-			Profile:      p.Profile,
-			BucketPrefix: "",
-			StatePrefix:  p.RunID + "-" + cfg.Name + "/",
-			NLBName:      identifier,
-		}
-	}
-
-	if werr := WriteEnvHCL(filepath.Join(wt.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.ToRef), deleteAfter)); werr != nil {
-		return werr
-	}
-
-	var appliedWT atomic.Pointer[Worktree]
-	appliedWT.Store(wt)
-	_ = writeAppliedMarker(p.RepoDir, tg(wt).StatePrefix, tg(wt).WorkingDir)
-	teardown, stopSig := setupTeardown(p, region, identifier, &appliedWT, tg, envHCL, "", &err)
-	defer teardown(false)
-	defer stopSig()
-
-	step("FRESH apply: %s (terragrunt run-all apply — physical then logical)", p.ToRef)
-	if aerr := tg(wt).Apply(); aerr != nil {
-		return fmt.Errorf("fresh apply: %w", aerr)
-	}
-	step("applied — validating: cluster health (waits for pods Ready, up to 20m), endpoints, helm release")
-	rev, _, caps, verr := validateStack(tg(wt), p, region)
-	if verr != nil {
-		return fmt.Errorf("fresh validation: %w", verr)
-	}
-	if rev < 1 {
-		return fmt.Errorf("helm release %q not deployed (revision %d)", "dozuki", rev)
-	}
-	step("fresh deploy validated ✓ (helm revision %d) — capability-gated infra validators", rev)
-
-	outs, err := readOutputs(tg(wt), region)
-	if err != nil {
-		return fmt.Errorf("fresh readOutputs: %w", err)
-	}
-	if ierr := runInfraValidators(ctx, p, region, caps, outs, false); ierr != nil {
-		return ierr
-	}
-
 	step("ALL VALIDATIONS PASSED ✓ — %s fresh deploy verified; tearing down next", p.ToRef)
 	return nil
-}
-
-// setupTeardown builds the sync.Once teardown closure (capture diagnostics, then
-// destroy against the APPLIED worktree) and installs the SIGINT/SIGTERM handler.
-// Shared by RunUpgrade and RunFresh. errp points at the caller's named return so a
-// destroy error can surface; it is read ONLY on the non-interrupted path — the
-// signal path exits via os.Exit while the main goroutine is still running, so
-// reading err there would race.
-func setupTeardown(p RunParams, region, identifier string, appliedWT *atomic.Pointer[Worktree], tg func(*Worktree) TGOptions, fromEnvHCL, toEnvHCL string, errp *error) (teardown func(bool), stop func()) {
-	var once sync.Once
-	teardown = func(interrupted bool) {
-		once.Do(func() {
-			wt := appliedWT.Load()
-			failed := interrupted
-			if !interrupted {
-				failed = *errp != nil
-			}
-			step("capturing diagnostics -> .artifacts/%s (full=%v)", p.RunID, failed)
-			captureDiagnostics(p, region, identifier, failed, tg(wt), fromEnvHCL, toEnvHCL)
-			step("TEARDOWN: destroy against %s (logical best-effort, then ALWAYS physical)", wt.Ref)
-			derr := tg(wt).Destroy()
-			if !interrupted && derr != nil && *errp == nil {
-				*errp = fmt.Errorf("destroy: %w", derr)
-			}
-			if !failed {
-				removeAppliedMarker(p.RepoDir, tg(wt).StatePrefix)
-			}
-		})
-	}
-	stop = installTeardownOnSignal(func() { teardown(true) }, os.Exit)
-	return teardown, stop
 }
 
 // runInfraValidators runs the capability-gated infra assertions shared by fresh and
