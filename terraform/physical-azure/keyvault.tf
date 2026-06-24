@@ -1,7 +1,11 @@
 # Key Vault names: 3-24 chars, globally unique.
 # "kv-" + identifier_compact (max 15) + "-" + 4-char suffix = max 23.
-# Deny-by-default firewall: in-cluster access (ESO) rides the AKS subnet's
-# Key Vault service endpoint; the deployer seeds secrets through kv_allowed_cidrs.
+# Firewall mirrors the AKS API (aks.tf): with kv_allowed_cidrs set, deny by
+# default and allowlist those CIDRs (the kit pins the operator's egress IP);
+# with it empty, the vault is public (default_action = Allow), RBAC-gated only —
+# required on the Spacelift public-worker path, where worker egress IPs aren't
+# allowlistable. In-cluster access (ESO) always rides the AKS subnet's Key Vault
+# service endpoint regardless.
 # Follow-up: private endpoint + public_network_access_enabled = false.
 resource "azurerm_key_vault" "this" {
   name                       = "kv-${local.identifier_compact}-${random_string.suffix.result}"
@@ -14,7 +18,7 @@ resource "azurerm_key_vault" "this" {
   soft_delete_retention_days = 30
 
   network_acls {
-    default_action             = "Deny"
+    default_action             = length(var.kv_allowed_cidrs) > 0 ? "Deny" : "Allow"
     bypass                     = "AzureServices"
     virtual_network_subnet_ids = [azurerm_subnet.aks.id]
     ip_rules                   = var.kv_allowed_cidrs
