@@ -2,6 +2,20 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.2.0...v7.3.0) (2026-06-24)
+
+
+### Features
+
+* delete_after tag + harness stamping for ResourceReaper ([#215](https://github.com/Dozuki/CloudPrem-Infra/issues/215)) ([0a7dc49](https://github.com/Dozuki/CloudPrem-Infra/commit/0a7dc496a76c9657d9c35d7063aba9af44936f26))
+
+
+### Bug Fixes
+
+* **azure:** public Key Vault when no CIDR allowlist + workloadidentity kubelogin ([#220](https://github.com/Dozuki/CloudPrem-Infra/issues/220)) ([9ab0477](https://github.com/Dozuki/CloudPrem-Infra/commit/9ab0477d285744fb7aef3931137e40f4779d8530))
+* **live:** keep backend bools as bools (s3 encrypt regression) ([#218](https://github.com/Dozuki/CloudPrem-Infra/issues/218)) ([1c5fe9e](https://github.com/Dozuki/CloudPrem-Infra/commit/1c5fe9e0d1106fa0ac01c2cfd06689dd3bdc1faa))
+* **logical:** ignore webhook-injected annotations on ratelimit redis ([#219](https://github.com/Dozuki/CloudPrem-Infra/issues/219)) ([9bea432](https://github.com/Dozuki/CloudPrem-Infra/commit/9bea43297ccbbec46a16957b854a14c2314b8dd8))
+
 ## [7.2.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.1.2...v7.2.0) (2026-06-24)
 
 
