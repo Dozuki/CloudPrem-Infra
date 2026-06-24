@@ -44,9 +44,9 @@ check "dr_region_valid" {
 # Aurora DR is the deferred Global Database "Plan B". S3 content replicates either way.
 check "dr_rds_replicable" {
   assert {
-    condition = !var.enable_dr || local.dr_rds_enabled
+    condition = !var.enable_dr || local.dr_rds_enabled || local.aurora_dr_enabled
     error_message = local.db_is_aurora ? (
-      "DR is enabled and S3 content replicates cross-region, but the Aurora database does NOT: cross-region Aurora DR (Global Database) is not yet implemented (the deferred \"Plan B\"). Only db_engine=\"rds\" currently supports automated-backup cross-region replication. The Aurora cluster is still encrypted with a customer-managed key when rds_adopt_dr_cmk is set."
+      "DR is enabled and S3 content replicates cross-region. The Aurora database replicates only when the global-database secondary is configured — ensure enable_dr is true and the admin layer injected a same-partition dr_region. (On GovCloud, confirm the engine version supports Global Database.)"
       ) : (
       "DR is enabled and S3 content replicates cross-region, but the RDS database does NOT: it is encrypted with an AWS-managed KMS key, so its automated backups are ineligible for cross-region replication. Adopt a customer-managed key — rds_adopt_dr_cmk = true (the default) for a fresh DB, or pin rds_kms_key_id to an existing CMK (a key change replaces the DB). See the DR cold-recovery runbook."
     )

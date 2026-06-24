@@ -379,6 +379,12 @@ variable "dr_region" {
   default     = ""
 }
 
+variable "dr_vpc_cidr" {
+  description = "CIDR for the minimal DR-region VPC that hosts the headless Aurora global-database secondary (private subnets only; no NAT/IGW). Must not overlap the primary VPC. Only used when the Aurora DR secondary is created (aurora engine + enable_dr)."
+  type        = string
+  default     = "10.99.0.0/20"
+}
+
 variable "rds_adopt_dr_cmk" {
   description = "When true (the default DR-ready posture), the database is created with a Terraform-managed customer KMS key so it is encrypted under a CMK — the prerequisite for cross-region DR (RDS automated-backup replication; Aurora is CMK-encrypted but its cross-region replication is the deferred Global-Database Plan B). EXISTING stacks created with the AWS-managed key MUST pin this to false (or pin rds_kms_key_id to their already-adopted CMK): a KMS-key change replaces the database. The db-replace-guard PLAN policy blocks any such unintended replacement (it requires the allow-db-replace stack label), so this default is fail-safe."
   type        = bool
