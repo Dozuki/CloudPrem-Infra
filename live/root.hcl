@@ -83,27 +83,40 @@ generate "provider" {
 # Configure Terragrunt to store tfstate in S3 (AWS) or an Azure Storage account (Azure).
 # Conditional spreads (cond ? {...} : {}) keep this one map — a plain ternary of the
 # two different-keyed configs would fail HCL type-checking.
+#
+# String- and bool-valued keys are split into SEPARATE spreads on purpose: a
+# conditional map literal unifies to one element type, so mixing strings and
+# bools in a single branch coerces the bools to strings ("true"). Terraform's
+# backend schema then rejects them — s3 'encrypt' and azurerm 'use_oidc' /
+# 'use_azuread_auth' must be real bools. merge() recombines the type-pure
+# spreads into one object preserving each key's type.
 remote_state {
   backend = local.cloud == "azure" ? "azurerm" : "s3"
   config = merge(
+    # Azure (azurerm) — strings, then bools.
     local.cloud == "azure" ? {
       resource_group_name  = local.az_state_rg
       storage_account_name = local.az_state_sa
       container_name       = "tfstate"
       subscription_id      = local.az_subscription_id
       tenant_id            = local.az_tenant_id
-      use_oidc             = true
+    } : {},
+    local.cloud == "azure" ? {
+      use_oidc = true
       # Entra (AAD) data-plane auth — the state account has shared-key access
       # disabled (azure-bootstrap), so blob ops use the deployer SP's Storage
       # Blob Data Contributor role rather than an account key.
       use_azuread_auth = true
     } : {},
+    # AWS (s3) — strings, then bool.
     local.cloud == "azure" ? {} : {
-      encrypt        = true
       bucket         = "${get_env("TG_BUCKET_PREFIX", "")}dozuki-terraform-state-${local.aws_region}-${local.account_id}"
       region         = local.aws_region
       dynamodb_table = "dozuki-terraform-lock"
       profile        = local.aws_profile
+    },
+    local.cloud == "azure" ? {} : {
+      encrypt = true
     },
     { key = "${get_env("TG_STATE_PREFIX", "")}${path_relative_to_include()}/terraform.tfstate" },
   )
