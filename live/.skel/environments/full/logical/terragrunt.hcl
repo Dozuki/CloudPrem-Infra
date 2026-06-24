@@ -7,9 +7,13 @@ terraform {
 
 # Include all settings from the root terragrunt.hcl file
 include "root" {
-  path = find_in_parent_folders()
+  path = find_in_parent_folders("root.hcl")
 }
 
-include "common" {
-  path = find_in_parent_folders("common.hcl")
+include "logical" {
+  path = find_in_parent_folders("logical.hcl")
+}
+
+include "helmignores" {
+  path = find_in_parent_folders("chart-helmignores.hcl")
 }

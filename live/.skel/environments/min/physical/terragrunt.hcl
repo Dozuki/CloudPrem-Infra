@@ -6,8 +6,8 @@ terraform {
 }
 
 # Include all settings from the root terragrunt.hcl file
-include {
-  path = find_in_parent_folders()
+include "root" {
+  path = find_in_parent_folders("root.hcl")
 }
 retryable_errors = [
   "(?s).*error waiting for Route in Route Table.*waiting for state to become 'ready'.*"
