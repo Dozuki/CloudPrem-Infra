@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.2.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.1.2...v7.2.0) (2026-06-24)
+
+
+### Features
+
+* **physical:** Aurora Global Database cross-region DR (phase 2) ([#210](https://github.com/Dozuki/CloudPrem-Infra/issues/210)) ([2b3ae48](https://github.com/Dozuki/CloudPrem-Infra/commit/2b3ae4849ef88d6f2dadd1210bfdaf7c8617c9ab))
+
 ## [7.1.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.1.1...v7.1.2) (2026-06-23)
 
 
