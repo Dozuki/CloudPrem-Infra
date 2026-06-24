@@ -478,6 +478,11 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
+  tags = merge(
+    {},
+    var.delete_after != "" ? { deleteAfter = var.delete_after } : {},
+  )
+
   # Headroom for the first node's Karpenter cold-start on a brand-new cluster.
   timeouts {
     create = "40m"

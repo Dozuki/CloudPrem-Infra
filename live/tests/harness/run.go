@@ -45,12 +45,13 @@ type RunParams struct {
 	ToRef             string // resolved concrete ref
 	AccountID         string
 	Profile           string
-	RunID             string   // unique per run; namespaces state
-	Namespace         string   // app namespace, e.g. "dozuki"
-	DRRegion          string   // DR region (e.g. "us-west-2"); set from matrix defaults
-	RestoreDrill      bool     // run the RDS restore drill
-	EnableDR          bool     // DR validators enabled (enable_dr flag)
-	CriticalWorkloads []string // critical workload name globs; empty → DefaultCriticalWorkloads()
+	RunID             string    // unique per run; namespaces state
+	Namespace         string    // app namespace, e.g. "dozuki"
+	DRRegion          string    // DR region (e.g. "us-west-2"); set from matrix defaults
+	RestoreDrill      bool      // run the RDS restore drill
+	EnableDR          bool      // DR validators enabled (enable_dr flag)
+	CriticalWorkloads []string  // critical workload name globs; empty → DefaultCriticalWorkloads()
+	StartTime         time.Time // wall-clock run start; used to compute deleteAfter (zero → time.Now())
 }
 
 // RunUpgrade executes apply(baseline) -> validate -> apply(target) -> validate
@@ -74,6 +75,17 @@ func RunUpgrade(p RunParams) (err error) {
 	phaseMarks = nil
 	runStart = time.Now()
 	defer func() { printSummary(p, cfg, err) }()
+
+	// Compute deleteAfter once so both worktrees of this upgrade share the same value.
+	startTime := p.StartTime
+	if startTime.IsZero() {
+		startTime = runStart
+	}
+	ttl := p.Matrix.Defaults.ReaperTTLHours
+	if ttl == 0 {
+		ttl = 24
+	}
+	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
 
 	ctx := context.Background()
 	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
@@ -132,10 +144,10 @@ func RunUpgrade(p RunParams) (err error) {
 	// runs against the applied worktree, appliedWT) always has a valid config to
 	// clean up with, even if the baseline apply fails before the target env.hcl
 	// would otherwise be written.
-	if werr := WriteEnvHCL(filepath.Join(fromWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.FromRef)); werr != nil {
+	if werr := WriteEnvHCL(filepath.Join(fromWT.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.FromRef), deleteAfter)); werr != nil {
 		return werr
 	}
-	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.ToRef)); werr != nil {
+	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.ToRef), deleteAfter)); werr != nil {
 		return werr
 	}
 
@@ -180,7 +192,7 @@ func RunUpgrade(p RunParams) (err error) {
 	}
 
 	// ---- Target (upgrade) apply against the SAME state prefix + validate ----
-	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), p.Matrix.MergedInputs(cfg, p.ToRef)); werr != nil {
+	if werr := WriteEnvHCL(filepath.Join(toWT.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.ToRef), deleteAfter)); werr != nil {
 		return werr
 	}
 	step("UPGRADE apply: %s -> %s (same state prefix; terragrunt run-all apply)", p.FromRef, p.ToRef)
@@ -233,6 +245,17 @@ func RunFresh(p RunParams) (err error) {
 	runStart = time.Now()
 	defer func() { printSummary(p, cfg, err) }()
 
+	// Compute deleteAfter for this run.
+	startTime := p.StartTime
+	if startTime.IsZero() {
+		startTime = runStart
+	}
+	ttl := p.Matrix.Defaults.ReaperTTLHours
+	if ttl == 0 {
+		ttl = 24
+	}
+	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
+
 	ctx := context.Background()
 	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
 	region := p.Matrix.Defaults.Region
@@ -270,7 +293,7 @@ func RunFresh(p RunParams) (err error) {
 		}
 	}
 
-	if werr := WriteEnvHCL(filepath.Join(wt.Dir, envSub), p.Matrix.MergedInputs(cfg, p.ToRef)); werr != nil {
+	if werr := WriteEnvHCL(filepath.Join(wt.Dir, envSub), withDeleteAfter(p.Matrix.MergedInputs(cfg, p.ToRef), deleteAfter)); werr != nil {
 		return werr
 	}
 
@@ -561,6 +584,15 @@ func printSummary(p RunParams, cfg Config, err error) {
 	line(" Artifacts: live/tests/.artifacts/%s/  (run log + diagnostics; bundled to S3 by run.sh)", p.RunID)
 	line("======================================================================")
 	fmt.Fprint(os.Stderr, b.String())
+}
+
+// withDeleteAfter sets in["delete_after"] = ts and returns the same map, so it
+// can be used inline at WriteEnvHCL call sites. Every worktree written by a run
+// carries this timestamp, allowing the ResourceReaper to purge orphans left behind
+// by a failed teardown.
+func withDeleteAfter(in map[string]interface{}, ts string) map[string]interface{} {
+	in["delete_after"] = ts
+	return in
 }
 
 // truncate collapses s to its first line and caps it at n bytes for the summary table.
