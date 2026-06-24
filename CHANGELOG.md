@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.0...v7.3.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **azure:** helm provider authenticates to GHCR for the OCI chart pull ([#221](https://github.com/Dozuki/CloudPrem-Infra/issues/221)) ([9b0d3da](https://github.com/Dozuki/CloudPrem-Infra/commit/9b0d3da39dea838ba7b69ab598edff7fcd01daaf))
+
 ## [7.3.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.2.0...v7.3.0) (2026-06-24)
 
 
