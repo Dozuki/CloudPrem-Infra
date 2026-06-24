@@ -40,16 +40,15 @@ locals {
   # helper, which auto-wires the app to the same host when seaweedfs.enabled.
   seaweedfs_s3_endpoint = "http://dozuki-seaweedfs-filer.${local.k8s_namespace_name}.svc.cluster.local:8333"
 
-  # The buckets the app uses. The subchart's native createBuckets hook is driven
-  # from this same list so the created buckets always match objectStorage.*Bucket.
-  seaweedfs_buckets = [
-    for b in [
-      var.s3_images_bucket,
-      var.s3_objects_bucket,
-      var.s3_documents_bucket,
-      var.s3_pdfs_bucket,
-    ] : b if b != ""
-  ]
+  # SeaweedFS bucket names are STATIC — the chart-defined defaults created by the
+  # subchart's native createBuckets hook (chart/values.yaml seaweedfs.filer.s3.createBuckets).
+  # These are deliberately NOT the per-install var.s3_*_bucket values; var.s3_*_bucket
+  # applies to real S3 (AWS) ONLY. The app's objectStorage.*Bucket (set in kubernetes.tf)
+  # must use these same names on Azure so the app reads the buckets SeaweedFS created.
+  seaweedfs_images_bucket    = "images"
+  seaweedfs_pdfs_bucket      = "pdfs"
+  seaweedfs_documents_bucket = "docs"
+  seaweedfs_objects_bucket   = "objects"
 
   # Values for the chart's bundled seaweedfs subchart. Merged into helm_release.app's
   # azure values in kubernetes.tf — and that merge only runs for var.cloud == "azure",
@@ -102,11 +101,10 @@ locals {
       }
       filer = {
         data = { storageClass = "managed-csi" }
-        s3 = {
-          # Drive the subchart's native bucket-creation hook from the CPI bucket
-          # vars so created buckets always match objectStorage.*Bucket.
-          createBuckets = [for b in local.seaweedfs_buckets : { name = b }]
-        }
+        # NOTE: filer.s3.createBuckets is intentionally NOT overridden — the chart's
+        # static default bucket set (images/pdfs/docs/objects) is created by the
+        # subchart's native hook. The app's objectStorage.*Bucket (kubernetes.tf) is
+        # pinned to these same names on Azure so the two always agree.
         # Point the filer's MySQL runtime config at the Azure app DB. Only the
         # hostname/database differ from the chart defaults (mysql/seaweedfs_filer);
         # username/password are injected by the subchart's own db-secret (patched by

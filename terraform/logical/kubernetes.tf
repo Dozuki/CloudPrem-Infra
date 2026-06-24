@@ -595,11 +595,16 @@ resource "helm_release" "app" {
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
 
     # --- Object Storage ---
+    # var.s3_*_bucket are the customer's REAL S3 bucket names and apply to AWS ONLY.
+    # On Azure object storage is the chart's SeaweedFS subchart, whose buckets are
+    # STATIC/chart-defined (images/pdfs/docs/objects, created by the subchart's
+    # createBuckets hook — see local.seaweedfs_*_bucket in seaweedfs.tf). The app
+    # must read those same static names so it hits the buckets SeaweedFS created.
     { name = "objectStorage.kmsKey", value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : "" },
-    { name = "objectStorage.imagesBucket", value = var.s3_images_bucket },
-    { name = "objectStorage.pdfsBucket", value = var.s3_pdfs_bucket },
-    { name = "objectStorage.documentsBucket", value = var.s3_documents_bucket },
-    { name = "objectStorage.objectsBucket", value = var.s3_objects_bucket },
+    { name = "objectStorage.imagesBucket", value = var.cloud == "azure" ? local.seaweedfs_images_bucket : var.s3_images_bucket },
+    { name = "objectStorage.pdfsBucket", value = var.cloud == "azure" ? local.seaweedfs_pdfs_bucket : var.s3_pdfs_bucket },
+    { name = "objectStorage.documentsBucket", value = var.cloud == "azure" ? local.seaweedfs_documents_bucket : var.s3_documents_bucket },
+    { name = "objectStorage.objectsBucket", value = var.cloud == "azure" ? local.seaweedfs_objects_bucket : var.s3_objects_bucket },
 
     # --- Memcached ---
     # Memcached host — see local.memcached_host (FQDN in-cluster). NOTE: this chart value
