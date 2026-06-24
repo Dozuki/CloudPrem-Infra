@@ -187,6 +187,16 @@ resource "kubernetes_deployment_v1" "ratelimit_redis" {
       }
     }
   }
+
+  # The amazon-cloudwatch-observability / OpenTelemetry operator mutating webhook
+  # auto-injects instrumentation annotations onto this pod template at admission
+  # (cloudwatch.aws.amazon.com/auto-annotate-*, instrumentation.opentelemetry.io/
+  # inject-*). Terraform sets no template annotations of its own, so ignore the
+  # whole map — otherwise every apply plans to strip them and the webhook re-adds
+  # them on the next rollout, an endless no-op diff (and a needless restart).
+  lifecycle {
+    ignore_changes = [spec[0].template[0].metadata[0].annotations]
+  }
 }
 
 # ---------------------------------------------------------------------------
