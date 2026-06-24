@@ -501,7 +501,7 @@ locals {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, helm_release.seaweedfs, kubernetes_job_v1.seaweedfs_buckets, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -520,12 +520,22 @@ resource "helm_release" "app" {
   wait    = true
   timeout = 900
 
-  # Azure-only values: GHCR pull secret for MPC images, and expose the gateway
-  # via an Azure public LoadBalancer (no NLB on Azure). An azure-dns-label-name
-  # annotation gives the LB a stable <label>.<region>.cloudapp.azure.com FQDN.
+  # Azure-only values: GHCR pull secret for MPC images, expose the gateway via an
+  # Azure public LoadBalancer (no NLB on Azure; an azure-dns-label-name annotation
+  # gives the LB a stable <label>.<region>.cloudapp.azure.com FQDN), and enable the
+  # chart's bundled SeaweedFS subchart for object storage (Azure has no S3). This is
+  # the same model on-prem uses (seaweedfs.enabled=true); see local.seaweedfs_values.
   # On AWS this is an empty list of values files — a no-op, no overrides applied.
   values = var.cloud == "azure" ? [yamlencode(merge({
-    global = { imagePullSecrets = [{ name = "ghcr-pull" }] }
+    global = {
+      imagePullSecrets = [{ name = "ghcr-pull" }]
+      # SeaweedFS subchart replication: keep a second copy of every volume so a
+      # single PVC loss does not lose data (matches the old standalone posture).
+      seaweedfs = {
+        enableReplication    = true
+        replicationPlacement = "001"
+      }
+    }
     gateway = {
       service = {
         type        = "LoadBalancer"
@@ -533,7 +543,7 @@ resource "helm_release" "app" {
       }
       dnsTarget = local.lb_fqdn
     }
-    }, var.azure_acme_server != "" ? {
+    }, local.seaweedfs_values, var.azure_acme_server != "" ? {
     cert_manager = { acmeServer = var.azure_acme_server }
   } : {}))] : []
 
@@ -585,11 +595,16 @@ resource "helm_release" "app" {
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
 
     # --- Object Storage ---
+    # var.s3_*_bucket are the customer's REAL S3 bucket names and apply to AWS ONLY.
+    # On Azure object storage is the chart's SeaweedFS subchart, whose buckets are
+    # STATIC/chart-defined (images/pdfs/docs/objects, created by the subchart's
+    # createBuckets hook — see local.seaweedfs_*_bucket in seaweedfs.tf). The app
+    # must read those same static names so it hits the buckets SeaweedFS created.
     { name = "objectStorage.kmsKey", value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : "" },
-    { name = "objectStorage.imagesBucket", value = var.s3_images_bucket },
-    { name = "objectStorage.pdfsBucket", value = var.s3_pdfs_bucket },
-    { name = "objectStorage.documentsBucket", value = var.s3_documents_bucket },
-    { name = "objectStorage.objectsBucket", value = var.s3_objects_bucket },
+    { name = "objectStorage.imagesBucket", value = var.cloud == "azure" ? local.seaweedfs_images_bucket : var.s3_images_bucket },
+    { name = "objectStorage.pdfsBucket", value = var.cloud == "azure" ? local.seaweedfs_pdfs_bucket : var.s3_pdfs_bucket },
+    { name = "objectStorage.documentsBucket", value = var.cloud == "azure" ? local.seaweedfs_documents_bucket : var.s3_documents_bucket },
+    { name = "objectStorage.objectsBucket", value = var.cloud == "azure" ? local.seaweedfs_objects_bucket : var.s3_objects_bucket },
 
     # --- Memcached ---
     # Memcached host — see local.memcached_host (FQDN in-cluster). NOTE: this chart value
@@ -612,7 +627,16 @@ resource "helm_release" "app" {
 
     # --- In-cluster services (Azure) ---
     { name = "memcached.enabled", value = local.memcached_in_cluster ? "true" : "false" },
-    { name = "objectStorage.endpoint", value = var.cloud == "azure" ? "https://s3.${var.dns_domain_name}" : "" },
+    # SeaweedFS S3 endpoint. When seaweedfs.enabled (azure), the chart's
+    # dozuki.objectStorageEndpoint helper auto-points the app at the in-cluster
+    # filer S3 service (dozuki-seaweedfs-filer:8333); we set the same value here
+    # explicitly so it is correct even where the raw objectStorage.endpoint is read.
+    { name = "objectStorage.endpoint", value = var.cloud == "azure" ? local.seaweedfs_s3_endpoint : "" },
+    # publicHost exposes SeaweedFS S3 externally (presigned reads/writes) via a
+    # dedicated gateway HTTPS listener + HTTPRoute. The HTTPRoute backend
+    # (objectStorage.publicBackend.service) is overridden in local.seaweedfs_values
+    # to the embedded filer S3 service, since the chart default ("seaweedfs-s3")
+    # only matches a standalone S3 deployment, which we do not run.
     { name = "objectStorage.publicHost", value = var.cloud == "azure" ? "s3.${var.dns_domain_name}" : "" },
 
     # --- Grafana ---
