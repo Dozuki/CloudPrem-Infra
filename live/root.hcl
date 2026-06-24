@@ -93,6 +93,10 @@ remote_state {
       subscription_id      = local.az_subscription_id
       tenant_id            = local.az_tenant_id
       use_oidc             = true
+      # Entra (AAD) data-plane auth — the state account has shared-key access
+      # disabled (azure-bootstrap), so blob ops use the deployer SP's Storage
+      # Blob Data Contributor role rather than an account key.
+      use_azuread_auth = true
     } : {},
     local.cloud == "azure" ? {} : {
       encrypt        = true
