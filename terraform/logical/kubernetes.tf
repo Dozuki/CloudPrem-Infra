@@ -520,6 +520,16 @@ resource "helm_release" "app" {
   wait    = true
   timeout = 900
 
+  # A failed install (e.g. a pod that never goes Ready before `timeout`) leaves the
+  # release in a "failed" state that Terraform does NOT record, so the next apply plans
+  # a fresh install and Helm rejects it with "cannot re-use a name that is still in use"
+  # — requiring a manual `helm uninstall` between every retry. `replace` makes the
+  # reinstall reuse the name (`helm install --replace` bypasses that check) so retries
+  # self-heal. Only ever exercised on the install path (a healthy release in state takes
+  # the upgrade path, where replace is a no-op), and unlike `atomic` it does NOT purge the
+  # failed release, so the broken pods stay inspectable for post-mortems.
+  replace = true
+
   # Azure-only values: GHCR pull secret for MPC images, expose the gateway via an
   # Azure public LoadBalancer (no NLB on Azure; an azure-dns-label-name annotation
   # gives the LB a stable <label>.<region>.cloudapp.azure.com FQDN), and enable the
