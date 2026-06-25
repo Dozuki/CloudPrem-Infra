@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.3...v7.3.4) (2026-06-25)
+
+
+### Bug Fixes
+
+* **logical:** replace=true on helm_release.app so failed installs don't wedge retries ([#228](https://github.com/Dozuki/CloudPrem-Infra/issues/228)) ([69abd59](https://github.com/Dozuki/CloudPrem-Infra/commit/69abd59a52f706d3019b4bd60c99019f6cb8ba2f))
+
 ## [7.3.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.2...v7.3.3) (2026-06-25)
 
 
