@@ -39,7 +39,7 @@ resource "aws_vpc" "dr_aurora" {
 
 # One private /24 per AZ (up to 3), carved from dr_vpc_cidr.
 resource "aws_subnet" "dr_aurora" {
-  for_each          = local.aurora_dr_enabled ? toset(slice(data.aws_availability_zones.dr[0].names, 0, min(3, length(data.aws_availability_zones.dr[0].names)))) : []
+  for_each          = local.aurora_dr_enabled ? toset(slice(data.aws_availability_zones.dr[0].names, 0, min(3, length(data.aws_availability_zones.dr[0].names)))) : toset([])
   provider          = aws.dr
   vpc_id            = aws_vpc.dr_aurora[0].id
   availability_zone = each.value
