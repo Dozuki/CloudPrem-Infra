@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.5](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.4...v7.3.5) (2026-06-25)
+
+
+### Bug Fixes
+
+* **logical:** disable PROXY protocol on the Azure gateway (clientIP.mode=none) ([#231](https://github.com/Dozuki/CloudPrem-Infra/issues/231)) ([beabb3c](https://github.com/Dozuki/CloudPrem-Infra/commit/beabb3cb508cbe6a53b72048cb39bac2267d76fe))
+
 ## [7.3.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.3...v7.3.4) (2026-06-25)
 
 
