@@ -249,6 +249,35 @@ else
   echo ">> az-env-gap guard DISABLED (NO_AZ_SHIM=1) — 'az' uses the ambient PATH." >&2
 fi
 
+# Optional PHASE mode: drive a SINGLE re-entrant phase via the harness CLI instead of
+# the whole go-test scenario — this is exactly how Argo Workflows invokes each phase.
+# State is shared across phases via the run manifest in S3 (<run-id>-<config>/
+# harness-manifest.json, at the same prefix as TF state), so reuse the SAME RUN_ID for
+# every phase of one run. Unset PHASE => unchanged full go-test path below (parity).
+#   PHASE=provision SCENARIO_FLAG="--scenario upgrade" FROM_REF=v6.0.3 TO_REF=v7.1.0 \
+#     CONFIGS=min_default ./run.sh
+#   PHASE=upgrade  CONFIGS=min_default RUN_ID=<same-id> ./run.sh
+#   PHASE=validate CONFIGS=min_default RUN_ID=<same-id> ./run.sh
+#   PHASE=teardown CONFIGS=min_default RUN_ID=<same-id> ./run.sh   # +KEEP_ON_FAILURE=1
+if [ -n "${PHASE:-}" ]; then
+  REPO_ROOT="$(git -C "$PWD" rev-parse --show-toplevel)"
+  # Manifest lives in the TF state bucket (live/root.hcl remote_state naming).
+  STATE_BUCKET="${STATE_BUCKET:-${TG_BUCKET_PREFIX:-}dozuki-terraform-state-${REGION:-us-east-1}-${DDVTEST_ACCOUNT_ID}}"
+  echo ">> PHASE mode: $PHASE (run-id=$RUN_ID config=${CONFIGS:-min_default} bucket=$STATE_BUCKET)" >&2
+  BIN="$PWD/.bin/harness"
+  mkdir -p "$PWD/.bin"
+  go build -o "$BIN" ./cmd/harness
+  _keep=""; [ "${KEEP_ON_FAILURE:-0}" = 1 ] && _keep="--keep-on-failure"
+  "$BIN" "$PHASE" \
+    --run-id "$RUN_ID" --config "${CONFIGS:-min_default}" \
+    --repo-dir "$REPO_ROOT" \
+    --account-id "$DDVTEST_ACCOUNT_ID" --profile "$AWS_PROFILE" \
+    --region "${REGION:-us-east-1}" --state-bucket "$STATE_BUCKET" \
+    --matrix "$PWD/matrix.yaml" \
+    ${SCENARIO_FLAG:-} ${FROM_REF:+--from-ref "$FROM_REF"} ${TO_REF:+--to-ref "$TO_REF"} ${_keep}
+  exit $?
+fi
+
 # Scenario selection: upgrade | fresh | both (default both). 'both' runs TestUpgrade
 # then TestFresh in one go-test process; a failure in EITHER makes go test exit non-zero.
 SCENARIO="${SCENARIO:-both}"
