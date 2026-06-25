@@ -54,6 +54,14 @@ module "aurora" {
       { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
       { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
       { name = "binlog_checksum", value = "NONE", apply_method = "pending-reboot" },
+      # MySQL 8.4 (Aurora 8.4) defaults restrict_fk_on_non_standard_key=ON, rejecting a
+      # foreign key whose referenced column lacks a unique/PK index. The dozuki schema
+      # migrations add such a FK (major_release_approval_processid -> approval_processes)
+      # that passed on 8.0; on 8.4 it fails ("Missing unique key for constraint ...") and
+      # aborts db-initialize, leaving the schema half-built (login then 500s on a missing
+      # password_requirements_revisions table). Restore the 8.0 behavior. Dynamic var, so
+      # immediate (no reboot).
+      { name = "restrict_fk_on_non_standard_key", value = "0", apply_method = "immediate" },
     ]
   }
 
