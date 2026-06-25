@@ -73,7 +73,7 @@ resource "aws_sns_topic_subscription" "email_subscription" {
 
   topic_arn = module.sns.topic_arn
   protocol  = "email"
-  endpoint  = var.alarm_email # Replace with your email address
+  endpoint  = var.alarm_email
 }
 
 module "node_cpu_alarm" {
@@ -341,7 +341,7 @@ module "rds_read_latency_alarm" {
   alarm_name          = "${local.identifier}-rds-read-latency"
   alarm_description   = "Read latency for RDS instance ${local.identifier}"
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  threshold           = 0.1 # Change as per your requirements, measured in seconds
+  threshold           = 0.1 # seconds
   evaluation_periods  = "2"
   period              = "300"
 
@@ -366,7 +366,7 @@ module "rds_write_latency_alarm" {
   alarm_name          = "${local.identifier}-rds-write-latency"
   alarm_description   = "Write latency for RDS instance ${local.identifier}"
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  threshold           = 0.1 # Change as per your requirements, measured in seconds
+  threshold           = 0.1 # seconds
   evaluation_periods  = "2"
   period              = "300"
 

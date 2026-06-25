@@ -1,26 +1,8 @@
 #!/usr/bin/env bash
-# AWS Data Migration Service (DMS) Stop Script
+# Stop a DMS replication task and wait until it is fully stopped (used before a
+# terraform destroy of the task).
 #
-# Purpose:
-# This script facilitates the stopping of a specified AWS DMS replication task.
-# It ensures the task transitions to a stopped state before subsequent operations.
-#
-# Main Functionality:
-# - Accepts three input arguments: The DMS task ARN, AWS region, and AWS profile.
-# - Fetches the current status of the specified DMS replication task.
-# - If the task is running, it issues a stop command and then waits for the task to be fully stopped.
-# - Logs messages to inform about the status and progress of the operation.
-#
-# Usage:
-# ./dms-stop.sh <DMS_TASK_ARN> <AWS_REGION> <AWS_PROFILE>
-#
-# Required Arguments:
-# DMS_TASK_ARN:  The ARN of the DMS replication task to be managed.
-# AWS_REGION:    The AWS region where the DMS replication task is located.
-# AWS_PROFILE:   The AWS CLI profile to be used.
-#
-# Note:
-# Ensure the AWS CLI is properly configured and you have permissions for DMS operations with the provided profile.
+# Usage: ./dms-stop.sh <DMS_TASK_ARN> <AWS_REGION> <AWS_PROFILE>
 
 TRIGGER="$1"
 AWS_REGION="$2"
