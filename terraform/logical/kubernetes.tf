@@ -595,6 +595,15 @@ resource "helm_release" "app" {
     { name = "ingress.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].hostname", value = coalesce(var.ingress_hostname, var.dns_domain_name) },
     { name = "gateway.hosts[0].tlsSecretName", value = "tls-secret" },
+    # Client-IP detection. The chart defaults to proxyProtocol (real client IP via
+    # PROXY protocol v2 from an AWS NLB). Azure's L4 Standard LB cannot prepend a
+    # PROXY preamble, so Envoy RESETS every gateway connection — which makes the
+    # cert-manager HTTP-01 challenge on :80 unreachable (LE can't fetch the token →
+    # the cert never issues → the :443 listener never programs → no public HTTPS).
+    # "none" renders no ClientTrafficPolicy; the Envoy service's
+    # externalTrafficPolicy=Local still preserves the real client source IP to Envoy
+    # (so GeoIP/WAF/logging keep working). AWS keeps proxyProtocol (its NLB sends it).
+    { name = "gateway.clientIP.mode", value = var.cloud == "azure" ? "none" : "proxyProtocol" },
     # Manual TLS. Supplied certs: chart renders the typed tls-secret (externallyManaged
     # false). Generated self-signed: Terraform renders it (externallyManaged true).
     { name = "tls.enabled", value = local.tls_manual ? "true" : "false" },
