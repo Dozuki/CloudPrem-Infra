@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.2...v7.3.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* **physical:** dr_aurora subnet for_each empty case must be a set, not a tuple ([#226](https://github.com/Dozuki/CloudPrem-Infra/issues/226)) ([34016de](https://github.com/Dozuki/CloudPrem-Infra/commit/34016de6da690e64ecf27630dc9595c1f605280e))
+
 ## [7.3.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.1...v7.3.2) (2026-06-25)
 
 
