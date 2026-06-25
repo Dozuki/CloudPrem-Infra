@@ -549,7 +549,7 @@ resource "helm_release" "app" {
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
-  set = concat([
+  set = [
     # --- General ---
     { name = "hostname", value = var.dns_domain_name },
     { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && !local.tls_manual && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
@@ -659,14 +659,20 @@ resource "helm_release" "app" {
     { name = "connectivity.connectors-worker.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
     { name = "connectivity.connectors-worker.redis.host", value = "dozuki-redis-master" },
     { name = "connectivity.connectors-worker.redis.tls", value = "false" },
-    ], var.cloud == "azure" ? [
-    # --- Operator (azure: pull from GHCR mirror, not ECR) ---
-    # The operator subchart reads its OWN imagePullSecrets (it does not honor
-    # global.imagePullSecrets), so the GHCR pull secret must be set explicitly.
+
+    # --- Operator ---
+    # Redirect the operator subchart to the env's registry. Its default repo is the
+    # commercial ECR (069…), which GovCloud and Azure can't reach; ${var.image_repository}
+    # already points at the right registry per env, so this applies on EVERY cloud/partition
+    # with no gate (commercial AWS resolves back to its own ECR). The tag is intentionally
+    # left to the subchart default (its appVersion) — exactly the operator image the haul
+    # bundles/mirrors — so the deployed tag can never drift from what was published. The
+    # subchart reads its OWN imagePullSecrets (it does not honor global.imagePullSecrets);
+    # ghcr-pull is required for Azure GHCR and is harmless on AWS (the node's ECR creds
+    # serve the ECR registry, so a non-matching secret is ignored).
     { name = "dozuki-operator.image.repository", value = "${var.image_repository}/dozuki-operator" },
-    { name = "dozuki-operator.image.tag", value = var.operator_image_tag },
     { name = "dozuki-operator.imagePullSecrets[0].name", value = "ghcr-pull" },
-  ] : [])
+  ]
 
   set_sensitive = [
     { name = "db.password", value = local.db_master_password },
