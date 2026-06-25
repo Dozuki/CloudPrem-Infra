@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.1...v7.3.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **logical:** apply dozuki-operator image redirect on all clouds, not just Azure ([#224](https://github.com/Dozuki/CloudPrem-Infra/issues/224)) ([cbab2f6](https://github.com/Dozuki/CloudPrem-Infra/commit/cbab2f6fe1feb40f35828b6fe61afd0dce3188b4))
+
 ## [7.3.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.0...v7.3.1) (2026-06-24)
 
 
