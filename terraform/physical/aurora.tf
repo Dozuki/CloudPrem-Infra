@@ -28,6 +28,12 @@ module "aurora" {
   engine_version  = var.aurora_engine_version
   master_username = local.db_username
 
+  # Permit the in-place major-version upgrade path (Aurora MySQL v3/8.0 to v4/8.4):
+  # AWS rejects a ModifyDBCluster engine_version bump across majors without it. Only
+  # permits the upgrade; the engine_version change is what triggers one. Matches the
+  # rds and bi paths, which already set this.
+  allow_major_version_upgrade = true
+
   manage_master_user_password = false
   master_password_wo          = random_password.aurora[0].result
   master_password_wo_version  = 1
