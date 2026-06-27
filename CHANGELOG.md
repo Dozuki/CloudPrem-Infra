@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.10](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.9...v7.3.10) (2026-06-27)
+
+
+### Bug Fixes
+
+* **physical:** allow major version upgrades on the aurora cluster ([682503b](https://github.com/Dozuki/CloudPrem-Infra/commit/682503b56b6eeca03ef7bffbc8b08ff676ee242f))
+
 ## [7.3.9](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.8...v7.3.9) (2026-06-27)
 
 
