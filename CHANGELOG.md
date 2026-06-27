@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.6](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.5...v7.3.6) (2026-06-27)
+
+
+### Bug Fixes
+
+* **logical:** bump default chart_version 0.4.1 -&gt; 0.5.0 (gateway compression + proxy autoscaling) ([c608129](https://github.com/Dozuki/CloudPrem-Infra/commit/c6081295a83a6f2e9545eb9c28915f73c3eb76ec))
+* **physical:** derive aurora parameter-group family from engine version ([1b60c12](https://github.com/Dozuki/CloudPrem-Infra/commit/1b60c12b1a89baa3f6ef88c31cc97ae6273a8de3))
+
 ## [7.3.5](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.4...v7.3.5) (2026-06-25)
 
 
