@@ -1,5 +1,14 @@
-# Aurora MySQL 8.4 Serverless v2 cluster (active when var.db_engine == "aurora").
+# Aurora MySQL Serverless v2 cluster (active when var.db_engine == "aurora").
 # Produces the same connection facts as the RDS path via local.db (db.tf).
+
+locals {
+  # Parameter-group family must match the engine's major.minor (aurora-mysql8.0
+  # vs aurora-mysql8.4), or RestoreDBClusterFromSnapshot rejects the create with
+  # "DBParameterGroupFamily ... cannot be used for this instance". Derive it from
+  # aurora_engine_version ("8.0.mysql_aurora.3.12.0" -> "8.0") instead of pinning
+  # 8.4, so an 8.0 snapshot restore (e.g. gov MPC migrations) gets the right family.
+  aurora_param_family = "aurora-mysql${split(".mysql_aurora", var.aurora_engine_version)[0]}"
+}
 
 resource "random_password" "aurora" {
   count   = local.db_is_aurora ? 1 : 0
@@ -38,7 +47,7 @@ module "aurora" {
 
   # Use primary_database_sg (in the app VPC, with the MySQL-from-EKS ingress) as the
   # cluster's only security group. The rds-aurora module otherwise creates its own SG
-  # and, with no vpc_id passed, places it in the account's DEFAULT VPC — which fails
+  # and, with no vpc_id passed, places it in the account's DEFAULT VPC, which fails
   # CreateDBCluster ("DB instance and EC2 security group are in different VPCs"). The
   # RDS path doesn't create its own SG, so only the aurora path needs this.
   create_security_group = false
@@ -49,7 +58,7 @@ module "aurora" {
   snapshot_identifier = var.aurora_snapshot_identifier != "" ? var.aurora_snapshot_identifier : null
 
   cluster_parameter_group = {
-    family = "aurora-mysql8.4"
+    family = local.aurora_param_family
     parameters = [
       { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
       { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
@@ -58,7 +67,7 @@ module "aurora" {
   }
 
   db_parameter_group = {
-    family = "aurora-mysql8.4"
+    family = local.aurora_param_family
     parameters = [
       { name = "group_concat_max_len", value = "33554432", apply_method = "pending-reboot" },
     ]
