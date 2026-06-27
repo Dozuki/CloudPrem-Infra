@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.7](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.6...v7.3.7) (2026-06-27)
+
+
+### Bug Fixes
+
+* **logical:** EG CRD rate-limit requests int32 -&gt; int64 (K8s 1.34 rejects uint32-max on int32) ([5ba676e](https://github.com/Dozuki/CloudPrem-Infra/commit/5ba676efd865ab6c9259f2cbb9b1564aa022beb9))
+
 ## [7.3.6](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.5...v7.3.6) (2026-06-27)
 
 
