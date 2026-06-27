@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.3.9](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.8...v7.3.9) (2026-06-27)
+
+
+### Bug Fixes
+
+* **logical:** bump default chart_version 0.5.1 -&gt; 0.5.2 (per-IP rate limit 500 -&gt; 5000) ([d54a7be](https://github.com/Dozuki/CloudPrem-Infra/commit/d54a7be0a640e37c92e27480cb38c09abc82d616))
+
 ## [7.3.8](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.7...v7.3.8) (2026-06-27)
 
 
