@@ -658,10 +658,8 @@ resource "helm_release" "app" {
     # only matches a standalone S3 deployment, which we do not run.
     { name = "objectStorage.publicHost", value = var.cloud == "azure" ? "s3.${var.dns_domain_name}" : "" },
 
-    # --- Grafana ---
-    { name = "grafana.enabled", value = var.enable_bi ? "true" : "false" },
-    { name = "grafana.security.admin_user", value = local.grafana_admin_username },
-    { name = "grafana.datasource.host", value = local.db_bi_host },
+    # --- Dashboards (shared Grafana) ---
+    { name = "dashboards.enabled", value = var.enable_dashboards ? "true" : "false" },
 
     # --- Connectivity (sunset planned) ---
     { name = "connectivity.webhook-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
@@ -691,6 +689,13 @@ resource "helm_release" "app" {
     # serve the ECR registry, so a non-matching secret is ignored).
     { name = "dozuki-operator.image.repository", value = "${var.image_repository}/dozuki-operator" },
     { name = "dozuki-operator.imagePullSecrets[0].name", value = "ghcr-pull" },
+    # GRAFANA_URL: tells the operator to run shared-Grafana org provisioning. The
+    # dashboards subchart forces nameOverride=dashboards-grafana and this chart's
+    # release name is always "dozuki" (helm_release.app.name), so the in-cluster
+    # Service is always dozuki-dashboards-grafana when dashboards.enabled. Left
+    # empty when disabled — a nonempty URL would point the operator at a Grafana
+    # that was never installed.
+    { name = "dozuki-operator.grafana.url", value = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" },
   ]
 
   set_sensitive = [
@@ -700,8 +705,11 @@ resource "helm_release" "app" {
     { name = "objectStorage.credentials.accessKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_access_key[0].result, "") : "" },
     { name = "objectStorage.credentials.secretKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_secret_key[0].result, "") : "" },
     { name = "googleTranslate.token", value = var.google_translate_api_token },
-    { name = "grafana.security.admin_password", value = local.grafana_admin_password },
-    { name = "grafana.datasource.password", value = local.db_bi_password },
+    # Signs the inline JWKS the Envoy JWT SecurityPolicy validates against (see
+    # dozuki chart templates/gateway-dashboards.yaml) — must be the SAME value
+    # seeded into the "grafana" Vault/Key Vault secret's "secret" property, since
+    # ESO syncs that same value into grafana.json for the app to mint tokens with.
+    { name = "dashboards.jwtSecret", value = local.dashboards_jwt_secret },
   ]
 
   lifecycle {

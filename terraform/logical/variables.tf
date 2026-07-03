@@ -49,6 +49,12 @@ variable "enable_bi" {
   default     = false
 }
 
+variable "enable_dashboards" {
+  description = "Turns on the dozuki chart's shared Grafana dashboards subchart (dashboards.enabled) and the dozuki-operator's per-subsite Grafana-org provisioning (dozuki-operator.grafana.url). Generates and seeds the \"grafana\" Vault/Key Vault secret (jwt signing secret + admin credentials) this layer's ESO ExternalSecrets read - no manual secret seeding required. Requires chart_version >= 1.0.0 and the bundled dozuki-operator >= 4.0.0 (older pins silently no-op on dozuki-operator.grafana.url)."
+  type        = bool
+  default     = false
+}
+
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string

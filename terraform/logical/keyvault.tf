@@ -3,7 +3,7 @@
 # db credentials are seeded by the physical layer as "database-credentials".
 
 locals {
-  azure_kv_secrets = var.cloud == "azure" ? {
+  azure_kv_secrets = var.cloud == "azure" ? merge({
     cache = jsonencode({
       host = "dozuki-memcached"
     })
@@ -27,7 +27,15 @@ locals {
       password        = var.rustici_password
       managedPassword = var.rustici_managed_password
     })
-  } : {}
+    }, var.enable_dashboards ? {
+    # Keys match the chart's ESO remoteRef properties (see vault.tf's
+    # vault_kv_secret_v2.grafana for the AWS twin of this same entry).
+    grafana = jsonencode({
+      secret        = local.dashboards_jwt_secret
+      adminUser     = local.dashboards_admin_username
+      adminPassword = local.dashboards_admin_password
+    })
+  } : {}) : {}
 }
 
 resource "azurerm_key_vault_secret" "app" {
