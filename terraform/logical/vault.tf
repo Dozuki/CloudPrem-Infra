@@ -215,67 +215,38 @@ resource "vault_kv_secret_v2" "smtp" {
   })
 }
 
-# --- System-wide secrets (read from Vault, pre-seeded by vault-infrastructure) --- #
+# --- Dashboards (shared Grafana) --- #
 
-data "vault_kv_secret_v2" "global_sentry" {
-  count = var.cloud == "aws" ? 1 : 0
-  mount = "secret"
-  name  = "dozuki/global/sentry"
+resource "random_password" "dashboards_jwt" {
+  count = var.enable_dashboards ? 1 : 0
+
+  length  = 40
+  special = false
 }
 
-data "vault_kv_secret_v2" "global_frontegg" {
-  count = var.cloud == "aws" ? 1 : 0
-  mount = "secret"
-  name  = "dozuki/global/frontegg"
+resource "random_password" "dashboards_admin" {
+  count = var.enable_dashboards ? 1 : 0
+
+  length  = 20
+  special = false
 }
 
-data "vault_kv_secret_v2" "global_surveyjs" {
-  count = var.cloud == "aws" ? 1 : 0
-  mount = "secret"
-  name  = "dozuki/global/surveyjs"
-}
+# Keys match the chart's ESO remoteRef properties exactly (dozuki chart
+# templates/vault/external-secret.yaml + templates/azure/external-secret.yaml):
+# "secret" signs/verifies the Envoy JWT SecurityPolicy and is baked into
+# grafana.json for the app to mint tokens with; adminUser/adminPassword seed the
+# dozuki-grafana-admin Secret the bundled Grafana subchart logs in with.
+resource "vault_kv_secret_v2" "grafana" {
+  count               = var.cloud == "aws" && var.enable_dashboards ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/grafana"
+  delete_all_versions = !var.protect_resources
 
-data "vault_kv_secret_v2" "global_rustici" {
-  count = var.cloud == "aws" ? 1 : 0
-  mount = "secret"
-  name  = "dozuki/global/rustici"
-}
-
-data "vault_kv_secret_v2" "global_ops" {
-  count = var.cloud == "aws" ? 1 : 0
-  mount = "secret"
-  name  = "dozuki/global/ops"
-}
-
-data "vault_kv_secret_v2" "global_slack" {
-  count = var.cloud == "aws" ? 1 : 0
-  mount = "secret"
-  name  = "dozuki/global/slack"
-}
-
-# --- Vault-sourced config values (replace devops/app/config SM when vault enabled) --- #
-
-locals {
-  vault_config_values = {
-    sentry_dsn                = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_sentry[0].data["dsn"] : var.sentry_dsn }
-    frontegg_client_id        = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_frontegg[0].data["clientId"] : var.frontegg_client_id }
-    frontegg_api_token        = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_frontegg[0].data["apiToken"] : var.frontegg_api_token }
-    frontegg_docker_username  = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_frontegg[0].data["dockerUsername"] : "" }
-    frontegg_docker_password  = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_frontegg[0].data["dockerPassword"] : "" }
-    frontegg_auth_pubkey      = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_frontegg[0].data["authPubkey"] : "" }
-    surveyjs_license_key      = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_surveyjs[0].data["licenseKey"] : var.surveyjs_license_key }
-    rustici_password          = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_rustici[0].data["password"] : var.rustici_password }
-    rustici_managed_password  = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_rustici[0].data["managedPassword"] : var.rustici_managed_password }
-    ops_basic_auth            = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_ops[0].data["basicAuth"] : "" }
-    infra_auth_password       = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_ops[0].data["infraAuthPassword"] : "" }
-    slack_webhook_url         = { value = var.cloud == "aws" ? data.vault_kv_secret_v2.global_slack[0].data["webhookUrl"] : "" }
-    grafana_smtp_enabled      = { value = var.cloud == "aws" ? try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpEnabled"], "false") : "false" }
-    grafana_smtp_host         = { value = var.cloud == "aws" ? try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpHost"], "") : "" }
-    grafana_smtp_user         = { value = var.cloud == "aws" ? try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpUser"], "") : "" }
-    grafana_smtp_password     = { value = var.cloud == "aws" ? try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpPassword"], "") : "" }
-    grafana_smtp_from_address = { value = var.cloud == "aws" ? try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpFromAddress"], "") : "" }
-    grafana_smtp_starttls     = { value = var.cloud == "aws" ? try(data.vault_kv_secret_v2.global_ops[0].data["grafanaSmtpStarttls"], "OpportunisticStartTLS") : "OpportunisticStartTLS" }
-  }
+  data_json = jsonencode({
+    secret        = local.dashboards_jwt_secret
+    adminUser     = local.dashboards_admin_username
+    adminPassword = local.dashboards_admin_password
+  })
 }
 
 # --- State moves: resources gained `count` when the azure cloud gate was added --- #
