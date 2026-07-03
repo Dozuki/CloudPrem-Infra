@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.4.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.10...v7.4.0) (2026-07-03)
+
+
+### Features
+
+* **logical:** opt-in shared-grafana dashboards wiring, drop dead grafana sets ([#238](https://github.com/Dozuki/CloudPrem-Infra/issues/238)) ([302d8de](https://github.com/Dozuki/CloudPrem-Infra/commit/302d8dece6563e329b89c966159291f9d7860472))
+
 ## [7.3.10](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.9...v7.3.10) (2026-06-27)
 
 
