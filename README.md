@@ -14,7 +14,7 @@ application/Kubernetes layer, and lets each layer use the toolchain it needs.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  logical   (terraform/logical)          Terraform 1.5.x       │
+│  logical   (terraform/logical)          OpenTofu 1.11+        │
 │  Kubernetes + Helm: cert-manager, metrics-server, External    │
 │  Secrets Operator, Envoy Gateway, and the Dozuki app chart.   │
 │  Seeds per-stack secrets into Vault.                          │
@@ -40,10 +40,10 @@ auth) and seeds each stack's secrets.
 ```
 terraform/
   physical/          AWS cloud infrastructure         (OpenTofu >= 1.11.1)
-  logical/           Kubernetes / Helm / app          (Terraform >= 1.5.0)
+  logical/           Kubernetes / Helm / app          (OpenTofu >= 1.11.1, requires provider for_each)
   physical-azure/    Azure cloud infrastructure
 live/                Terragrunt deployment configs
-  terragrunt.hcl     Root: remote state, provider generation, input merge
+  root.hcl           Root: remote state, provider generation, input merge
   common.hcl         Shared inputs + logical→physical dependency wiring
   standard/          AWS commercial partition  (account.hcl → region → env)
   gov/               AWS GovCloud partition
@@ -57,7 +57,7 @@ DEPLOYMENT.md        Operator runbook for standing up / upgrading a stack
 ## The `live/` deployment model
 
 Terragrunt configuration is layered so values flow down a hierarchy and merge into
-each leaf module. The root [`live/terragrunt.hcl`](./live/terragrunt.hcl) generates
+each leaf module. The root [`live/root.hcl`](./live/root.hcl) generates
 the S3 remote-state backend (with DynamoDB locking) and the provider block — the
 primary `aws` provider plus the `aws.dns` (cross-account DNS) and `aws.dr`
 (disaster-recovery region) aliases.
@@ -90,20 +90,23 @@ via [`live/generate_live_env.sh`](./live/generate_live_env.sh).
 
 For the full step-by-step deploy and upgrade procedure, see **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
 
-## Toolchain: the OpenTofu / Terraform split
+## Toolchain: OpenTofu
 
-The two layers deliberately run on different binaries:
+Both layers run on OpenTofu:
 
 - **`physical` → OpenTofu (`>= 1.11.1`).** It relies on write-only attributes
-  (e.g. `master_password_wo`) and the Aurora module, which require a newer core than
-  the logical layer is pinned to. Drive Terragrunt against it with
-  `TERRAGRUNT_TFPATH=tofu`.
-- **`logical` → Terraform (`1.5.7`).** Held at 1.5.7 for compatibility with the
-  production runner (Spacelift, MPL-licensed Terraform). Uses the Helm / Kubernetes
-  providers.
+  (e.g. `master_password_wo`) and the Aurora module, which need a newer core than
+  older Terraform provides. Drive Terragrunt against it with `TERRAGRUNT_TFPATH=tofu`.
+- **`logical` → OpenTofu (`>= 1.11.1`).** Uses a provider `for_each` (OpenTofu-only,
+  requires >= 1.9) to gate the `azurerm` provider on `var.cloud`, so it never
+  configures (and never authenticates) on an AWS deploy. Also uses the Helm
+  (`~> 3.0`) and Kubernetes providers.
 
-CI enforces this per-layer (see [`.github/workflows/terraform.yml`](./.github/workflows/terraform.yml)),
-and the test harness selects the right binary per layer automatically.
+CI runs both layers on OpenTofu (see
+[`.github/workflows/terraform.yml`](./.github/workflows/terraform.yml)), and the
+test harness selects the right binary per layer automatically. Only the separate
+`infra-live` repo's Vault stacks still run Terraform 1.5.7 — nothing in this repo
+does.
 
 > **Production deployments** are executed by **Spacelift**, configured in the
 > separate `infra-live` repository (which wires each stack to the correct tool and
@@ -113,7 +116,7 @@ and the test harness selects the right binary per layer automatically.
 ## Configuration
 
 Feature flags are set per-environment in `env.hcl` and flow through the root
-`terragrunt.hcl` `inputs` merge. The most common operator-facing toggles:
+`root.hcl` `inputs` merge. The most common operator-facing toggles:
 
 | Variable                       | Layer    | Default | Purpose                                                        |
 |--------------------------------|----------|---------|----------------------------------------------------------------|
@@ -128,6 +131,7 @@ Feature flags are set per-environment in `env.hcl` and flow through the root
 | `image_tag` / `nextjs_tag`     | logical  | —       | Dozuki application image tags                                   |
 | `chart_version`                | logical  | —       | Dozuki Helm chart version (pulled from the OCI/ECR registry)   |
 | `image_repository`             | logical  | —       | Registry the app chart and images are pulled from              |
+| `enable_dashboards`            | logical  | `false` | Turns on the dozuki chart's shared Grafana dashboards subchart and the operator's per-subsite Grafana-org provisioning; seeds the Grafana Vault/Key Vault secret. Requires `chart_version >= 1.0.0` and the bundled operator `>= 4.0.0` |
 
 ## Testing
 
@@ -144,17 +148,20 @@ take. Scenarios are defined in `matrix.yaml` (`min_default`, `bi_ha`, `full`).
 
 ## CI/CD
 
-| Workflow              | Trigger                     | Does                                                       |
-|-----------------------|-----------------------------|-----------------------------------------------------------|
-| `terraform.yml`       | push / PR                   | `fmt` + `tflint` per layer (OpenTofu for physical, Terraform for logical) |
-| `release.yml`         | push of a `v*` tag          | Publishes the AWS GitHub release from the curated notes    |
-| `release-azure.yml`   | Azure release tag           | Publishes the Azure deploy-kit release                     |
+| Workflow              | Trigger                          | Does                                                       |
+|-----------------------|-----------------------------------|-----------------------------------------------------------|
+| `terraform.yml`       | push / PR                        | `fmt` + `tflint` per layer (OpenTofu for both physical and logical) |
+| `release-please.yml`  | push to `master`                 | Maintains a release PR from conventional commits; merging it cuts the version tag + GitHub release |
+| `release-azure.yml`   | Azure release tag                | Publishes the Azure deploy-kit release                    |
+| `upgrade-tests.yml`   | manual dispatch / PR label       | Runs the `live/tests` upgrade harness (see Testing above)  |
 
 ## Releasing
 
-Releases are cut by tagging `vX.Y` (which fires `release.yml`). The working model is
-freeze a release branch, land any further fixes on `master`, re-sync them into the
-release branch, re-validate with the harness, then tag.
+[release-please](https://github.com/googleapis/release-please) tracks conventional
+commits on `master` and keeps an open release PR with the computed version bump and
+changelog. Merging that PR cuts the `vX.Y.Z` tag and GitHub release; a `feat:` bumps
+minor, a `fix:` bumps patch, and a `feat!:` / `fix!:` or `BREAKING CHANGE:` footer
+bumps major.
 
 ## Contributing
 
@@ -167,5 +174,5 @@ pre-commit run -a       # run against all files
 ```
 
 Make changes in `terraform/` (modules) and exercise them through a `min` environment
-under `live/` per [DEPLOYMENT.md](./DEPLOYMENT.md). Keep the `physical` layer
-OpenTofu-compatible and the `logical` layer Terraform 1.5.7-compatible.
+under `live/` per [DEPLOYMENT.md](./DEPLOYMENT.md). Both layers run on OpenTofu, so
+keep changes compatible with `>= 1.11.1`.
