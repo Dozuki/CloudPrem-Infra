@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.5.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.4.0...v7.5.0) (2026-07-06)
+
+
+### Features
+
+* **logical:** default chart_version to 1.7.1 ([#240](https://github.com/Dozuki/CloudPrem-Infra/issues/240)) ([e2398a9](https://github.com/Dozuki/CloudPrem-Infra/commit/e2398a9e33764b3dc11541645943b58b3934c52a))
+
 ## [7.4.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.10...v7.4.0) (2026-07-03)
 
 
