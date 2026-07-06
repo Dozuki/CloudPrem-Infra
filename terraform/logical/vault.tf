@@ -249,6 +249,49 @@ resource "vault_kv_secret_v2" "grafana" {
   })
 }
 
+# --- Ops ingress (public Grafana/Alertmanager basic auth) --- #
+
+# Unconditional (unlike random_password.dashboards_admin above): the chart's ops
+# ingress is always on, so the credential is seeded on every stack, both clouds.
+resource "random_password" "ops_admin" {
+  length  = 24
+  special = false
+}
+
+# Envoy Gateway's basic_auth filter only accepts the htpasswd {SHA} format (base64 of
+# the raw SHA1 digest) — bcrypt/apr1 aren't supported (envoyproxy/envoy#36278), and
+# OpenTofu/Terraform only ship base64sha256/base64sha512, no base64sha1. So this
+# shells out to openssl for the one hash Envoy actually reads. Needs openssl + jq on
+# the plan/apply runner.
+data "external" "ops_htpasswd_hash" {
+  program = ["bash", "-c", <<-EOT
+    set -euo pipefail
+    password=$(jq -r .password)
+    hash=$(printf '%s' "$password" | openssl dgst -sha1 -binary | openssl base64 -A)
+    jq -n --arg hash "$hash" '{hash: $hash}'
+  EOT
+  ]
+
+  query = {
+    password = random_password.ops_admin.result
+  }
+}
+
+# Keys match the chart's ExternalSecret (ops-basic-auth -> ".htpasswd"): the chart
+# only reads "htpasswd"; username/password are here so ops can look up the plaintext.
+resource "vault_kv_secret_v2" "ops_auth" {
+  count               = var.cloud == "aws" ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/ops-auth"
+  delete_all_versions = !var.protect_resources
+
+  data_json = jsonencode({
+    htpasswd = local.ops_htpasswd
+    username = local.ops_user
+    password = local.ops_admin_password
+  })
+}
+
 # --- State moves: resources gained `count` when the azure cloud gate was added --- #
 
 moved {

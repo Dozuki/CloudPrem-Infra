@@ -27,6 +27,14 @@ locals {
       password        = var.rustici_password
       managedPassword = var.rustici_managed_password
     })
+    # Ops ingress (public Grafana/Alertmanager basic auth): always on, unlike the
+    # grafana entry below which is gated by enable_dashboards. AWS twin in vault.tf's
+    # vault_kv_secret_v2.ops_auth.
+    ops-auth = jsonencode({
+      htpasswd = local.ops_htpasswd
+      username = local.ops_user
+      password = local.ops_admin_password
+    })
     }, var.enable_dashboards ? {
     # Keys match the chart's ESO remoteRef properties (see vault.tf's
     # vault_kv_secret_v2.grafana for the AWS twin of this same entry).
