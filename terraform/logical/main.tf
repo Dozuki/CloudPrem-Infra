@@ -33,7 +33,8 @@ terraform {
     # external — only for data.external.ops_htpasswd_hash (vault.tf): OpenTofu/
     # Terraform have no base64sha1() (only base64sha256/512), and Envoy Gateway's
     # basic_auth filter only accepts that SHA1 htpasswd format, so we shell out to
-    # openssl. First-party HashiCorp provider, same trust tier as null/local/tls.
+    # busybox sha1sum/base64 (the Spacelift runner ships no openssl). First-party
+    # HashiCorp provider, same trust tier as null/local/tls.
     external = {
       source  = "hashicorp/external"
       version = "~> 2.0"

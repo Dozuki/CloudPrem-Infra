@@ -259,15 +259,18 @@ resource "random_password" "ops_admin" {
 }
 
 # Envoy Gateway's basic_auth filter only accepts the htpasswd {SHA} format (base64 of
-# the raw SHA1 digest) — bcrypt/apr1 aren't supported (envoyproxy/envoy#36278), and
-# OpenTofu/Terraform only ship base64sha256/base64sha512, no base64sha1. So this
-# shells out to openssl for the one hash Envoy actually reads. Needs openssl + jq on
-# the plan/apply runner.
+# the raw SHA1 digest); bcrypt/apr1 aren't supported (envoyproxy/envoy#36278), and
+# OpenTofu/Terraform only ship base64sha256/base64sha512, no base64sha1. The Spacelift
+# public runner (ghcr.io/spacelift-io/runner-terraform, Alpine) has jq but NO openssl,
+# so the digest is built from busybox-safe tools only: sha1sum for the hex digest,
+# printf/sed to expand the hex to raw bytes, base64 to encode. Verified byte-identical
+# to `openssl dgst -sha1 -binary | openssl base64 -A` inside that runner image.
 data "external" "ops_htpasswd_hash" {
   program = ["bash", "-c", <<-EOT
     set -euo pipefail
     password=$(jq -r .password)
-    hash=$(printf '%s' "$password" | openssl dgst -sha1 -binary | openssl base64 -A)
+    hex=$(printf '%s' "$password" | sha1sum | cut -d' ' -f1)
+    hash=$(printf "$(printf '%s' "$hex" | sed 's/../\\x&/g')" | base64)
     jq -n --arg hash "$hash" '{hash: $hash}'
   EOT
   ]
