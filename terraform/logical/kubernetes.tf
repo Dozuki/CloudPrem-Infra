@@ -559,7 +559,7 @@ resource "helm_release" "app" {
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
-  set = [
+  set = concat([
     # --- General ---
     { name = "hostname", value = var.dns_domain_name },
     { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && !local.tls_manual && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
@@ -696,7 +696,17 @@ resource "helm_release" "app" {
     # empty when disabled — a nonempty URL would point the operator at a Grafana
     # that was never installed.
     { name = "dozuki-operator.grafana.url", value = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" },
-  ]
+
+    # --- web-nextjs ---
+    # SERVICE_JWT_PRIVATE_KEY via ESO; the Vault/KV secret must pre-exist (see
+    # variables.tf). The key itself never passes through Terraform here.
+    { name = "deployments.webNextjs.serviceJwt.enabled", value = var.nextjs_service_jwt_enabled ? "true" : "false" },
+    ],
+    # Per-env web-nextjs env vars (service API URLs etc.); merge into the chart's
+    # deployments.webNextjs.env map. Env var names are underscore-only, so no
+    # helm set-path escaping is needed.
+    [for name, value in var.nextjs_extra_env : { name = "deployments.webNextjs.env.${name}", value = value }],
+  )
 
   set_sensitive = [
     { name = "db.password", value = local.db_master_password },

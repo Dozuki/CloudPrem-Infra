@@ -88,6 +88,18 @@ variable "image_repository" {
   type        = string
 }
 
+variable "nextjs_extra_env" {
+  description = "Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs."
+  type        = map(string)
+  default     = {}
+}
+
+variable "nextjs_service_jwt_enabled" {
+  description = "Inject SERVICE_JWT_PRIVATE_KEY into web-nextjs from Vault secret/dozuki/global/nextjs (Azure: KV secret 'nextjs') via ESO. That secret must exist in this env's backend first, or the dozuki-infra-credentials ExternalSecret stops syncing. Chart >= 1.8.0."
+  type        = bool
+  default     = false
+}
+
 variable "smtp_enabled" {
   description = "Whether to enable SMTP email sending."
   type        = bool
