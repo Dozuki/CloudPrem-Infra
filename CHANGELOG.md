@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.6.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.5.0...v7.6.0) (2026-07-08)
+
+
+### Features
+
+* **logical:** per-env web-nextjs env vars and service JWT toggle ([b751875](https://github.com/Dozuki/CloudPrem-Infra/commit/b751875b86a2e62919b4c13512371b0b003ce995))
+* **logical:** seed ops-auth htpasswd for the chart's public ops ingress ([#242](https://github.com/Dozuki/CloudPrem-Infra/issues/242)) ([d58f05e](https://github.com/Dozuki/CloudPrem-Infra/commit/d58f05edb0570481514001799b7deea87ad17786))
+
 ## [7.5.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.4.0...v7.5.0) (2026-07-06)
 
 
