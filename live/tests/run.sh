@@ -301,8 +301,4 @@ mkdir -p "$PWD/.bin"
 go test -c -o "$TEST_BIN" ./scenarios/
 if ( cd scenarios && "$TEST_BIN" -test.run "$_run" -test.v -test.timeout 180m ); then TEST_RC=0; else TEST_RC=$?; fi
 
-if [ "$TEST_RC" -ne 0 ] && [ "${RUN_POSTMORTEM:-0}" = 1 ]; then
-  ./postmortem.sh "$RUN_ID" "$RUN_LOG" || true
-fi
-
 exit "$TEST_RC"
