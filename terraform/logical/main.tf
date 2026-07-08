@@ -30,6 +30,15 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.0"
     }
+    # external — only for data.external.ops_htpasswd_hash (vault.tf): OpenTofu/
+    # Terraform have no base64sha1() (only base64sha256/512), and Envoy Gateway's
+    # basic_auth filter only accepts that SHA1 htpasswd format, so we shell out to
+    # busybox sha1sum/base64 (the Spacelift runner ships no openssl). First-party
+    # HashiCorp provider, same trust tier as null/local/tls.
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.0"
+    }
     local = {
       source  = "hashicorp/local"
       version = "~> 2.0"
@@ -216,6 +225,16 @@ locals {
   dashboards_jwt_secret     = var.enable_dashboards ? random_password.dashboards_jwt[0].result : ""
   dashboards_admin_username = "admin"
   dashboards_admin_password = var.enable_dashboards ? random_password.dashboards_admin[0].result : ""
+
+  # Ops ingress (public Grafana/Alertmanager behind HTTP basic auth): always on, so
+  # unlike dashboards_* above it isn't gated by enable_dashboards/enable_bi. Seeded
+  # into Vault/Key Vault as "ops-auth" (vault.tf / keyvault.tf) for the chart's
+  # ExternalSecret to read.
+  ops_user           = "ops"
+  ops_admin_password = random_password.ops_admin.result
+  # {SHA}<base64 sha1 digest>, matching `htpasswd -s` — see data.external.ops_htpasswd_hash
+  # in vault.tf for why this needs to shell out instead of a native function.
+  ops_htpasswd = "${local.ops_user}:{SHA}${data.external.ops_htpasswd_hash.result.hash}"
 }
 
 check "vault_address_configured" {
