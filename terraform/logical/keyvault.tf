@@ -35,7 +35,7 @@ locals {
       username = local.ops_user
       password = local.ops_admin_password
     })
-    # web-nextjs service JWT signing key. Chart >= 2.0.0 reads this path
+    # web-nextjs service JWT signing key. Chart >= 1.9.0 reads this path
     # unconditionally, so the entry must exist even while the value is empty.
     # AWS twin: secret/dozuki/global/nextjs, synced from 1Password by
     # infra-tf's vault-config.

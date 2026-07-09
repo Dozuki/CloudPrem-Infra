@@ -95,7 +95,7 @@ variable "nextjs_extra_env" {
 }
 
 variable "nextjs_service_jwt_private_key" {
-  description = "web-nextjs service JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'nextjs' secret, which chart >= 2.0.0 reads unconditionally."
+  description = "web-nextjs service JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'nextjs' secret, which chart >= 1.9.0 reads unconditionally."
   type        = string
   sensitive   = true
   default     = ""
