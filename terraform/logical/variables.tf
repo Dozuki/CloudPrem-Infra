@@ -94,10 +94,11 @@ variable "nextjs_extra_env" {
   default     = {}
 }
 
-variable "nextjs_service_jwt_enabled" {
-  description = "Inject SERVICE_JWT_PRIVATE_KEY into web-nextjs from Vault secret/dozuki/global/nextjs (Azure: KV secret 'nextjs') via ESO. That secret must exist in this env's backend first, or the dozuki-infra-credentials ExternalSecret stops syncing. Chart >= 1.8.0."
-  type        = bool
-  default     = false
+variable "nextjs_service_jwt_private_key" {
+  description = "web-nextjs service JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'nextjs' secret, which chart >= 2.0.0 reads unconditionally."
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "smtp_enabled" {

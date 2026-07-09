@@ -35,6 +35,13 @@ locals {
       username = local.ops_user
       password = local.ops_admin_password
     })
+    # web-nextjs service JWT signing key. Chart >= 2.0.0 reads this path
+    # unconditionally, so the entry must exist even while the value is empty.
+    # AWS twin: secret/dozuki/global/nextjs, synced from 1Password by
+    # infra-tf's vault-config.
+    nextjs = jsonencode({
+      privateKey = var.nextjs_service_jwt_private_key
+    })
     }, var.enable_dashboards ? {
     # Keys match the chart's ESO remoteRef properties (see vault.tf's
     # vault_kv_secret_v2.grafana for the AWS twin of this same entry).

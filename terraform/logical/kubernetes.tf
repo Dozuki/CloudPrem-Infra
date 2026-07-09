@@ -697,10 +697,6 @@ resource "helm_release" "app" {
     # that was never installed.
     { name = "dozuki-operator.grafana.url", value = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" },
 
-    # --- web-nextjs ---
-    # SERVICE_JWT_PRIVATE_KEY via ESO; the Vault/KV secret must pre-exist (see
-    # variables.tf). The key itself never passes through Terraform here.
-    { name = "deployments.webNextjs.serviceJwt.enabled", value = var.nextjs_service_jwt_enabled ? "true" : "false" },
     ],
     # Per-env web-nextjs env vars (service API URLs etc.); merge into the chart's
     # deployments.webNextjs.env map. Env var names are underscore-only, so no
