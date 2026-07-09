@@ -2,6 +2,22 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.6.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.6.0...v7.6.1) (2026-07-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **logical:** service JWT key is unconditional; seed the azure nextjs KV secret
+
+### Features
+
+* **logical:** service JWT key is unconditional; seed the azure nextjs KV secret ([27b6098](https://github.com/Dozuki/CloudPrem-Infra/commit/27b60981145583d21724400759b9aeac26a1b5ba))
+
+
+### Miscellaneous Chores
+
+* **logical:** the unconditional jwt chart version is 1.9.0, not 2.0.0 ([41558fa](https://github.com/Dozuki/CloudPrem-Infra/commit/41558fa462ddedacb0ed0218b635677df330a2f5))
+
 ## [7.6.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.5.0...v7.6.0) (2026-07-08)
 
 
