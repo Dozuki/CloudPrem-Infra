@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.6.1...v7.7.0) (2026-07-09)
+
+
+### Features
+
+* **logical:** supplied TLS certs seed Vault from Terraform on AWS ([eb5c0ce](https://github.com/Dozuki/CloudPrem-Infra/commit/eb5c0ce040e9d01d9e9fa663d607ee6c1416dc20))
+
 ## [7.6.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.6.0...v7.6.1) (2026-07-09)
 
 
