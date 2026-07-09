@@ -2,29 +2,38 @@
 # cert) keeps cert-manager/ACME out of the way (no public-DNS / ACME dependency —
 # essential for ephemeral test clusters and air-gapped on-prem).
 #
-# SUPPLIED certs are rendered by the chart (tls.enabled + tls.cert/key, typed
-# kubernetes.io/tls since chart 0.3.12), NOT by Terraform — so a v6.0 (chart-owned
-# tls-secret) -> v6.1 upgrade keeps the same owner and doesn't collide ("secrets
-# tls-secret already exists"). Terraform only creates the secret for the GENERATED
-# self-signed case (Azure dev), which is greenfield. AWS with no supplied cert is
-# unaffected (cert-manager/ACME as before).
+# SUPPLIED certs on AWS flow tls_cert/tls_key -> Vault (TF-seeded below) -> ESO ->
+# tls-secret, so all customer TLS material starts in terraform inputs and no Vault
+# path is ever hand-seeded. On azure/onprem (no Vault) supplied certs are rendered
+# by the chart (tls.enabled + tls.cert/key, typed kubernetes.io/tls since chart
+# 0.3.12), NOT by Terraform — so a v6.0 (chart-owned tls-secret) -> v6.1 upgrade
+# keeps the same owner and doesn't collide ("secrets tls-secret already exists").
+# Terraform only creates the K8s secret directly for the GENERATED self-signed case
+# (Azure dev), which is greenfield. AWS with no supplied cert is unaffected
+# (cert-manager/ACME as before).
 
 locals {
-  # Operator-supplied cert/key — cloud-agnostic; rendered by the chart.
+  # Operator-supplied cert/key via tls_cert/tls_key (env.hcl or stack TF_VARs).
   tls_supplied = var.tls_cert != "" && var.tls_key != ""
   # Generated self-signed cert (dev). Azure-only for now; follow-up to generalize.
   tls_selfsigned = var.cloud == "azure" && var.azure_tls_mode == "self-signed"
-  # Customer cert stored in Vault, synced into tls-secret by ESO (cert never in TF
-  # state). Like self-signed, it's "manual" TLS and the secret is owned externally.
-  tls_from_vault = var.customer_tls_externally_managed
+  # On AWS (Vault always enabled), supplied certs are seeded into Vault by TF and
+  # delivered by ESO, so customer info flows env.hcl -> Terraform -> Vault -> pod
+  # with no hand-seeding. Azure/onprem supplied certs stay chart-rendered.
+  tls_vault_seeded = local.tls_supplied && var.cloud == "aws"
+  # tls-secret owned by ESO, from Vault: TF-seeded (above), or the legacy
+  # hand-seeded mode (customer_tls_externally_managed; 3m/qa) kept until its
+  # cert is migrated into stack vars.
+  tls_from_vault = var.customer_tls_externally_managed || local.tls_vault_seeded
   # Any manual TLS -> cert-manager/ACME (dns_validation) stays out of the way.
   tls_manual = local.tls_supplied || local.tls_selfsigned || local.tls_from_vault
-  # Terraform creates the tls-secret ONLY for the generated self-signed cert; supplied
-  # certs go through the chart (consistent owner across the v6.0->v6.1 upgrade).
+  # Terraform creates the tls-secret ONLY for the generated self-signed cert.
   tls_managed_tf = local.tls_selfsigned
   # The chart must skip rendering tls-secret whenever something ELSE owns it — the
   # TF self-signed secret OR the ESO-synced Vault secret.
   tls_externally_managed = local.tls_managed_tf || local.tls_from_vault
+  # Supplied certs the CHART renders (azure/onprem, no Vault in the path).
+  tls_chart_rendered = local.tls_supplied && !local.tls_vault_seeded
 }
 
 resource "tls_private_key" "gateway" {
@@ -70,16 +79,33 @@ resource "kubernetes_secret_v1" "gateway_tls" {
   }
 }
 
+# Supplied cert on AWS: TF seeds secret/<tenant>/<env>/tls like every other
+# per-env secret (vault.tf), and ESO below delivers it. Raw PEM in Vault (the
+# tls_cert/tls_key vars are base64) to match the ESO template and the legacy
+# hand-seeded layout, so a migrating env just gets a new KV version.
+resource "vault_kv_secret_v2" "tls" {
+  count               = local.tls_vault_seeded ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/tls"
+  delete_all_versions = !var.protect_resources
+
+  data_json = jsonencode({
+    cert = base64decode(var.tls_cert)
+    key  = base64decode(var.tls_key)
+  })
+}
+
 # Customer-provided TLS: sync the cert+key from Vault (secret/<tenant>/<env>/tls,
-# keys cert/key) into the tls-secret K8s Secret via ESO. The cert/key are seeded in
-# Vault out-of-band, so they never enter Terraform state. The chart skips rendering
-# tls-secret (tls.externallyManaged) and drops the cert-manager Gateway annotation,
-# leaving ESO as the sole owner. References the chart-created SecretStore
-# vault-<stack_label>; depends on the app release so that SecretStore exists first.
+# keys cert/key) into the tls-secret K8s Secret via ESO. The Vault entry is either
+# TF-seeded (above) or, legacy, hand-seeded (customer_tls_externally_managed). The
+# chart skips rendering tls-secret (tls.externallyManaged) and drops the
+# cert-manager Gateway annotation, leaving ESO as the sole owner. References the
+# chart-created SecretStore vault-<stack_label>; depends on the app release so
+# that SecretStore exists first.
 resource "kubernetes_manifest" "tls_external_secret" {
   count = local.tls_from_vault ? 1 : 0
 
-  depends_on = [helm_release.external_secrets, helm_release.app]
+  depends_on = [helm_release.external_secrets, helm_release.app, vault_kv_secret_v2.tls]
 
   manifest = {
     apiVersion = "external-secrets.io/v1"

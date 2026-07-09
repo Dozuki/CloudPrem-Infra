@@ -396,25 +396,26 @@ variable "ghcr_pull_token" {
 }
 
 variable "tls_cert" {
-  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set (any cloud), Terraform creates the tls-secret and the chart runs with tls.externallyManaged=true, bypassing cert-manager/ACME. Empty = cert-manager/ACME (AWS) or azure_tls_mode (azure)."
+  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set, cert-manager/ACME is bypassed. On AWS Terraform seeds it into Vault (secret/<customer>/<env>/tls) and ESO owns tls-secret; on azure/onprem the chart renders tls-secret. Empty = cert-manager/ACME (AWS) or azure_tls_mode (azure). Certs are public data and can live in env.hcl; keep tls_key a masked stack TF_VAR."
   type        = string
   default     = ""
 }
 
 variable "tls_key" {
-  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set."
+  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set. Set as a masked Spacelift TF_VAR on the env's logical stack, not in git."
   type        = string
   default     = ""
 }
 
 variable "customer_tls_externally_managed" {
   description = <<-EOT
-    Customer-provided TLS where the cert+key live in VAULT (not in tls_cert/tls_key).
-    When true, an ExternalSecret syncs cert/key from Vault secret/<tenant>/<env>/tls
-    (keys: cert, key) into the tls-secret K8s Secret, and the chart's
-    tls.externallyManaged is set so it skips rendering tls-secret and drops the
-    cert-manager Gateway annotation. Cert/key are seeded into Vault out-of-band and
-    never enter Terraform state. Mutually exclusive with tls_cert/tls_key.
+    LEGACY: customer TLS where the cert+key were hand-seeded into Vault
+    secret/<tenant>/<env>/tls out-of-band. Superseded by tls_cert/tls_key, which
+    seed the same Vault path from Terraform (customer data must start in
+    terraform inputs, not manual vault writes). Kept only until 3m/qa's cert is
+    migrated into stack vars; do not use for new envs. Delivery is identical:
+    ESO syncs the Vault path into tls-secret and the chart skips rendering it.
+    Mutually exclusive with tls_cert/tls_key.
   EOT
   type        = bool
   default     = false

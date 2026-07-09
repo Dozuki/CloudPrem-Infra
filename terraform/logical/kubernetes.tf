@@ -608,7 +608,7 @@ resource "helm_release" "app" {
     # false). Generated self-signed: Terraform renders it (externallyManaged true).
     { name = "tls.enabled", value = local.tls_manual ? "true" : "false" },
     { name = "tls.externallyManaged", value = local.tls_externally_managed ? "true" : "false" },
-    { name = "tls.cert", value = local.tls_supplied ? var.tls_cert : "" },
+    { name = "tls.cert", value = local.tls_chart_rendered ? var.tls_cert : "" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
@@ -706,7 +706,7 @@ resource "helm_release" "app" {
 
   set_sensitive = [
     { name = "db.password", value = local.db_master_password },
-    { name = "tls.key", value = local.tls_supplied ? var.tls_key : "" },
+    { name = "tls.key", value = local.tls_chart_rendered ? var.tls_key : "" },
     { name = "smtp.auth.password", value = var.smtp_password },
     { name = "objectStorage.credentials.accessKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_access_key[0].result, "") : "" },
     { name = "objectStorage.credentials.secretKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_secret_key[0].result, "") : "" },
