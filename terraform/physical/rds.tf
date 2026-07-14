@@ -133,6 +133,7 @@ module "primary_database" {
   instance_class               = data.aws_rds_orderable_db_instance.default.instance_class
   allocated_storage            = var.rds_allocated_storage
   max_allocated_storage        = var.rds_max_allocated_storage
+  storage_type                 = "gp3"
   storage_encrypted            = true
   kms_key_id                   = local.rds_kms_key_arn
   apply_immediately            = !var.protect_resources

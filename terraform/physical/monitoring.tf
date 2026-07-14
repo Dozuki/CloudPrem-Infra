@@ -430,7 +430,9 @@ resource "aws_lambda_function" "sns_to_slack" {
   filename      = data.archive_file.slack_sns_lambda[0].output_path
   function_name = "${local.identifier}-sns_to_slack"
   handler       = "sns_to_slack.lambda_handler"
-  runtime       = "python3.8"
+  # Same treatment as dms_restart below: arm64 + off the deprecated python3.8.
+  runtime       = "python3.12"
+  architectures = ["arm64"]
   role          = aws_iam_role.lambda_execution[0].arn
 
   source_code_hash = data.archive_file.slack_sns_lambda[0].output_base64sha256
@@ -482,7 +484,11 @@ resource "aws_lambda_function" "dms_restart" {
   filename      = data.archive_file.dms_restart_lambda[0].output_path
   function_name = "${local.identifier}-dms_restart"
   handler       = "dms_restart.lambda_handler"
-  runtime       = "python3.8"
+  # arm64: 20% cheaper, and the script is pure boto3. python3.8 was a deprecated
+  # runtime (AWS refuses new function creation on it), so fresh stacks would
+  # have failed here anyway.
+  runtime       = "python3.12"
+  architectures = ["arm64"]
   role          = aws_iam_role.lambda_execution[0].arn
 
   source_code_hash = data.archive_file.dms_restart_lambda[0].output_base64sha256

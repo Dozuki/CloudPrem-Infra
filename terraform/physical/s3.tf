@@ -486,3 +486,47 @@ resource "aws_s3_bucket_cors_configuration" "guide_images" {
 }
 
 # - End dynamic S3 resource creation
+# FinOps hygiene on the stack-created buckets (Infracost policy): incomplete
+# multipart uploads are invisible billable storage, and both bucket families
+# are versioned, so noncurrent versions accumulate forever without a rule.
+# Guide buckets keep 90 days of noncurrent versions (customer-data oops
+# window); the access-log bucket keeps 30. Current versions are untouched.
+resource "aws_s3_bucket_lifecycle_configuration" "guide_buckets" {
+  for_each = toset(local.create_s3_bucket_names)
+
+  bucket = aws_s3_bucket.guide_buckets[each.key].id
+
+  rule {
+    id     = "finops-hygiene"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "logging_bucket" {
+  bucket = aws_s3_bucket.logging_bucket.id
+
+  rule {
+    id     = "finops-hygiene"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+}
