@@ -2,6 +2,52 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.6.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.0...v7.6.1) (2026-07-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **logical:** service JWT key is unconditional; seed the azure nextjs KV secret
+
+### Features
+
+* delete_after tag + harness stamping for ResourceReaper ([#215](https://github.com/Dozuki/CloudPrem-Infra/issues/215)) ([0a7dc49](https://github.com/Dozuki/CloudPrem-Infra/commit/0a7dc496a76c9657d9c35d7063aba9af44936f26))
+* **logical:** default chart_version to 1.7.1 ([#240](https://github.com/Dozuki/CloudPrem-Infra/issues/240)) ([e2398a9](https://github.com/Dozuki/CloudPrem-Infra/commit/e2398a9e33764b3dc11541645943b58b3934c52a))
+* **logical:** manage Envoy Gateway CRDs via kubectl provider (fix EG upgrade timeout) ([#201](https://github.com/Dozuki/CloudPrem-Infra/issues/201)) ([085ab33](https://github.com/Dozuki/CloudPrem-Infra/commit/085ab3331907a964cfffee3a0c2a2c9a7c5bf899))
+* **logical:** opt-in shared-grafana dashboards wiring, drop dead grafana sets ([#238](https://github.com/Dozuki/CloudPrem-Infra/issues/238)) ([302d8de](https://github.com/Dozuki/CloudPrem-Infra/commit/302d8dece6563e329b89c966159291f9d7860472))
+* **logical:** per-env web-nextjs env vars and service JWT toggle ([b751875](https://github.com/Dozuki/CloudPrem-Infra/commit/b751875b86a2e62919b4c13512371b0b003ce995))
+* **logical:** seed ops-auth htpasswd for the chart's public ops ingress ([#242](https://github.com/Dozuki/CloudPrem-Infra/issues/242)) ([d58f05e](https://github.com/Dozuki/CloudPrem-Infra/commit/d58f05edb0570481514001799b7deea87ad17786))
+* **logical:** service JWT key is unconditional; seed the azure nextjs KV secret ([27b6098](https://github.com/Dozuki/CloudPrem-Infra/commit/27b60981145583d21724400759b9aeac26a1b5ba))
+* **logical:** supplied TLS certs seed Vault from Terraform on AWS ([eb5c0ce](https://github.com/Dozuki/CloudPrem-Infra/commit/eb5c0ce040e9d01d9e9fa663d607ee6c1416dc20))
+* **physical:** Aurora Global Database cross-region DR (phase 2) ([#210](https://github.com/Dozuki/CloudPrem-Infra/issues/210)) ([2b3ae48](https://github.com/Dozuki/CloudPrem-Infra/commit/2b3ae4849ef88d6f2dadd1210bfdaf7c8617c9ab))
+* **physical:** default RDS to a customer-managed KMS key (DR-ready posture) ([#199](https://github.com/Dozuki/CloudPrem-Infra/issues/199)) ([a70605c](https://github.com/Dozuki/CloudPrem-Infra/commit/a70605ce503a90fbcd90de84c7b3ad9974e5a8ea))
+
+
+### Bug Fixes
+
+* **azure:** helm provider authenticates to GHCR for the OCI chart pull ([#221](https://github.com/Dozuki/CloudPrem-Infra/issues/221)) ([9b0d3da](https://github.com/Dozuki/CloudPrem-Infra/commit/9b0d3da39dea838ba7b69ab598edff7fcd01daaf))
+* **azure:** public Key Vault when no CIDR allowlist + workloadidentity kubelogin ([#220](https://github.com/Dozuki/CloudPrem-Infra/issues/220)) ([9ab0477](https://github.com/Dozuki/CloudPrem-Infra/commit/9ab0477d285744fb7aef3931137e40f4779d8530))
+* **live:** keep backend bools as bools (s3 encrypt regression) ([#218](https://github.com/Dozuki/CloudPrem-Infra/issues/218)) ([1c5fe9e](https://github.com/Dozuki/CloudPrem-Infra/commit/1c5fe9e0d1106fa0ac01c2cfd06689dd3bdc1faa))
+* **logical:** apply dozuki-operator image redirect on all clouds, not just Azure ([#224](https://github.com/Dozuki/CloudPrem-Infra/issues/224)) ([cbab2f6](https://github.com/Dozuki/CloudPrem-Infra/commit/cbab2f6fe1feb40f35828b6fe61afd0dce3188b4))
+* **logical:** bump default chart_version 0.4.1 -&gt; 0.5.0 (gateway compression + proxy autoscaling) ([c608129](https://github.com/Dozuki/CloudPrem-Infra/commit/c6081295a83a6f2e9545eb9c28915f73c3eb76ec))
+* **logical:** bump default chart_version 0.5.0 -&gt; 0.5.1 (gzip-only compression + gateway perf fixes) ([7ec3a23](https://github.com/Dozuki/CloudPrem-Infra/commit/7ec3a2376b23fb1616c4e5be3bce27d96b492d44))
+* **logical:** bump default chart_version 0.5.1 -&gt; 0.5.2 (per-IP rate limit 500 -&gt; 5000) ([d54a7be](https://github.com/Dozuki/CloudPrem-Infra/commit/d54a7be0a640e37c92e27480cb38c09abc82d616))
+* **logical:** disable PROXY protocol on the Azure gateway (clientIP.mode=none) ([#231](https://github.com/Dozuki/CloudPrem-Infra/issues/231)) ([beabb3c](https://github.com/Dozuki/CloudPrem-Infra/commit/beabb3cb508cbe6a53b72048cb39bac2267d76fe))
+* **logical:** EG CRD rate-limit requests int32 -&gt; int64 (K8s 1.34 rejects uint32-max on int32) ([5ba676e](https://github.com/Dozuki/CloudPrem-Infra/commit/5ba676efd865ab6c9259f2cbb9b1564aa022beb9))
+* **logical:** ignore webhook-injected annotations on ratelimit redis ([#219](https://github.com/Dozuki/CloudPrem-Infra/issues/219)) ([9bea432](https://github.com/Dozuki/CloudPrem-Infra/commit/9bea43297ccbbec46a16957b854a14c2314b8dd8))
+* **logical:** replace=true on helm_release.app so failed installs don't wedge retries ([#228](https://github.com/Dozuki/CloudPrem-Infra/issues/228)) ([69abd59](https://github.com/Dozuki/CloudPrem-Infra/commit/69abd59a52f706d3019b4bd60c99019f6cb8ba2f))
+* omit service_region for same-region Vault VPC endpoint (GovCloud) ([#204](https://github.com/Dozuki/CloudPrem-Infra/issues/204)) ([e3c8bde](https://github.com/Dozuki/CloudPrem-Infra/commit/e3c8bde5d68b16f7ee8b934ddedccf78b6acea0f))
+* **physical:** allow major version upgrades on the aurora cluster ([682503b](https://github.com/Dozuki/CloudPrem-Infra/commit/682503b56b6eeca03ef7bffbc8b08ff676ee242f))
+* **physical:** derive aurora parameter-group family from engine version ([1b60c12](https://github.com/Dozuki/CloudPrem-Infra/commit/1b60c12b1a89baa3f6ef88c31cc97ae6273a8de3))
+* **physical:** dr_aurora subnet for_each empty case must be a set, not a tuple ([#226](https://github.com/Dozuki/CloudPrem-Infra/issues/226)) ([34016de](https://github.com/Dozuki/CloudPrem-Infra/commit/34016de6da690e64ecf27630dc9595c1f605280e))
+* **physical:** stop Aurora module creating a 2nd SG in the default VPC ([#202](https://github.com/Dozuki/CloudPrem-Infra/issues/202)) ([24b6d13](https://github.com/Dozuki/CloudPrem-Infra/commit/24b6d13781fccaa9332ad34778bd8605adc9c919))
+* sign Vault AWS-auth for the gov regional STS endpoint (GovCloud) ([#206](https://github.com/Dozuki/CloudPrem-Infra/issues/206)) ([a0684e8](https://github.com/Dozuki/CloudPrem-Infra/commit/a0684e8104c787ec5e13e27854193c8adb27b49a))
+
+
+### Miscellaneous Chores
+
+* **logical:** the unconditional jwt chart version is 1.9.0, not 2.0.0 ([41558fa](https://github.com/Dozuki/CloudPrem-Infra/commit/41558fa462ddedacb0ed0218b635677df330a2f5))
+
 ## [7.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.6.1...v7.7.0) (2026-07-09)
 
 
