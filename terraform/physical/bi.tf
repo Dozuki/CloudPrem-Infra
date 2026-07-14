@@ -187,6 +187,7 @@ module "rds_replica_database" {
   port                        = 3306
   instance_class              = data.aws_rds_orderable_db_instance.default.instance_class
   max_allocated_storage       = var.rds_max_allocated_storage
+  storage_type                = "gp3"
   replicate_source_db         = module.primary_database[0].db_instance_id
   storage_encrypted           = true
   kms_key_id                  = data.aws_kms_key.rds.arn
@@ -231,6 +232,7 @@ module "dms_replica_database" {
   instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
   allocated_storage     = var.rds_allocated_storage
   max_allocated_storage = var.rds_max_allocated_storage
+  storage_type          = "gp3"
   storage_encrypted     = true
   kms_key_id            = data.aws_kms_key.rds.arn
   apply_immediately     = !var.protect_resources
