@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.7.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.0...v7.7.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **physical:** finops remediation for the infracost policy set ([#247](https://github.com/Dozuki/CloudPrem-Infra/issues/247)) ([0b971f2](https://github.com/Dozuki/CloudPrem-Infra/commit/0b971f2eec158d6d6ce9678ea4c02050e226afeb))
+
 ## [7.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.6.1...v7.7.0) (2026-07-09)
 
 
