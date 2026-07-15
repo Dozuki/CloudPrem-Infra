@@ -198,7 +198,13 @@ module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
-  depends_on = [aws_iam_policy.cluster_access, aws_iam_policy.eks_worker]
+  # NO module-level depends_on here, ever. It defers EVERY data source inside
+  # the module to apply time whenever a dependency has ANY pending diff, which
+  # turns partition/caller-identity-derived attributes into (known after apply)
+  # and force-replaces the cluster's access entries and IAM policy attachments.
+  # The 2026-07-15 fleet default_tags rollout tripped exactly this on every EKS
+  # stack (the old depends_on pointed at two IAM policies that are not even
+  # module inputs - they attach to other roles, so no ordering was ever needed).
 
   # The default 15m cluster-delete timeout can be exceeded when the cluster still has
   # load-balancer/ENI resources to clean up (e.g. an automated teardown after a failed
