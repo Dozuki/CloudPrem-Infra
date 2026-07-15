@@ -449,58 +449,31 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
-  # Keep Application Signals away from workloads it cannot help.
+  # Application Signals "Auto-monitor" defaults ON since addon v5.0.0: the
+  # bundled OTel operator webhook auto-injects ADOT SDKs + instrumentation
+  # annotations into every workload (the reason ratelimit.tf ignores template
+  # annotations, and why web-nextjs/grafana pods carry an ADOT SDK nobody
+  # asked for), and the agent exports the resulting traces to X-Ray, which
+  # nothing reads (no dashboards, alarms, SLOs, or custom groups in any
+  # account). APM is Datadog's job (datadog.tf), so auto-monitor goes off.
+  # Container Insights metrics and Fluent Bit log collection are independent
+  # of this key and keep working. This is the only opt-out valid on BOTH the
+  # 5.x and 6.x addon schemas (the fleet is mixed); once every stack is on
+  # 6.x, add {"applicationSignals":{"enabled":false}} to also strip the
+  # app-signals pipelines from the agent config. Already-injected pods keep
+  # their ADOT SDK until restarted.
   #
-  # autoMonitor.monitorAllServices defaults to TRUE, so the operator's mutating webhook
-  # stamps instrumentation.opentelemetry.io/inject-<lang>="true" onto every pod at
-  # admission — one init container per enabled language, each with CPU/memory requests.
-  #
-  # Excluding here rather than per-pod: one declarative place, no support needed from the
-  # (vendored, third-party) subcharts, and auto-monitoring stays ON for everything else in
-  # the namespace, so the monolith is still instrumented.
-  #
-  # The monitoring stack is excluded for EVERY language, not just nodejs. autoMonitor
-  # injects one init container per enabled language into every pod it matches, each with
-  # CPU and memory requests. prometheus-node-exporter is a single Go binary that can use
-  # none of them, and it is a DAEMONSET: its pod carries a nodeAffinity pinning it to one
-  # specific node, so it cannot be rescheduled elsewhere when that node is full. Four
-  # unusable init containers were enough to make it unschedulable:
-  #
-  #   0/6 nodes are available: 1 Insufficient cpu, 1 Insufficient memory,
-  #   5 node(s) didn't satisfy plugin(s) [NodeAffinity]
-  #
-  # and because the HelmRelease runs with disableWait = false, helm waited on that one
-  # pod for its full 4h30m timeout - the release never reached Ready, on every deploy.
-  # It went unnoticed because a stuck node-exporter fails nothing else: the app serves
-  # fine, and cluster-health checks treat it as non-critical.
-  #
-  # kube-state-metrics and the prometheus operator get the same treatment for the same
-  # reason (Go binaries, nothing to instrument). Application Signals stays ON for the
-  # monolith and anything else in the namespace.
+  # This replaces the per-workload autoMonitor.exclude map that briefly lived
+  # here: injected init containers (one per enabled language, each with
+  # requests) made the node-affinity-pinned prometheus-node-exporter daemonset
+  # unschedulable and stalled every deploy for helm's full 4h30m wait, and the
+  # frontegg Node 12 images crashlooped on the injected SDK's optional
+  # chaining. No injection anywhere is a superset of those excludes.
   configuration_values = jsonencode({
     manager = {
       applicationSignals = {
         autoMonitor = {
-          exclude = {
-            for lang in ["java", "nodejs", "python", "dotnet"] : lang => {
-              daemonsets = ["${local.k8s_namespace_name}/dozuki-prometheus-node-exporter"]
-              deployments = concat(
-                [
-                  "${local.k8s_namespace_name}/dozuki-kube-state-metrics",
-                  "${local.k8s_namespace_name}/dozuki-kube-prometheus-sta-operator",
-                ],
-                # The frontegg connectivity tier is nodejs-only: the injected Node.js SDK
-                # uses optional chaining, which those images' Node 12 cannot parse, so all
-                # five crashloop with "SyntaxError: Unexpected token '?'". Kept scoped to
-                # nodejs so a future JVM/python workload there would still be picked up.
-                lang != "nodejs" ? [] : [
-                  for svc in ["api-gateway", "connectors-worker", "event-service", "integrations-service", "webhook-service"] :
-                  # namespace/deployment; the release is always named "dozuki".
-                  "${local.k8s_namespace_name}/dozuki-${svc}-deployment"
-                ],
-              )
-            }
-          }
+          monitorAllServices = false
         }
       }
     }
