@@ -55,6 +55,12 @@ variable "enable_dashboards" {
   default     = false
 }
 
+variable "enable_datadog" {
+  description = "Installs the Datadog agent (lean: APM trace intake + SSI library injection + continuous profiler only) and instruments the monolith PHP pods. Dozuki-internal observability for MPC stacks - never enable on CloudPrem customer installs. AWS only; reads the API key from Vault secret/dozuki/global/datadog. See datadog.tf."
+  type        = bool
+  default     = false
+}
+
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string
