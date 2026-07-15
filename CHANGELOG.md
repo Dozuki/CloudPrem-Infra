@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.7.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.2...v7.7.3) (2026-07-15)
+
+
+### Bug Fixes
+
+* **physical:** drop the eks_cluster module-level depends_on ([#253](https://github.com/Dozuki/CloudPrem-Infra/issues/253)) ([80b6ba0](https://github.com/Dozuki/CloudPrem-Infra/commit/80b6ba0138473abc5c018ce5be6057874bcf243f))
+
 ## [7.7.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.1...v7.7.2) (2026-07-14)
 
 
