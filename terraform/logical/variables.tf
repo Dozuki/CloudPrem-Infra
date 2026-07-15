@@ -412,8 +412,9 @@ variable "customer_tls_externally_managed" {
     LEGACY: customer TLS where the cert+key were hand-seeded into Vault
     secret/<tenant>/<env>/tls out-of-band. Superseded by tls_cert/tls_key, which
     seed the same Vault path from Terraform (customer data must start in
-    terraform inputs, not manual vault writes). Kept only until 3m/qa's cert is
-    migrated into stack vars; do not use for new envs. Delivery is identical:
+    terraform inputs, not manual vault writes). Kept only until the last legacy
+    env's cert is migrated into stack vars; do not use for new envs. Delivery is
+    identical:
     ESO syncs the Vault path into tls-secret and the chart skips rendering it.
     Mutually exclusive with tls_cert/tls_key.
   EOT
