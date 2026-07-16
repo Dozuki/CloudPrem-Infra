@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.8.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.8.0...v7.8.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **physical:** bastion SSM associations target identity tags, not the whole tag map ([94ded20](https://github.com/Dozuki/CloudPrem-Infra/commit/94ded20ea0a6cfcaad64165807d0142d475fd160))
+
 ## [7.8.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.3...v7.8.0) (2026-07-16)
 
 
