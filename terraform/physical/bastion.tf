@@ -1,16 +1,3 @@
-data "aws_ami" "amazon_linux_2023" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name = "name"
-
-    values = [
-      "al2023-ami-2023.*-x86_64",
-    ]
-  }
-}
-
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
 module "bastion_sg" {
   source  = "terraform-aws-modules/security-group/aws"
@@ -121,7 +108,10 @@ module "bastion" {
     AdministratorAccess          = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
   }
 
-  image_id        = data.aws_ami.amazon_linux_2023.id
+  # AMI resolves from AWS's public SSM parameter at instance launch, not at
+  # plan time: the old latest-AMI data source made the plan (and drift
+  # detection) go dirty every time Amazon published a new AL2023 AMI.
+  image_id        = "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
   instance_type   = "t3.micro"
   security_groups = [module.bastion_sg.security_group_id]
 
