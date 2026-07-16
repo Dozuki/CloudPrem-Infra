@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.8.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.3...v7.8.0) (2026-07-16)
+
+
+### Features
+
+* **tags:** Service + Customer tags, one Identifier sentinel, casing advisories ([#252](https://github.com/Dozuki/CloudPrem-Infra/issues/252)) ([15681ca](https://github.com/Dozuki/CloudPrem-Infra/commit/15681cacf868ee59a60ea44877a5b08848f5aebd))
+
 ## [7.7.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.2...v7.7.3) (2026-07-15)
 
 
