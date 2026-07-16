@@ -53,7 +53,7 @@ locals {
     {
       Terraform   = "true"
       Project     = "Dozuki"
-      Service     = "cloudprem"
+      Service     = "mpc"
       Customer    = coalesce(var.customer, "dozuki")
       Identifier  = coalesce(var.customer, "Dozuki")
       Environment = var.environment
