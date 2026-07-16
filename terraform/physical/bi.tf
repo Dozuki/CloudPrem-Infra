@@ -213,6 +213,10 @@ module "rds_replica_database" {
 
   create_db_option_group = false
 
+  enabled_cloudwatch_logs_exports        = local.rds_instance_log_exports
+  create_cloudwatch_log_group            = true
+  cloudwatch_log_group_retention_in_days = 365
+
   tags = local.tags
 }
 
@@ -266,6 +270,10 @@ module "dms_replica_database" {
   parameter_group_name      = aws_db_parameter_group.default[0].name
 
   create_db_option_group = false
+
+  enabled_cloudwatch_logs_exports        = local.rds_instance_log_exports
+  create_cloudwatch_log_group            = true
+  cloudwatch_log_group_retention_in_days = 365
 
   tags = local.tags
 }

@@ -439,3 +439,14 @@ variable "delete_after" {
 }
 
 # --- END App Configuration --- #
+
+variable "rds_log_exports" {
+  description = "Database log types exported to CloudWatch Logs (365-day retention). Aurora supports all four; provisioned RDS instances export the subset possible without an option group (audit needs the MariaDB audit plugin option). general is off by default: it records every statement, which is high-volume and puts query text (potentially sensitive) in logs."
+  type        = list(string)
+  default     = ["audit", "error", "slowquery"]
+
+  validation {
+    condition     = alltrue([for l in var.rds_log_exports : contains(["audit", "error", "general", "slowquery"], l)])
+    error_message = "rds_log_exports entries must be among: audit, error, general, slowquery."
+  }
+}

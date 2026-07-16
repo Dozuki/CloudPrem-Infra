@@ -89,12 +89,29 @@ module "bi_database_sg" {
   tags = local.tags
 }
 
+locals {
+  # Provisioned instances can export error/general/slowquery without extra
+  # setup; audit needs the MARIADB_AUDIT_PLUGIN option group, which nothing
+  # here manages (create_db_option_group = false) - known gap, aurora covers
+  # audit. Shared by the primary and the two BI replicas.
+  rds_instance_log_exports = sort(setintersection(var.rds_log_exports, ["error", "general", "slowquery"]))
+}
+
 resource "aws_db_parameter_group" "default" {
   count = var.db_engine == "rds" ? 1 : 0
 
   name_prefix = local.identifier
   family      = "mysql${var.rds_engine_family}"
 
+  # Make the exported logs exist (exports only ship what the engine writes).
+  parameter {
+    name  = "slow_query_log"
+    value = "1"
+  }
+  parameter {
+    name  = "log_output"
+    value = "FILE"
+  }
   parameter {
     name  = "binlog_format"
     value = "ROW"
@@ -174,6 +191,11 @@ module "primary_database" {
   parameter_group_name      = aws_db_parameter_group.default[0].name
 
   create_db_option_group = false
+
+  # Default-on log exports with retained log groups (never-expire otherwise).
+  enabled_cloudwatch_logs_exports        = local.rds_instance_log_exports
+  create_cloudwatch_log_group            = true
+  cloudwatch_log_group_retention_in_days = 365
 
   tags = local.tags
 }

@@ -48,7 +48,9 @@ module "vpc" {
   create_flow_log_cloudwatch_log_group = true
   create_flow_log_cloudwatch_iam_role  = true
   flow_log_max_aggregation_interval    = 60
-  create_database_subnet_group         = false
+  # 1-year retention; the upstream default is never-expire.
+  flow_log_cloudwatch_log_group_retention_in_days = 365
+  create_database_subnet_group                    = false
 
   public_subnets = [for i in range(local.azs_count) : cidrsubnet(var.vpc_cidr, 4, i)]
 

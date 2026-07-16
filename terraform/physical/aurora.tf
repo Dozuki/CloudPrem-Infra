@@ -63,13 +63,34 @@ module "aurora" {
 
   snapshot_identifier = var.aurora_snapshot_identifier != "" ? var.aurora_snapshot_identifier : null
 
+  # Log exports are default-on (log-and-audit-everything). The module creates
+  # the /aws/rds/cluster/... log groups itself so they carry retention instead
+  # of landing as auto-created never-expire groups. The parameter-group entries
+  # below make the exported logs actually exist: exports only ship what the
+  # engine writes.
+  enabled_cloudwatch_logs_exports        = var.rds_log_exports
+  create_cloudwatch_log_group            = true
+  cloudwatch_log_group_retention_in_days = 365
+
   cluster_parameter_group = {
     family = local.aurora_param_family
-    parameters = [
-      { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
-      { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
-      { name = "binlog_checksum", value = "NONE", apply_method = "pending-reboot" },
-    ]
+    parameters = concat(
+      [
+        { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
+        { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
+        { name = "binlog_checksum", value = "NONE", apply_method = "pending-reboot" },
+      ],
+      contains(var.rds_log_exports, "audit") ? [
+        { name = "server_audit_logging", value = "1", apply_method = "immediate" },
+        { name = "server_audit_events", value = "CONNECT,QUERY_DCL,QUERY_DDL", apply_method = "immediate" },
+      ] : [],
+      contains(var.rds_log_exports, "slowquery") ? [
+        { name = "slow_query_log", value = "1", apply_method = "immediate" },
+      ] : [],
+      contains(var.rds_log_exports, "general") ? [
+        { name = "general_log", value = "1", apply_method = "immediate" },
+      ] : [],
+    )
   }
 
   db_parameter_group = {
