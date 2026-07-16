@@ -108,9 +108,9 @@ variable "smtp_enabled" {
 }
 
 variable "smtp_host" {
-  description = "SMTP server hostname."
+  description = "SMTP server hostname (and port if necessary)."
   type        = string
-  default     = "smtp.sendgrid.net"
+  default     = "smtp.sendgrid.net:587"
 }
 
 variable "smtp_from_address" {
