@@ -109,6 +109,10 @@ resource "aws_db_parameter_group" "default" {
     value = "1"
   }
   parameter {
+    name  = "general_log"
+    value = "1"
+  }
+  parameter {
     name  = "log_output"
     value = "FILE"
   }
