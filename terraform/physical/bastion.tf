@@ -52,17 +52,23 @@ resource "aws_ssm_association" "bastion_mysql_config" {
     Region : data.aws_region.current.region
   }
 
+  # Target the stack's bastion by its IDENTITY tags only. AWS caps an
+  # association at 5 targets blocks, so iterating the whole house-tag map
+  # broke the moment the tag set grew past four (Customer/Service, v7.8.0);
+  # fleet-constant tags (Terraform, Project) never narrowed the match anyway.
   targets {
     key    = "tag:Role"
     values = ["Bastion"]
   }
 
-  dynamic "targets" {
-    for_each = local.tags
-    content {
-      key    = "tag:${targets.key}"
-      values = [targets.value]
-    }
+  targets {
+    key    = "tag:Identifier"
+    values = [coalesce(var.customer, "Dozuki")]
+  }
+
+  targets {
+    key    = "tag:Environment"
+    values = [var.environment]
   }
 }
 
@@ -76,17 +82,23 @@ resource "aws_ssm_association" "bastion_kubernetes_config" {
     Region : data.aws_region.current.region
   }
 
+  # Target the stack's bastion by its IDENTITY tags only. AWS caps an
+  # association at 5 targets blocks, so iterating the whole house-tag map
+  # broke the moment the tag set grew past four (Customer/Service, v7.8.0);
+  # fleet-constant tags (Terraform, Project) never narrowed the match anyway.
   targets {
     key    = "tag:Role"
     values = ["Bastion"]
   }
 
-  dynamic "targets" {
-    for_each = local.tags
-    content {
-      key    = "tag:${targets.key}"
-      values = [targets.value]
-    }
+  targets {
+    key    = "tag:Identifier"
+    values = [coalesce(var.customer, "Dozuki")]
+  }
+
+  targets {
+    key    = "tag:Environment"
+    values = [var.environment]
   }
 }
 
