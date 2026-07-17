@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.10.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.9.0...v7.10.0) (2026-07-17)
+
+
+### Features
+
+* **physical:** general log joins the default exports ([7b1cbfa](https://github.com/Dozuki/CloudPrem-Infra/commit/7b1cbfab61d3bae788a83718c04196fa2e341f2d))
+
+
+### Bug Fixes
+
+* **physical:** bastion AMI resolves via SSM at launch, not at plan time ([92620d9](https://github.com/Dozuki/CloudPrem-Infra/commit/92620d995fc14f7cbedebd5a9b8a149017087d3e))
+
 ## [7.9.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.8.1...v7.9.0) (2026-07-16)
 
 
