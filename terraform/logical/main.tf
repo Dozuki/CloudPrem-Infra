@@ -263,6 +263,12 @@ data "aws_caller_identity" "current" {
 
 data "aws_ecr_authorization_token" "chart" {
   count = var.cloud == "aws" ? 1 : 0
+
+  # ECR auth tokens are regional and the shared chart registry lives in one
+  # region while stacks run anywhere; a token from the stack's own region is
+  # rejected by the registry's endpoint. Parse the registry region from the
+  # repository host (fall back to the stack region for non-ECR hosts).
+  region = try(regex("\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com", var.image_repository)[0], null)
 }
 
 data "aws_kms_key" "s3" {
