@@ -403,6 +403,9 @@ resource "helm_release" "external_secrets" {
   namespace  = kubernetes_namespace_v1.app.metadata[0].name
   repository = "https://charts.external-secrets.io"
   chart      = "external-secrets"
+  # Pin the chart: unpinned it floats upstream latest, so two stacks applied a
+  # week apart run different ESO versions. Bump deliberately.
+  version = "2.8.0"
 
   wait = true
 
