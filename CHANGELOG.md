@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.11.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.10.0...v7.11.0) (2026-07-22)
+
+
+### Features
+
+* **logical:** seed the azure service-jwt validation key, order kv seeding before helm ([27140f1](https://github.com/Dozuki/CloudPrem-Infra/commit/27140f16c90517d93bf6143977bf339a63cad356))
+
+
+### Reverts
+
+* back out the previous commit, its metadata was copied from the release commit ([132d4b3](https://github.com/Dozuki/CloudPrem-Infra/commit/132d4b361dea3ffe0d21f4ec238c53ca5f0423c4))
+
 ## [7.10.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.9.0...v7.10.0) (2026-07-17)
 
 
