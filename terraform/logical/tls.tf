@@ -102,12 +102,20 @@ resource "vault_kv_secret_v2" "tls" {
 # cert-manager Gateway annotation, leaving ESO as the sole owner. References the
 # chart-created SecretStore vault-<stack_label>; depends on the app release so
 # that SecretStore exists first.
-resource "kubernetes_manifest" "tls_external_secret" {
+# kubectl_manifest, not kubernetes_manifest: the latter validates the kind
+# against the API at plan time, and on a fresh cluster the ExternalSecret CRD
+# only arrives when this same apply installs ESO, so the first plan can never
+# succeed. kubectl_manifest validates at apply, after the CRDs exist (same
+# reason the envoy gateway CRDs use it).
+resource "kubectl_manifest" "tls_external_secret" {
   count = local.tls_from_vault ? 1 : 0
 
   depends_on = [helm_release.external_secrets, helm_release.app, vault_kv_secret_v2.tls]
 
-  manifest = {
+  server_side_apply = true
+  force_conflicts   = true
+
+  yaml_body = yamlencode({
     apiVersion = "external-secrets.io/v1"
     kind       = "ExternalSecret"
     metadata = {
@@ -143,5 +151,5 @@ resource "kubernetes_manifest" "tls_external_secret" {
         },
       ]
     }
-  }
+  })
 }
