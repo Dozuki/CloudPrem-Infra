@@ -42,13 +42,6 @@ locals {
     nextjs = jsonencode({
       privateKey = var.nextjs_service_jwt_private_key
     })
-    # Monolith-side service JWT validation key. Chart >= 1.12.0 reads this
-    # path unconditionally (same must-exist contract as nextjs above), so the
-    # entry exists even while empty; the chart composes the actual
-    # service-jwt.json file. AWS twin: secret/dozuki/global/service-jwt.
-    service-jwt = jsonencode({
-      validationKey = var.service_jwt_validation_key
-    })
     }, var.enable_dashboards ? {
     # Keys match the chart's ESO remoteRef properties (see vault.tf's
     # vault_kv_secret_v2.grafana for the AWS twin of this same entry).

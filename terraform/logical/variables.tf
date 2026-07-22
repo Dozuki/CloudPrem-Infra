@@ -101,13 +101,6 @@ variable "nextjs_service_jwt_private_key" {
   default     = ""
 }
 
-variable "service_jwt_validation_key" {
-  description = "Monolith-side service JWT validation key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'service-jwt' secret, which chart >= 1.12.0 reads unconditionally. Empty = verification disabled."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "smtp_enabled" {
   description = "Whether to enable SMTP email sending."
   type        = bool
