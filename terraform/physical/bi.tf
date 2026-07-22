@@ -220,6 +220,37 @@ module "rds_replica_database" {
   tags = local.tags
 }
 
+# Aurora stacks have no instance-level parameter group to reuse (the cluster
+# uses a cluster parameter group), so the DMS replica gets its own copy of
+# aws_db_parameter_group.default. rds stacks keep sharing the primary's group.
+resource "aws_db_parameter_group" "bi_replica" {
+  count = local.dms_enabled && var.db_engine == "aurora" ? 1 : 0
+
+  name_prefix = "${local.identifier}-bi-"
+  family      = "mysql${var.rds_engine_family}"
+
+  parameter {
+    name  = "binlog_format"
+    value = "ROW"
+  }
+  parameter {
+    name  = "binlog_row_image"
+    value = "Full"
+  }
+  parameter {
+    name  = "binlog_checksum"
+    value = "NONE"
+  }
+  parameter {
+    name  = "group_concat_max_len"
+    value = "33554432"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 #tfsec:ignore:general-secrets-sensitive-in-variable
 module "dms_replica_database" {
   source  = "terraform-aws-modules/rds/aws"
@@ -267,7 +298,7 @@ module "dms_replica_database" {
 
   # DB parameter group
   create_db_parameter_group = false
-  parameter_group_name      = aws_db_parameter_group.default[0].name
+  parameter_group_name      = var.db_engine == "rds" ? aws_db_parameter_group.default[0].name : aws_db_parameter_group.bi_replica[0].name
 
   create_db_option_group = false
 
