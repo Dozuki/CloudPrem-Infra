@@ -181,6 +181,7 @@ No modules.
 | <a name="input_s3_replicate_buckets"></a> [s3\_replicate\_buckets](#input\_s3\_replicate\_buckets) | Whether or not we are replicating objects from existing S3 buckets. | `bool` | `false` | no |
 | <a name="input_seaweedfs_volume_size_gb"></a> [seaweedfs\_volume\_size\_gb](#input\_seaweedfs\_volume\_size\_gb) | PVC size in GB for each SeaweedFS volume server (Azure only). | `number` | `100` | no |
 | <a name="input_sentry_dsn"></a> [sentry\_dsn](#input\_sentry\_dsn) | Sentry DSN (Azure only; AWS reads Vault). | `string` | `""` | no |
+| <a name="input_service_jwt_validation_key"></a> [service\_jwt\_validation\_key](#input\_service\_jwt\_validation\_key) | Monolith-side service JWT validation key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'service-jwt' secret, which chart >= 1.12.0 reads unconditionally. Empty = verification disabled. | `string` | `""` | no |
 | <a name="input_smtp_auth_enabled"></a> [smtp\_auth\_enabled](#input\_smtp\_auth\_enabled) | Whether to use SMTP authentication. | `bool` | `true` | no |
 | <a name="input_smtp_enabled"></a> [smtp\_enabled](#input\_smtp\_enabled) | Whether to enable SMTP email sending. | `bool` | `true` | no |
 | <a name="input_smtp_from_address"></a> [smtp\_from\_address](#input\_smtp\_from\_address) | SMTP from email address. | `string` | `"noreply@dozuki.com"` | no |
