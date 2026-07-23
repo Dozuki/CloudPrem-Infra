@@ -160,8 +160,10 @@ resource "kubernetes_labels" "ambient_envoy_gateway" {
 }
 
 resource "kubernetes_labels" "ambient_redis" {
-  count      = local.mesh_enrolled ? 1 : 0
-  depends_on = [helm_release.ztunnel]
+  count = local.mesh_enrolled ? 1 : 0
+  # The NetworkPolicy must allow HBONE 15008 before redis-system is enrolled (and
+  # enrollment must be removed before the rule on teardown).
+  depends_on = [helm_release.ztunnel, kubernetes_network_policy_v1.ratelimit_redis]
 
   api_version = "v1"
   kind        = "Namespace"
