@@ -578,6 +578,12 @@ resource "helm_release" "app" {
     { name = "db.host", value = local.db_master_host },
     { name = "db.user", value = local.db_master_username },
     { name = "db.rdsCaCert", value = base64encode(file(local.ca_cert_pem_file)) },
+    # The chart default (900s) is fine for small DBs but the Q1->Q2 forward
+    # migration on a large snapshot-restored DB (3M emea/gca/usac, ~100 GB)
+    # exceeds it and the job dies DeadlineExceeded. Give it real headroom;
+    # the job still exits as soon as migrations finish, so a high ceiling is
+    # free on small DBs. This also bounds the cutover window on the big envs.
+    { name = "dbMigrations.activeDeadlineSeconds", value = tostring(var.db_migrations_active_deadline_seconds) },
 
     # --- SMTP ---
     { name = "smtp.enabled", value = var.smtp_enabled ? "true" : "false" },
