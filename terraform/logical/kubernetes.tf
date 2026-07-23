@@ -529,7 +529,7 @@ locals {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, helm_release.istio_base, helm_release.istiod, helm_release.istio_cni, helm_release.ztunnel, kubernetes_labels.ambient_dozuki, kubernetes_labels.ambient_envoy_gateway, kubernetes_labels.ambient_redis]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
