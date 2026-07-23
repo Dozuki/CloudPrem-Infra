@@ -54,7 +54,8 @@ resource "helm_release" "istiod" {
   # Gateway API CRDs must exist before istiod (it watches them). The Envoy Gateway
   # CRD bundle already ships Gateway API v1.5.1, so istio and EG share those CRDs:
   # check istio compatibility on every EG CRD bump.
-  depends_on = [kubectl_manifest.envoy_gateway_crds]
+  # istio_base must land first: it templates the Istio CRDs istiod watches.
+  depends_on = [helm_release.istio_base, kubectl_manifest.envoy_gateway_crds]
 
   name       = "istiod"
   namespace  = kubernetes_namespace_v1.istio_system[0].metadata[0].name
