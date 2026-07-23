@@ -189,6 +189,15 @@ locals {
       # plaintext redirects/ACME and NLB health checks on 10080.
       ports = [10443, 10080]
     }
+    envoy-gateway-controller-webhook = {
+      namespace = "envoy-gateway-system"
+      selector = {
+        "control-plane" = "envoy-gateway"
+      }
+      # API server -> topology-injector mutating webhook (:9443, failurePolicy
+      # Ignore): silently loses zone-aware routing under STRICT without this.
+      ports = [9443]
+    }
     kps-operator-webhook = {
       namespace = "dozuki"
       selector = {
