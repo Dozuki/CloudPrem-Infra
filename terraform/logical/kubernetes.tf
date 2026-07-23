@@ -320,25 +320,39 @@ resource "kubernetes_manifest" "nodepool_spot" {
     }
     spec = {
       template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["spot"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
+        spec = merge(
+          {
+            nodeClassRef = {
+              group = "eks.amazonaws.com"
+              kind  = "NodeClass"
+              name  = "default"
             }
-          ]
-        }
+            requirements = [
+              {
+                key      = "karpenter.sh/capacity-type"
+                operator = "In"
+                values   = ["spot"]
+              },
+              {
+                key      = "kubernetes.io/arch"
+                operator = "In"
+                values   = ["amd64"]
+              }
+            ]
+          },
+          # Fresh-node race: pods scheduled before istio-cni is ready silently
+          # bypass the mesh (STRICT then rejects them). The taint blocks
+          # scheduling; istiod's untaint controller (taint.enabled) removes it
+          # per node once the CNI agent is ready. App pods can ONLY land on
+          # these custom pools (physical enables just the built-in system pool,
+          # which is CriticalAddonsOnly), so coverage is total.
+          local.mesh_installed ? {
+            startupTaints = [{
+              key    = "cni.istio.io/not-ready"
+              effect = "NoSchedule"
+            }]
+          } : {}
+        )
       }
       disruption = {
         consolidationPolicy = "WhenEmptyOrUnderutilized"
@@ -360,32 +374,41 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
     }
     spec = {
       template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["on-demand"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
+        spec = merge(
+          {
+            nodeClassRef = {
+              group = "eks.amazonaws.com"
+              kind  = "NodeClass"
+              name  = "default"
             }
-          ]
-          taints = [
-            {
-              key    = "eks.amazonaws.com/capacity-type"
-              value  = "on-demand"
+            requirements = [
+              {
+                key      = "karpenter.sh/capacity-type"
+                operator = "In"
+                values   = ["on-demand"]
+              },
+              {
+                key      = "kubernetes.io/arch"
+                operator = "In"
+                values   = ["amd64"]
+              }
+            ]
+            taints = [
+              {
+                key    = "eks.amazonaws.com/capacity-type"
+                value  = "on-demand"
+                effect = "NoSchedule"
+              }
+            ]
+          },
+          # See nodepool_spot for the startupTaints rationale.
+          local.mesh_installed ? {
+            startupTaints = [{
+              key    = "cni.istio.io/not-ready"
               effect = "NoSchedule"
-            }
-          ]
-        }
+            }]
+          } : {}
+        )
       }
       disruption = {
         consolidationPolicy = "WhenEmptyOrUnderutilized"
