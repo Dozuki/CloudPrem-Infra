@@ -427,7 +427,9 @@ resource "helm_release" "external_secrets" {
   repository = "https://charts.external-secrets.io"
   chart      = "external-secrets"
   # Pin the chart: unpinned it floats upstream latest, so two stacks applied a
-  # week apart run different ESO versions. Bump deliberately.
+  # week apart run different ESO versions. Bump deliberately. The strict-mTLS
+  # PeerAuthentication carve-out targets this chart's rendered webhook labels
+  # and port; check those still match before bumping this version.
   version = "2.8.0"
 
   wait = true
