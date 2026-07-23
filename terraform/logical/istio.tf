@@ -253,3 +253,40 @@ resource "kubectl_manifest" "peer_auth_carveouts" {
   })
   server_side_apply = true
 }
+
+resource "kubectl_manifest" "ztunnel_podmonitor" {
+  count = local.mesh_enrolled ? 1 : 0
+  # The PodMonitor CRD ships with the kube-prometheus-stack subchart INSIDE the
+  # app release; applying this any earlier fails on fresh installs.
+  depends_on = [helm_release.app, helm_release.ztunnel]
+
+  yaml_body = yamlencode({
+    apiVersion = "monitoring.coreos.com/v1"
+    kind       = "PodMonitor"
+    metadata = {
+      name      = "ztunnel"
+      namespace = "istio-system"
+      # kps Prometheus only discovers monitors carrying the release label.
+      # Verified against the rendered vendored kps-82.8.0 chart (release
+      # dozuki, ns dozuki): Prometheus.spec.podMonitorSelector.matchLabels =
+      # {release: dozuki}, podMonitorNamespaceSelector: {} (select-all, so a
+      # PodMonitor living in istio-system, outside the dozuki namespace, is
+      # still discovered). No override of that selector exists anywhere in
+      # the dozuki chart's values.yaml or in this logical layer's helm_release
+      # "app" call, so the chart default stands.
+      labels = { release = "dozuki" }
+    }
+    spec = {
+      selector = { matchLabels = { app = "ztunnel" } }
+      # Verified against the rendered ztunnel-1.30.3 chart: the DaemonSet pod
+      # template carries label app: ztunnel, and the istio-proxy container
+      # exposes containerPort 15020 named "ztunnel-stats" (not unnamed), so
+      # port: (by name) is used as-is rather than falling back to targetPort.
+      podMetricsEndpoints = [{
+        port = "ztunnel-stats"
+        path = "/stats/prometheus"
+      }]
+    }
+  })
+  server_side_apply = true
+}
