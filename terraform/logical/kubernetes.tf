@@ -732,6 +732,10 @@ resource "helm_release" "app" {
       condition     = var.cloud == "aws" || (!var.enable_webhooks && !var.enable_bi)
       error_message = "enable_webhooks and enable_bi are not supported on Azure."
     }
+    precondition {
+      condition     = var.istio_mesh_state == "disabled" || local.mesh_supported
+      error_message = "istio_mesh_state requires commercial AWS EKS (non-GovCloud). Gov needs the phase-2 image mirror; Azure is not supported yet."
+    }
   }
 }
 # Moved blocks: these resources gained `count` when Azure support was added.
