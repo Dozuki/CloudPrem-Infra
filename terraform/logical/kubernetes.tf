@@ -481,6 +481,29 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
+  # Application Signals "Auto-monitor" defaults ON since addon v5.0.0: the
+  # bundled OTel operator webhook auto-injects ADOT SDKs + instrumentation
+  # annotations into every workload (the reason ratelimit.tf ignores template
+  # annotations, and why web-nextjs/grafana pods carry an ADOT SDK nobody
+  # asked for), and the agent exports the resulting traces to X-Ray, which
+  # nothing reads (no dashboards, alarms, SLOs, or custom groups in any
+  # account). APM is Datadog's job (datadog.tf), so auto-monitor goes off.
+  # Container Insights metrics and Fluent Bit log collection are independent
+  # of this key and keep working. This is the only opt-out valid on BOTH the
+  # 5.x and 6.x addon schemas (the fleet is mixed); once every stack is on
+  # 6.x, add {"applicationSignals":{"enabled":false}} to also strip the
+  # app-signals pipelines from the agent config. Already-injected pods keep
+  # their ADOT SDK until restarted.
+  configuration_values = jsonencode({
+    manager = {
+      applicationSignals = {
+        autoMonitor = {
+          monitorAllServices = false
+        }
+      }
+    }
+  })
+
   tags = merge(
     {},
     var.delete_after != "" ? { deleteAfter = var.delete_after } : {},

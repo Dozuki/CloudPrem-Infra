@@ -373,8 +373,8 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
 # EKS Auto Mode gives nodes a deliberately minimal role (only EKS worker + ECR pull),
 # so the agent must get its CloudWatch permissions via Pod Identity. Without an
 # association the cloudwatch-agent SA falls back to the node role and every publish
-# (cloudwatch:PutMetricData, logs:PutLogEvents, xray:PutTraceSegments) is AccessDenied:
-# the ContainerInsights namespace stays empty and the node_* cluster alarms sit in
+# (cloudwatch:PutMetricData, logs:PutLogEvents) is AccessDenied: the
+# ContainerInsights namespace stays empty and the node_* cluster alarms sit in
 # INSUFFICIENT_DATA. Both the metrics agent and fluent-bit run as the cloudwatch-agent
 # SA, so one association covers metrics and logs.
 resource "aws_iam_role" "cloudwatch_agent_pod_identity" {
@@ -402,13 +402,6 @@ resource "aws_iam_role" "cloudwatch_agent_pod_identity" {
 resource "aws_iam_role_policy_attachment" "cloudwatch_agent_server" {
   role       = aws_iam_role.cloudwatch_agent_pod_identity.name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
-}
-
-# The agent's bundled OTel collector exports traces to X-Ray; without this the agent
-# logs a continuous stream of AccessDenied errors for xray:PutTraceSegments.
-resource "aws_iam_role_policy_attachment" "cloudwatch_agent_xray" {
-  role       = aws_iam_role.cloudwatch_agent_pod_identity.name
-  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
 # CloudWatch Observability: the EKS ADDON itself is created in the LOGICAL layer,
