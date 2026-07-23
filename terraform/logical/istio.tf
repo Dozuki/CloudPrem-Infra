@@ -126,3 +126,50 @@ resource "helm_release" "ztunnel" {
   # Step 2; adjust if the rendered image is wrong).
   values = local.istio_image_hub == "" ? [] : [yamlencode({ hub = local.istio_image_hub })]
 }
+
+resource "kubernetes_labels" "ambient_dozuki" {
+  count      = local.mesh_enrolled ? 1 : 0
+  depends_on = [helm_release.ztunnel]
+
+  api_version = "v1"
+  kind        = "Namespace"
+  metadata {
+    name = kubernetes_namespace_v1.app.metadata[0].name
+  }
+  labels = {
+    "istio.io/dataplane-mode" = "ambient"
+  }
+  field_manager = "cpi-istio"
+}
+
+resource "kubernetes_labels" "ambient_envoy_gateway" {
+  count = local.mesh_enrolled ? 1 : 0
+  # envoy-gateway-system is created by the EG release (create_namespace), not by a
+  # Terraform namespace resource.
+  depends_on = [helm_release.ztunnel, helm_release.envoy_gateway]
+
+  api_version = "v1"
+  kind        = "Namespace"
+  metadata {
+    name = "envoy-gateway-system"
+  }
+  labels = {
+    "istio.io/dataplane-mode" = "ambient"
+  }
+  field_manager = "cpi-istio"
+}
+
+resource "kubernetes_labels" "ambient_redis" {
+  count      = local.mesh_enrolled ? 1 : 0
+  depends_on = [helm_release.ztunnel]
+
+  api_version = "v1"
+  kind        = "Namespace"
+  metadata {
+    name = kubernetes_namespace_v1.ratelimit_redis.metadata[0].name
+  }
+  labels = {
+    "istio.io/dataplane-mode" = "ambient"
+  }
+  field_manager = "cpi-istio"
+}
