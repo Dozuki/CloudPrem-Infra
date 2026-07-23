@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.11.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.11.0...v7.11.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **physical:** dms replica parameter group missing on aurora stacks ([#260](https://github.com/Dozuki/CloudPrem-Infra/issues/260)) ([b2d4142](https://github.com/Dozuki/CloudPrem-Infra/commit/b2d414225315ec1f49a0f08a32217d3e1ca7b95a))
+
 ## [7.11.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.10.0...v7.11.0) (2026-07-22)
 
 
