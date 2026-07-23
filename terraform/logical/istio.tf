@@ -65,31 +65,34 @@ resource "helm_release" "istiod" {
   wait       = true
   timeout    = 600
 
-  values = [yamlencode(merge(
-    {
-      profile = "ambient"
-      # Untaint controller for the NodePool startupTaints. Top-level `taint` key
-      # (NOT pilot.taint); it auto-sets PILOT_ENABLE_NODE_UNTAINT_CONTROLLERS.
-      taint = { enabled = true }
-      pilot = {
-        # Autoscaling is on by default and ignores replicaCount. Min 2 so losing a
-        # system node does not take the untaint controller down (dead istiod =
-        # every new tainted custom-pool node stays unschedulable).
-        autoscaleMin = 2
-        # istiod lives on the built-in Auto Mode system pool: it must never depend
-        # on the custom pools it untaints.
-        nodeSelector = { "karpenter.sh/nodepool" = "system" }
-        tolerations  = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
-        topologySpreadConstraints = [{
-          maxSkew           = 1
-          topologyKey       = "kubernetes.io/hostname"
-          whenUnsatisfiable = "ScheduleAnyway"
-          labelSelector     = { matchLabels = { app = "istiod" } }
-        }]
-      }
-    },
-    local.istio_image_hub == "" ? {} : { global = { hub = local.istio_image_hub } }
-  ))]
+  values = [yamlencode({
+    profile = "ambient"
+    # Untaint controller for the NodePool startupTaints. Top-level `taint` key
+    # (NOT pilot.taint); it auto-sets PILOT_ENABLE_NODE_UNTAINT_CONTROLLERS.
+    taint = { enabled = true }
+    pilot = {
+      # Autoscaling is on by default and ignores replicaCount. Min 2 so losing a
+      # system node does not take the untaint controller down (dead istiod =
+      # every new tainted custom-pool node stays unschedulable).
+      autoscaleMin = 2
+      # istiod lives on the built-in Auto Mode system pool: it must never depend
+      # on the custom pools it untaints.
+      nodeSelector = { "karpenter.sh/nodepool" = "system" }
+      tolerations  = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
+      topologySpreadConstraints = [{
+        maxSkew           = 1
+        topologyKey       = "kubernetes.io/hostname"
+        whenUnsatisfiable = "ScheduleAnyway"
+        labelSelector     = { matchLabels = { app = "istiod" } }
+      }]
+    }
+    # 1.30.3 defaults this on; pinned so a future chart default change cannot
+    # drop istiod's PDB.
+    global = merge(
+      { defaultPodDisruptionBudget = { enabled = true } },
+      local.istio_image_hub == "" ? {} : { hub = local.istio_image_hub }
+    )
+  })]
 }
 
 resource "helm_release" "istio_cni" {
