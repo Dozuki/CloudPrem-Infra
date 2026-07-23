@@ -487,3 +487,9 @@ variable "delete_after" {
   type        = string
   default     = ""
 }
+
+variable "db_migrations_active_deadline_seconds" {
+  description = "activeDeadlineSeconds for the chart's db-migrations Job. The chart default (900) is too short for the Q1->Q2 forward migration on a large snapshot-restored DB (~100 GB dies DeadlineExceeded). Default here is generous; the job exits when migrations finish, so a high ceiling costs nothing on small DBs."
+  type        = number
+  default     = 3600
+}
