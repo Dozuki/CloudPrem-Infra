@@ -173,3 +173,83 @@ resource "kubernetes_labels" "ambient_redis" {
   }
   field_manager = "cpi-istio"
 }
+
+# Verified against the rendered charts (ESO pin task + the vendored kps and
+# prometheus-adapter tgz renders). Re-verify whenever any of those versions or
+# the envoy-gateway version changes.
+locals {
+  mesh_carveouts = {
+    envoy-gateway-proxy = {
+      namespace = "envoy-gateway-system"
+      selector = {
+        "app.kubernetes.io/component"  = "proxy"
+        "app.kubernetes.io/managed-by" = "envoy-gateway"
+      }
+      # NLB targets proxy pod IPs directly: client TLS passthrough on 10443,
+      # plaintext redirects/ACME and NLB health checks on 10080.
+      ports = [10443, 10080]
+    }
+    kps-operator-webhook = {
+      namespace = "dozuki"
+      selector = {
+        "app"     = "kube-prometheus-stack-operator"
+        "release" = "dozuki"
+      }
+      # API server admission webhook callback (HTTPS, cannot be mesh mTLS).
+      ports = [10250]
+    }
+    external-secrets-webhook = {
+      namespace = "dozuki"
+      selector = {
+        "app.kubernetes.io/name" = "external-secrets-webhook"
+      }
+      # API server admission webhook callback (HTTPS, cannot be mesh mTLS).
+      ports = [10250]
+    }
+    prometheus-adapter = {
+      namespace = "dozuki"
+      selector = {
+        "app.kubernetes.io/name" = "prometheus-adapter"
+      }
+      # external.metrics.k8s.io APIService callback; HPAs break without it.
+      ports = [6443]
+    }
+  }
+  mesh_strict_namespaces = ["dozuki", "envoy-gateway-system", "redis-system"]
+}
+
+resource "kubectl_manifest" "peer_auth_strict" {
+  for_each = local.mesh_strict ? toset(local.mesh_strict_namespaces) : toset([])
+  depends_on = [
+    kubernetes_labels.ambient_dozuki,
+    kubernetes_labels.ambient_envoy_gateway,
+    kubernetes_labels.ambient_redis,
+  ]
+
+  yaml_body = yamlencode({
+    apiVersion = "security.istio.io/v1"
+    kind       = "PeerAuthentication"
+    metadata   = { name = "default", namespace = each.value }
+    spec       = { mtls = { mode = "STRICT" } }
+  })
+  server_side_apply = true
+}
+
+resource "kubectl_manifest" "peer_auth_carveouts" {
+  for_each   = local.mesh_strict ? local.mesh_carveouts : {}
+  depends_on = [kubectl_manifest.peer_auth_strict]
+
+  yaml_body = yamlencode({
+    apiVersion = "security.istio.io/v1"
+    kind       = "PeerAuthentication"
+    metadata   = { name = each.key, namespace = each.value.namespace }
+    spec = {
+      selector = { matchLabels = each.value.selector }
+      mtls     = { mode = "STRICT" }
+      # JSON object keys are strings on the wire; the API server decodes them
+      # into the CRD's port-number map.
+      portLevelMtls = { for p in each.value.ports : tostring(p) => { mode = "PERMISSIVE" } }
+    }
+  })
+  server_side_apply = true
+}
