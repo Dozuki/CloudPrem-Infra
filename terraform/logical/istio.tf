@@ -218,13 +218,12 @@ locals {
   mesh_strict_namespaces = ["dozuki", "envoy-gateway-system", "redis-system"]
 }
 
+# Carve-outs must exist before namespace-wide STRICT lands (and outlive it on
+# teardown), or the NLB-facing envoy ports and API-server webhook callbacks are
+# rejected during the transition window.
 resource "kubectl_manifest" "peer_auth_strict" {
-  for_each = local.mesh_strict ? toset(local.mesh_strict_namespaces) : toset([])
-  depends_on = [
-    kubernetes_labels.ambient_dozuki,
-    kubernetes_labels.ambient_envoy_gateway,
-    kubernetes_labels.ambient_redis,
-  ]
+  for_each   = local.mesh_strict ? toset(local.mesh_strict_namespaces) : toset([])
+  depends_on = [kubectl_manifest.peer_auth_carveouts]
 
   yaml_body = yamlencode({
     apiVersion = "security.istio.io/v1"
@@ -236,8 +235,12 @@ resource "kubectl_manifest" "peer_auth_strict" {
 }
 
 resource "kubectl_manifest" "peer_auth_carveouts" {
-  for_each   = local.mesh_strict ? local.mesh_carveouts : {}
-  depends_on = [kubectl_manifest.peer_auth_strict]
+  for_each = local.mesh_strict ? local.mesh_carveouts : {}
+  depends_on = [
+    kubernetes_labels.ambient_dozuki,
+    kubernetes_labels.ambient_envoy_gateway,
+    kubernetes_labels.ambient_redis,
+  ]
 
   yaml_body = yamlencode({
     apiVersion = "security.istio.io/v1"
