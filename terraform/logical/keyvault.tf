@@ -49,6 +49,12 @@ locals {
     service-jwt = jsonencode({
       validationKey = var.service_jwt_validation_key
     })
+    # Zendesk JWT signing key. Same must-exist contract as nextjs/service-jwt
+    # above (chart >= 1.13.0); the chart composes zendesk.json and hardcodes
+    # isEnabled true. AWS twin: secret/dozuki/global/zendesk.
+    zendesk = jsonencode({
+      jwtSigningKey = var.zendesk_jwt_signing_key
+    })
     }, var.enable_dashboards ? {
     # Keys match the chart's ESO remoteRef properties (see vault.tf's
     # vault_kv_secret_v2.grafana for the AWS twin of this same entry).

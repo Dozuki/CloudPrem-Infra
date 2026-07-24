@@ -108,6 +108,13 @@ variable "service_jwt_validation_key" {
   default     = ""
 }
 
+variable "zendesk_jwt_signing_key" {
+  description = "Zendesk JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'zendesk' secret, which chart >= 1.13.0 reads unconditionally."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "smtp_enabled" {
   description = "Whether to enable SMTP email sending."
   type        = bool
