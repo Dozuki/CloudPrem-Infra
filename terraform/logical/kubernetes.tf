@@ -576,7 +576,7 @@ resource "helm_release" "app" {
     { name = "tls.cert", value = local.tls_chart_rendered ? var.tls_cert : "" },
     # The chart now renders these (moved out of this layer). See the removed
     # kubernetes_service_v1.envoy_proxy above and kubectl_manifest.tls_external_secret in
-    # tls.tf. Requires a chart_version that ships these templates (>= 1.13.0); on an older
+    # tls.tf. Requires a chart_version that ships these templates (>= 1.14.0); on an older
     # chart the flags are ignored and neither renders, so bump the chart pin in the same
     # change. The proxy Service tracks the old resources' cloud gate (aws OR azure only, never
     # on-prem); the Vault TLS ExternalSecret follows the same tls_from_vault condition the
