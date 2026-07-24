@@ -55,6 +55,23 @@ variable "enable_dashboards" {
   default     = false
 }
 
+variable "istio_mesh_state" {
+  description = "Istio ambient mesh lifecycle state. disabled: nothing installed. installed: control plane + node dataplane running, NodePool startup taints active, no namespaces enrolled. permissive: dozuki/envoy-gateway-system/redis-system enrolled (mesh-to-mesh traffic is auto-mTLS, nothing rejected). strict: STRICT PeerAuthentication enforced with documented carve-outs. States are ordered supersets; walk one step per apply, forward or back. Commercial AWS only until gov phase 2."
+  type        = string
+  default     = "disabled"
+
+  validation {
+    condition     = contains(["disabled", "installed", "permissive", "strict"], var.istio_mesh_state)
+    error_message = "istio_mesh_state must be one of: disabled, installed, permissive, strict."
+  }
+}
+
+variable "managed_private_cloud" {
+  description = "True on Dozuki-managed MPC stacks (mirrors the physical-layer variable; MPC env.hcl files already set it). Reserved by the mesh platform contract: the knob-retirement release will require the mesh when this is true and the platform is supported, while customer-managed CloudPrem keeps an effective-disabled default."
+  type        = bool
+  default     = false
+}
+
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string

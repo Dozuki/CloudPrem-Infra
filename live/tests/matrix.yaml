@@ -95,4 +95,5 @@ configs:
       rds_adopt_dr_cmk: true
       bi_dms_enabled: true
       restore_drill: true         # consumed by the harness, NOT passed to terraform
+      istio_mesh_state: "strict"
       alarm_email: "devops@dozuki.com"

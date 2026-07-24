@@ -18,12 +18,17 @@ export default function () {
   const { token } = login(BASE, EMAIL, PASSWORD);
   const h = apiHeaders(token);
 
-  // Ensure the category exists (autoCategoryCreation may also handle this on guide create).
-  http.post(`${BASE}/api/2.0/categories`, JSON.stringify({ title: CATEGORY }), { headers: h });
+  // Ensure the category exists. Categories are CATEGORY-namespace wiki documents;
+  // /api/2.0/categories has no POST endpoint (404s) and guide creation 422s on a
+  // missing category, so this must succeed first. Idempotent: re-creating an
+  // existing wiki title is a no-op error we ignore.
+  http.post(`${BASE}/api/2.0/wikis`,
+    JSON.stringify({ namespace: 'CATEGORY', title: CATEGORY, contents: 'Synthetic content for load testing.' }),
+    { headers: h });
 
   for (let i = 0; i < N_GUIDES; i++) {
     const res = http.post(`${BASE}/api/2.0/guides`,
-      JSON.stringify({ category: CATEGORY, type: 'guide', title: `LoadTest Guide ${i}` }),
+      JSON.stringify({ category: CATEGORY, type: 'how-to', title: `LoadTest Guide ${i}` }),
       { headers: h });
     if (res.status === 200 || res.status === 201) {
       const id = res.json('guideid'); if (id) pool.guides.push(id);
@@ -50,8 +55,9 @@ export default function () {
   }
   check(pool, { 'seeded some guides': (p) => p.guides.length > 0 });
   console.log(`seeded guides=${pool.guides.length} courses=${pool.courses.length} users=${pool.users.length}`);
-}
-
-export function handleSummary() {
-  return { 'pool.json': JSON.stringify(pool, null, 2) };
+  // Machine-readable pool for run.sh to extract (run with --log-format=raw).
+  // handleSummary CANNOT do this: it runs in a fresh module scope where `pool`
+  // is re-initialized empty, so the old handleSummary always wrote {} and
+  // clobbered any previously good pool.json.
+  console.log(`POOL_JSON:${JSON.stringify(pool)}`);
 }

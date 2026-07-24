@@ -91,6 +91,13 @@ resource "kubernetes_namespace_v1" "ratelimit_redis" {
   metadata {
     name = "redis-system"
   }
+
+  lifecycle {
+    # Same as kubernetes_namespace_v1.app: the ambient label belongs to
+    # kubernetes_labels.ambient_redis (istio.tf); without this every apply
+    # silently un-enrolls the namespace. Caught live on the min pilot.
+    ignore_changes = [metadata[0].labels["istio.io/dataplane-mode"]]
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -254,6 +261,18 @@ resource "kubernetes_network_policy_v1" "ratelimit_redis" {
       ports {
         protocol = "TCP"
         port     = "6379"
+      }
+
+      # Ambient delivers inbound over HBONE (TCP 15008) before ztunnel restores
+      # the original port, and the VPC CNI evaluates this policy first. Without
+      # this, enrolling redis-system severs ratelimit -> redis immediately
+      # (permissive mode included). 6379 stays for the pre-enrollment path.
+      dynamic "ports" {
+        for_each = local.mesh_enrolled ? [1] : []
+        content {
+          protocol = "TCP"
+          port     = "15008"
+        }
       }
     }
   }

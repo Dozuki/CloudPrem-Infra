@@ -21,6 +21,14 @@ resource "kubernetes_namespace_v1" "app" {
   metadata {
     name = local.k8s_namespace_name
   }
+
+  lifecycle {
+    # The ambient enrollment label is owned by kubernetes_labels.ambient_dozuki
+    # (istio.tf) under its own field manager. Without this, every apply strips
+    # the label and silently un-enrolls the namespace from the mesh (mTLS stops
+    # being enforced with no error anywhere). Caught live on the min pilot.
+    ignore_changes = [metadata[0].labels["istio.io/dataplane-mode"]]
+  }
 }
 
 resource "kubernetes_role_v1" "dozuki_subsite_role" {
@@ -320,25 +328,39 @@ resource "kubernetes_manifest" "nodepool_spot" {
     }
     spec = {
       template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["spot"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
+        spec = merge(
+          {
+            nodeClassRef = {
+              group = "eks.amazonaws.com"
+              kind  = "NodeClass"
+              name  = "default"
             }
-          ]
-        }
+            requirements = [
+              {
+                key      = "karpenter.sh/capacity-type"
+                operator = "In"
+                values   = ["spot"]
+              },
+              {
+                key      = "kubernetes.io/arch"
+                operator = "In"
+                values   = ["amd64"]
+              }
+            ]
+          },
+          # Fresh-node race: pods scheduled before istio-cni is ready silently
+          # bypass the mesh (STRICT then rejects them). The taint blocks
+          # scheduling; istiod's untaint controller (taint.enabled) removes it
+          # per node once the CNI agent is ready. App pods can ONLY land on
+          # these custom pools (physical enables just the built-in system pool,
+          # which is CriticalAddonsOnly), so coverage is total.
+          local.mesh_installed ? {
+            startupTaints = [{
+              key    = "cni.istio.io/not-ready"
+              effect = "NoSchedule"
+            }]
+          } : {}
+        )
       }
       disruption = {
         consolidationPolicy = "WhenEmptyOrUnderutilized"
@@ -360,32 +382,41 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
     }
     spec = {
       template = {
-        spec = {
-          nodeClassRef = {
-            group = "eks.amazonaws.com"
-            kind  = "NodeClass"
-            name  = "default"
-          }
-          requirements = [
-            {
-              key      = "karpenter.sh/capacity-type"
-              operator = "In"
-              values   = ["on-demand"]
-            },
-            {
-              key      = "kubernetes.io/arch"
-              operator = "In"
-              values   = ["amd64"]
+        spec = merge(
+          {
+            nodeClassRef = {
+              group = "eks.amazonaws.com"
+              kind  = "NodeClass"
+              name  = "default"
             }
-          ]
-          taints = [
-            {
-              key    = "eks.amazonaws.com/capacity-type"
-              value  = "on-demand"
+            requirements = [
+              {
+                key      = "karpenter.sh/capacity-type"
+                operator = "In"
+                values   = ["on-demand"]
+              },
+              {
+                key      = "kubernetes.io/arch"
+                operator = "In"
+                values   = ["amd64"]
+              }
+            ]
+            taints = [
+              {
+                key    = "eks.amazonaws.com/capacity-type"
+                value  = "on-demand"
+                effect = "NoSchedule"
+              }
+            ]
+          },
+          # See nodepool_spot for the startupTaints rationale.
+          local.mesh_installed ? {
+            startupTaints = [{
+              key    = "cni.istio.io/not-ready"
               effect = "NoSchedule"
-            }
-          ]
-        }
+            }]
+          } : {}
+        )
       }
       disruption = {
         consolidationPolicy = "WhenEmptyOrUnderutilized"
@@ -404,7 +435,9 @@ resource "helm_release" "external_secrets" {
   repository = "https://charts.external-secrets.io"
   chart      = "external-secrets"
   # Pin the chart: unpinned it floats upstream latest, so two stacks applied a
-  # week apart run different ESO versions. Bump deliberately.
+  # week apart run different ESO versions. Bump deliberately. The strict-mTLS
+  # PeerAuthentication carve-out targets this chart's rendered webhook labels
+  # and port; check those still match before bumping this version.
   version = "2.8.0"
 
   wait = true
@@ -504,7 +537,7 @@ locals {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app]
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, helm_release.istio_base, helm_release.istiod, helm_release.istio_cni, helm_release.ztunnel, kubernetes_labels.ambient_dozuki, kubernetes_labels.ambient_envoy_gateway, kubernetes_labels.ambient_redis]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -731,6 +764,10 @@ resource "helm_release" "app" {
     precondition {
       condition     = var.cloud == "aws" || (!var.enable_webhooks && !var.enable_bi)
       error_message = "enable_webhooks and enable_bi are not supported on Azure."
+    }
+    precondition {
+      condition     = var.istio_mesh_state == "disabled" || local.mesh_supported
+      error_message = "istio_mesh_state requires commercial AWS EKS (non-GovCloud). Gov needs the phase-2 image mirror; Azure is not supported yet."
     }
   }
 }
