@@ -83,6 +83,12 @@ variable "nextjs_tag" {
   type        = string
 }
 
+variable "webnextjs_env" {
+  description = "Extra container env vars for the web-nextjs pods, merged into the chart's webNextjs.env map. Per-env service URLs live here (CREATOR_PRO_SERVICE_API_URL, MARKETPLACE_SERVICE_API_URL, ...); an empty map renders nothing. The chart's SERVER_SIDE_MONOLITH_API_URL default is preserved by the merge."
+  type        = map(string)
+  default     = {}
+}
+
 variable "image_repository" {
   description = "Docker image repository (ECR) for app containers."
   type        = string
