@@ -560,7 +560,7 @@ resource "helm_release" "app" {
   # passed it, so these URLs had to be hand-patched onto every stack (nextjs BFF 500s
   # without them). Wire it here. Empty map is a no-op — the chart's env defaults
   # (SERVER_SIDE_MONOLITH_API_URL) are preserved by the merge.
-  values = concat([yamlencode({ webNextjs = { env = var.webnextjs_env } })], var.cloud == "azure" ? [yamlencode(merge({
+  values = concat([yamlencode({ deployments = { webNextjs = { env = var.webnextjs_env } } })], var.cloud == "azure" ? [yamlencode(merge({
     global = {
       imagePullSecrets = [{ name = "ghcr-pull" }]
       # SeaweedFS subchart replication: keep a second copy of every volume so a

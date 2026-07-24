@@ -41,7 +41,15 @@ resource "kubernetes_job_v1" "dms_start" {
               echo "DMS replication task status: $STATUS"
               case "$STATUS" in
                 running|starting) echo "task already running - nothing to do" ;;
-                *) aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn "$ARN" --region "$REGION" ;;
+                creating|modifying|stopping|testing|deleting) echo "transient state '$STATUS' - a later reconcile will act" ;;
+                None|"") echo "replication task not found: $ARN" >&2; exit 1 ;;
+                ready|stopped|failed)
+                  # start-replication redoes a full load - intended for the cutover
+                  # restore-from-new-primary path. For a steady-state task known to have
+                  # completed its full load, resume-processing (CDC from last stop) is
+                  # cheaper; refine if this job is ever used purely for restart.
+                  aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn "$ARN" --region "$REGION" ;;
+                *) echo "unexpected task status '$STATUS'" >&2; exit 1 ;;
               esac
             EOT
           ]
