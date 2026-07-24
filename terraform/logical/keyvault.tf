@@ -3,7 +3,7 @@
 # db credentials are seeded by the physical layer as "database-credentials".
 
 locals {
-  azure_kv_secrets = var.cloud == "azure" ? {
+  azure_kv_secrets = var.cloud == "azure" ? merge({
     cache = jsonencode({
       host = "dozuki-memcached"
     })
@@ -27,7 +27,43 @@ locals {
       password        = var.rustici_password
       managedPassword = var.rustici_managed_password
     })
-  } : {}
+    # Ops ingress (public Grafana/Alertmanager basic auth): always on, unlike the
+    # grafana entry below which is gated by enable_dashboards. AWS twin in vault.tf's
+    # vault_kv_secret_v2.ops_auth.
+    ops-auth = jsonencode({
+      htpasswd = local.ops_htpasswd
+      username = local.ops_user
+      password = local.ops_admin_password
+    })
+    # web-nextjs service JWT signing key. Chart >= 1.9.0 reads this path
+    # unconditionally, so the entry must exist even while the value is empty.
+    # AWS twin: secret/dozuki/global/nextjs, synced from 1Password by
+    # infra-tf's vault-config.
+    nextjs = jsonencode({
+      privateKey = var.nextjs_service_jwt_private_key
+    })
+    # Monolith-side service JWT validation key. Chart >= 1.12.0 reads this
+    # path unconditionally (same must-exist contract as nextjs above), so the
+    # entry exists even while empty; the chart composes the actual
+    # service-jwt.json file. AWS twin: secret/dozuki/global/service-jwt.
+    service-jwt = jsonencode({
+      validationKey = var.service_jwt_validation_key
+    })
+    # Zendesk JWT signing key. Same must-exist contract as nextjs/service-jwt
+    # above (chart >= 1.13.0); the chart composes zendesk.json and hardcodes
+    # isEnabled true. AWS twin: secret/dozuki/global/zendesk.
+    zendesk = jsonencode({
+      jwtSigningKey = var.zendesk_jwt_signing_key
+    })
+    }, var.enable_dashboards ? {
+    # Keys match the chart's ESO remoteRef properties (see vault.tf's
+    # vault_kv_secret_v2.grafana for the AWS twin of this same entry).
+    grafana = jsonencode({
+      secret        = local.dashboards_jwt_secret
+      adminUser     = local.dashboards_admin_username
+      adminPassword = local.dashboards_admin_password
+    })
+  } : {}) : {}
 }
 
 resource "azurerm_key_vault_secret" "app" {

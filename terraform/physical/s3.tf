@@ -486,3 +486,52 @@ resource "aws_s3_bucket_cors_configuration" "guide_images" {
 }
 
 # - End dynamic S3 resource creation
+# FinOps hygiene on the stack-created buckets (Infracost policy): incomplete
+# multipart uploads are invisible billable storage, and both bucket families
+# are versioned, so noncurrent versions accumulate forever without a rule.
+# Guide buckets hold customer content, so superseded/deleted versions are
+# NEVER expired - they move to Deep Archive after 30 noncurrent days and stay
+# recoverable indefinitely (~$1/TB-mo; MPC customers store <1TB, so the undo
+# outweighs the pennies). Objects under the 128K transition minimum just stay
+# on standard storage, which is cheaper than archiving them anyway. The
+# access-log bucket keeps hard deletion. Current versions are untouched.
+resource "aws_s3_bucket_lifecycle_configuration" "guide_buckets" {
+  for_each = toset(local.create_s3_bucket_names)
+
+  bucket = aws_s3_bucket.guide_buckets[each.key].id
+
+  rule {
+    id     = "finops-hygiene"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+
+    noncurrent_version_transition {
+      noncurrent_days = 30
+      storage_class   = "DEEP_ARCHIVE"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "logging_bucket" {
+  bucket = aws_s3_bucket.logging_bucket.id
+
+  rule {
+    id     = "finops-hygiene"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+}

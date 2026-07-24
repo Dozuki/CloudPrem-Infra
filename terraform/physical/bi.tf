@@ -187,6 +187,7 @@ module "rds_replica_database" {
   port                        = 3306
   instance_class              = data.aws_rds_orderable_db_instance.default.instance_class
   max_allocated_storage       = var.rds_max_allocated_storage
+  storage_type                = "gp3"
   replicate_source_db         = module.primary_database[0].db_instance_id
   storage_encrypted           = true
   kms_key_id                  = data.aws_kms_key.rds.arn
@@ -212,7 +213,42 @@ module "rds_replica_database" {
 
   create_db_option_group = false
 
+  enabled_cloudwatch_logs_exports        = local.rds_instance_log_exports
+  create_cloudwatch_log_group            = true
+  cloudwatch_log_group_retention_in_days = 365
+
   tags = local.tags
+}
+
+# Aurora stacks have no instance-level parameter group to reuse (the cluster
+# uses a cluster parameter group), so the DMS replica gets its own copy of
+# aws_db_parameter_group.default. rds stacks keep sharing the primary's group.
+resource "aws_db_parameter_group" "bi_replica" {
+  count = local.dms_enabled && var.db_engine == "aurora" ? 1 : 0
+
+  name_prefix = "${local.identifier}-bi-"
+  family      = "mysql${var.rds_engine_family}"
+
+  parameter {
+    name  = "binlog_format"
+    value = "ROW"
+  }
+  parameter {
+    name  = "binlog_row_image"
+    value = "Full"
+  }
+  parameter {
+    name  = "binlog_checksum"
+    value = "NONE"
+  }
+  parameter {
+    name  = "group_concat_max_len"
+    value = "33554432"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 #tfsec:ignore:general-secrets-sensitive-in-variable
@@ -231,6 +267,7 @@ module "dms_replica_database" {
   instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
   allocated_storage     = var.rds_allocated_storage
   max_allocated_storage = var.rds_max_allocated_storage
+  storage_type          = "gp3"
   storage_encrypted     = true
   kms_key_id            = data.aws_kms_key.rds.arn
   apply_immediately     = !var.protect_resources
@@ -261,9 +298,13 @@ module "dms_replica_database" {
 
   # DB parameter group
   create_db_parameter_group = false
-  parameter_group_name      = aws_db_parameter_group.default[0].name
+  parameter_group_name      = var.db_engine == "rds" ? aws_db_parameter_group.default[0].name : aws_db_parameter_group.bi_replica[0].name
 
   create_db_option_group = false
+
+  enabled_cloudwatch_logs_exports        = local.rds_instance_log_exports
+  create_cloudwatch_log_group            = true
+  cloudwatch_log_group_retention_in_days = 365
 
   tags = local.tags
 }

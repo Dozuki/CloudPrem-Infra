@@ -4,8 +4,20 @@ repos:
     hooks:
       - id: terraform-docs-go
         args: ["markdown", "table", "--output-file", "README.md", "./terraform/physical"]
-      - id: terraform-docs-go
-        args: ["markdown", "table", "--output-file", "README.md", "./terraform/logical"]
+  - repo: local
+    hooks:
+      # ./terraform/logical can't use the standard terraform-docs hook: it uses OpenTofu
+      # `provider for_each` (indexed provider refs like `azurerm.main[each.key]`), which
+      # terraform-docs cannot parse (fails "Invalid provider reference", still true as of
+      # v0.24.0). This shim generates the same docs from a copy with those provider
+      # meta-args stripped - Inputs/Outputs/Requirements are exact. Uses system
+      # terraform-docs; keep devs/CI on a consistent version to avoid README churn.
+      - id: terraform-docs-logical
+        name: terraform-docs (logical, OpenTofu provider-for_each shim)
+        entry: scripts/terraform-docs-logical.sh
+        language: script
+        files: ^terraform/logical/.*\.tf$
+        pass_filenames: false
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: "v1.83.5"
     hooks:

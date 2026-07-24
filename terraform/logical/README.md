@@ -2,11 +2,13 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 4.0 |
+| <a name="requirement_external"></a> [external](#requirement\_external) | ~> 2.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | ~> 3.0 |
+| <a name="requirement_kubectl"></a> [kubectl](#requirement\_kubectl) | 2.1.5 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 2.0 |
 | <a name="requirement_local"></a> [local](#requirement\_local) | ~> 2.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
@@ -17,14 +19,16 @@
 ## Providers
 
 | Name | Version |
-|------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.51.0 |
+| ---- | ------- |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
 | <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | ~> 4.0 |
-| <a name="provider_helm"></a> [helm](#provider\_helm) | 2.17.0 |
-| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.38.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+| <a name="provider_external"></a> [external](#provider\_external) | ~> 2.0 |
+| <a name="provider_helm"></a> [helm](#provider\_helm) | ~> 3.0 |
+| <a name="provider_kubectl"></a> [kubectl](#provider\_kubectl) | 2.1.5 |
+| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | ~> 2.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 | <a name="provider_tls"></a> [tls](#provider\_tls) | ~> 4.0 |
-| <a name="provider_vault"></a> [vault](#provider\_vault) | 4.8.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | ~> 4.0 |
 
 ## Modules
 
@@ -33,7 +37,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_eks_addon.cloudwatch_observability](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [azurerm_key_vault_secret.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault_secret) | resource |
 | [helm_release.app](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
@@ -41,6 +45,7 @@ No modules.
 | [helm_release.envoy_gateway](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.external_dns](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.external_secrets](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [kubectl_manifest.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_binding_v1.vault_auth_delegator](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_v1.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_v1) | resource |
@@ -70,11 +75,12 @@ No modules.
 | [kubernetes_secret_v1.vault_auth_token](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_service_account_v1.eso_vault_auth](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_account_v1) | resource |
 | [kubernetes_service_account_v1.vault_auth](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_account_v1) | resource |
-| [kubernetes_service_v1.envoy_proxy](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_v1) | resource |
-| [kubernetes_service_v1.envoy_proxy_azure](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_v1) | resource |
 | [kubernetes_service_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_v1) | resource |
 | [kubernetes_storage_class_v1.ebs_gp3](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/storage_class_v1) | resource |
+| [random_password.dashboards_admin](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
+| [random_password.dashboards_jwt](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.grafana_admin](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
+| [random_password.ops_admin](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.redis_auth](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.seaweedfs_access_key](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.seaweedfs_filer_db](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
@@ -89,7 +95,10 @@ No modules.
 | [vault_kv_secret_v2.cache](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.db](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.google_translate](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
+| [vault_kv_secret_v2.grafana](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
+| [vault_kv_secret_v2.ops_auth](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.smtp](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
+| [vault_kv_secret_v2.tls](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_policy.eso_readonly](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [vault_policy.stack](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
@@ -102,18 +111,15 @@ No modules.
 | [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/secretsmanager_secret_version) | data source |
 | [azurerm_key_vault_secret.db_master](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/key_vault_secret) | data source |
 | [azurerm_kubernetes_cluster.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/kubernetes_cluster) | data source |
+| [external_external.ops_htpasswd_hash](https://registry.terraform.io/providers/hashicorp/external/latest/docs/data-sources/external) | data source |
+| [kubectl_file_documents.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/data-sources/file_documents) | data source |
 | [kubernetes_resources.envoy_gateway_svc](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resources) | data source |
-| [vault_kv_secret_v2.global_frontegg](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
-| [vault_kv_secret_v2.global_ops](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
-| [vault_kv_secret_v2.global_rustici](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
-| [vault_kv_secret_v2.global_sentry](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
-| [vault_kv_secret_v2.global_slack](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
-| [vault_kv_secret_v2.global_surveyjs](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
+| [kubernetes_service_v1.envoy_proxy_azure](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/service_v1) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_aws_external_dns_role_arn"></a> [aws\_external\_dns\_role\_arn](#input\_aws\_external\_dns\_role\_arn) | AWS IAM role ARN that external-dns assumes via AKS workload identity (azure). Empty = external-dns disabled. | `string` | `""` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
 | <a name="input_azure_acme_server"></a> [azure\_acme\_server](#input\_azure\_acme\_server) | ACME directory URL for the cert-issuer when azure\_tls\_mode=letsencrypt. Empty = chart default (LE prod). Use the staging URL during bring-up. | `string` | `""` | no |
@@ -121,20 +127,24 @@ No modules.
 | <a name="input_azure_eso_identity_client_id"></a> [azure\_eso\_identity\_client\_id](#input\_azure\_eso\_identity\_client\_id) | Client ID of the ESO workload identity (physical output eso\_identity\_client\_id). | `string` | `""` | no |
 | <a name="input_azure_key_vault_id"></a> [azure\_key\_vault\_id](#input\_azure\_key\_vault\_id) | Key Vault resource ID (physical output key\_vault\_id). | `string` | `""` | no |
 | <a name="input_azure_key_vault_uri"></a> [azure\_key\_vault\_uri](#input\_azure\_key\_vault\_uri) | Key Vault URI for the ESO SecretStore (physical output key\_vault\_uri). | `string` | `""` | no |
-| <a name="input_azure_kubelogin_login"></a> [azure\_kubelogin\_login](#input\_azure\_kubelogin\_login) | kubelogin --login mode: azurecli on a workstation, msi on an Azure VM with managed identity. | `string` | `"azurecli"` | no |
+| <a name="input_azure_kubelogin_login"></a> [azure\_kubelogin\_login](#input\_azure\_kubelogin\_login) | kubelogin --login mode: azurecli on a workstation, msi on an Azure VM, or workloadidentity for OIDC federation (Spacelift — reads AZURE\_FEDERATED\_TOKEN\_FILE / AZURE\_CLIENT\_ID / AZURE\_TENANT\_ID from the run env). | `string` | `"azurecli"` | no |
 | <a name="input_azure_resource_group"></a> [azure\_resource\_group](#input\_azure\_resource\_group) | Resource group containing the AKS cluster and Key Vault. Required when cloud = azure. | `string` | `""` | no |
 | <a name="input_azure_subscription_id"></a> [azure\_subscription\_id](#input\_azure\_subscription\_id) | Azure subscription ID. Required when cloud = azure. | `string` | `""` | no |
 | <a name="input_azure_tenant_id"></a> [azure\_tenant\_id](#input\_azure\_tenant\_id) | Entra tenant ID (physical output tenant\_id). | `string` | `""` | no |
 | <a name="input_azure_tls_mode"></a> [azure\_tls\_mode](#input\_azure\_tls\_mode) | Azure gateway TLS strategy: self-signed (dev), letsencrypt (cert-manager HTTP-01), or supplied (tls\_cert/tls\_key). | `string` | `"self-signed"` | no |
 | <a name="input_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#input\_bi\_database\_credential\_secret) | ARN to secret containing bi db credentials | `string` | `""` | no |
-| <a name="input_chart_version"></a> [chart\_version](#input\_chart\_version) | Dozuki chart version pulled from the registry (oci://<image\_repository>/charts/dozuki). | `string` | `"0.3.12"` | no |
+| <a name="input_chart_version"></a> [chart\_version](#input\_chart\_version) | Dozuki chart version pulled from the registry (oci://<image\_repository>/charts/dozuki). | `string` | `"1.7.1"` | no |
 | <a name="input_cloud"></a> [cloud](#input\_cloud) | Cloud the physical layer runs on. | `string` | `"aws"` | no |
 | <a name="input_customer"></a> [customer](#input\_customer) | The customer name for resource names and tagging. This will also be the autogenerated subdomain. | `string` | `""` | no |
+| <a name="input_customer_tls_externally_managed"></a> [customer\_tls\_externally\_managed](#input\_customer\_tls\_externally\_managed) | LEGACY: customer TLS where the cert+key were hand-seeded into Vault<br/>secret/<tenant>/<env>/tls out-of-band. Superseded by tls\_cert/tls\_key, which<br/>seed the same Vault path from Terraform (customer data must start in<br/>terraform inputs, not manual vault writes). Kept only until the last legacy<br/>env's cert is migrated into stack vars; do not use for new envs. Delivery is<br/>identical:<br/>ESO syncs the Vault path into tls-secret and the chart skips rendering it.<br/>Mutually exclusive with tls\_cert/tls\_key. | `bool` | `false` | no |
+| <a name="input_db_migrations_active_deadline_seconds"></a> [db\_migrations\_active\_deadline\_seconds](#input\_db\_migrations\_active\_deadline\_seconds) | activeDeadlineSeconds for the chart's db-migrations Job. The chart default (900) is too short for the Q1->Q2 forward migration on a large snapshot-restored DB (~100 GB dies DeadlineExceeded). Default here is generous; the job exits when migrations finish, so a high ceiling costs nothing on small DBs. | `number` | `3600` | no |
+| <a name="input_delete_after"></a> [delete\_after](#input\_delete\_after) | Optional RFC3339 timestamp. When set, the AWS EKS addon resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys). | `string` | `""` | no |
 | <a name="input_dms_enabled"></a> [dms\_enabled](#input\_dms\_enabled) | If BI is enabled, whether or not to use DMS for conditional replication if true or a basic RDS read replica if false. | `bool` | `false` | no |
 | <a name="input_dms_task_arn"></a> [dms\_task\_arn](#input\_dms\_task\_arn) | If BI is enabled, the DMS replication task arn. | `string` | n/a | yes |
 | <a name="input_dns_domain_name"></a> [dns\_domain\_name](#input\_dns\_domain\_name) | Auto-provisioned subdomain for this environment | `string` | n/a | yes |
 | <a name="input_eks_cluster_id"></a> [eks\_cluster\_id](#input\_eks\_cluster\_id) | ID of EKS cluster for app provisioning | `string` | n/a | yes |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster | `bool` | `false` | no |
+| <a name="input_enable_dashboards"></a> [enable\_dashboards](#input\_enable\_dashboards) | Turns on the dozuki chart's shared Grafana dashboards subchart (dashboards.enabled) and the dozuki-operator's per-subsite Grafana-org provisioning (dozuki-operator.grafana.url). Generates and seeds the "grafana" Vault/Key Vault secret (jwt signing secret + admin credentials) this layer's ESO ExternalSecrets read - no manual secret seeding required. Requires chart\_version >= 1.0.0 and the bundled dozuki-operator >= 4.0.0 (older pins silently no-op on dozuki-operator.grafana.url). | `bool` | `false` | no |
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_dns_sa_name"></a> [external\_dns\_sa\_name](#input\_external\_dns\_sa\_name) | external-dns service account name (must match the AWS role trust subject). | `string` | `"external-dns"` | no |
@@ -152,6 +162,8 @@ No modules.
 | <a name="input_memcached_cluster_address"></a> [memcached\_cluster\_address](#input\_memcached\_cluster\_address) | Address of the deployed memcached cluster | `string` | n/a | yes |
 | <a name="input_memcached_in_cluster"></a> [memcached\_in\_cluster](#input\_memcached\_in\_cluster) | Run memcached in-cluster instead of ElastiCache (AWS). Azure is always in-cluster. Must match the physical layer's value. | `bool` | `true` | no |
 | <a name="input_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#input\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list | `any` | n/a | yes |
+| <a name="input_nextjs_extra_env"></a> [nextjs\_extra\_env](#input\_nextjs\_extra\_env) | Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs. | `map(string)` | `{}` | no |
+| <a name="input_nextjs_service_jwt_private_key"></a> [nextjs\_service\_jwt\_private\_key](#input\_nextjs\_service\_jwt\_private\_key) | web-nextjs service JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'nextjs' secret, which chart >= 1.9.0 reads unconditionally. | `string` | `""` | no |
 | <a name="input_nextjs_tag"></a> [nextjs\_tag](#input\_nextjs\_tag) | Docker image tag for the Next.js frontend container. Changes with every deploy. | `string` | n/a | yes |
 | <a name="input_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#input\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding | `string` | n/a | yes |
 | <a name="input_nlb_https_target_group_arn"></a> [nlb\_https\_target\_group\_arn](#input\_nlb\_https\_target\_group\_arn) | NLB HTTPS target group ARN for TargetGroupBinding | `string` | n/a | yes |
@@ -168,22 +180,24 @@ No modules.
 | <a name="input_s3_replicate_buckets"></a> [s3\_replicate\_buckets](#input\_s3\_replicate\_buckets) | Whether or not we are replicating objects from existing S3 buckets. | `bool` | `false` | no |
 | <a name="input_seaweedfs_volume_size_gb"></a> [seaweedfs\_volume\_size\_gb](#input\_seaweedfs\_volume\_size\_gb) | PVC size in GB for each SeaweedFS volume server (Azure only). | `number` | `100` | no |
 | <a name="input_sentry_dsn"></a> [sentry\_dsn](#input\_sentry\_dsn) | Sentry DSN (Azure only; AWS reads Vault). | `string` | `""` | no |
+| <a name="input_service_jwt_validation_key"></a> [service\_jwt\_validation\_key](#input\_service\_jwt\_validation\_key) | Monolith-side service JWT validation key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'service-jwt' secret, which chart >= 1.12.0 reads unconditionally. Empty = verification disabled. | `string` | `""` | no |
 | <a name="input_smtp_auth_enabled"></a> [smtp\_auth\_enabled](#input\_smtp\_auth\_enabled) | Whether to use SMTP authentication. | `bool` | `true` | no |
 | <a name="input_smtp_enabled"></a> [smtp\_enabled](#input\_smtp\_enabled) | Whether to enable SMTP email sending. | `bool` | `true` | no |
 | <a name="input_smtp_from_address"></a> [smtp\_from\_address](#input\_smtp\_from\_address) | SMTP from email address. | `string` | `"noreply@dozuki.com"` | no |
-| <a name="input_smtp_host"></a> [smtp\_host](#input\_smtp\_host) | SMTP server hostname. | `string` | `"smtp.sendgrid.net"` | no |
+| <a name="input_smtp_host"></a> [smtp\_host](#input\_smtp\_host) | SMTP server hostname (and port if necessary). | `string` | `"smtp.sendgrid.net:587"` | no |
 | <a name="input_smtp_password"></a> [smtp\_password](#input\_smtp\_password) | SMTP authentication password. | `string` | `""` | no |
 | <a name="input_smtp_username"></a> [smtp\_username](#input\_smtp\_username) | SMTP authentication username. | `string` | `"apikey"` | no |
 | <a name="input_spacelift"></a> [spacelift](#input\_spacelift) | Set to true when running in Spacelift. Enables IAM auth for the Vault provider. | `bool` | `false` | no |
 | <a name="input_surveyjs_license_key"></a> [surveyjs\_license\_key](#input\_surveyjs\_license\_key) | SurveyJS license key (Azure only; AWS reads Vault). | `string` | `""` | no |
-| <a name="input_tls_cert"></a> [tls\_cert](#input\_tls\_cert) | Base64-encoded PEM TLS certificate (full chain) for the gateway. When set (any cloud), Terraform creates the tls-secret and the chart runs with tls.externallyManaged=true, bypassing cert-manager/ACME. Empty = cert-manager/ACME (AWS) or azure\_tls\_mode (azure). | `string` | `""` | no |
-| <a name="input_tls_key"></a> [tls\_key](#input\_tls\_key) | Base64-encoded PEM TLS private key matching tls\_cert. Required when tls\_cert is set. | `string` | `""` | no |
+| <a name="input_tls_cert"></a> [tls\_cert](#input\_tls\_cert) | Base64-encoded PEM TLS certificate (full chain) for the gateway. When set, cert-manager/ACME is bypassed. On AWS Terraform seeds it into Vault (secret/<customer>/<env>/tls) and ESO owns tls-secret; on azure/onprem the chart renders tls-secret. Empty = cert-manager/ACME (AWS) or azure\_tls\_mode (azure). Certs are public data and can live in env.hcl; keep tls\_key a masked stack TF\_VAR. | `string` | `""` | no |
+| <a name="input_tls_key"></a> [tls\_key](#input\_tls\_key) | Base64-encoded PEM TLS private key matching tls\_cert. Required when tls\_cert is set. Set as a masked Spacelift TF\_VAR on the env's logical stack, not in git. | `string` | `""` | no |
 | <a name="input_vault_address"></a> [vault\_address](#input\_vault\_address) | Vault server address accessible from within the cluster (PrivateLink). | `string` | n/a | yes |
+| <a name="input_zendesk_jwt_signing_key"></a> [zendesk\_jwt\_signing\_key](#input\_zendesk\_jwt\_signing\_key) | Zendesk JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'zendesk' secret, which chart >= 1.13.0 reads unconditionally. | `string` | `""` | no |
 
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_dozuki_url"></a> [dozuki\_url](#output\_dozuki\_url) | URL to your Dozuki Installation. |
 | <a name="output_grafana_admin_password"></a> [grafana\_admin\_password](#output\_grafana\_admin\_password) | Password for Grafana admin user |
 | <a name="output_grafana_admin_username"></a> [grafana\_admin\_username](#output\_grafana\_admin\_username) | n/a |

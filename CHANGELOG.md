@@ -2,6 +2,124 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.11.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.11.0...v7.11.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **physical:** dms replica parameter group missing on aurora stacks ([#260](https://github.com/Dozuki/CloudPrem-Infra/issues/260)) ([b2d4142](https://github.com/Dozuki/CloudPrem-Infra/commit/b2d414225315ec1f49a0f08a32217d3e1ca7b95a))
+
+## [7.11.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.10.0...v7.11.0) (2026-07-22)
+
+
+### Features
+
+* **logical:** seed the azure service-jwt validation key, order kv seeding before helm ([27140f1](https://github.com/Dozuki/CloudPrem-Infra/commit/27140f16c90517d93bf6143977bf339a63cad356))
+
+
+### Reverts
+
+* back out the previous commit, its metadata was copied from the release commit ([132d4b3](https://github.com/Dozuki/CloudPrem-Infra/commit/132d4b361dea3ffe0d21f4ec238c53ca5f0423c4))
+
+## [7.10.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.9.0...v7.10.0) (2026-07-17)
+
+
+### Features
+
+* **physical:** general log joins the default exports ([7b1cbfa](https://github.com/Dozuki/CloudPrem-Infra/commit/7b1cbfab61d3bae788a83718c04196fa2e341f2d))
+
+
+### Bug Fixes
+
+* **physical:** bastion AMI resolves via SSM at launch, not at plan time ([92620d9](https://github.com/Dozuki/CloudPrem-Infra/commit/92620d995fc14f7cbedebd5a9b8a149017087d3e))
+
+## [7.9.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.8.1...v7.9.0) (2026-07-16)
+
+
+### Features
+
+* **physical:** default-on database log exports, 1y retention on new log groups ([158b83a](https://github.com/Dozuki/CloudPrem-Infra/commit/158b83abe0bb425e36e6520c8cf1880b6bf26e0f))
+
+## [7.8.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.8.0...v7.8.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* **physical:** bastion SSM associations target identity tags, not the whole tag map ([94ded20](https://github.com/Dozuki/CloudPrem-Infra/commit/94ded20ea0a6cfcaad64165807d0142d475fd160))
+
+## [7.8.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.3...v7.8.0) (2026-07-16)
+
+
+### Features
+
+* **tags:** Service + Customer tags, one Identifier sentinel, casing advisories ([#252](https://github.com/Dozuki/CloudPrem-Infra/issues/252)) ([15681ca](https://github.com/Dozuki/CloudPrem-Infra/commit/15681cacf868ee59a60ea44877a5b08848f5aebd))
+
+## [7.7.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.2...v7.7.3) (2026-07-15)
+
+
+### Bug Fixes
+
+* **physical:** drop the eks_cluster module-level depends_on ([#253](https://github.com/Dozuki/CloudPrem-Infra/issues/253)) ([80b6ba0](https://github.com/Dozuki/CloudPrem-Infra/commit/80b6ba0138473abc5c018ce5be6057874bcf243f))
+
+## [7.7.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.1...v7.7.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **physical:** archive noncurrent guide-bucket versions instead of deleting ([#249](https://github.com/Dozuki/CloudPrem-Infra/issues/249)) ([6d67dce](https://github.com/Dozuki/CloudPrem-Infra/commit/6d67dcedc6d882220272b1d79bb7c9ebd467ae57))
+
+## [7.7.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.7.0...v7.7.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **physical:** finops remediation for the infracost policy set ([#247](https://github.com/Dozuki/CloudPrem-Infra/issues/247)) ([0b971f2](https://github.com/Dozuki/CloudPrem-Infra/commit/0b971f2eec158d6d6ce9678ea4c02050e226afeb))
+
+## [7.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.6.1...v7.7.0) (2026-07-09)
+
+
+### Features
+
+* **logical:** supplied TLS certs seed Vault from Terraform on AWS ([eb5c0ce](https://github.com/Dozuki/CloudPrem-Infra/commit/eb5c0ce040e9d01d9e9fa663d607ee6c1416dc20))
+
+## [7.6.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.6.0...v7.6.1) (2026-07-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **logical:** service JWT key is unconditional; seed the azure nextjs KV secret
+
+### Features
+
+* **logical:** service JWT key is unconditional; seed the azure nextjs KV secret ([27b6098](https://github.com/Dozuki/CloudPrem-Infra/commit/27b60981145583d21724400759b9aeac26a1b5ba))
+
+
+### Miscellaneous Chores
+
+* **logical:** the unconditional jwt chart version is 1.9.0, not 2.0.0 ([41558fa](https://github.com/Dozuki/CloudPrem-Infra/commit/41558fa462ddedacb0ed0218b635677df330a2f5))
+
+## [7.6.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.5.0...v7.6.0) (2026-07-08)
+
+
+### Features
+
+* **logical:** per-env web-nextjs env vars and service JWT toggle ([b751875](https://github.com/Dozuki/CloudPrem-Infra/commit/b751875b86a2e62919b4c13512371b0b003ce995))
+* **logical:** seed ops-auth htpasswd for the chart's public ops ingress ([#242](https://github.com/Dozuki/CloudPrem-Infra/issues/242)) ([d58f05e](https://github.com/Dozuki/CloudPrem-Infra/commit/d58f05edb0570481514001799b7deea87ad17786))
+
+## [7.5.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.4.0...v7.5.0) (2026-07-06)
+
+
+### Features
+
+* **logical:** default chart_version to 1.7.1 ([#240](https://github.com/Dozuki/CloudPrem-Infra/issues/240)) ([e2398a9](https://github.com/Dozuki/CloudPrem-Infra/commit/e2398a9e33764b3dc11541645943b58b3934c52a))
+
+## [7.4.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.10...v7.4.0) (2026-07-03)
+
+
+### Features
+
+* **logical:** opt-in shared-grafana dashboards wiring, drop dead grafana sets ([#238](https://github.com/Dozuki/CloudPrem-Infra/issues/238)) ([302d8de](https://github.com/Dozuki/CloudPrem-Infra/commit/302d8dece6563e329b89c966159291f9d7860472))
+
 ## [7.3.10](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.3.9...v7.3.10) (2026-06-27)
 
 

@@ -49,6 +49,12 @@ variable "enable_bi" {
   default     = false
 }
 
+variable "enable_dashboards" {
+  description = "Turns on the dozuki chart's shared Grafana dashboards subchart (dashboards.enabled) and the dozuki-operator's per-subsite Grafana-org provisioning (dozuki-operator.grafana.url). Generates and seeds the \"grafana\" Vault/Key Vault secret (jwt signing secret + admin credentials) this layer's ESO ExternalSecrets read - no manual secret seeding required. Requires chart_version >= 1.0.0 and the bundled dozuki-operator >= 4.0.0 (older pins silently no-op on dozuki-operator.grafana.url)."
+  type        = bool
+  default     = false
+}
+
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string
@@ -88,6 +94,33 @@ variable "image_repository" {
   type        = string
 }
 
+variable "nextjs_extra_env" {
+  description = "Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs."
+  type        = map(string)
+  default     = {}
+}
+
+variable "nextjs_service_jwt_private_key" {
+  description = "web-nextjs service JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'nextjs' secret, which chart >= 1.9.0 reads unconditionally."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "service_jwt_validation_key" {
+  description = "Monolith-side service JWT validation key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'service-jwt' secret, which chart >= 1.12.0 reads unconditionally. Empty = verification disabled."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "zendesk_jwt_signing_key" {
+  description = "Zendesk JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'zendesk' secret, which chart >= 1.13.0 reads unconditionally."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "smtp_enabled" {
   description = "Whether to enable SMTP email sending."
   type        = bool
@@ -95,9 +128,9 @@ variable "smtp_enabled" {
 }
 
 variable "smtp_host" {
-  description = "SMTP server hostname."
+  description = "SMTP server hostname (and port if necessary)."
   type        = string
-  default     = "smtp.sendgrid.net"
+  default     = "smtp.sendgrid.net:587"
 }
 
 variable "smtp_from_address" {
@@ -366,7 +399,7 @@ variable "rustici_managed_password" {
 variable "chart_version" {
   description = "Dozuki chart version pulled from the registry (oci://<image_repository>/charts/dozuki)."
   type        = string
-  default     = "0.5.2"
+  default     = "1.7.1"
 }
 
 variable "ghcr_pull_username" {
@@ -383,25 +416,27 @@ variable "ghcr_pull_token" {
 }
 
 variable "tls_cert" {
-  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set (any cloud), Terraform creates the tls-secret and the chart runs with tls.externallyManaged=true, bypassing cert-manager/ACME. Empty = cert-manager/ACME (AWS) or azure_tls_mode (azure)."
+  description = "Base64-encoded PEM TLS certificate (full chain) for the gateway. When set, cert-manager/ACME is bypassed. On AWS Terraform seeds it into Vault (secret/<customer>/<env>/tls) and ESO owns tls-secret; on azure/onprem the chart renders tls-secret. Empty = cert-manager/ACME (AWS) or azure_tls_mode (azure). Certs are public data and can live in env.hcl; keep tls_key a masked stack TF_VAR."
   type        = string
   default     = ""
 }
 
 variable "tls_key" {
-  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set."
+  description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set. Set as a masked Spacelift TF_VAR on the env's logical stack, not in git."
   type        = string
   default     = ""
 }
 
 variable "customer_tls_externally_managed" {
   description = <<-EOT
-    Customer-provided TLS where the cert+key live in VAULT (not in tls_cert/tls_key).
-    When true, an ExternalSecret syncs cert/key from Vault secret/<tenant>/<env>/tls
-    (keys: cert, key) into the tls-secret K8s Secret, and the chart's
-    tls.externallyManaged is set so it skips rendering tls-secret and drops the
-    cert-manager Gateway annotation. Cert/key are seeded into Vault out-of-band and
-    never enter Terraform state. Mutually exclusive with tls_cert/tls_key.
+    LEGACY: customer TLS where the cert+key were hand-seeded into Vault
+    secret/<tenant>/<env>/tls out-of-band. Superseded by tls_cert/tls_key, which
+    seed the same Vault path from Terraform (customer data must start in
+    terraform inputs, not manual vault writes). Kept only until the last legacy
+    env's cert is migrated into stack vars; do not use for new envs. Delivery is
+    identical:
+    ESO syncs the Vault path into tls-secret and the chart skips rendering it.
+    Mutually exclusive with tls_cert/tls_key.
   EOT
   type        = bool
   default     = false
@@ -464,4 +499,10 @@ variable "delete_after" {
   description = "Optional RFC3339 timestamp. When set, the AWS EKS addon resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys)."
   type        = string
   default     = ""
+}
+
+variable "db_migrations_active_deadline_seconds" {
+  description = "activeDeadlineSeconds for the chart's db-migrations Job. The chart default (900) is too short for the Q1->Q2 forward migration on a large snapshot-restored DB (~100 GB dies DeadlineExceeded). Default here is generous; the job exits when migrations finish, so a high ceiling costs nothing on small DBs."
+  type        = number
+  default     = 3600
 }

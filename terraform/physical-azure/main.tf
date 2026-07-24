@@ -44,6 +44,8 @@ locals {
   tags = {
     Terraform   = "true"
     Project     = "mpc"
+    Service     = "mpc"
+    Customer    = coalesce(var.customer, "dozuki")
     Identifier  = local.identifier
     Environment = var.environment
   }

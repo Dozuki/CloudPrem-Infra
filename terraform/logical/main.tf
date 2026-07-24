@@ -30,6 +30,15 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.0"
     }
+    # external — only for data.external.ops_htpasswd_hash (vault.tf): OpenTofu/
+    # Terraform have no base64sha1() (only base64sha256/512), and Envoy Gateway's
+    # basic_auth filter only accepts that SHA1 htpasswd format, so we shell out to
+    # busybox sha1sum/base64 (the Spacelift runner ships no openssl). First-party
+    # HashiCorp provider, same trust tier as null/local/tls.
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.0"
+    }
     local = {
       source  = "hashicorp/local"
       version = "~> 2.0"
@@ -208,55 +217,24 @@ locals {
   # Kubernetes
   k8s_namespace_name = "dozuki"
 
-  // Map for app config
+  # Dashboards (shared Grafana): jwt signing secret + admin creds, generated once
+  # per stack. Shared between the "grafana" Vault/Key Vault secret (vault.tf /
+  # keyvault.tf, read by ESO) and the dashboards.jwtSecret chart value (kubernetes.tf),
+  # which the Envoy Gateway JWT SecurityPolicy needs baked in at render time — a
+  # cluster secret alone isn't enough, ESO and Terraform must agree on the same value.
+  dashboards_jwt_secret     = var.enable_dashboards ? random_password.dashboards_jwt[0].result : ""
+  dashboards_admin_username = "admin"
+  dashboards_admin_password = var.enable_dashboards ? random_password.dashboards_admin[0].result : ""
 
-  base_config_values = {
-    customer               = { value = coalesce(var.customer, "Dozuki") }
-    environment            = { value = var.environment }
-    aws_acct_id            = { value = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : "" }
-    aws_region             = { value = var.cloud == "aws" ? data.aws_region.current[0].region : "us-east-1" }
-    hostname               = { value = var.dns_domain_name }
-    ingress_hostname       = { value = coalesce(var.ingress_hostname, var.dns_domain_name) }
-    bi_enabled             = { value = var.enable_bi ? "true" : "false" }
-    webhooks_enabled       = { value = var.enable_webhooks ? "true" : "false" }
-    memcached_host         = { value = local.memcached_host }
-    s3_kms_key             = { value = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : "" }
-    s3_images_bucket       = { value = var.s3_images_bucket }
-    s3_objects_bucket      = { value = var.s3_objects_bucket }
-    s3_documents_bucket    = { value = var.s3_documents_bucket }
-    s3_pdfs_bucket         = { value = var.s3_pdfs_bucket }
-    db_host                = { value = local.db_master_host }
-    db_user                = { value = local.db_master_username }
-    db_password            = { value = local.db_master_password }
-    rds_ca_cert            = { value = base64encode(file(local.ca_cert_pem_file)) }
-    msk_bootstrap_brokers  = { value = var.msk_bootstrap_brokers }
-    google_translate_token = { value = var.google_translate_api_token }
-    dns_validation         = { value = !local.is_us_gov && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" }
-    vault_enabled          = { value = "true" }
-    vault_address          = { value = var.vault_address }
-    image_repository       = { value = var.image_repository }
-    image_tag              = { value = var.image_tag }
-    nextjs_tag             = { value = var.nextjs_tag }
-    smtp_enabled           = { value = var.smtp_enabled ? "true" : "false" }
-    smtp_host              = { value = var.smtp_host }
-    smtp_from_address      = { value = var.smtp_from_address }
-    smtp_auth_enabled      = { value = var.smtp_auth_enabled ? "true" : "false" }
-    smtp_username          = { value = var.smtp_username }
-    smtp_password          = { value = var.smtp_password }
-  }
-
-  // Optional add-on for Grafana config
-  grafana_config_values = {
-    grafana_admin_username      = { value = local.grafana_admin_username }
-    grafana_admin_password      = { value = local.grafana_admin_password }
-    grafana_datasource_hostname = { value = local.db_bi_host }
-    grafana_datasource_password = { value = local.db_bi_password }
-    grafana_settings_hostname   = { value = local.db_master_host }
-    grafana_settings_username   = { value = local.db_master_username }
-    grafana_settings_password   = { value = local.db_master_password }
-    grafana_subpath             = { value = var.grafana_subpath }
-  }
-
+  # Ops ingress (public Grafana/Alertmanager behind HTTP basic auth): always on, so
+  # unlike dashboards_* above it isn't gated by enable_dashboards/enable_bi. Seeded
+  # into Vault/Key Vault as "ops-auth" (vault.tf / keyvault.tf) for the chart's
+  # ExternalSecret to read.
+  ops_user           = "ops"
+  ops_admin_password = random_password.ops_admin.result
+  # {SHA}<base64 sha1 digest>, matching `htpasswd -s` — see data.external.ops_htpasswd_hash
+  # in vault.tf for why this needs to shell out instead of a native function.
+  ops_htpasswd = "${local.ops_user}:{SHA}${data.external.ops_htpasswd_hash.result.hash}"
 }
 
 check "vault_address_configured" {
@@ -285,6 +263,12 @@ data "aws_caller_identity" "current" {
 
 data "aws_ecr_authorization_token" "chart" {
   count = var.cloud == "aws" ? 1 : 0
+
+  # ECR auth tokens are regional and the shared chart registry lives in one
+  # region while stacks run anywhere; a token from the stack's own region is
+  # rejected by the registry's endpoint. Parse the registry region from the
+  # repository host (fall back to the stack region for non-ECR hosts).
+  region = try(regex("\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com", var.image_repository)[0], null)
 }
 
 data "aws_kms_key" "s3" {

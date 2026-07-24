@@ -217,75 +217,28 @@ resource "helm_release" "envoy_gateway" {
   ]
 }
 
-# Stable Service in envoy-gateway-system targeting Envoy proxy pods.
-# Proxy pods are deployed in the controller namespace, not the Gateway namespace.
-resource "kubernetes_service_v1" "envoy_proxy" {
-  count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [helm_release.app]
+# The stable dozuki-envoy-proxy Service (AWS ClusterIP / Azure LoadBalancer, in
+# envoy-gateway-system) now ships in the chart (gateway.stableProxyService, set below), so
+# it renders in-release next to the Gateway it fronts. It stayed in Terraform only for
+# historical ordering; nothing here needed a physical input. The AWS TargetGroupBindings
+# below stay in Terraform - they bind to the physical NLB target-group ARN.
 
-  metadata {
-    name      = "dozuki-envoy-proxy"
-    namespace = "envoy-gateway-system"
-  }
-  spec {
-    type = "ClusterIP"
-    selector = {
-      "gateway.envoyproxy.io/owning-gateway-name"      = "dozuki-gateway"
-      "gateway.envoyproxy.io/owning-gateway-namespace" = kubernetes_namespace_v1.app.metadata[0].name
-    }
-    port {
-      name        = "https"
-      port        = 443
-      target_port = 10443
-      protocol    = "TCP"
-    }
-    port {
-      name        = "http"
-      port        = 80
-      target_port = 10080
-      protocol    = "TCP"
-    }
-  }
-}
-
-# Azure twin of the Envoy proxy Service: exposes the proxy pods directly via an
-# Azure Load Balancer instead of NLB target group bindings.
-resource "kubernetes_service_v1" "envoy_proxy_azure" {
+# Azure only: the ingress_ip output needs the LoadBalancer IP the chart's Service is assigned.
+# Read it back rather than owning the Service. depends_on the release so the read happens after
+# the Service exists; try() in the output tolerates the brief window before the LB IP lands.
+data "kubernetes_service_v1" "envoy_proxy_azure" {
   count      = var.cloud == "azure" ? 1 : 0
   depends_on = [helm_release.app]
 
-  # Azure LB uses its default TCP health probe. Do not set an HTTP
-  # health-probe-request-path annotation unless the Envoy proxy is verified to
-  # serve 200 on that path on the data ports (10443/10080) — a failing HTTP
-  # probe blackholes ingress.
   metadata {
     name      = "dozuki-envoy-proxy"
     namespace = "envoy-gateway-system"
-  }
-  spec {
-    type = "LoadBalancer"
-    selector = {
-      "gateway.envoyproxy.io/owning-gateway-name"      = "dozuki-gateway"
-      "gateway.envoyproxy.io/owning-gateway-namespace" = kubernetes_namespace_v1.app.metadata[0].name
-    }
-    port {
-      name        = "https"
-      port        = 443
-      target_port = 10443
-      protocol    = "TCP"
-    }
-    port {
-      name        = "http"
-      port        = 80
-      target_port = 10080
-      protocol    = "TCP"
-    }
   }
 }
 
 resource "kubernetes_manifest" "tgb_https" {
   count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [kubernetes_service_v1.envoy_proxy]
+  depends_on = [helm_release.app] # chart creates the Service in-release; wait=true guarantees it before the binding
 
   manifest = {
     apiVersion = "eks.amazonaws.com/v1"
@@ -307,7 +260,7 @@ resource "kubernetes_manifest" "tgb_https" {
 
 resource "kubernetes_manifest" "tgb_http" {
   count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [kubernetes_service_v1.envoy_proxy]
+  depends_on = [helm_release.app] # chart creates the Service in-release; wait=true guarantees it before the binding
 
   manifest = {
     apiVersion = "eks.amazonaws.com/v1"
@@ -421,6 +374,9 @@ resource "helm_release" "external_secrets" {
   namespace  = kubernetes_namespace_v1.app.metadata[0].name
   repository = "https://charts.external-secrets.io"
   chart      = "external-secrets"
+  # Pin the chart: unpinned it floats upstream latest, so two stacks applied a
+  # week apart run different ESO versions. Bump deliberately.
+  version = "2.8.0"
 
   wait = true
 
@@ -519,7 +475,10 @@ locals {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg]
+  # vault_kv_secret_v2.tls: the chart now renders the tls-secret ExternalSecret (moved from
+  # tls.tf); keep the ordering the deleted resource had so a fresh seeded-Vault install seeds
+  # the cert before ESO tries to read it.
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, vault_kv_secret_v2.tls]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -583,7 +542,7 @@ resource "helm_release" "app" {
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
-  set = [
+  set = concat([
     # --- General ---
     { name = "hostname", value = var.dns_domain_name },
     { name = "dns_validation", value = var.cloud == "aws" && !local.is_us_gov && !local.tls_manual && contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", "")) ? "true" : "false" },
@@ -599,6 +558,12 @@ resource "helm_release" "app" {
     { name = "db.host", value = local.db_master_host },
     { name = "db.user", value = local.db_master_username },
     { name = "db.rdsCaCert", value = base64encode(file(local.ca_cert_pem_file)) },
+    # The chart default (900s) is fine for small DBs but the Q1->Q2 forward
+    # migration on a large snapshot-restored DB (3M emea/gca/usac, ~100 GB)
+    # exceeds it and the job dies DeadlineExceeded. Give it real headroom;
+    # the job still exits as soon as migrations finish, so a high ceiling is
+    # free on small DBs. This also bounds the cutover window on the big envs.
+    { name = "dbMigrations.activeDeadlineSeconds", value = tostring(var.db_migrations_active_deadline_seconds) },
 
     # --- SMTP ---
     { name = "smtp.enabled", value = var.smtp_enabled ? "true" : "false" },
@@ -632,7 +597,16 @@ resource "helm_release" "app" {
     # false). Generated self-signed: Terraform renders it (externallyManaged true).
     { name = "tls.enabled", value = local.tls_manual ? "true" : "false" },
     { name = "tls.externallyManaged", value = local.tls_externally_managed ? "true" : "false" },
-    { name = "tls.cert", value = local.tls_supplied ? var.tls_cert : "" },
+    { name = "tls.cert", value = local.tls_chart_rendered ? var.tls_cert : "" },
+    # The chart now renders these (moved out of this layer). See the removed
+    # kubernetes_service_v1.envoy_proxy above and kubectl_manifest.tls_external_secret in
+    # tls.tf. Requires a chart_version that ships these templates (>= 1.14.0); on an older
+    # chart the flags are ignored and neither renders, so bump the chart pin in the same
+    # change. The proxy Service tracks the old resources' cloud gate (aws OR azure only, never
+    # on-prem); the Vault TLS ExternalSecret follows the same tls_from_vault condition the
+    # deleted resource used.
+    { name = "gateway.stableProxyService.enabled", value = contains(["aws", "azure"], var.cloud) ? "true" : "false" },
+    { name = "tls.vaultExternalSecret.enabled", value = local.tls_from_vault ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
@@ -682,10 +656,8 @@ resource "helm_release" "app" {
     # only matches a standalone S3 deployment, which we do not run.
     { name = "objectStorage.publicHost", value = var.cloud == "azure" ? "s3.${var.dns_domain_name}" : "" },
 
-    # --- Grafana ---
-    { name = "grafana.enabled", value = var.enable_bi ? "true" : "false" },
-    { name = "grafana.security.admin_user", value = local.grafana_admin_username },
-    { name = "grafana.datasource.host", value = local.db_bi_host },
+    # --- Dashboards (shared Grafana) ---
+    { name = "dashboards.enabled", value = var.enable_dashboards ? "true" : "false" },
 
     # --- Connectivity (sunset planned) ---
     { name = "connectivity.webhook-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
@@ -715,17 +687,33 @@ resource "helm_release" "app" {
     # serve the ECR registry, so a non-matching secret is ignored).
     { name = "dozuki-operator.image.repository", value = "${var.image_repository}/dozuki-operator" },
     { name = "dozuki-operator.imagePullSecrets[0].name", value = "ghcr-pull" },
-  ]
+    # GRAFANA_URL: tells the operator to run shared-Grafana org provisioning. The
+    # dashboards subchart forces nameOverride=dashboards-grafana and this chart's
+    # release name is always "dozuki" (helm_release.app.name), so the in-cluster
+    # Service is always dozuki-dashboards-grafana when dashboards.enabled. Left
+    # empty when disabled — a nonempty URL would point the operator at a Grafana
+    # that was never installed.
+    { name = "dozuki-operator.grafana.url", value = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" },
+
+    ],
+    # Per-env web-nextjs env vars (service API URLs etc.); merge into the chart's
+    # deployments.webNextjs.env map. Env var names are underscore-only, so no
+    # helm set-path escaping is needed.
+    [for name, value in var.nextjs_extra_env : { name = "deployments.webNextjs.env.${name}", value = value }],
+  )
 
   set_sensitive = [
     { name = "db.password", value = local.db_master_password },
-    { name = "tls.key", value = local.tls_supplied ? var.tls_key : "" },
+    { name = "tls.key", value = local.tls_chart_rendered ? var.tls_key : "" },
     { name = "smtp.auth.password", value = var.smtp_password },
     { name = "objectStorage.credentials.accessKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_access_key[0].result, "") : "" },
     { name = "objectStorage.credentials.secretKey", value = var.cloud == "azure" ? try(random_password.seaweedfs_secret_key[0].result, "") : "" },
     { name = "googleTranslate.token", value = var.google_translate_api_token },
-    { name = "grafana.security.admin_password", value = local.grafana_admin_password },
-    { name = "grafana.datasource.password", value = local.db_bi_password },
+    # Signs the inline JWKS the Envoy JWT SecurityPolicy validates against (see
+    # dozuki chart templates/gateway-dashboards.yaml) — must be the SAME value
+    # seeded into the "grafana" Vault/Key Vault secret's "secret" property, since
+    # ESO syncs that same value into grafana.json for the app to mint tokens with.
+    { name = "dashboards.jwtSecret", value = local.dashboards_jwt_secret },
   ]
 
   lifecycle {
@@ -742,10 +730,6 @@ moved {
   to   = kubernetes_storage_class_v1.ebs_gp3[0]
 }
 
-moved {
-  from = kubernetes_service_v1.envoy_proxy
-  to   = kubernetes_service_v1.envoy_proxy[0]
-}
 
 moved {
   from = kubernetes_manifest.tgb_https
