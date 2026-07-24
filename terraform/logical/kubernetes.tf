@@ -153,6 +153,24 @@ resource "helm_release" "envoy_gateway" {
   #    and passes it as the Redis AUTH password. No plaintext password in the
   #    EnvoyGateway ConfigMap. See ratelimit.tf for the Secret + Redis --requirepass.
   values = [yamlencode({
+    # Controller (control-plane) resources. The gateway-helm default is a 100m CPU
+    # request, which crashlooped the controller under load: CPU-starved on a busy
+    # node it couldn't answer its 1s liveness probe in time, kubelet killed it, and
+    # every kill dropped the xDS stream so the whole data plane went down (took apac
+    # down mid-cutover). A 500m request gives it guaranteed scheduling headroom so the
+    # probe stays responsive; no CPU limit so reconciliation can burst. (The chart
+    # does not expose the controller's probe timeouts, so we fix this via resources;
+    # verify this value path against the pinned gateway-helm chart on version bumps.)
+    deployment = {
+      envoyGateway = {
+        resources = {
+          requests = {
+            cpu    = "500m"
+            memory = "256Mi"
+          }
+        }
+      }
+    }
     config = {
       envoyGateway = {
         extensionApis = {
@@ -539,7 +557,13 @@ resource "helm_release" "app" {
   # chart's bundled SeaweedFS subchart for object storage (Azure has no S3). This is
   # the same model on-prem uses (seaweedfs.enabled=true); see local.seaweedfs_values.
   # On AWS this is an empty list of values files — a no-op, no overrides applied.
-  values = var.cloud == "azure" ? [yamlencode(merge({
+  # webNextjs.env: per-env service URLs (CREATOR_PRO_SERVICE_API_URL,
+  # MARKETPLACE_SERVICE_API_URL, ...) merged into the chart's webNextjs.env map from
+  # var.webnextjs_env. The chart supports this merge, but the logical layer never
+  # passed it, so these URLs had to be hand-patched onto every stack (nextjs BFF 500s
+  # without them). Wire it here. Empty map is a no-op — the chart's env defaults
+  # (SERVER_SIDE_MONOLITH_API_URL) are preserved by the merge.
+  values = concat([yamlencode({ webNextjs = { env = var.webnextjs_env } })], var.cloud == "azure" ? [yamlencode(merge({
     global = {
       imagePullSecrets = [{ name = "ghcr-pull" }]
       # SeaweedFS subchart replication: keep a second copy of every volume so a
@@ -558,7 +582,7 @@ resource "helm_release" "app" {
     }
     }, local.seaweedfs_values, var.azure_acme_server != "" ? {
     cert_manager = { acmeServer = var.azure_acme_server }
-  } : {}))] : []
+  } : {}))] : [])
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
