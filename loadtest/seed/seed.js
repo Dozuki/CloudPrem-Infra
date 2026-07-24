@@ -55,8 +55,9 @@ export default function () {
   }
   check(pool, { 'seeded some guides': (p) => p.guides.length > 0 });
   console.log(`seeded guides=${pool.guides.length} courses=${pool.courses.length} users=${pool.users.length}`);
-}
-
-export function handleSummary() {
-  return { 'pool.json': JSON.stringify(pool, null, 2) };
+  // Machine-readable pool for run.sh to extract (run with --log-format=raw).
+  // handleSummary CANNOT do this: it runs in a fresh module scope where `pool`
+  // is re-initialized empty, so the old handleSummary always wrote {} and
+  // clobbered any previously good pool.json.
+  console.log(`POOL_JSON:${JSON.stringify(pool)}`);
 }
