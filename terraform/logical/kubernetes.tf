@@ -510,14 +510,26 @@ resource "helm_release" "app" {
   repository = "oci://${var.image_repository}/charts"
   version    = var.chart_version
 
-  # wait must be true so that on destroy, Helm waits for all resources
-  # (including custom resources with finalizers like Gateway, HTTPRoute,
-  # Certificate, ClusterIssuer) to be fully deleted before Terraform
-  # proceeds to destroy the controllers (cert-manager, envoy-gateway)
-  # that process those finalizers. Without this, controllers are torn
-  # down while custom resources still have pending finalizers, causing
-  # the namespace to hang indefinitely.
-  wait    = true
+  # wait = false: the app pods gate on the DB migration via a wait-for-migrations
+  # init container, and a large migration (a fresh cutover is hundreds of migrations
+  # across many tenant DBs) runs far longer than any apply is allowed to — the
+  # Spacelift public-pool run uses a role-chained AWS session capped at 1h. With
+  # wait = true the release blocked on those never-Ready pods, timed out, and left
+  # tls-secret unreconciled, so the gateway couldn't serve HTTPS (the usac/emea
+  # cutover failures). Not waiting decouples serving (tls-secret + gateway come up
+  # as soon as the manifests apply) from the migration (runs in-cluster on its own
+  # activeDeadlineSeconds, hours if needed). Correctness stays on the init container;
+  # a failed/slow migration leaves the app pods not-Ready and is caught by alerts,
+  # not by a failed apply.
+  #
+  # TRADEOFF (fast-follow): wait = true was previously pinned so destroy waits for
+  # finalizer'd CRs (Gateway, HTTPRoute, Certificate, ClusterIssuer) to delete before
+  # their controllers (cert-manager, envoy-gateway) are torn down. wait = false
+  # reopens that race on teardown — the namespace can hang on pending finalizers
+  # (recoverable by clearing them). The proper fix is to move the finalizer'd platform
+  # resources into their own wait = true release; tracked separately. Teardown is a
+  # rare, recoverable path; the recurring migration failure this replaces is not.
+  wait    = false
   timeout = 900
 
   # A failed install (e.g. a pod that never goes Ready before `timeout`) leaves the
