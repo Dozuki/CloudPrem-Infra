@@ -95,61 +95,11 @@ resource "vault_kv_secret_v2" "tls" {
   })
 }
 
-# Customer-provided TLS: sync the cert+key from Vault (secret/<tenant>/<env>/tls,
-# keys cert/key) into the tls-secret K8s Secret via ESO. The Vault entry is either
-# TF-seeded (above) or, legacy, hand-seeded (customer_tls_externally_managed). The
-# chart skips rendering tls-secret (tls.externallyManaged) and drops the
-# cert-manager Gateway annotation, leaving ESO as the sole owner. References the
-# chart-created SecretStore vault-<stack_label>; depends on the app release so
-# that SecretStore exists first.
-# kubectl_manifest, not kubernetes_manifest: the latter validates the kind
-# against the API at plan time, and on a fresh cluster the ExternalSecret CRD
-# only arrives when this same apply installs ESO, so the first plan can never
-# succeed. kubectl_manifest validates at apply, after the CRDs exist (same
-# reason the envoy gateway CRDs use it).
-resource "kubectl_manifest" "tls_external_secret" {
-  count = local.tls_from_vault ? 1 : 0
-
-  depends_on = [helm_release.external_secrets, helm_release.app, vault_kv_secret_v2.tls]
-
-  server_side_apply = true
-  force_conflicts   = true
-
-  yaml_body = yamlencode({
-    apiVersion = "external-secrets.io/v1"
-    kind       = "ExternalSecret"
-    metadata = {
-      name      = "tls-secret"
-      namespace = kubernetes_namespace_v1.app.metadata[0].name
-    }
-    spec = {
-      refreshInterval = "5m"
-      secretStoreRef = {
-        name = "vault-${local.vault_stack_label}"
-        kind = "SecretStore"
-      }
-      target = {
-        name           = "tls-secret"
-        creationPolicy = "Owner"
-        deletionPolicy = "Retain"
-        template = {
-          type = "kubernetes.io/tls"
-          data = {
-            "tls.crt" = "{{ .cert }}"
-            "tls.key" = "{{ .key }}"
-          }
-        }
-      }
-      data = [
-        {
-          secretKey = "cert"
-          remoteRef = { key = "${local.vault_env_prefix}/tls", property = "cert" }
-        },
-        {
-          secretKey = "key"
-          remoteRef = { key = "${local.vault_env_prefix}/tls", property = "key" }
-        },
-      ]
-    }
-  })
-}
+# Customer-provided TLS: the ExternalSecret that syncs cert+key from Vault into the
+# tls-secret Secret now ships in the chart (tls.vaultExternalSecret, gated on the same
+# tls_from_vault condition, set in kubernetes.tf). The chart already owns the SecretStore it
+# references, and the Vault path (<customer>/<environment>/tls) and SecretStore name
+# (vault-<customer>-<environment>) are the chart's existing ESO convention, so it reproduces
+# this exactly. The Vault entry is still seeded here (vault_kv_secret_v2.tls above) or, legacy,
+# hand-seeded. tls.externallyManaged (set in kubernetes.tf) still suppresses the chart's own
+# tls-secret and the cert-manager annotation, leaving ESO the sole owner.

@@ -22,5 +22,5 @@ output "replicate_instructions" {
 }
 output "ingress_ip" {
   description = "Public IP of the ingress load balancer (Azure only; point DNS here)."
-  value       = var.cloud == "azure" ? try(kubernetes_service_v1.envoy_proxy_azure[0].status[0].load_balancer[0].ingress[0].ip, "") : ""
+  value       = var.cloud == "azure" ? try(data.kubernetes_service_v1.envoy_proxy_azure[0].status[0].load_balancer[0].ingress[0].ip, "") : ""
 }
