@@ -12,12 +12,38 @@ resource "kubernetes_job_v1" "dms_start" {
       metadata {}
       spec {
         container {
-          name  = "dms-start"
+          name = "dms-start"
+          # TODO: pin to a digest and mirror into the airgap registries. ":latest" is
+          # a supply-chain/reproducibility risk; unchanged here to keep this fix scoped.
           image = "bearengineer/awscli-kubectl:latest"
           command = [
             "/bin/sh",
             "-c",
-            "kubectl wait deploy/dozuki-app-deployment --for condition=available --timeout=1200s && aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn ${var.dms_task_arn} --region ${data.aws_region.current[0].region}"
+            # The app deployment may not exist yet on a fresh install. The old
+            # `kubectl wait deploy/...` hard-failed with NotFound in that window and
+            # burned the Job's retries, so DMS never started (all 5 cutover envs had
+            # to be started by hand). Wait for the deployment to EXIST first, then be
+            # available. Then start the replication task idempotently — only if it is
+            # not already running/starting, since start-replication-task errors on a
+            # running task. (Edge case not handled: a source-endpoint connection gone
+            # stale after a DB replace needs a test-connection first — see the cutover
+            # runbook; rare, and outside this job's inputs.)
+            <<-EOT
+              set -e
+              for i in $(seq 1 60); do
+                kubectl get deploy/dozuki-app-deployment >/dev/null 2>&1 && break
+                echo "waiting for dozuki-app-deployment to be created ($i/60)"; sleep 20
+              done
+              kubectl wait deploy/dozuki-app-deployment --for=condition=available --timeout=1200s
+              ARN='${var.dms_task_arn}'
+              REGION='${data.aws_region.current[0].region}'
+              STATUS=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-arn,Values=$ARN" --query 'ReplicationTasks[0].Status' --output text)
+              echo "DMS replication task status: $STATUS"
+              case "$STATUS" in
+                running|starting) echo "task already running - nothing to do" ;;
+                *) aws dms start-replication-task --start-replication-task-type start-replication --replication-task-arn "$ARN" --region "$REGION" ;;
+              esac
+            EOT
           ]
         }
         restart_policy = "Never"
