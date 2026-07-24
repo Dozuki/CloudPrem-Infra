@@ -42,7 +42,9 @@ export default function (data) {
   if (r < 0.5 && POOL.guides.length) {
     // Guide page view (cache-heavy monolith render) — the page-load win path.
     const id = pick(POOL.guides);
-    const res = http.get(`${BASE}/Guide/${id}/x`, { headers: pageHeaders(token), tags: { journey: 'guide' } });
+    // Guide URLs are /Guide/<title-slug>/<id> - the id is the LAST segment (any
+    // slug 302s to the canonical page, which k6 follows and measures).
+    const res = http.get(`${BASE}/Guide/x/${id}`, { headers: pageHeaders(token), tags: { journey: 'guide' } });
     check(res, { 'guide 2xx/3xx': (x) => x.status < 400 });
   } else if (r < 0.8) {
     const q = pick(SEARCH_TERMS);
