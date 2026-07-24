@@ -91,6 +91,13 @@ resource "kubernetes_namespace_v1" "ratelimit_redis" {
   metadata {
     name = "redis-system"
   }
+
+  lifecycle {
+    # Same as kubernetes_namespace_v1.app: the ambient label belongs to
+    # kubernetes_labels.ambient_redis (istio.tf); without this every apply
+    # silently un-enrolls the namespace. Caught live on the min pilot.
+    ignore_changes = [metadata[0].labels["istio.io/dataplane-mode"]]
+  }
 }
 
 # ---------------------------------------------------------------------------

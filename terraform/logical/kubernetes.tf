@@ -21,6 +21,14 @@ resource "kubernetes_namespace_v1" "app" {
   metadata {
     name = local.k8s_namespace_name
   }
+
+  lifecycle {
+    # The ambient enrollment label is owned by kubernetes_labels.ambient_dozuki
+    # (istio.tf) under its own field manager. Without this, every apply strips
+    # the label and silently un-enrolls the namespace from the mesh (mTLS stops
+    # being enforced with no error anywhere). Caught live on the min pilot.
+    ignore_changes = [metadata[0].labels["istio.io/dataplane-mode"]]
+  }
 }
 
 resource "kubernetes_role_v1" "dozuki_subsite_role" {
