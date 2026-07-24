@@ -18,7 +18,7 @@ spec:
           args: ["run", "/scripts/journeys.js"]
           env:
             - { name: K6_TARGET, value: "${TARGET}" }
-            - { name: K6_VUS, value: "${VUS}" }
+            - { name: LT_VUS, value: "${VUS}" }
             - { name: DURATION, value: "${DURATION}" }
             - { name: LABEL, value: "${LABEL}" }
             - { name: INSECURE, value: "${INSECURE}" }

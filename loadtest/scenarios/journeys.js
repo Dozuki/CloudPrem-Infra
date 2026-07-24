@@ -14,8 +14,10 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: __ENV.RAMP || '30s', target: parseInt(__ENV.K6_VUS || '50', 10) },
-        { duration: __ENV.DURATION || '5m', target: parseInt(__ENV.K6_VUS || '50', 10) },
+        // LT_VUS, not K6_VUS: K6_* names are k6's own option namespace, and K6_VUS
+        // silently REPLACES the whole scenarios block with a basic executor.
+        { duration: __ENV.RAMP || '30s', target: parseInt(__ENV.LT_VUS || '50', 10) },
+        { duration: __ENV.DURATION || '5m', target: parseInt(__ENV.LT_VUS || '50', 10) },
         { duration: '30s', target: 0 },
       ],
     },
