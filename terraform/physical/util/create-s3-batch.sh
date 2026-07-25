@@ -20,7 +20,12 @@ if [ "${6:-}" != "" ]; then
   AWS_PREFIX="AWS_PROFILE=$6"
 fi
 
-sleep 30 # Cheap insurance against a race condition caused by the batch job being created before the IAM role is ready.
+# IAM propagation slack. This is NOT what orders the job after its permissions: the job is
+# authorised by the replication POLICY, and this sleep was calibrated against the role, which
+# Terraform creates earlier. On the sharedgov build the role existed 40s before the job and the
+# policy appeared 8s AFTER it, so every job failed AccessDenied on the manifest with 0 tasks run.
+# The ordering is enforced by the depends_on in s3.tf; keep both.
+sleep 30
 
 $AWS_PREFIX aws s3control create-job \
   --account-id "$AWS_ACCOUNT" \

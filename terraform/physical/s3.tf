@@ -289,6 +289,18 @@ resource "aws_s3_bucket_replication_configuration" "replication" {
 resource "null_resource" "s3_replication_job_init" {
   for_each = { for k, v in local.existing_bucket_map : v.type => v }
 
+  # The triggers below reference the ROLE, which makes Terraform order this after the role and
+  # nothing else. The batch job is authorised by the POLICY, so without this depends_on the job
+  # can be submitted before the policy exists and S3 fails it asynchronously while the apply
+  # still goes green. Observed on the sharedgov build: all four jobs submitted at 12:20:54-55,
+  # the policy was created at 12:21:02, and every job ended
+  #   AccessDenied: Error occurred when preparing manifest: ...
+  #   s3:PutInventoryConfiguration required for the role.
+  # with 0 tasks run. Since S3ReplicateObject with a generated manifest is what copies the
+  # PRE-EXISTING objects (live replication only carries new writes), the silent result is a
+  # destination bucket holding nothing but post-cutover media.
+  depends_on = [aws_iam_role_policy_attachment.s3_replication]
+
   triggers = {
     aws_account      = data.aws_caller_identity.current.account_id
     aws_profile      = var.aws_profile
