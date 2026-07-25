@@ -55,6 +55,12 @@ variable "enable_dashboards" {
   default     = false
 }
 
+variable "subsite_gateway_api_enabled" {
+  description = "Switches subsite routing to Gateway API HTTPRoutes: the dozuki-operator reconciles one HTTPRoute per subsite off the chart's dozuki-gateway instead of the legacy nginx Ingress, so subsites route automatically on Envoy Gateway installs (no hand-created wildcard HTTPRoutes). Off by default - it changes subsite routing behavior, so enable per-env after validating. Requires a bundled dozuki-operator >= the version that ships gatewayAPI.enabled (older pins silently ignore it). Safe on GovCloud's exact-host gateway layout (the operator no-ops there)."
+  type        = bool
+  default     = false
+}
+
 variable "istio_mesh_state" {
   description = "Istio ambient mesh lifecycle state. disabled: nothing installed. installed: control plane + node dataplane running, NodePool startup taints active, no namespaces enrolled. permissive: dozuki/envoy-gateway-system/redis-system enrolled (mesh-to-mesh traffic is auto-mTLS, nothing rejected). strict: STRICT PeerAuthentication enforced with documented carve-outs. States are ordered supersets; walk one step per apply, forward or back. Commercial AWS only until gov phase 2."
   type        = string

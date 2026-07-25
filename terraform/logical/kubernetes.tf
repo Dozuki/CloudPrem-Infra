@@ -732,6 +732,14 @@ resource "helm_release" "app" {
     # empty when disabled — a nonempty URL would point the operator at a Grafana
     # that was never installed.
     { name = "dozuki-operator.grafana.url", value = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" },
+    # Subsite routing mode. When true the operator reconciles a Gateway API HTTPRoute per
+    # subsite off the chart's dozuki-gateway (instead of the legacy nginx Ingress), so subsites
+    # route automatically on Envoy Gateway installs - no more hand-created wildcard HTTPRoutes.
+    # Off by default: it flips subsite routing, so enable per-env after validating (min first).
+    # Safe on GovCloud's exact-host gateway layout too (the operator no-ops there; the chart's
+    # own routes already serve every subsite host). Requires an operator subchart >= the version
+    # that ships gatewayAPI.enabled; older subcharts ignore this value.
+    { name = "dozuki-operator.gatewayAPI.enabled", value = var.subsite_gateway_api_enabled ? "true" : "false" },
 
     ],
     # Per-env web-nextjs env vars (service API URLs etc.); merge into the chart's
