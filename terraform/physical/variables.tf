@@ -51,6 +51,31 @@ variable "protect_resources" {
   default     = true
 }
 
+variable "rds_create_cmk" {
+  description = <<-EOT
+    Whether to create the Terraform-managed customer KMS key for the database, decoupled from
+    enable_dr.
+
+    Leave null (the default) to keep the historical behaviour, where the key was created only
+    when enable_dr was true. Existing stacks are therefore completely unaffected.
+
+    Set true to get CMK encryption on a stack that defers cross-region DR. Those are separable
+    concerns and conflating them is a trap, because the KMS key is immutable on RDS/Aurora:
+    a stack born on the AWS-managed key can only adopt a CMK later by REPLACING the database.
+    So a stack that will eventually want DR, but cannot enable it at create (for example a
+    migration cutover, which cannot carry an Aurora global cluster through an in-place major
+    version upgrade), must still create the key up front or it is locked out permanently.
+
+    Setting true also makes enabling DR later a no-op for the key: rds_use_tf_cmk is already
+    satisfied, so the ARN does not change and the database is not replaced.
+
+    Still subject to rds_adopt_dr_cmk and rds_kms_key_id: an explicitly pinned key always
+    wins, and rds_adopt_dr_cmk = false always opts out.
+  EOT
+  type        = bool
+  default     = null
+}
+
 variable "db_apply_immediately" {
   description = <<-EOT
     Whether database modifications apply immediately instead of waiting for the next
