@@ -644,10 +644,6 @@ resource "helm_release" "app" {
 
     # --- Monitoring ---
     { name = "monitoring.enabled", value = "true" },
-    # Render the ztunnel PodMonitor (chart, templates/istio) only when this env is mesh-enrolled.
-    # The chart owns the PodMonitor now (it ships next to its CRD in the kube-prometheus-stack
-    # subchart); the old kubectl_manifest.ztunnel_podmonitor in istio.tf is gone.
-    { name = "istio.ztunnelMonitor.enabled", value = local.mesh_enrolled ? "true" : "false" },
 
     # --- In-cluster services ---
     # Deliberately still set, and hardcoded true. helm #136 removes memcached.enabled from
