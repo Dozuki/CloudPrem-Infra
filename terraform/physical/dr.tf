@@ -11,20 +11,27 @@ locals {
   # Source RDS instance ARN (the rds module exposes no ARN output, so construct it).
   dr_source_db_arn = "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}"
 
-  # Use a Terraform-created customer-managed key for the DB when DR is on and no
-  # explicit key was given. rds_adopt_dr_cmk now defaults TRUE (CMK is the default
-  # DR-ready posture), so this is the path for fresh stacks. EXISTING stacks on the
-  # AWS-managed key must pin rds_adopt_dr_cmk = false (or pin rds_kms_key_id to their
-  # adopted CMK) to keep the same key ARN — otherwise this flips and the KMS-key
-  # change replaces the DB. The db-replace-guard PLAN policy blocks that unless the
-  # stack carries the allow-db-replace label, so the aggressive default is fail-safe.
-  rds_use_dr_cmk  = var.enable_dr && var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
-  rds_kms_key_arn = local.rds_use_dr_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
+  # Use a Terraform-created customer-managed key for the DB when the stack opts in and no
+  # explicit key was given. rds_adopt_dr_cmk defaults TRUE (CMK is the intended posture), so
+  # this is the path for fresh stacks. EXISTING stacks on the AWS-managed key must pin
+  # rds_adopt_dr_cmk = false (or pin rds_kms_key_id to their adopted CMK) to keep the same key
+  # ARN — otherwise this flips and the KMS-key change replaces the DB. The db-replace-guard
+  # PLAN policy blocks that unless the stack carries the allow-db-replace label, so the
+  # aggressive default is fail-safe.
+  #
+  # The opt-in used to be enable_dr, which conflated two separable things: whether the
+  # database is encrypted under a CMK, and whether cross-region DR is on. A stack that wants
+  # CMK encryption but defers DR (a migration cutover cannot carry an Aurora global cluster
+  # through an in-place major upgrade) was forced onto the AWS-managed key, and that is a
+  # one-way door: the KMS key is immutable, so adopting a CMK later replaces the database.
+  # rds_create_cmk overrides the gate; null keeps the historical enable_dr behaviour exactly.
+  rds_use_tf_cmk  = coalesce(var.rds_create_cmk, var.enable_dr) && var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
+  rds_kms_key_arn = local.rds_use_tf_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
 
   # RDS automated-backup cross-region replication is only possible when the DB
   # uses a customer-managed key (either our created CMK or an operator-pinned one).
   # Aurora DR uses Global Database (Plan B), not automated-backup replication.
-  dr_rds_enabled = var.db_engine == "rds" && var.enable_dr && (local.rds_use_dr_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
+  dr_rds_enabled = var.db_engine == "rds" && var.enable_dr && (local.rds_use_tf_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
 }
 
 # Defense-in-depth guardrail. The real selection + blocklist enforcement happens
@@ -53,20 +60,20 @@ check "dr_rds_replicable" {
   }
 }
 
-# Customer-managed key for the PRIMARY RDS instance, created only when a new
-# stack opts in (rds_adopt_dr_cmk). Required so automated backups are eligible
-# for cross-region replication. Never created for existing managed-key stacks.
+# Customer-managed key for the PRIMARY database, created only when a new stack opts in.
+# Gives CMK encryption in its own right, and is the prerequisite for RDS automated-backup
+# cross-region replication. Never created for existing managed-key stacks.
 resource "aws_kms_key" "rds_cmk" {
-  count = local.rds_use_dr_cmk ? 1 : 0
+  count = local.rds_use_tf_cmk ? 1 : 0
 
-  description             = "${local.identifier} RDS encryption (DR-replicable)"
+  description             = "${local.identifier} database encryption (customer-managed; DR-replicable)"
   enable_key_rotation     = true
   deletion_window_in_days = var.protect_resources ? 30 : 7
   tags                    = local.tags
 }
 
 resource "aws_kms_alias" "rds_cmk" {
-  count = local.rds_use_dr_cmk ? 1 : 0
+  count = local.rds_use_tf_cmk ? 1 : 0
 
   name_prefix   = "alias/${local.identifier}/rds-dr/"
   target_key_id = aws_kms_key.rds_cmk[0].id
