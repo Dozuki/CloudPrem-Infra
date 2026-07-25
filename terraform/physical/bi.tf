@@ -191,7 +191,7 @@ module "rds_replica_database" {
   replicate_source_db         = module.primary_database[0].db_instance_id
   storage_encrypted           = true
   kms_key_id                  = data.aws_kms_key.rds.arn
-  apply_immediately           = !var.protect_resources
+  apply_immediately           = local.db_apply_immediately
   publicly_accessible         = false
   allow_major_version_upgrade = true
 
@@ -270,7 +270,7 @@ module "dms_replica_database" {
   storage_type          = "gp3"
   storage_encrypted     = true
   kms_key_id            = data.aws_kms_key.rds.arn
-  apply_immediately     = !var.protect_resources
+  apply_immediately     = local.db_apply_immediately
   publicly_accessible   = var.bi_public_access
 
   username               = "dozuki"
