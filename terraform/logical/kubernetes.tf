@@ -679,6 +679,11 @@ resource "helm_release" "app" {
 
     # --- Monitoring ---
     { name = "monitoring.enabled", value = "true" },
+    # Redirect in-cluster fetches of the app's own site FQDN to the in-cluster gateway (chart
+    # ServiceEntry) instead of hairpinning out to the public NLB. Needs the workload in the mesh,
+    # so gate on mesh enrollment; the chart's proxyProtocol.optional lets the gateway accept the
+    # header-less in-cluster connection.
+    { name = "istio.fqdnRedirect.enabled", value = local.mesh_enrolled ? "true" : "false" },
 
     # --- In-cluster services ---
     # Deliberately still set, and hardcoded true. helm #136 removes memcached.enabled from
