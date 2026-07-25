@@ -4,8 +4,11 @@
 
 locals {
   azure_kv_secrets = var.cloud == "azure" ? merge({
+    # Must be local.memcached_host (the service FQDN), matching the AWS path in vault.tf: ESO
+    # syncs this into the app's memcached.json, and the app's Hostname type rejects a bare
+    # single-label name with "Invalid hostname". This was hardcoded to "dozuki-memcached".
     cache = jsonencode({
-      host = "dozuki-memcached"
+      host = local.memcached_host
     })
     google-translate = jsonencode({
       token = var.google_translate_api_token

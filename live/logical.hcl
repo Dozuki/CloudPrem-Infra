@@ -18,7 +18,6 @@ dependency "physical" {
     guide_pdfs_bucket             = "dummy-pdfs-bucket"
     s3_kms_key_id                 = "dummy-kms-arn"
     s3_replicate_buckets          = "false"
-    memcached_cluster_address     = "dummy-memcache"
     dms_task_arn                  = "dummy-dms-arn"
     bi_database_credential_secret = "dummy-secret"
     dms_enabled                   = "false"
@@ -50,7 +49,6 @@ inputs = {
   s3_pdfs_bucket                = dependency.physical.outputs.guide_pdfs_bucket
   s3_kms_key_id                 = dependency.physical.outputs.s3_kms_key_id
   s3_replicate_buckets          = dependency.physical.outputs.s3_replicate_buckets
-  memcached_cluster_address     = dependency.physical.outputs.memcached_cluster_address
   dms_task_arn                  = dependency.physical.outputs.dms_task_arn
   dms_enabled                   = dependency.physical.outputs.dms_enabled
   vault_address                 = "http://${dependency.physical.outputs.vault_endpoint_dns}:8200"

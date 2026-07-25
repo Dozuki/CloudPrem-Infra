@@ -80,7 +80,7 @@ variable "db_apply_immediately" {
   description = <<-EOT
     Whether database modifications apply immediately instead of waiting for the next
     maintenance window. Applies to the Aurora cluster, the RDS instance, the BI replica and
-    the Aurora DR secondary. ElastiCache is unaffected (it is always immediate).
+    the Aurora DR secondary.
 
     Leave null (the default) to keep the historical behaviour, which is !protect_resources:
     production stacks defer to the maintenance window and disposable ones apply at once.
@@ -367,17 +367,7 @@ variable "app_access_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "elasticache_instance_type" {
-  type        = string
-  default     = "cache.t3.micro"
-  description = "Elastic cache instance type"
-}
 
-variable "elasticache_cluster_size" {
-  type        = number
-  default     = 1
-  description = "Cluster size"
-}
 
 variable "eks_kms_key_id" {
   description = "AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
@@ -473,11 +463,6 @@ variable "aurora_snapshot_identifier" {
   default     = ""
 }
 
-variable "memcached_in_cluster" {
-  description = "Run memcached in-cluster (chart memcached deployment) instead of ElastiCache. When true (default), ElastiCache is not provisioned (and is destroyed if it exists)."
-  type        = bool
-  default     = true
-}
 
 variable "delete_after" {
   description = "Optional RFC3339 timestamp. When set, every resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys)."
