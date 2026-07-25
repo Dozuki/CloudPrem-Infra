@@ -275,6 +275,12 @@ variable "nlb_http_target_group_arn" {
   type        = string
 }
 
+variable "db_resource_id" {
+  description = "Stable identifier of the primary database (physical db_resource_id output). Passed to the chart as db.resourceId so a DB replace re-runs migrations. Defaults empty; wired from physical via infra-live. Empty keeps the migration Job name tag-only (unchanged)."
+  type        = string
+  default     = ""
+}
+
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #
 variable "cloud" {
   description = "Cloud the physical layer runs on."

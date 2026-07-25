@@ -94,6 +94,11 @@ output "nlb_http_target_group_arn" {
   value       = module.nlb.target_groups["acme"].arn
 }
 
+output "db_resource_id" {
+  description = "Stable identifier of the primary database (Aurora cluster_resource_id / RDS db_instance_resource_id). Changes on every DB replace; the chart folds it into the migration Job name so a same-image DB replace re-runs migrations."
+  value       = local.db_resource_id
+}
+
 output "dr_region" {
   description = "Region the DR replication layer targets (empty when DR disabled)."
   value       = var.enable_dr ? var.dr_region : ""
