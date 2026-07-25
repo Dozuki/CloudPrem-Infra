@@ -2,6 +2,17 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.0.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.15.0...v8.0.0) (2026-07-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **physical:** delete the ElastiCache path, memcached is always in-cluster ([#275](https://github.com/Dozuki/CloudPrem-Infra/issues/275))
+
+### Features
+
+* **physical:** delete the ElastiCache path, memcached is always in-cluster ([#275](https://github.com/Dozuki/CloudPrem-Infra/issues/275)) ([5acc323](https://github.com/Dozuki/CloudPrem-Infra/commit/5acc3235d9db4db4b0d572e5b63daa3e2ec60cea))
+
 ## [7.15.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.14.0...v7.15.0) (2026-07-25)
 
 
