@@ -96,4 +96,5 @@ configs:
       bi_dms_enabled: true
       restore_drill: true         # consumed by the harness, NOT passed to terraform
       istio_mesh_state: "strict"
+      managed_private_cloud: true  # the mesh is MPC-only; the logical precondition requires this to enable istio_mesh_state
       alarm_email: "devops@dozuki.com"

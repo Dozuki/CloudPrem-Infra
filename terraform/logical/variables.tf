@@ -67,7 +67,7 @@ variable "istio_mesh_state" {
 }
 
 variable "managed_private_cloud" {
-  description = "True on Dozuki-managed MPC stacks (mirrors the physical-layer variable; MPC env.hcl files already set it). Reserved by the mesh platform contract: the knob-retirement release will require the mesh when this is true and the platform is supported, while customer-managed CloudPrem keeps an effective-disabled default."
+  description = "True on Dozuki-managed MPC stacks (mirrors the physical-layer variable; MPC env.hcl files already set it). The mesh platform contract: istio_mesh_state can only be enabled on an MPC stack (enforced on helm_release.app), so customer-managed CloudPrem never gets the mesh by default; the knob-retirement release builds on this to make the mesh mandatory when true and the platform is supported."
   type        = bool
   default     = false
 }
