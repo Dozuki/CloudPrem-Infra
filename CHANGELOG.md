@@ -2,6 +2,20 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.12.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.11.1...v7.12.0) (2026-07-25)
+
+
+### Features
+
+* **logical:** istio ambient mesh behind istio_mesh_state ([#262](https://github.com/Dozuki/CloudPrem-Infra/issues/262)) ([445c490](https://github.com/Dozuki/CloudPrem-Infra/commit/445c4908ac95450b4fffbd6d82a5ba799ddc05f2))
+* **logical:** pass the db resource id to the chart for migration keying ([#267](https://github.com/Dozuki/CloudPrem-Infra/issues/267)) ([9275844](https://github.com/Dozuki/CloudPrem-Infra/commit/927584427bc09231d2ccf79a133cd3f89f8d7e47))
+* **logical:** seed the zendesk jwt into azure key vault ([37893b5](https://github.com/Dozuki/CloudPrem-Infra/commit/37893b5fe57a0568588e3490b6dd27d1ddf8a76f))
+
+
+### Bug Fixes
+
+* **logical:** post-cutover hardening — controller cpu, webnextjs env, dms-start ([#264](https://github.com/Dozuki/CloudPrem-Infra/issues/264)) ([f9932e2](https://github.com/Dozuki/CloudPrem-Infra/commit/f9932e21ddbfcde7d757181ef8de2b1bc2b924b3))
+
 ## [7.11.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.11.0...v7.11.1) (2026-07-23)
 
 
