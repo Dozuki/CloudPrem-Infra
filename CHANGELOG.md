@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.14.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.13.0...v7.14.0) (2026-07-25)
+
+
+### Features
+
+* **logical:** additional exact-host gateway listeners ([#270](https://github.com/Dozuki/CloudPrem-Infra/issues/270)) ([f333235](https://github.com/Dozuki/CloudPrem-Infra/commit/f333235f764fbccec275c889f45a12240762dd8b))
+
 ## [7.13.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.12.0...v7.13.0) (2026-07-25)
 
 
