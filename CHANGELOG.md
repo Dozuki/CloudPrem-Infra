@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.13.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.12.0...v7.13.0) (2026-07-25)
+
+
+### Features
+
+* **logical:** add subsite_gateway_api_enabled to flip subsites to Gateway API ([#268](https://github.com/Dozuki/CloudPrem-Infra/issues/268)) ([d0ab222](https://github.com/Dozuki/CloudPrem-Infra/commit/d0ab22200c52f8a5076aa787755a0bded15a5b21))
+
 ## [7.12.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.11.1...v7.12.0) (2026-07-25)
 
 
