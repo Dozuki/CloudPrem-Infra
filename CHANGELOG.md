@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.15.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.14.0...v7.15.0) (2026-07-25)
+
+
+### Features
+
+* **physical:** db_apply_immediately to override the maintenance-window default ([#272](https://github.com/Dozuki/CloudPrem-Infra/issues/272)) ([81817c9](https://github.com/Dozuki/CloudPrem-Infra/commit/81817c9754344075b6e3bbf339b296755487e7e4))
+* **physical:** decouple the database CMK from enable_dr ([#274](https://github.com/Dozuki/CloudPrem-Infra/issues/274)) ([5fcc9a2](https://github.com/Dozuki/CloudPrem-Infra/commit/5fcc9a29cad37ec9dbd3188a54c328af4e0f2164))
+
 ## [7.14.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.13.0...v7.14.0) (2026-07-25)
 
 
