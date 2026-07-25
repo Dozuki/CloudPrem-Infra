@@ -592,6 +592,9 @@ resource "helm_release" "app" {
     # --- Database ---
     { name = "db.host", value = local.db_master_host },
     { name = "db.user", value = local.db_master_username },
+    # Physical db identifier -> chart's migration Job name hash, so a DB replace (new
+    # identifier at the same image tag) re-runs migrations. Empty until infra-live wires it.
+    { name = "db.resourceId", value = var.db_resource_id },
     { name = "db.rdsCaCert", value = base64encode(file(local.ca_cert_pem_file)) },
     # The chart default (900s) is fine for small DBs but the Q1->Q2 forward
     # migration on a large snapshot-restored DB (3M emea/gca/usac, ~100 GB)
