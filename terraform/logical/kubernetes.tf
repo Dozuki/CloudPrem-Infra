@@ -244,49 +244,10 @@ data "kubernetes_service_v1" "envoy_proxy_azure" {
   }
 }
 
-resource "kubernetes_manifest" "tgb_https" {
-  count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [helm_release.app] # chart creates the Service in-release; wait=true guarantees it before the binding
-
-  manifest = {
-    apiVersion = "eks.amazonaws.com/v1"
-    kind       = "TargetGroupBinding"
-    metadata = {
-      name      = "envoy-https"
-      namespace = "envoy-gateway-system"
-    }
-    spec = {
-      serviceRef = {
-        name = "dozuki-envoy-proxy"
-        port = 443
-      }
-      targetGroupARN = var.nlb_https_target_group_arn
-      targetType     = "ip"
-    }
-  }
-}
-
-resource "kubernetes_manifest" "tgb_http" {
-  count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [helm_release.app] # chart creates the Service in-release; wait=true guarantees it before the binding
-
-  manifest = {
-    apiVersion = "eks.amazonaws.com/v1"
-    kind       = "TargetGroupBinding"
-    metadata = {
-      name      = "envoy-http"
-      namespace = "envoy-gateway-system"
-    }
-    spec = {
-      serviceRef = {
-        name = "dozuki-envoy-proxy"
-        port = 80
-      }
-      targetGroupARN = var.nlb_http_target_group_arn
-      targetType     = "ip"
-    }
-  }
-}
+# The envoy-https / envoy-http TargetGroupBindings moved into the dozuki chart
+# (templates/gateway/target-group-bindings.yaml), next to the stable proxy Service they bind.
+# This layer just passes the physical target-group ARNs as chart values (see the
+# gateway.stableProxyService.targetGroupBindings set entries below).
 
 resource "kubernetes_manifest" "nodepool_spot" {
   count = var.cloud == "aws" ? 1 : 0
@@ -644,6 +605,10 @@ resource "helm_release" "app" {
     # on-prem); the Vault TLS ExternalSecret follows the same tls_from_vault condition the
     # deleted resource used.
     { name = "gateway.stableProxyService.enabled", value = contains(["aws", "azure"], var.cloud) ? "true" : "false" },
+    # Physical NLB target-group ARNs for the chart-owned TargetGroupBindings. aws only; empty
+    # elsewhere so the chart renders no TGB (Azure fronts the proxy with a LoadBalancer Service).
+    { name = "gateway.stableProxyService.targetGroupBindings.httpsArn", value = var.cloud == "aws" ? var.nlb_https_target_group_arn : "" },
+    { name = "gateway.stableProxyService.targetGroupBindings.httpArn", value = var.cloud == "aws" ? var.nlb_http_target_group_arn : "" },
     { name = "tls.vaultExternalSecret.enabled", value = local.tls_from_vault ? "true" : "false" },
 
     # --- Webhooks ---
