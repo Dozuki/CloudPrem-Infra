@@ -256,9 +256,19 @@ variable "ingress_hostname" {
   default     = ""
 }
 
+
 variable "memcached_cluster_address" {
+  description = <<-EOT
+    DEPRECATED, unused, retained for one release only.
+
+    Memcached is always in-cluster now; the ElastiCache path and this value's only consumer
+    are gone. It cannot be deleted yet because it has never had a default, so removing it
+    would break every infra-live stack that still passes it (logical.hcl passes it on all
+    three paths). Giving it a default lets infra-live drop those inputs, after which this
+    block goes.
+  EOT
   type        = string
-  description = "Address of the deployed memcached cluster"
+  default     = ""
 }
 
 variable "s3_kms_key_id" {
@@ -555,11 +565,6 @@ variable "gateway_name" {
   default     = "dozuki-gateway"
 }
 
-variable "memcached_in_cluster" {
-  description = "Run memcached in-cluster instead of ElastiCache (AWS). Azure is always in-cluster. Must match the physical layer's value."
-  type        = bool
-  default     = true
-}
 
 variable "delete_after" {
   description = "Optional RFC3339 timestamp. When set, the AWS EKS addon resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys)."

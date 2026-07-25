@@ -11,7 +11,6 @@ config layer, not produced by the cloud layer.
 | `eks_cluster_id` | K8s cluster name | `eks_cluster_id` | `cluster_name` |
 | `dns_domain_name` | App FQDN | `dns_domain_name` (Route53-managed) | `dns_domain_name` (passthrough of `external_fqdn`; customer-managed DNS) |
 | `primary_db_secret` | Locator of DB credentials secret | `primary_db_secret` (Secrets Manager ARN) | `db_credentials_secret_id` (Key Vault secret versionless ID) |
-| `memcached_cluster_address` | Cache endpoint | `memcached_cluster_address` (ElastiCache) | N/A — logical deploys in-cluster memcached when `cloud = "azure"` and uses its Service DNS name |
 | `s3_images_bucket` | Guide images bucket | `guide_images_bucket` (S3) | `guide_images_bucket` (SeaweedFS bucket name; created by logical) |
 | `s3_objects_bucket` | Guide objects bucket | `guide_objects_bucket` | `guide_objects_bucket` |
 | `s3_pdfs_bucket` | Guide PDFs bucket | `guide_pdfs_bucket` | `guide_pdfs_bucket` |

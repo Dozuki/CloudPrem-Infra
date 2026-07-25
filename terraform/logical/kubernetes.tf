@@ -498,13 +498,13 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 }
 
 locals {
-  memcached_in_cluster = var.cloud == "azure" || var.memcached_in_cluster
-  # The app's Hostname type rejects a bare single-label name ("Invalid hostname"), so
-  # in-cluster memcached must use the service FQDN. ElastiCache supplies a full host
-  # already. This single source feeds the chart value, the config-map values, AND the
-  # Vault-seeded cache secret (ESO-synced into memcached.json, which OVERRIDES the chart
-  # config map) — all three must agree or the app reads an empty/invalid host.
-  memcached_host = local.memcached_in_cluster ? "dozuki-memcached.${local.k8s_namespace_name}.svc.cluster.local" : var.memcached_cluster_address
+  # Memcached is always in-cluster, on every cloud. The ElastiCache alternative is gone.
+  # The app's Hostname type rejects a bare single-label name ("Invalid hostname"), so this
+  # must be the service FQDN. This single source feeds the chart value, the config-map
+  # values, AND the Vault-seeded cache secret (ESO-synced into memcached.json, which
+  # OVERRIDES the chart config map) — all three must agree or the app reads an
+  # empty/invalid host.
+  memcached_host = "dozuki-memcached.${local.k8s_namespace_name}.svc.cluster.local"
 }
 
 resource "helm_release" "app" {
@@ -680,8 +680,13 @@ resource "helm_release" "app" {
     # --- Monitoring ---
     { name = "monitoring.enabled", value = "true" },
 
-    # --- In-cluster services (Azure) ---
-    { name = "memcached.enabled", value = local.memcached_in_cluster ? "true" : "false" },
+    # --- In-cluster services ---
+    # Deliberately still set, and hardcoded true. helm #136 removes memcached.enabled from
+    # the chart, but every chart at or below 1.16.2 still has it and still DEFAULTS IT FALSE,
+    # so dropping this line would silently deploy those versions with no cache at all. Newer
+    # charts ignore the value. Remove this only once no consumer pins a chart older than the
+    # one that drops the flag.
+    { name = "memcached.enabled", value = "true" },
     # SeaweedFS S3 endpoint. When seaweedfs.enabled (azure), the chart's
     # dozuki.objectStorageEndpoint helper auto-points the app at the in-cluster
     # filer S3 service (dozuki-seaweedfs-filer:8333); we set the same value here

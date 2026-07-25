@@ -40,9 +40,14 @@ output "s3_kms_key_id" {
 output "s3_replicate_buckets" {
   value = local.use_existing_buckets
 }
+# DEPRECATED, retained for one release only. ElastiCache is gone, so there is no endpoint to
+# report. Kept non-empty-keyed because infra-live's logical.hcl still reads
+# dependency.physical.outputs.memcached_cluster_address; removing it now would fail those
+# stacks at parse time. Delete once infra-live no longer references it.
 output "memcached_cluster_address" {
-  value = try(aws_elasticache_cluster.this[0].cluster_address, "")
+  value = ""
 }
+
 output "vpc_id" {
   description = "VPC ID"
   value       = local.vpc_id

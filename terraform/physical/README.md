@@ -15,9 +15,9 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.55.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.55.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.55.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.56.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.56.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.56.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
@@ -77,9 +77,6 @@
 | [aws_eks_pod_identity_association.app_migration_wait](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.cert_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.cloudwatch_agent](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
-| [aws_elasticache_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_cluster) | resource |
-| [aws_elasticache_parameter_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_parameter_group) | resource |
-| [aws_elasticache_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_subnet_group) | resource |
 | [aws_iam_policy.assume_cross_account_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.cluster_access](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.dr_s3_replication](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
@@ -153,11 +150,8 @@
 | [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
-| [aws_security_group.elasticache](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
-| [aws_security_group_rule.egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
@@ -176,12 +170,10 @@
 | [aws_vpc.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
-| [null_resource.cluster_urls](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_vpc_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.s3_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
-| [random_id.elasticache](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/id) | resource |
 | [random_password.aurora](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
 | [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
@@ -238,7 +230,7 @@
 | <a name="input_bi_vpn_user_list"></a> [bi\_vpn\_user\_list](#input\_bi\_vpn\_user\_list) | List of users to create OpenVPN configurations for usint mutual authentication. | `list(string)` | <pre>[<br>  "root"<br>]</pre> | no |
 | <a name="input_cf_template_version"></a> [cf\_template\_version](#input\_cf\_template\_version) | Version of the CloudFormation template that deployed this stack for validation | `number` | `0` | no |
 | <a name="input_customer"></a> [customer](#input\_customer) | The customer name for resource names and tagging. This will also be the autogenerated subdomain. | `string` | `""` | no |
-| <a name="input_db_apply_immediately"></a> [db\_apply\_immediately](#input\_db\_apply\_immediately) | Whether database modifications apply immediately instead of waiting for the next<br>maintenance window. Applies to the Aurora cluster, the RDS instance, the BI replica and<br>the Aurora DR secondary. ElastiCache is unaffected (it is always immediate).<br><br>Leave null (the default) to keep the historical behaviour, which is !protect\_resources:<br>production stacks defer to the maintenance window and disposable ones apply at once.<br><br>Set true on a production stack when a change has to land inside a scheduled window<br>rather than at preferred\_maintenance\_window (sun:19:00-sun:23:00). Without it, an apply<br>that modifies the database returns green having only SCHEDULED the change, which is<br>especially misleading during a migration cutover: the run succeeds and nothing has<br>happened yet.<br><br>This does not make a change safe, it makes it prompt. An immediate modification can<br>still be disruptive, so treat true as an in-window setting rather than a default. | `bool` | `null` | no |
+| <a name="input_db_apply_immediately"></a> [db\_apply\_immediately](#input\_db\_apply\_immediately) | Whether database modifications apply immediately instead of waiting for the next<br>maintenance window. Applies to the Aurora cluster, the RDS instance, the BI replica and<br>the Aurora DR secondary.<br><br>Leave null (the default) to keep the historical behaviour, which is !protect\_resources:<br>production stacks defer to the maintenance window and disposable ones apply at once.<br><br>Set true on a production stack when a change has to land inside a scheduled window<br>rather than at preferred\_maintenance\_window (sun:19:00-sun:23:00). Without it, an apply<br>that modifies the database returns green having only SCHEDULED the change, which is<br>especially misleading during a migration cutover: the run succeeds and nothing has<br>happened yet.<br><br>This does not make a change safe, it makes it prompt. An immediate modification can<br>still be disruptive, so treat true as an in-window setting rather than a default. | `bool` | `null` | no |
 | <a name="input_db_engine"></a> [db\_engine](#input\_db\_engine) | Database engine for this stack: 'rds' (provisioned RDS MySQL) or 'aurora' (Aurora MySQL 8.4 Serverless v2). Default 'aurora' for new stacks. EXISTING rds stacks must pin db\_engine='rds' in env.hcl, or a deploy will try to replace the DB — the Spacelift db-replace-guard plan policy blocks that accidental rds->aurora switch (override per stack with the allow-db-replace label for a deliberate migration). | `string` | `"aurora"` | no |
 | <a name="input_delete_after"></a> [delete\_after](#input\_delete\_after) | Optional RFC3339 timestamp. When set, every resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys). | `string` | `""` | no |
 | <a name="input_dms_allocated_storage"></a> [dms\_allocated\_storage](#input\_dms\_allocated\_storage) | How many GB to allocate for the DMS replication instance | `string` | `100` | no |
@@ -248,8 +240,6 @@
 | <a name="input_eks_enabled_log_types"></a> [eks\_enabled\_log\_types](#input\_eks\_enabled\_log\_types) | EKS control-plane log types to stream to CloudWatch Logs. Defaults to all 5 (audit, api, authenticator, controllerManager, scheduler) for compliance (SOC2 / Vanta require audit logs at minimum). Set to [] to disable cluster logging entirely (not recommended). | `list(string)` | <pre>[<br>  "api",<br>  "audit",<br>  "authenticator",<br>  "controllerManager",<br>  "scheduler"<br>]</pre> | no |
 | <a name="input_eks_k8s_version"></a> [eks\_k8s\_version](#input\_eks\_k8s\_version) | Kubernetes version override. Leave null to let EKS Auto Mode manage the version. Set explicitly only to pin a specific version. | `string` | `null` | no |
 | <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
-| <a name="input_elasticache_cluster_size"></a> [elasticache\_cluster\_size](#input\_elasticache\_cluster\_size) | Cluster size | `number` | `1` | no |
-| <a name="input_elasticache_instance_type"></a> [elasticache\_instance\_type](#input\_elasticache\_instance\_type) | Elastic cache instance type | `string` | `"cache.t3.micro"` | no |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users). | `bool` | `false` | no |
 | <a name="input_enable_dr"></a> [enable\_dr](#input\_enable\_dr) | Enable the always-on cross-region DR data-protection layer (RDS automated-backup replication + S3 CRR). On by default; ephemeral/dev stacks may set false. | `bool` | `true` | no |
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
@@ -257,7 +247,6 @@
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
-| <a name="input_memcached_in_cluster"></a> [memcached\_in\_cluster](#input\_memcached\_in\_cluster) | Run memcached in-cluster (chart memcached deployment) instead of ElastiCache. When true (default), ElastiCache is not provisioned (and is destroyed if it exists). | `bool` | `true` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
 | <a name="input_rds_adopt_dr_cmk"></a> [rds\_adopt\_dr\_cmk](#input\_rds\_adopt\_dr\_cmk) | When true (the default DR-ready posture), the database is created with a Terraform-managed customer KMS key so it is encrypted under a CMK — the prerequisite for cross-region DR (RDS automated-backup replication; Aurora is CMK-encrypted but its cross-region replication is the deferred Global-Database Plan B). EXISTING stacks created with the AWS-managed key MUST pin this to false (or pin rds\_kms\_key\_id to their already-adopted CMK): a KMS-key change replaces the database. The db-replace-guard PLAN policy blocks any such unintended replacement (it requires the allow-db-replace stack label), so this default is fail-safe. | `bool` | `true` | no |
 | <a name="input_rds_allocated_storage"></a> [rds\_allocated\_storage](#input\_rds\_allocated\_storage) | The initial size of the database (Gb) | `number` | `100` | no |
@@ -309,7 +298,7 @@
 | <a name="output_guide_images_bucket"></a> [guide\_images\_bucket](#output\_guide\_images\_bucket) | n/a |
 | <a name="output_guide_objects_bucket"></a> [guide\_objects\_bucket](#output\_guide\_objects\_bucket) | n/a |
 | <a name="output_guide_pdfs_bucket"></a> [guide\_pdfs\_bucket](#output\_guide\_pdfs\_bucket) | n/a |
-| <a name="output_memcached_cluster_address"></a> [memcached\_cluster\_address](#output\_memcached\_cluster\_address) | n/a |
+| <a name="output_memcached_cluster_address"></a> [memcached\_cluster\_address](#output\_memcached\_cluster\_address) | DEPRECATED, retained for one release only. ElastiCache is gone, so there is no endpoint to report. Kept non-empty-keyed because infra-live's logical.hcl still reads dependency.physical.outputs.memcached\_cluster\_address; removing it now would fail those stacks at parse time. Delete once infra-live no longer references it. |
 | <a name="output_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#output\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list |
 | <a name="output_nlb_dns_name"></a> [nlb\_dns\_name](#output\_nlb\_dns\_name) | The FQDN of the NLB. |
 | <a name="output_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#output\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding |
