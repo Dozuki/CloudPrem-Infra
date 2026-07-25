@@ -714,6 +714,12 @@ resource "helm_release" "app" {
     # own routes already serve every subsite host). Requires an operator subchart >= the version
     # that ships gatewayAPI.enabled; older subcharts ignore this value.
     { name = "dozuki-operator.gatewayAPI.enabled", value = var.subsite_gateway_api_enabled ? "true" : "false" },
+    # The install's base site (siteid 2), which the operator applies every entitled
+    # FeatureRequest to alongside each subsite. Always either "onprem" or the platform's own base
+    # sitename. The operator chart hardcodes "onprem" and nothing wired this before, so that
+    # default reached every install; where it is wrong, every reconcile fails permanently with
+    # "Site '<name>' not found".
+    { name = "dozuki-operator.features.primarySite", value = var.operator_primary_site },
 
     ],
     # Additional exact-host HTTPS listeners, for platforms serving several hostnames off one

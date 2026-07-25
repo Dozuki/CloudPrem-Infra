@@ -55,6 +55,22 @@ variable "enable_dashboards" {
   default     = false
 }
 
+variable "operator_primary_site" {
+  description = <<-EOT
+    Sitename at siteid 2: the install's base site. Every install has exactly one, and it is
+    either "onprem" (standard CloudPrem) or the platform's own base sitename (shared GovCloud is
+    "dozuki"). siteid 1 is the internal "base" template site and is never this.
+
+    The operator applies every entitled FeatureRequest to this site plus each Subsite CR. The
+    operator chart hardcodes "onprem", so any install whose base site is named otherwise must
+    set this or every reconcile fails with "Site '<name>' not found", permanently.
+
+    Confirm with: SELECT name FROM sites.site_index WHERE siteid = 2;
+  EOT
+  type        = string
+  default     = "onprem"
+}
+
 variable "subsite_gateway_api_enabled" {
   description = "Switches subsite routing to Gateway API HTTPRoutes: the dozuki-operator reconciles one HTTPRoute per subsite off the chart's dozuki-gateway instead of the legacy nginx Ingress, so subsites route automatically on Envoy Gateway installs (no hand-created wildcard HTTPRoutes). Off by default - it changes subsite routing behavior, so enable per-env after validating. Requires a bundled dozuki-operator >= the version that ships gatewayAPI.enabled (older pins silently ignore it). Safe on GovCloud's exact-host gateway layout (the operator no-ops there)."
   type        = bool
