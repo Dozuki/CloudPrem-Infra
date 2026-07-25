@@ -742,6 +742,16 @@ resource "helm_release" "app" {
     { name = "dozuki-operator.gatewayAPI.enabled", value = var.subsite_gateway_api_enabled ? "true" : "false" },
 
     ],
+    # Additional exact-host HTTPS listeners, for platforms serving several hostnames off one
+    # install (shared GovCloud runs ten). Indexed from 1 on purpose: hosts[0] above is the
+    # primary and has to stay there, because the chart reads $firstHost from it both to decide
+    # whether the cert-manager cluster-issuer annotation goes on the Gateway and to build the
+    # default alertmanager/grafana ops hostnames. An empty list renders nothing, so single-host
+    # installs are byte-identical to before.
+    flatten([for i, host in var.additional_gateway_hosts : [
+      { name = "gateway.hosts[${i + 1}].hostname", value = host.hostname },
+      { name = "gateway.hosts[${i + 1}].tlsSecretName", value = host.tls_secret_name },
+    ]]),
     # Per-env web-nextjs env vars (service API URLs etc.); merge into the chart's
     # deployments.webNextjs.env map. Env var names are underscore-only, so no
     # helm set-path escaping is needed.

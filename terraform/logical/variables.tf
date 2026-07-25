@@ -182,6 +182,49 @@ variable "protect_resources" {
   default     = true
 }
 
+variable "additional_gateway_hosts" {
+  description = <<-EOT
+    Extra exact-host HTTPS listeners on the Envoy gateway, one per entry, for multi-tenant
+    platforms where several hostnames land on the same install (the shared GovCloud platform
+    serves ten). Each entry needs the authoritative hostname and its own TLS secret name.
+
+    The primary host stays gateway.hosts[0] (ingress_hostname or dns_domain_name) and these
+    append from index 1, which is deliberate: the chart derives $firstHost from hosts[0] and
+    uses it both to decide whether to place the cert-manager cluster-issuer annotation on the
+    Gateway (wildcard first host = no annotation) and to build the default alertmanager/grafana
+    ops hostnames. Appending can therefore never disturb either.
+
+    Empty (the default) reproduces single-host behaviour exactly, so existing environments are
+    unaffected.
+
+    On AWS with cert-manager, every entry gets a Certificate via the gateway-shim as soon as
+    the Gateway exists, and HTTP-01 only succeeds once the hostname already resolves to this
+    install's load balancer. When migrating hostnames onto a new stack, add them here at the
+    DNS cutover rather than up front, or the failing ACME orders burn Let's Encrypt's
+    per-hostname failed-validation budget.
+  EOT
+  type = list(object({
+    hostname        = string
+    tls_secret_name = string
+  }))
+  default = []
+
+  validation {
+    condition     = length(distinct([for h in var.additional_gateway_hosts : lower(h.hostname)])) == length(var.additional_gateway_hosts)
+    error_message = "additional_gateway_hosts contains duplicate hostnames; each listener hostname must be unique."
+  }
+
+  validation {
+    condition     = length(distinct([for h in var.additional_gateway_hosts : h.tls_secret_name])) == length(var.additional_gateway_hosts)
+    error_message = "additional_gateway_hosts contains duplicate tls_secret_name values; each listener needs its own secret or cert-manager will contend over one."
+  }
+
+  validation {
+    condition     = alltrue([for h in var.additional_gateway_hosts : !startswith(h.hostname, "*.")])
+    error_message = "additional_gateway_hosts is for exact hosts only. A wildcard listener belongs at gateway.hosts[0] via ingress_hostname, since the chart keys its cert-manager behaviour off the first host."
+  }
+}
+
 # --- END App Configuration --- #
 
 # --- BEGIN Physical Module Passthrough Configuration (do not set or modify) --- #
