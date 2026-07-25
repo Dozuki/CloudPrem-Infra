@@ -20,7 +20,11 @@ KC=(kubectl --context "$CTX" -n "$NS")
 
 if [ "$DO_SEED" = "true" ]; then
   echo "[seed] running locally against $TARGET"
-  K6_TARGET="$TARGET" ADMIN_EMAIL="$EMAIL" ADMIN_PASSWORD="$PASSWORD" k6 run seed/seed.js
+  K6_TARGET="$TARGET" ADMIN_EMAIL="$EMAIL" ADMIN_PASSWORD="$PASSWORD" \
+    k6 run --log-format=raw seed/seed.js 2>&1 | tee /dev/stderr \
+    | awk -F'POOL_JSON:' '/POOL_JSON:/{print $2}' | tail -1 > pool.json
+  jq -e '.guides | length > 0' pool.json >/dev/null || {
+    echo "seed produced an empty pool (see output above)"; exit 1; }
 fi
 [ -f pool.json ] || { echo "pool.json missing — run with --seed first (or seed manually)"; exit 1; }
 POOL_JSON="$(jq -c . pool.json)"

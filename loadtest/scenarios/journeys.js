@@ -14,8 +14,10 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: __ENV.RAMP || '30s', target: parseInt(__ENV.K6_VUS || '50', 10) },
-        { duration: __ENV.DURATION || '5m', target: parseInt(__ENV.K6_VUS || '50', 10) },
+        // LT_VUS, not K6_VUS: K6_* names are k6's own option namespace, and K6_VUS
+        // silently REPLACES the whole scenarios block with a basic executor.
+        { duration: __ENV.RAMP || '30s', target: parseInt(__ENV.LT_VUS || '50', 10) },
+        { duration: __ENV.DURATION || '5m', target: parseInt(__ENV.LT_VUS || '50', 10) },
         { duration: '30s', target: 0 },
       ],
     },
@@ -40,7 +42,9 @@ export default function (data) {
   if (r < 0.5 && POOL.guides.length) {
     // Guide page view (cache-heavy monolith render) — the page-load win path.
     const id = pick(POOL.guides);
-    const res = http.get(`${BASE}/Guide/${id}/x`, { headers: pageHeaders(token), tags: { journey: 'guide' } });
+    // Guide URLs are /Guide/<title-slug>/<id> - the id is the LAST segment (any
+    // slug 302s to the canonical page, which k6 follows and measures).
+    const res = http.get(`${BASE}/Guide/x/${id}`, { headers: pageHeaders(token), tags: { journey: 'guide' } });
     check(res, { 'guide 2xx/3xx': (x) => x.status < 400 });
   } else if (r < 0.8) {
     const q = pick(SEARCH_TERMS);
