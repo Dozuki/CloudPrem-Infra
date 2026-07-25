@@ -161,6 +161,24 @@ resource "helm_release" "envoy_gateway" {
   #    and passes it as the Redis AUTH password. No plaintext password in the
   #    EnvoyGateway ConfigMap. See ratelimit.tf for the Secret + Redis --requirepass.
   values = [yamlencode({
+    # Controller (control-plane) resources. The gateway-helm default is a 100m CPU
+    # request, which crashlooped the controller under load: CPU-starved on a busy
+    # node it couldn't answer its 1s liveness probe in time, kubelet killed it, and
+    # every kill dropped the xDS stream so the whole data plane went down (took apac
+    # down mid-cutover). A 500m request gives it guaranteed scheduling headroom so the
+    # probe stays responsive; no CPU limit so reconciliation can burst. (The chart
+    # does not expose the controller's probe timeouts, so we fix this via resources;
+    # verify this value path against the pinned gateway-helm chart on version bumps.)
+    deployment = {
+      envoyGateway = {
+        resources = {
+          requests = {
+            cpu    = "500m"
+            memory = "256Mi"
+          }
+        }
+      }
+    }
     config = {
       envoyGateway = {
         extensionApis = {
@@ -207,75 +225,28 @@ resource "helm_release" "envoy_gateway" {
   ]
 }
 
-# Stable Service in envoy-gateway-system targeting Envoy proxy pods.
-# Proxy pods are deployed in the controller namespace, not the Gateway namespace.
-resource "kubernetes_service_v1" "envoy_proxy" {
-  count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [helm_release.app]
+# The stable dozuki-envoy-proxy Service (AWS ClusterIP / Azure LoadBalancer, in
+# envoy-gateway-system) now ships in the chart (gateway.stableProxyService, set below), so
+# it renders in-release next to the Gateway it fronts. It stayed in Terraform only for
+# historical ordering; nothing here needed a physical input. The AWS TargetGroupBindings
+# below stay in Terraform - they bind to the physical NLB target-group ARN.
 
-  metadata {
-    name      = "dozuki-envoy-proxy"
-    namespace = "envoy-gateway-system"
-  }
-  spec {
-    type = "ClusterIP"
-    selector = {
-      "gateway.envoyproxy.io/owning-gateway-name"      = "dozuki-gateway"
-      "gateway.envoyproxy.io/owning-gateway-namespace" = kubernetes_namespace_v1.app.metadata[0].name
-    }
-    port {
-      name        = "https"
-      port        = 443
-      target_port = 10443
-      protocol    = "TCP"
-    }
-    port {
-      name        = "http"
-      port        = 80
-      target_port = 10080
-      protocol    = "TCP"
-    }
-  }
-}
-
-# Azure twin of the Envoy proxy Service: exposes the proxy pods directly via an
-# Azure Load Balancer instead of NLB target group bindings.
-resource "kubernetes_service_v1" "envoy_proxy_azure" {
+# Azure only: the ingress_ip output needs the LoadBalancer IP the chart's Service is assigned.
+# Read it back rather than owning the Service. depends_on the release so the read happens after
+# the Service exists; try() in the output tolerates the brief window before the LB IP lands.
+data "kubernetes_service_v1" "envoy_proxy_azure" {
   count      = var.cloud == "azure" ? 1 : 0
   depends_on = [helm_release.app]
 
-  # Azure LB uses its default TCP health probe. Do not set an HTTP
-  # health-probe-request-path annotation unless the Envoy proxy is verified to
-  # serve 200 on that path on the data ports (10443/10080) — a failing HTTP
-  # probe blackholes ingress.
   metadata {
     name      = "dozuki-envoy-proxy"
     namespace = "envoy-gateway-system"
-  }
-  spec {
-    type = "LoadBalancer"
-    selector = {
-      "gateway.envoyproxy.io/owning-gateway-name"      = "dozuki-gateway"
-      "gateway.envoyproxy.io/owning-gateway-namespace" = kubernetes_namespace_v1.app.metadata[0].name
-    }
-    port {
-      name        = "https"
-      port        = 443
-      target_port = 10443
-      protocol    = "TCP"
-    }
-    port {
-      name        = "http"
-      port        = 80
-      target_port = 10080
-      protocol    = "TCP"
-    }
   }
 }
 
 resource "kubernetes_manifest" "tgb_https" {
   count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [kubernetes_service_v1.envoy_proxy]
+  depends_on = [helm_release.app] # chart creates the Service in-release; wait=true guarantees it before the binding
 
   manifest = {
     apiVersion = "eks.amazonaws.com/v1"
@@ -297,7 +268,7 @@ resource "kubernetes_manifest" "tgb_https" {
 
 resource "kubernetes_manifest" "tgb_http" {
   count      = var.cloud == "aws" ? 1 : 0
-  depends_on = [kubernetes_service_v1.envoy_proxy]
+  depends_on = [helm_release.app] # chart creates the Service in-release; wait=true guarantees it before the binding
 
   manifest = {
     apiVersion = "eks.amazonaws.com/v1"
@@ -537,7 +508,12 @@ locals {
 }
 
 resource "helm_release" "app" {
-  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, helm_release.istio_base, helm_release.istiod, helm_release.istio_cni, helm_release.ztunnel, kubernetes_labels.ambient_dozuki, kubernetes_labels.ambient_envoy_gateway, kubernetes_labels.ambient_redis]
+  # vault_kv_secret_v2.tls: the chart now renders the tls-secret ExternalSecret (moved from
+  # tls.tf); keep the ordering the deleted resource had so a fresh seeded-Vault install seeds
+  # the cert before ESO tries to read it.
+  # The istio_* / ambient_* entries order the mesh install and namespace enrollment before
+  # the app release (count=0 when the mesh is disabled, so this is a no-op then).
+  depends_on = [helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets, kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull, aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns, kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, vault_kv_secret_v2.tls, helm_release.istio_base, helm_release.istiod, helm_release.istio_cni, helm_release.ztunnel, kubernetes_labels.ambient_dozuki, kubernetes_labels.ambient_envoy_gateway, kubernetes_labels.ambient_redis]
 
   name      = "dozuki"
   namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -572,7 +548,13 @@ resource "helm_release" "app" {
   # chart's bundled SeaweedFS subchart for object storage (Azure has no S3). This is
   # the same model on-prem uses (seaweedfs.enabled=true); see local.seaweedfs_values.
   # On AWS this is an empty list of values files — a no-op, no overrides applied.
-  values = var.cloud == "azure" ? [yamlencode(merge({
+  # webNextjs.env: per-env service URLs (CREATOR_PRO_SERVICE_API_URL,
+  # MARKETPLACE_SERVICE_API_URL, ...) merged into the chart's webNextjs.env map from
+  # var.webnextjs_env. The chart supports this merge, but the logical layer never
+  # passed it, so these URLs had to be hand-patched onto every stack (nextjs BFF 500s
+  # without them). Wire it here. Empty map is a no-op — the chart's env defaults
+  # (SERVER_SIDE_MONOLITH_API_URL) are preserved by the merge.
+  values = concat([yamlencode({ deployments = { webNextjs = { env = var.webnextjs_env } } })], var.cloud == "azure" ? [yamlencode(merge({
     global = {
       imagePullSecrets = [{ name = "ghcr-pull" }]
       # SeaweedFS subchart replication: keep a second copy of every volume so a
@@ -591,7 +573,7 @@ resource "helm_release" "app" {
     }
     }, local.seaweedfs_values, var.azure_acme_server != "" ? {
     cert_manager = { acmeServer = var.azure_acme_server }
-  } : {}))] : []
+  } : {}))] : [])
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
   # repeatable blocks. Section groupings preserved as comments.
@@ -651,6 +633,15 @@ resource "helm_release" "app" {
     { name = "tls.enabled", value = local.tls_manual ? "true" : "false" },
     { name = "tls.externallyManaged", value = local.tls_externally_managed ? "true" : "false" },
     { name = "tls.cert", value = local.tls_chart_rendered ? var.tls_cert : "" },
+    # The chart now renders these (moved out of this layer). See the removed
+    # kubernetes_service_v1.envoy_proxy above and kubectl_manifest.tls_external_secret in
+    # tls.tf. Requires a chart_version that ships these templates (>= 1.14.0); on an older
+    # chart the flags are ignored and neither renders, so bump the chart pin in the same
+    # change. The proxy Service tracks the old resources' cloud gate (aws OR azure only, never
+    # on-prem); the Vault TLS ExternalSecret follows the same tls_from_vault condition the
+    # deleted resource used.
+    { name = "gateway.stableProxyService.enabled", value = contains(["aws", "azure"], var.cloud) ? "true" : "false" },
+    { name = "tls.vaultExternalSecret.enabled", value = local.tls_from_vault ? "true" : "false" },
 
     # --- Webhooks ---
     { name = "webhooks.enabled", value = var.enable_webhooks ? "true" : "false" },
@@ -778,10 +769,6 @@ moved {
   to   = kubernetes_storage_class_v1.ebs_gp3[0]
 }
 
-moved {
-  from = kubernetes_service_v1.envoy_proxy
-  to   = kubernetes_service_v1.envoy_proxy[0]
-}
 
 moved {
   from = kubernetes_manifest.tgb_https

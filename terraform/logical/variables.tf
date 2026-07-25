@@ -100,6 +100,12 @@ variable "nextjs_tag" {
   type        = string
 }
 
+variable "webnextjs_env" {
+  description = "Extra container env vars for the web-nextjs pods, merged into the chart's webNextjs.env map. Per-env service URLs live here (CREATOR_PRO_SERVICE_API_URL, MARKETPLACE_SERVICE_API_URL, ...); an empty map renders nothing. The chart's SERVER_SIDE_MONOLITH_API_URL default is preserved by the merge."
+  type        = map(string)
+  default     = {}
+}
+
 variable "image_repository" {
   description = "Docker image repository (ECR) for app containers."
   type        = string
@@ -120,6 +126,13 @@ variable "nextjs_service_jwt_private_key" {
 
 variable "service_jwt_validation_key" {
   description = "Monolith-side service JWT validation key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'service-jwt' secret, which chart >= 1.12.0 reads unconditionally. Empty = verification disabled."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "zendesk_jwt_signing_key" {
+  description = "Zendesk JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'zendesk' secret, which chart >= 1.13.0 reads unconditionally."
   type        = string
   sensitive   = true
   default     = ""

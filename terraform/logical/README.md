@@ -52,7 +52,6 @@ No modules.
 | [kubectl_manifest.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.peer_auth_carveouts](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.peer_auth_strict](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.tls_external_secret](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.ztunnel_podmonitor](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_binding_v1.vault_auth_delegator](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
@@ -87,8 +86,6 @@ No modules.
 | [kubernetes_secret_v1.vault_auth_token](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_service_account_v1.eso_vault_auth](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_account_v1) | resource |
 | [kubernetes_service_account_v1.vault_auth](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_account_v1) | resource |
-| [kubernetes_service_v1.envoy_proxy](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_v1) | resource |
-| [kubernetes_service_v1.envoy_proxy_azure](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_v1) | resource |
 | [kubernetes_service_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_v1) | resource |
 | [kubernetes_storage_class_v1.ebs_gp3](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/storage_class_v1) | resource |
 | [random_password.dashboards_admin](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
@@ -128,6 +125,7 @@ No modules.
 | [external_external.ops_htpasswd_hash](https://registry.terraform.io/providers/hashicorp/external/latest/docs/data-sources/external) | data source |
 | [kubectl_file_documents.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/data-sources/file_documents) | data source |
 | [kubernetes_resources.envoy_gateway_svc](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resources) | data source |
+| [kubernetes_service_v1.envoy_proxy_azure](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/service_v1) | data source |
 
 ## Inputs
 
@@ -207,6 +205,8 @@ No modules.
 | <a name="input_tls_cert"></a> [tls\_cert](#input\_tls\_cert) | Base64-encoded PEM TLS certificate (full chain) for the gateway. When set, cert-manager/ACME is bypassed. On AWS Terraform seeds it into Vault (secret/<customer>/<env>/tls) and ESO owns tls-secret; on azure/onprem the chart renders tls-secret. Empty = cert-manager/ACME (AWS) or azure\_tls\_mode (azure). Certs are public data and can live in env.hcl; keep tls\_key a masked stack TF\_VAR. | `string` | `""` | no |
 | <a name="input_tls_key"></a> [tls\_key](#input\_tls\_key) | Base64-encoded PEM TLS private key matching tls\_cert. Required when tls\_cert is set. Set as a masked Spacelift TF\_VAR on the env's logical stack, not in git. | `string` | `""` | no |
 | <a name="input_vault_address"></a> [vault\_address](#input\_vault\_address) | Vault server address accessible from within the cluster (PrivateLink). | `string` | n/a | yes |
+| <a name="input_webnextjs_env"></a> [webnextjs\_env](#input\_webnextjs\_env) | Extra container env vars for the web-nextjs pods, merged into the chart's webNextjs.env map. Per-env service URLs live here (CREATOR\_PRO\_SERVICE\_API\_URL, MARKETPLACE\_SERVICE\_API\_URL, ...); an empty map renders nothing. The chart's SERVER\_SIDE\_MONOLITH\_API\_URL default is preserved by the merge. | `map(string)` | `{}` | no |
+| <a name="input_zendesk_jwt_signing_key"></a> [zendesk\_jwt\_signing\_key](#input\_zendesk\_jwt\_signing\_key) | Zendesk JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'zendesk' secret, which chart >= 1.13.0 reads unconditionally. | `string` | `""` | no |
 
 ## Outputs
 
