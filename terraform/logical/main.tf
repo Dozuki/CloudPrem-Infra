@@ -47,8 +47,9 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
-    # kubectl provider — used ONLY to server-side-apply the Envoy Gateway CRDs that
-    # Helm cannot upgrade (see envoy_gateway_crds.tf). It applies raw manifests via
+    # kubectl provider — server-side-applies the Envoy Gateway CRDs that Helm cannot
+    # upgrade (see envoy_gateway_crds.tf) and the Istio mesh policy/monitoring
+    # manifests (istio.tf). It applies raw manifests via
     # the Kubernetes API (client-go); it does NOT shell out to a kubectl binary, so
     # nothing extra is needed on the Spacelift/CI runners.
     #
