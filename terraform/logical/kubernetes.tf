@@ -757,8 +757,8 @@ resource "helm_release" "app" {
       error_message = "enable_webhooks and enable_bi are not supported on Azure."
     }
     precondition {
-      condition     = var.istio_mesh_state == "disabled" || (local.mesh_supported && var.managed_private_cloud)
-      error_message = "istio_mesh_state can only be enabled on a managed_private_cloud stack on commercial AWS EKS (non-GovCloud). The mesh is an MPC-only product feature; gov needs the phase-2 image mirror; Azure is not supported yet."
+      condition     = var.istio_mesh_state == "disabled" || local.mesh_supported
+      error_message = "istio_mesh_state requires commercial AWS EKS (non-GovCloud). Gov needs the phase-2 image mirror; Azure is not supported yet."
     }
   }
 }
