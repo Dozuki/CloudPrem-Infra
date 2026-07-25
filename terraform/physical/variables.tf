@@ -51,6 +51,28 @@ variable "protect_resources" {
   default     = true
 }
 
+variable "db_apply_immediately" {
+  description = <<-EOT
+    Whether database modifications apply immediately instead of waiting for the next
+    maintenance window. Applies to the Aurora cluster, the RDS instance, the BI replica and
+    the Aurora DR secondary. ElastiCache is unaffected (it is always immediate).
+
+    Leave null (the default) to keep the historical behaviour, which is !protect_resources:
+    production stacks defer to the maintenance window and disposable ones apply at once.
+
+    Set true on a production stack when a change has to land inside a scheduled window
+    rather than at preferred_maintenance_window (sun:19:00-sun:23:00). Without it, an apply
+    that modifies the database returns green having only SCHEDULED the change, which is
+    especially misleading during a migration cutover: the run succeeds and nothing has
+    happened yet.
+
+    This does not make a change safe, it makes it prompt. An immediate modification can
+    still be disruptive, so treat true as an in-window setting rather than a default.
+  EOT
+  type        = bool
+  default     = null
+}
+
 variable "aws_profile" {
   description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
   type        = string

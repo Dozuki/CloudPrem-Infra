@@ -157,7 +157,7 @@ module "primary_database" {
   storage_type                 = "gp3"
   storage_encrypted            = true
   kms_key_id                   = local.rds_kms_key_arn
-  apply_immediately            = !var.protect_resources
+  apply_immediately            = local.db_apply_immediately
   allow_major_version_upgrade  = true
   performance_insights_enabled = true
   # iam_database_authentication_enabled = true

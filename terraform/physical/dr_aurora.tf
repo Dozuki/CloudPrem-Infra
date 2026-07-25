@@ -127,7 +127,7 @@ resource "aws_rds_cluster" "dr_aurora_secondary" {
   # master_username / master_password / database_name are inherited from the global
   # primary and must NOT be set on a secondary.
   skip_final_snapshot = !var.protect_resources
-  apply_immediately   = !var.protect_resources
+  apply_immediately   = local.db_apply_immediately
 
   # NO aws_rds_cluster_instance => headless: storage replication only, no compute cost.
   # Failover provisions an instance (see the Aurora failover runbook).

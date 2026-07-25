@@ -100,7 +100,7 @@ module "aurora" {
     ]
   }
 
-  apply_immediately            = !var.protect_resources
+  apply_immediately            = local.db_apply_immediately
   deletion_protection          = var.protect_resources
   skip_final_snapshot          = !var.protect_resources
   copy_tags_to_snapshot        = true

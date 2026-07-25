@@ -42,6 +42,14 @@ locals {
   identifier    = var.customer == "" ? "dozuki-${var.environment}" : "${var.customer}-${var.environment}"
   customer_name = var.subdomain_override != "" ? var.subdomain_override : var.customer == "" ? "dozuki" : var.customer
 
+  # Database modifications: immediate, or deferred to preferred_maintenance_window.
+  # Historically hardwired to !protect_resources, which silently makes every production DB
+  # change a scheduled one - an apply that modifies the database returns green having only
+  # QUEUED the change for sun:19:00-sun:23:00. That is fine for routine drift and actively
+  # dangerous during a migration window, so db_apply_immediately can override it per env.
+  # null keeps the historical behaviour exactly.
+  db_apply_immediately = coalesce(var.db_apply_immediately, !var.protect_resources)
+
   # --EKS--
   cluster_access_role_name = "${local.identifier}-${data.aws_region.current.region}-cluster-access"
   create_eks_kms           = var.eks_kms_key_id == "" ? true : false
