@@ -270,6 +270,23 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 	if len(critical) == 0 {
 		critical = DefaultCriticalWorkloads()
 	}
+	// Since CPI v7.19.0 the app is delivered by a Flux HelmRelease applied with
+	// kubectl_manifest, which returns as soon as the CR exists — the apply no longer
+	// blocks on the install the way helm_release.app's wait=true did. Ask Flux for the
+	// verdict instead of guessing a duration: helm-controller knows both when the
+	// release is genuinely Ready and, on failure, WHY. That fails in seconds on a broken
+	// install (remediation.retries = 0 makes it terminal) instead of waiting out a timer
+	// only to report "still not ready". The timeout here is a backstop for a controller
+	// that never reconciles, not a readiness estimate.
+	//
+	// Skipped when there is no HelmRelease — a pre-v7.19.0 baseline in an upgrade run
+	// installs through the TF helm provider, where the apply already waited.
+	if validation.HelmReleaseManaged(kc, p.Namespace, "dozuki") {
+		step("waiting on Flux HelmRelease dozuki (authoritative readiness)")
+		if herr := validation.AwaitHelmReleaseReady(kc, p.Namespace, "dozuki", 60*time.Minute); herr != nil {
+			return 0, "", caps, herr
+		}
+	}
 	advisory, err := validation.CheckClusterHealth(kc, p.Namespace, critical, 20*time.Minute)
 	if err != nil {
 		return 0, "", caps, err
