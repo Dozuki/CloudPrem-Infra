@@ -135,6 +135,16 @@ data "aws_iam_policy_document" "eks_worker" {
 
   statement {
     actions = [
+      # DescribeReplicationTasks is required alongside Start: the dms-start Job
+      # (logical/bi.tf) reads the task's current status FIRST and only starts it when
+      # it is ready/stopped/failed, since start-replication-task errors on a task that
+      # is already running. Without Describe the Job dies on AccessDenied before it can
+      # decide, and because it runs with wait_for_completion = false the apply still
+      # reports success while DMS silently never starts.
+      #
+      # This was masked until now: the Job's image shipped a 2019 AWS CLI that could not
+      # use EKS Pod Identity at all, so it never got far enough to be denied.
+      "dms:DescribeReplicationTasks",
       "dms:StartReplicationTask"
     ]
 
