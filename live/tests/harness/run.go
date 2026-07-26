@@ -102,7 +102,16 @@ func RunUpgrade(p RunParams) (err error) {
 	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
 
 	// Teardown always runs (defer); the signal handler runs it on SIGINT/SIGTERM too.
-	defer func() { _ = pp.Teardown(ctx, false, err != nil) }()
+	// Do NOT discard the teardown error. Swallowing it hid a silent no-op teardown:
+	// the stack stayed up, diagnostics were never captured, and the run reported only
+	// the original failure — so the leak surfaced later as an unexplained running
+	// cluster. run.sh's cleanup backstop still runs either way; this just makes a
+	// failed teardown visible in the log instead of invisible.
+	defer func() {
+		if terr := pp.Teardown(ctx, false, err != nil); terr != nil {
+			step("WARNING: teardown failed: %v — stack may still be up; run ./cleanup-orphans.sh %s", terr, p.RunID)
+		}
+	}()
 	stop := installTeardownOnSignal(func() { _ = pp.Teardown(ctx, false, true) }, os.Exit)
 	defer stop()
 
@@ -146,7 +155,16 @@ func RunFresh(p RunParams) (err error) {
 	}
 	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
 
-	defer func() { _ = pp.Teardown(ctx, false, err != nil) }()
+	// Do NOT discard the teardown error. Swallowing it hid a silent no-op teardown:
+	// the stack stayed up, diagnostics were never captured, and the run reported only
+	// the original failure — so the leak surfaced later as an unexplained running
+	// cluster. run.sh's cleanup backstop still runs either way; this just makes a
+	// failed teardown visible in the log instead of invisible.
+	defer func() {
+		if terr := pp.Teardown(ctx, false, err != nil); terr != nil {
+			step("WARNING: teardown failed: %v — stack may still be up; run ./cleanup-orphans.sh %s", terr, p.RunID)
+		}
+	}()
 	stop := installTeardownOnSignal(func() { _ = pp.Teardown(ctx, false, true) }, os.Exit)
 	defer stop()
 

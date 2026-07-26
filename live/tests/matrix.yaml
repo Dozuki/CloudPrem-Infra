@@ -18,7 +18,12 @@ defaults:
 version_defaults:
   image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
   nextjs_tag: "2.23.0"
-  chart_version: "0.4.1"   # current dozuki OCI chart (logical layer default @ 7.1.x)
+  chart_version: "1.18.0"  # v7.17.0 moved the NLB TargetGroupBindings (#278) and the frontegg
+                           # DB-create + ztunnel PodMonitor (#277) out of TF and into the chart;
+                           # 1.18.0 is the release that carries those templates. Older charts
+                           # silently drop all three resources. The TGB template is gated on
+                           # gateway.stableProxyService.targetGroupBindings.httpsArn, which only
+                           # CPI >= 7.17.0 passes, so 1.18.0 is safe on pre-7.17 baseline refs too.
   image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
 
 # Per-ref OVERRIDES — only keys that DIFFER from version_defaults need to be here.
@@ -84,6 +89,19 @@ configs:
       rds_adopt_dr_cmk: true     # RDS-only (DR backup replication); ignored on aurora
       bi_dms_enabled: false
       alarm_email: "devops@dozuki.com"
+      # Same wiring min_default and full carry. WriteEnvHCL REPLACES env.hcl outright
+      # rather than merging into the .skel, so anything omitted here silently falls back
+      # to the terraform default - it is not inherited from the skel. That is how this
+      # config ended up unrunnable: vault_endpoint_service_name (physical) and
+      # vault_address (logical) are required with no default, and protect_resources
+      # defaults to TRUE, which turns on RDS deletion protection + skip_final_snapshot
+      # and makes the stack impossible to tear down.
+      protect_resources: false
+      customer: "smoke"
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
   - name: full
     env: full
     feature_flags:
@@ -97,3 +115,18 @@ configs:
       restore_drill: true         # consumed by the harness, NOT passed to terraform
       istio_mesh_state: "strict"
       alarm_email: "devops@dozuki.com"
+      # MUST be false for an ephemeral test stack. The variable defaults to TRUE, which
+      # turns on RDS deletion protection and skip_final_snapshot=false, so teardown dies
+      # with "Cannot delete protected DB Instance" / "final_snapshot_identifier is
+      # required" and strands the databases, VPC and subnet/param groups. Only
+      # min_default set this, which is why it only ever surfaced on full.
+      protect_resources: false
+      # Same vault/identity wiring min_default carries. vault_endpoint_service_name
+      # (physical) and vault_address (logical) are required variables with no default,
+      # so without these the config cannot init. customer gives the stack a unique
+      # identity (smoke-full) so it never collides with the live dev-min/dozuki-* stacks.
+      customer: "smoke"
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true

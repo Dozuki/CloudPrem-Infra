@@ -37,10 +37,20 @@ ACCT="$(aws sts get-caller-identity --profile "$P" --query Account --output text
 BUCKET="dozuki-terraform-state-${R}-${ACCT}"
 LOCK_TABLE="dozuki-terraform-lock"
 
-# Target prefixes: every local-* prefix in the state bucket, optionally filtered to
-# those that START WITH an arg — so a full prefix matches itself, and a RUN_ID like
-# "local-<ts>-" matches all of that run's per-config prefixes (and nothing else).
-ALL_PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE local-/{gsub(/\//,"",$2); print $2}')"
+# Target prefixes, filtered to those that START WITH an arg — so a full prefix matches
+# itself, and a RUN_ID like "local-<ts>-" matches all of that run's per-config prefixes
+# (and nothing else).
+#
+# With NO args we only ever consider local-* (run.sh's default RUN_ID shape), so a blind
+# sweep can never touch a real stack's state in this bucket. With an EXPLICIT arg we match
+# any prefix: run.sh lets RUN_ID be overridden, and a custom RUN_ID used to match nothing
+# here — the destroy silently no-op'd and the whole run leaked (EKS, Aurora, VPCs) while
+# still reporting that cleanup had run.
+if [ "$#" -gt 0 ]; then
+  ALL_PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE /{gsub(/\//,"",$2); print $2}')"
+else
+  ALL_PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE local-/{gsub(/\//,"",$2); print $2}')"
+fi
 if [ "$#" -gt 0 ]; then
   PREFIXES=""
   for arg in "$@"; do
@@ -52,7 +62,7 @@ $(printf '%s\n' "$ALL_PREFIXES" | awk -v a="$arg" 'index($0,a)==1')"
 else
   PREFIXES="$ALL_PREFIXES"
 fi
-if [ -z "$PREFIXES" ]; then echo ">> No matching orphaned local-* state prefixes found in s3://$BUCKET/."; fi
+if [ -z "$PREFIXES" ]; then echo ">> No matching orphaned state prefixes found in s3://$BUCKET/ (searched: ${*:-local-*})."; fi
 
 fail=0
 STACKS=""   # collected <customer>-<env> stacks, for central-Vault cleanup after teardown
@@ -84,6 +94,22 @@ while IFS= read -r pfx; do
         --attributes Key=deletion_protection.enabled,Value=false --region "$region" --profile "$P" >/dev/null 2>&1 \
         && echo "  NLB deletion protection disabled (${CUSTOMER}-${env})"
     fi
+  fi
+
+  # 1b) Delete any MSK cluster for this stack that Terraform does not know about.
+  # A run killed mid-apply (SIGKILL, so no trap) can finish creating MSK after the
+  # state was last written, leaving an ACTIVE cluster absent from state. `destroy`
+  # then removes the MSK *configuration* but never the cluster, and the cluster's
+  # ENIs pin every subnet and security group in the VPC — so the VPC destroy fails
+  # forever and the whole network is stranded. Delete by name and let the retry loop
+  # below wait it out. Idempotent: no cluster, no output.
+  if [ -n "$env" ]; then
+    for carn in $(aws kafka list-clusters --region "$region" --profile "$P" \
+          --query "ClusterInfoList[?starts_with(ClusterName,'${CUSTOMER}-${env}')].ClusterArn" --output text 2>/dev/null); do
+      [ -z "$carn" ] || [ "$carn" = "None" ] && continue
+      aws kafka delete-cluster --cluster-arn "$carn" --region "$region" --profile "$P" >/dev/null 2>&1 \
+        && echo "  MSK cluster delete requested: $carn"
+    done
   fi
 
   # 2) Force-release held state locks AND clear the -md5 state digest for this prefix.
@@ -121,12 +147,28 @@ while IFS= read -r pfx; do
         TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
           terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) \
         || echo "  logical destroy failed (continuing to physical so infra isn't stranded)" >&2
-      ( cd "$tgt/physical"
-        rm -rf .terragrunt-cache
-        TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
-        TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
-          terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
-      destroyed_ok=$?
+      # Physical destroy, retried. A single pass routinely fails on transient
+      # DependencyViolation: a killed run can leave MSK/EKS/NAT still creating or
+      # deleting, and their ENIs pin the subnets and security groups until AWS
+      # finishes releasing them. Those errors clear on their own given time, so
+      # retry with a pause rather than declaring the stack un-destroyable and
+      # leaving a VPC behind. Attempts/backoff overridable for a quick sweep.
+      DESTROY_ATTEMPTS="${DESTROY_ATTEMPTS:-4}"
+      DESTROY_BACKOFF="${DESTROY_BACKOFF:-120}"
+      destroyed_ok=1
+      for attempt in $(seq 1 "$DESTROY_ATTEMPTS"); do
+        ( cd "$tgt/physical"
+          rm -rf .terragrunt-cache
+          TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
+          TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+            terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
+        destroyed_ok=$?
+        [ "$destroyed_ok" -eq 0 ] && break
+        if [ "$attempt" -lt "$DESTROY_ATTEMPTS" ]; then
+          echo "  physical destroy attempt $attempt/$DESTROY_ATTEMPTS failed — waiting ${DESTROY_BACKOFF}s for in-flight deletions to drain, then retrying" >&2
+          sleep "$DESTROY_BACKOFF"
+        fi
+      done
     fi
   elif [ -n "$key" ]; then
     echo "  WARNING: no worktree marker and no live $LIVE_ROOT/$envdir/physical — cannot destroy via terragrunt; leaving state intact." >&2
@@ -170,10 +212,15 @@ done <<EOF
 $PREFIXES
 EOF
 
-# 5) Sweep addon-created containerinsights log groups (out-of-band; TF doesn't own them).
-for lg in $(aws logs describe-log-groups --region "$R" --profile "$P" \
-      --query "logGroups[?starts_with(logGroupName,'/aws/containerinsights/${CUSTOMER}-')].logGroupName" --output text 2>/dev/null); do
-  aws logs delete-log-group --log-group-name "$lg" --region "$R" --profile "$P" 2>/dev/null && echo "  deleted log group: $lg"
+# 5) Sweep service-created log groups (out-of-band; TF doesn't own them, so a destroy
+# leaves them behind). Two families: the containerinsights groups the CloudWatch addon
+# creates, and /aws/lambda/<identifier>-* which Lambda creates on first invocation —
+# the latter outlived every teardown and was the last straggler on each run.
+for prefix in "/aws/containerinsights/${CUSTOMER}-" "/aws/lambda/${CUSTOMER}-"; do
+  for lg in $(aws logs describe-log-groups --region "$R" --profile "$P" \
+        --query "logGroups[?starts_with(logGroupName,'${prefix}')].logGroupName" --output text 2>/dev/null); do
+    aws logs delete-log-group --log-group-name "$lg" --region "$R" --profile "$P" 2>/dev/null && echo "  deleted log group: $lg"
+  done
 done
 
 # 6) Central Vault cleanup: disable each stack's k8s auth mount + delete its policy.
