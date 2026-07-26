@@ -261,22 +261,6 @@ variable "ingress_hostname" {
 }
 
 
-# Deliberately retained (with a default) for the two-step removal; live/logical.hcl still passes it,
-# so the declaration must stay until that input is dropped. See the description.
-# tflint-ignore: terraform_unused_declarations
-variable "memcached_cluster_address" {
-  description = <<-EOT
-    DEPRECATED, unused, retained for one release only.
-
-    Memcached is always in-cluster now; the ElastiCache path and this value's only consumer
-    are gone. It cannot be deleted yet because it has never had a default, so removing it
-    would break every infra-live stack that still passes it (logical.hcl passes it on all
-    three paths). Giving it a default lets infra-live drop those inputs, after which this
-    block goes.
-  EOT
-  type        = string
-  default     = ""
-}
 
 variable "s3_kms_key_id" {
   description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"

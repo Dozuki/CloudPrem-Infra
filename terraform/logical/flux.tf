@@ -140,6 +140,12 @@ locals {
 
     monitoring = { enabled = true }
 
+    # metrics-server ships in the chart (default on) as the single source of truth across
+    # onprem+cloud; the EKS addon was retired (#297). args=[] drops the chart's onprem-oriented
+    # --kubelet-insecure-tls default (cloud kubelets present proper serving certs), keeping the
+    # subchart's secure defaultArgs.
+    "metrics-server" = { args = [] }
+
     dashboards = {
       enabled   = var.enable_dashboards
       jwtSecret = local.dashboards_jwt_secret # (was set_sensitive)
@@ -196,17 +202,21 @@ locals {
     deployments = { webNextjs = { env = local.app_webnextjs_env } }
   }
 
-  # Final values = base, merged with the azure-only block. Only `gateway` collides between the two
-  # (base sets hosts/clientIP/stableProxyService; azure adds service/dnsTarget), so gateway is
-  # merged one level deeper; every other azure key (global, cert_manager, seaweedfs...) has no base
-  # collision and shallow-merges cleanly. helm_release.app got the same effect from helm's deep
-  # merge of its two values files + set list.
-  # gateway is deep-merged unconditionally (no cond?{}:{} ternary): on non-azure app_azure_values has
-  # no gateway key, so try(...,{}) yields {} and gateway == base.gateway; on azure it adds service/dnsTarget.
+  # Final values = base, merged with the azure-only block. Two keys collide between the two and both
+  # need a one-level-deeper merge (a shallow spread would replace base's whole subtree):
+  #   - gateway: base sets hosts/clientIP/stableProxyService; azure adds service/dnsTarget.
+  #   - objectStorage: base sets kmsKey/buckets/endpoint/credentials (the old set list); azure's
+  #     seaweedfs_values adds publicBackend. Without the deep merge azure would keep only publicBackend
+  #     and drop the buckets/credentials the app needs.
+  # Every other azure key (global, cert_manager, seaweedfs...) has no base collision and shallow-merges
+  # cleanly. helm_release.app got the same effect from helm's deep merge of its two values files + set
+  # list. Both deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values has
+  # neither key, so try(...,{}) yields {} and the merged result equals base.
   app_values = merge(
     local.app_base_values,
-    { for k, v in local.app_azure_values : k => v if k != "gateway" },
+    { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" },
     { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
+    { objectStorage = merge(local.app_base_values.objectStorage, try(local.app_azure_values.objectStorage, {})) },
   )
 }
 
@@ -225,9 +235,31 @@ resource "kubernetes_secret_v1" "flux_values" {
   metadata {
     name      = "dozuki-flux-values"
     namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
-    labels    = { "app.kubernetes.io/managed-by" = "terraform" }
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+      # helm-controller watches the REFERENCED Secret (not the HelmRelease) for this label and
+      # re-reconciles immediately on a values change; without it a values edit waits up to the 30m interval.
+      "reconcile.fluxcd.io/watch" = "Enabled"
+    }
   }
   data = { "values.yaml" = yamlencode(local.app_values) }
+}
+
+# GHCR pull secret in flux-system for the Azure/generic OCIRepository (source-controller pulls the
+# chart from ghcr.io there instead of ECR). Mirrors the app-namespace ghcr-pull; AWS/gov use pod
+# identity + provider=aws instead, so this is azure-only.
+resource "kubernetes_secret_v1" "flux_ghcr_pull" {
+  count = var.cloud == "azure" ? 1 : 0
+  metadata {
+    name      = "flux-ghcr-pull"
+    namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
+  }
+  type = "kubernetes.io/dockerconfigjson"
+  data = {
+    ".dockerconfigjson" = jsonencode({
+      auths = { "ghcr.io" = { auth = base64encode("${var.ghcr_pull_username}:${var.ghcr_pull_token}") } }
+    })
+  }
 }
 
 # Flux controllers (source + helm only). wait=false: `helm install --wait` on the flux chart
@@ -239,6 +271,14 @@ resource "helm_release" "flux" {
   chart      = "flux2"
   version    = var.flux_chart_version
   wait       = false
+
+  # EKS injects pod-identity creds at pod startup; if source-controller starts before the association
+  # (and its policy) exist it comes up credential-less and stays that way until a manual restart. So
+  # install Flux only after both are effective. count=0 on non-aws makes these no-op refs there.
+  depends_on = [
+    aws_eks_pod_identity_association.flux_source_controller,
+    aws_iam_role_policy.flux_source_ecr_read,
+  ]
 
   # Only the two controllers the app-delivery path needs; the rest add footprint + images to mirror.
   values = [yamlencode({
@@ -306,12 +346,17 @@ resource "kubectl_manifest" "dozuki_ocirepository" {
     apiVersion = "source.toolkit.fluxcd.io/v1"
     kind       = "OCIRepository"
     metadata   = { name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
-    spec = {
-      interval = "10m"
-      url      = "oci://${var.image_repository}/charts/dozuki"
-      ref      = { tag = var.chart_version }
-      provider = "aws"
-    }
+    # provider=aws pulls with the source-controller's pod-identity ECR creds (AWS + gov). Azure has no
+    # pod identity, so it uses the default provider + the flux-system ghcr dockerconfigjson secret.
+    spec = merge(
+      {
+        interval = "10m"
+        url      = "oci://${var.image_repository}/charts/dozuki"
+        ref      = { tag = var.chart_version }
+        provider = var.cloud == "aws" ? "aws" : "generic"
+      },
+      var.cloud == "aws" ? {} : { secretRef = { name = "flux-ghcr-pull" } },
+    )
   })
 }
 
@@ -323,8 +368,9 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
     helm_release.flux, kubectl_manifest.dozuki_ocirepository, kubernetes_secret_v1.flux_values,
     # same platform-ordering barriers the old helm_release.app depended on:
     helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets,
-    kubernetes_secret_v1.ghcr_pull, kubernetes_secret_v1.gateway_tls, helm_release.external_dns,
-    kubernetes_secret_v1.redis_auth_eg, vault_kv_secret_v2.tls,
+    kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull,
+    aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns,
+    kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, vault_kv_secret_v2.tls,
     helm_release.istio_base, helm_release.istiod, helm_release.istio_cni, helm_release.ztunnel,
     kubernetes_labels.ambient_dozuki, kubernetes_labels.ambient_envoy_gateway, kubernetes_labels.ambient_redis,
   ]
@@ -334,7 +380,6 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
     metadata = {
       name      = "dozuki"
       namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
-      labels    = { "reconcile.fluxcd.io/watch" = "Enabled" }
     }
     spec = {
       interval         = "30m"
