@@ -84,6 +84,19 @@ func AddWorktree(repoDir, baseDir, ref string, initSubmodules bool) (*Worktree, 
 	if hasRemoteBranch(repoDir, ref) {
 		checkout = "origin/" + ref
 	}
+	// Reuse an existing worktree at this path instead of failing. On a FAILED run the
+	// worktree is deliberately kept (see removeUnlessFailed) so the teardown can destroy
+	// against the deployed code — but Teardown then calls prepareWorktree again, and
+	// `git worktree add` on an existing path exits 128 ("already exists"). That aborted
+	// teardown before it ran, so a failed run never destroyed itself and never captured
+	// diagnostics; only the external cleanup backstop saved it. Verify the path is a
+	// real checkout of the same ref before trusting it.
+	if fi, serr := os.Stat(filepath.Join(dir, ".git")); serr == nil && fi != nil {
+		if err := run(dir, "git", "checkout", "--detach", checkout); err != nil {
+			return nil, fmt.Errorf("reuse worktree %s at %s: %w", ref, dir, err)
+		}
+		return &Worktree{Dir: dir, Ref: ref}, nil
+	}
 	if err := run(repoDir, "git", "worktree", "add", "--detach", dir, checkout); err != nil {
 		return nil, fmt.Errorf("worktree add %s (%s): %w", ref, checkout, err)
 	}
