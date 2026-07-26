@@ -492,6 +492,7 @@ variable "tls_key" {
   description = "Base64-encoded PEM TLS private key matching tls_cert. Required when tls_cert is set. Set as a masked Spacelift TF_VAR on the env's logical stack, not in git."
   type        = string
   default     = ""
+  sensitive   = true
 }
 
 variable "customer_tls_externally_managed" {
