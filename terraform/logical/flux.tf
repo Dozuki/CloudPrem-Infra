@@ -1,0 +1,346 @@
+# Flux app-delivery: the dozuki release is delivered by a Flux HelmRelease (helm-controller),
+# not the Terraform helm provider. local.app_values is the nested, type-correct values map that
+# replaces the old helm_release.app `set`/`set_sensitive` lists - built from the SAME vars/locals,
+# never a `helm get values` snapshot (the snapshot emits unparseable YAML from the TLS bundles and
+# silently falls back to chart defaults). Types mirror helm's strvals coercion: bare true/false ->
+# bool, numeric -> number, the two redis.tls entries stay string (they were --set-string), all else
+# string. A render/path diff against the retired set list is the correctness gate (see the flux
+# validation harness). Values go into a Secret (values-Secret, create-not-apply for the 240KB size)
+# referenced by the HelmRelease `valuesFrom`.
+
+locals {
+  # deployments.webNextjs.env came from two sources on helm_release.app: the values-block
+  # (var.webnextjs_env) and appended set entries (var.nextjs_extra_env). Merge them (nextjs_extra_env
+  # wins on key collisions, matching the old later-set-overrides-earlier-value order).
+  app_webnextjs_env = merge(var.webnextjs_env, var.nextjs_extra_env)
+
+  # gateway.hosts[0] is the primary; additional_gateway_hosts append from index 1.
+  app_gateway_hosts = concat(
+    [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name), tlsSecretName = "tls-secret" }],
+    [for host in var.additional_gateway_hosts : { hostname = host.hostname, tlsSecretName = host.tls_secret_name }],
+  )
+
+  # Azure-only overrides (were the helm_release.app `values` yamlencode block). Empty on non-azure.
+  app_azure_values = var.cloud == "azure" ? merge({
+    global = {
+      imagePullSecrets = [{ name = "ghcr-pull" }]
+      seaweedfs        = { enableReplication = true, replicationPlacement = "001" }
+    }
+    gateway = {
+      service = {
+        type        = "LoadBalancer"
+        annotations = var.gateway_dns_label != "" ? { "service.beta.kubernetes.io/azure-dns-label-name" = var.gateway_dns_label } : {}
+      }
+      dnsTarget = local.lb_fqdn
+    }
+  }, local.seaweedfs_values, var.azure_acme_server != "" ? { cert_manager = { acmeServer = var.azure_acme_server } } : {}) : {}
+
+  # The base values, mirroring the old set + set_sensitive lists with correct types.
+  app_base_values = {
+    hostname = var.dns_domain_name
+    dns_validation = (
+      var.cloud == "aws" && !local.is_us_gov && !local.tls_manual &&
+      contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", ""))
+    )
+    customer    = coalesce(var.customer, "Dozuki")
+    environment = var.environment
+
+    aws = {
+      region    = var.cloud == "aws" ? data.aws_region.current[0].region : "us-east-1"
+      accountId = var.cloud == "aws" ? data.aws_caller_identity.current[0].account_id : ""
+      enabled   = var.cloud == "aws"
+    }
+
+    db = {
+      host       = local.db_master_host
+      user       = local.db_master_username
+      resourceId = var.db_resource_id
+      rdsCaCert  = base64encode(file(local.ca_cert_pem_file))
+      password   = local.db_master_password # (was set_sensitive)
+    }
+    dbMigrations = { activeDeadlineSeconds = var.db_migrations_active_deadline_seconds } # number
+
+    smtp = {
+      enabled = var.smtp_enabled
+      host    = var.smtp_host
+      from    = var.smtp_from_address
+      auth = {
+        enabled  = var.smtp_auth_enabled
+        username = var.smtp_username
+        password = var.smtp_password # (was set_sensitive)
+      }
+    }
+
+    sentry = { customerName = coalesce(var.customer, "Dozuki") }
+
+    images = {
+      app       = { repository = var.image_repository, tag = var.image_tag }
+      webnextjs = { tag = var.nextjs_tag }
+    }
+
+    ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
+
+    gateway = {
+      hosts    = local.app_gateway_hosts
+      clientIP = { mode = var.cloud == "azure" ? "none" : "proxyProtocol" }
+      stableProxyService = {
+        enabled = contains(["aws", "azure"], var.cloud)
+        targetGroupBindings = {
+          httpsArn = var.cloud == "aws" ? var.nlb_https_target_group_arn : ""
+          httpArn  = var.cloud == "aws" ? var.nlb_http_target_group_arn : ""
+        }
+      }
+    }
+
+    tls = {
+      enabled             = local.tls_manual
+      externallyManaged   = local.tls_externally_managed
+      cert                = local.tls_chart_rendered ? var.tls_cert : ""
+      key                 = local.tls_chart_rendered ? var.tls_key : "" # (was set_sensitive)
+      vaultExternalSecret = { enabled = local.tls_from_vault }
+    }
+
+    webhooks = { enabled = var.enable_webhooks }
+
+    objectStorage = {
+      kmsKey          = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : ""
+      imagesBucket    = var.cloud == "azure" ? local.seaweedfs_images_bucket : var.s3_images_bucket
+      pdfsBucket      = var.cloud == "azure" ? local.seaweedfs_pdfs_bucket : var.s3_pdfs_bucket
+      documentsBucket = var.cloud == "azure" ? local.seaweedfs_documents_bucket : var.s3_documents_bucket
+      objectsBucket   = var.cloud == "azure" ? local.seaweedfs_objects_bucket : var.s3_objects_bucket
+      endpoint        = var.cloud == "azure" ? local.seaweedfs_s3_endpoint : ""
+      publicHost      = var.cloud == "azure" ? "s3.${var.dns_domain_name}" : ""
+      credentials = {
+        accessKey = var.cloud == "azure" ? try(random_password.seaweedfs_access_key[0].result, "") : "" # (was set_sensitive)
+        secretKey = var.cloud == "azure" ? try(random_password.seaweedfs_secret_key[0].result, "") : "" # (was set_sensitive)
+      }
+    }
+
+    memcached = { host = local.memcached_host, enabled = true }
+
+    vault = { enabled = var.cloud == "aws", address = var.vault_address }
+
+    azure = {
+      enabled     = var.cloud == "azure"
+      tenantId    = var.azure_tenant_id
+      keyVaultUri = var.azure_key_vault_uri
+      environment = var.azure_environment
+    }
+
+    monitoring = { enabled = true }
+
+    dashboards = {
+      enabled   = var.enable_dashboards
+      jwtSecret = local.dashboards_jwt_secret # (was set_sensitive)
+    }
+
+    connectivity = {
+      "webhook-service" = {
+        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        mysql         = { host = local.db_master_host, username = local.db_master_username }
+        mongo         = { connectionString = "mongodb://dozuki-mongodb/webhooks" }
+        configuration = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_WEBHOOK_MYSQL_DB_PASSWORD = "db_password" } } }
+      }
+      "integrations-service" = {
+        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        mongo         = { connectionString = "mongodb://dozuki-mongodb/integrations" }
+      }
+      "event-service" = {
+        database      = { host = local.db_master_host, username = local.db_master_username }
+        configuration = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "db_password" } } }
+        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING (was --set-string)
+      }
+      "connectors-worker" = {
+        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING
+      }
+      frontegg = { images = { username = var.frontegg_docker_username, password = var.frontegg_docker_password } } # (was set_sensitive)
+    }
+
+    "dozuki-operator" = {
+      image            = { repository = "${var.image_repository}/dozuki-operator" }
+      imagePullSecrets = [{ name = "ghcr-pull" }]
+      grafana          = { url = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" }
+      gatewayAPI       = { enabled = var.subsite_gateway_api_enabled }
+    }
+
+    grafana = {
+      env = {
+        GF_DATABASE_TYPE = var.enable_dashboards ? "mysql" : ""
+        GF_DATABASE_HOST = var.enable_dashboards ? "${local.db_master_host}:3306" : ""
+        GF_DATABASE_NAME = var.enable_dashboards ? "grafana_primary" : ""
+        GF_DATABASE_USER = var.enable_dashboards ? local.db_master_username : ""
+      }
+      envValueFrom = {
+        GF_DATABASE_PASSWORD = { secretKeyRef = {
+          name = var.enable_dashboards ? "grafana-db-credentials" : ""
+          key  = var.enable_dashboards ? "password" : ""
+        } }
+      }
+    }
+
+    googleTranslate = { token = var.google_translate_api_token } # (was set_sensitive)
+
+    deployments = { webNextjs = { env = local.app_webnextjs_env } }
+  }
+
+  # Final values = base, merged with the azure-only block. Only `gateway` collides between the two
+  # (base sets hosts/clientIP/stableProxyService; azure adds service/dnsTarget), so gateway is
+  # merged one level deeper; every other azure key (global, cert_manager, seaweedfs...) has no base
+  # collision and shallow-merges cleanly. helm_release.app got the same effect from helm's deep
+  # merge of its two values files + set list.
+  app_values = merge(
+    local.app_base_values,
+    { for k, v in local.app_azure_values : k => v if k != "gateway" },
+    var.cloud == "azure" ? { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) } : {},
+  )
+}
+
+# ---------------------------------------------------------------------------
+# Flux bootstrap + the dozuki OCIRepository/HelmRelease that deliver the app.
+# ---------------------------------------------------------------------------
+
+resource "kubernetes_namespace_v1" "flux_system" {
+  metadata { name = "flux-system" }
+}
+
+# The app values, as a Secret the HelmRelease reads via valuesFrom. Managed directly by the
+# kubernetes provider (not kubectl apply), so the 240KB size is fine - the create-not-apply
+# limit only bit the spike's manual `kubectl apply` (last-applied annotation > 256KB).
+resource "kubernetes_secret_v1" "flux_values" {
+  metadata {
+    name      = "dozuki-flux-values"
+    namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
+    labels    = { "app.kubernetes.io/managed-by" = "terraform" }
+  }
+  data = { "values.yaml" = yamlencode(local.app_values) }
+}
+
+# Flux controllers (source + helm only). wait=false: `helm install --wait` on the flux chart
+# wedges when detached (proven on the spike). Migration-free install, so no token-cap concern.
+resource "helm_release" "flux" {
+  name       = "flux2"
+  namespace  = kubernetes_namespace_v1.flux_system.metadata[0].name
+  repository = "oci://ghcr.io/fluxcd-community/charts"
+  chart      = "flux2"
+  version    = var.flux_chart_version
+  wait       = false
+
+  # Only the two controllers the app-delivery path needs; the rest add footprint + images to mirror.
+  values = [yamlencode({
+    imageAutomationController = { create = false }
+    imageReflectionController = { create = false }
+    kustomizeController       = { create = false }
+    notificationController    = { create = false }
+    helmController            = { create = true }
+    sourceController          = { create = true }
+  })]
+}
+
+# --- Pod identity so source-controller can pull the OCI chart from ECR ---
+# OCIRepository `provider: aws` needs the SA's AWS identity. On EKS Auto Mode pod IMDS is blocked,
+# so the spike's token fallback is not durable; production associates the source-controller SA with
+# an IAM role that has cross-account ECR read on the chart registry. The chart account's ECR repo
+# policy must allow this account (the app-image pulls already establish that cross-account path).
+data "aws_iam_policy_document" "flux_source_assume" {
+  count = var.cloud == "aws" ? 1 : 0
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "flux_source_controller" {
+  count              = var.cloud == "aws" ? 1 : 0
+  name               = "${data.aws_eks_cluster.main[0].name}-flux-source-controller"
+  assume_role_policy = data.aws_iam_policy_document.flux_source_assume[0].json
+}
+
+resource "aws_iam_role_policy" "flux_source_ecr_read" {
+  count = var.cloud == "aws" ? 1 : 0
+  name  = "ecr-read"
+  role  = aws_iam_role.flux_source_controller[0].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = ["ecr:GetAuthorizationToken"], Resource = "*" },
+      { Effect = "Allow", Action = [
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchCheckLayerAvailability",
+      ], Resource = "*" }, # scope to the chart repo ARN(s) once the cross-account repo policy is confirmed
+    ]
+  })
+}
+
+resource "aws_eks_pod_identity_association" "flux_source_controller" {
+  count           = var.cloud == "aws" ? 1 : 0
+  cluster_name    = data.aws_eks_cluster.main[0].name
+  namespace       = kubernetes_namespace_v1.flux_system.metadata[0].name
+  service_account = "source-controller"
+  role_arn        = aws_iam_role.flux_source_controller[0].arn
+}
+
+# OCIRepository: the same chart artifact env.hcl already pins (registry + chart_version).
+resource "kubectl_manifest" "dozuki_ocirepository" {
+  depends_on = [helm_release.flux]
+  yaml_body = yamlencode({
+    apiVersion = "source.toolkit.fluxcd.io/v1"
+    kind       = "OCIRepository"
+    metadata   = { name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
+    spec = {
+      interval = "10m"
+      url      = "oci://${var.image_repository}/charts/dozuki"
+      ref      = { tag = var.chart_version }
+      provider = "aws"
+    }
+  })
+}
+
+# HelmRelease: adopts the existing TF-installed release (releaseName/storageNamespace=dozuki), then
+# reconciles from the OCIRepository with in-cluster wait + a migration-sized timeout, unbounded by
+# any Spacelift token. Values come from the Secret above (built from local.app_values, not a snapshot).
+resource "kubectl_manifest" "dozuki_helmrelease" {
+  depends_on = [
+    helm_release.flux, kubectl_manifest.dozuki_ocirepository, kubernetes_secret_v1.flux_values,
+    # same platform-ordering barriers the old helm_release.app depended on:
+    helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets,
+    kubernetes_secret_v1.ghcr_pull, kubernetes_secret_v1.gateway_tls, helm_release.external_dns,
+    kubernetes_secret_v1.redis_auth_eg, vault_kv_secret_v2.tls,
+    helm_release.istio_base, helm_release.istiod, helm_release.istio_cni, helm_release.ztunnel,
+    kubernetes_labels.ambient_dozuki, kubernetes_labels.ambient_envoy_gateway, kubernetes_labels.ambient_redis,
+  ]
+  yaml_body = yamlencode({
+    apiVersion = "helm.toolkit.fluxcd.io/v2"
+    kind       = "HelmRelease"
+    metadata = {
+      name      = "dozuki"
+      namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
+      labels    = { "reconcile.fluxcd.io/watch" = "Enabled" }
+    }
+    spec = {
+      interval         = "30m"
+      releaseName      = "dozuki"
+      targetNamespace  = kubernetes_namespace_v1.app.metadata[0].name
+      storageNamespace = kubernetes_namespace_v1.app.metadata[0].name
+      maxHistory       = 0 # keep unlimited history; helm-controller defaults to 5 and would prune
+      chartRef         = { kind = "OCIRepository", name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
+      install          = { disableWait = false, timeout = "4h30m", remediation = { retries = 0 } }
+      upgrade          = { disableWait = false, timeout = "4h30m", remediation = { retries = 0, remediateLastFailure = false } }
+      # driftDetection intentionally omitted: a completed migration Job must not be recreated/rerun.
+      valuesFrom = [{ kind = "Secret", name = kubernetes_secret_v1.flux_values.metadata[0].name, valuesKey = "values.yaml" }]
+    }
+  })
+}
+
+# Hand the running release off to Flux without uninstalling it: forget helm_release.app from state
+# but leave the live release installed (Flux then adopts it). No-op on a fresh env that never had it.
+removed {
+  from = helm_release.app
+  lifecycle { destroy = false }
+}

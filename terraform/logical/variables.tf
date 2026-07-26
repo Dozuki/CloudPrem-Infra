@@ -591,3 +591,9 @@ variable "db_migrations_active_deadline_seconds" {
   type        = number
   default     = 3600
 }
+
+variable "flux_chart_version" {
+  description = "fluxcd-community/flux2 chart version for the app-delivery controllers. 2.19.0 = Flux 2.9.1 (helm-controller v1.6.2, Helm 4/SSA line), validated adopting the release cleanly on min under Helm 3 and 4."
+  type        = string
+  default     = "2.19.0"
+}
