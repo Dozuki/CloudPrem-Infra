@@ -754,6 +754,21 @@ resource "helm_release" "app" {
     # seeded into the "grafana" Vault/Key Vault secret's "secret" property, since
     # ESO syncs that same value into grafana.json for the app to mint tokens with.
     { name = "dashboards.jwtSecret", value = local.dashboards_jwt_secret },
+
+    # Frontegg's private Docker Hub credentials for the webhooks tier. The connectivity
+    # subchart renders the "regcred" imagePullSecret from these two values, but the
+    # chart ships LITERAL PLACEHOLDERS for them ("frontegg_docker_username" /
+    # "frontegg_docker_password" in the parent values.yaml). They are non-empty, so the
+    # chart's `required` guard passes and the secret renders — with credentials Docker
+    # Hub rejects. Every enable_webhooks deploy therefore got ImagePullBackOff / 401 on
+    # docker.io/frontegg/*, and helm_release.app never went Ready.
+    #
+    # Real values live in Vault at secret/dozuki/global/frontegg (dockerUsername /
+    # dockerPassword). Empty vars leave the chart placeholders in place, which fails at
+    # image pull exactly as before rather than changing behaviour for callers that do
+    # not set them.
+    { name = "connectivity.frontegg.images.username", value = var.frontegg_docker_username },
+    { name = "connectivity.frontegg.images.password", value = var.frontegg_docker_password },
   ]
 
   lifecycle {
