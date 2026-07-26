@@ -67,7 +67,10 @@ resource "kubernetes_job_v1" "dms_start" {
 }
 
 resource "kubernetes_config_map_v1" "grafana_create_db_script" {
-  count = var.enable_bi ? 1 : 0
+  # Also created when enable_dashboards: the dashboards Grafana points at this grafana_primary
+  # MySQL DB (see kubernetes.tf grafana.env.GF_DATABASE_*) instead of on-PVC SQLite. No-op where
+  # enable_bi is already on (e.g. all 3M envs).
+  count = (var.enable_bi || var.enable_dashboards) ? 1 : 0
   metadata {
     name      = "grafana-create-db-script"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
@@ -79,7 +82,7 @@ resource "kubernetes_config_map_v1" "grafana_create_db_script" {
 }
 
 resource "kubernetes_secret_v1" "grafana_db_credentials" {
-  count = var.enable_bi ? 1 : 0
+  count = (var.enable_bi || var.enable_dashboards) ? 1 : 0
 
   metadata {
     name      = "grafana-db-credentials"
@@ -95,7 +98,7 @@ resource "kubernetes_secret_v1" "grafana_db_credentials" {
 }
 
 resource "kubernetes_job_v1" "grafana_db_create" {
-  count = var.enable_bi ? 1 : 0
+  count = (var.enable_bi || var.enable_dashboards) ? 1 : 0
 
   metadata {
     name      = "grafana-db-create"
