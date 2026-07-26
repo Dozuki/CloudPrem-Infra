@@ -156,6 +156,27 @@ resource "aws_s3_bucket_versioning" "dr_guide_buckets" {
   }
 }
 
+# Same multipart hygiene as the primary buckets (s3.tf): failed uploads leave
+# invisible parts that bill forever. No noncurrent-version archival here though,
+# a DR restore should not wait on Deep Archive retrieval.
+resource "aws_s3_bucket_lifecycle_configuration" "dr_guide_buckets" {
+  for_each = aws_s3_bucket.dr_guide_buckets
+  provider = aws.dr
+
+  bucket = each.value.id
+
+  rule {
+    id     = "finops-hygiene"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "dr_guide_buckets" {
   for_each = aws_s3_bucket.dr_guide_buckets
   provider = aws.dr
