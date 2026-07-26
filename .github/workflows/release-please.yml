@@ -18,6 +18,16 @@ on:
     branches:
       - master
 
+# Serialize release-please: a burst of merges to master otherwise fires overlapping
+# runs that race. One pass can rebuild the release PR from pre-merge state just as
+# another pass merges the release, leaving an empty duplicate release PR (this is what
+# produced the phantom second "release 7.19.0" PR). Queue rather than cancel so every
+# run finishes and reconciles against the latest state - the tag/release step at the
+# end must never be cut off mid-flight.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
