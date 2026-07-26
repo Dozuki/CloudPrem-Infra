@@ -446,6 +446,42 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
+  # Keep Application Signals away from the frontegg (connectivity) services.
+  #
+  # autoMonitor.monitorAllServices defaults to TRUE, so the operator's mutating webhook
+  # stamps instrumentation.opentelemetry.io/inject-<lang>="true" onto every pod at
+  # admission. The injected Node.js SDK uses optional chaining, which the frontegg
+  # images' Node 12 cannot parse — so all five connectivity services crashloop on
+  # startup with:
+  #   SyntaxError: Unexpected token '?'
+  #     at .../@opentelemetry/auto-instrumentations-node/build/src/index.js:8
+  # and helm_release.app never goes Ready. Only reachable with enable_webhooks = true,
+  # which is why no live stack has hit it.
+  #
+  # Excluding here rather than per-pod: this is one declarative place, it needs no
+  # support from the (vendored, third-party) subcharts, and it leaves auto-monitoring
+  # ON for everything else in the namespace — the monolith still gets instrumented.
+  # Scoped to nodejs so a future JVM/python workload in these deployments would still
+  # be picked up. The cost is no Application Signals for the frontegg tier, forced by
+  # the vendor's runtime being too old.
+  configuration_values = jsonencode({
+    manager = {
+      applicationSignals = {
+        autoMonitor = {
+          exclude = {
+            nodejs = {
+              deployments = [
+                for svc in ["api-gateway", "connectors-worker", "event-service", "integrations-service", "webhook-service"] :
+                # namespace/deployment; the release is always named "dozuki".
+                "${local.k8s_namespace_name}/dozuki-${svc}-deployment"
+              ]
+            }
+          }
+        }
+      }
+    }
+  })
+
   tags = merge(
     {},
     var.delete_after != "" ? { deleteAfter = var.delete_after } : {},
