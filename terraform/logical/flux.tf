@@ -14,8 +14,19 @@ locals {
   # the migration TLS fix. Both pin the upstream digest they were built from (recorded
   # with the images), so what we shipped is always traceable. Immutable tags, never
   # :latest — the upstream tag moved under us historically.
-  frontegg_mirror_tag = "20260726-mirror"
-  frontegg_fork_tag   = "20260726-mysql-tls"
+  # Per-service, because each connectivity image has its own upstream version — the
+  # chart has pinned these since 2021. Our tag IS the upstream version (plus -mysql-tls
+  # on the two forks), so the relationship is self-evident and traceable.
+  #
+  # These MUST track the chart's connectivity appVersion pins. Mirroring :latest instead
+  # is not equivalent: latest is a different product generation whose api-gateway
+  # entrypoint expects a service|worker argument the chart never passes, so it
+  # crashloops with "Available startup options are service, worker. Given ".
+  frontegg_api_gateway_tag          = "2021.5.4132030"
+  frontegg_connectors_worker_tag    = "2021.5.5162227"
+  frontegg_integrations_service_tag = "2021.5.5162332"
+  frontegg_event_service_tag        = "2021.5.5183929-mysql-tls"
+  frontegg_webhook_service_tag      = "2021.3.24161215-mysql-tls"
 
   # deployments.webNextjs.env came from two sources on helm_release.app: the values-block
   # (var.webnextjs_env) and appended set entries (var.nextjs_extra_env). Merge them (nextjs_extra_env
@@ -175,7 +186,7 @@ locals {
     connectivity = {
       "webhook-service" = {
         image            = { repository = "${var.image_repository}/hybrid-webhook-service" }
-        appVersion       = local.frontegg_fork_tag
+        appVersion       = local.frontegg_webhook_service_tag
         imagePullSecrets = []
         messageBroker    = { brokerList = var.msk_bootstrap_brokers }
         # useSSL is a STRING: helm coerces a bare true to a bool and the chart b64encs it.
@@ -185,14 +196,14 @@ locals {
       }
       "integrations-service" = {
         image            = { repository = "${var.image_repository}/hybrid-integrations-service" }
-        appVersion       = local.frontegg_mirror_tag
+        appVersion       = local.frontegg_integrations_service_tag
         imagePullSecrets = []
         messageBroker    = { brokerList = var.msk_bootstrap_brokers }
         mongo            = { connectionString = "mongodb://dozuki-mongodb/integrations" }
       }
       "event-service" = {
         image            = { repository = "${var.image_repository}/hybrid-event-service" }
-        appVersion       = local.frontegg_fork_tag
+        appVersion       = local.frontegg_event_service_tag
         imagePullSecrets = []
         database         = { host = local.db_master_host, username = local.db_master_username, useSSL = "true" }
         configuration    = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "master_password" } } }
@@ -201,14 +212,14 @@ locals {
       }
       "connectors-worker" = {
         image            = { repository = "${var.image_repository}/hybrid-connectors-worker" }
-        appVersion       = local.frontegg_mirror_tag
+        appVersion       = local.frontegg_connectors_worker_tag
         imagePullSecrets = []
         messageBroker    = { brokerList = var.msk_bootstrap_brokers }
         redis            = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING
       }
       "api-gateway" = {
         image            = { repository = "${var.image_repository}/hybrid-api-gateway" }
-        appVersion       = local.frontegg_mirror_tag
+        appVersion       = local.frontegg_api_gateway_tag
         imagePullSecrets = []
       }
       # Stops the subchart rendering its regcred Secret. Nothing pulls from Docker Hub
