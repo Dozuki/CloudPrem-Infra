@@ -490,8 +490,16 @@ resource "helm_release" "app" {
   # that process those finalizers. Without this, controllers are torn
   # down while custom resources still have pending finalizers, causing
   # the namespace to hang indefinitely.
-  wait    = true
-  timeout = 900
+  wait = true
+  # 900s covers a minimal deploy but not a full-featured one. With webhooks + BI the
+  # release carries roughly half again as many workloads — the five connectivity
+  # services plus mongodb, redis, opensearch and grafana — and on EKS Auto Mode a
+  # fresh cluster has no nodes until these pods schedule, so node provisioning and
+  # image pulls are on the critical path. A fresh `full` install was still converging
+  # at 16m when the old limit tripped, leaving the release in a failed state. Raising
+  # the ceiling does not slow a small deploy down: wait returns as soon as everything
+  # is Ready, so this only changes how long we allow a legitimately slow install.
+  timeout = 1800
 
   # A failed install (e.g. a pod that never goes Ready before `timeout`) leaves the
   # release in a "failed" state that Terraform does NOT record, so the next apply plans
