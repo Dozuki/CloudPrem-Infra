@@ -1,12 +1,36 @@
 # Envoy Gateway CRDs — managed here, NOT by the envoy_gateway helm_release.
 #
 # Why: Helm never upgrades CRDs that live in a chart's crds/ dir on `helm upgrade`
-# (a deliberate Helm limitation), and EG's separate gateway-crds-helm chart can't
-# be a helm_release because its rendered CRDs exceed Helm's 1MB release-secret
-# limit. So on an EG version bump the chart's NEW CRDs never apply, the 1.8.x
-# controller can't reconcile, and the release's `wait` times out (the failure that
-# hit mpc-dev-min-logical). EG's own docs say: apply the CRDs first, then upgrade
-# the gateway. We do exactly that, in-band, so there's no out-of-band manual step.
+# (a deliberate Helm limitation, unchanged in Helm 4 — its --skip-crds help still
+# reads "installed if not already present"). So on an EG version bump the chart's NEW
+# CRDs never apply, the 1.8.x controller can't reconcile, and the release's `wait`
+# times out (the failure that hit mpc-dev-min-logical). EG's own docs say: apply the
+# CRDs first, then upgrade the gateway. We do exactly that, in-band, so there's no
+# out-of-band manual step.
+#
+# Upstream's answer to the same problem is the separate gateway-crds-helm chart, which
+# holds the CRDs as TEMPLATES rather than in a crds/ dir, so Helm does upgrade them.
+# We cannot use it, and neither can anyone else on the default storage driver: Helm
+# stores a release as base64(gzip(json)) in a Secret, and Kubernetes hard-rejects Secret
+# data over 1048576 DECODED bytes ("data: Too long: may not be more than 1048576
+# bytes"). Because gateway-crds-helm's CRDs are templates they are stored twice, as
+# base64 template source in the chart record AND as the rendered manifest, which lands
+# at roughly 1.6 to 1.85MB decoded, 1.5x to 1.8x over the ceiling. That is a Helm
+# storage limit, not a Terraform one: installing it by hand fails the same way. Only
+# HELM_DRIVER=sql escapes it, which is not worth a Postgres dependency for CRDs.
+#
+# This is upstream envoyproxy/gateway#6105, open since 2025-05 and still live. The
+# maintainer's own recommendation there is `helm template` plus an apply, which is
+# exactly what this file does, wired in-band so there is no manual step. Note that the
+# chart's crds.gatewayAPI.enabled=false escape hatch does NOT get you under the limit
+# (reported against 1.8.1 in that issue): Helm stores every template file in the chart
+# whether it rendered or not, so the payload is there regardless of the toggles.
+# Flux users have no workaround at all, having no templating step.
+#
+# skip_crds below is also what keeps THIS release's record small, which is a second
+# reason to keep it. Measured on mpc-dev-min-logical: the pre-#201 revisions carry the
+# 4.4MB crds/ payload in the chart record and sit at 1,035,308 decoded bytes (98.7% of
+# the limit), while every revision since is 27,276 bytes (2.6%).
 #
 # Mechanism: the kubectl provider server-side-applies the vendored CRD set before
 # the helm_release (depends_on). Server-side apply is REQUIRED — these CRDs are too
