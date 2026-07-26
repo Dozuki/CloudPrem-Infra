@@ -448,4 +448,4 @@ resource "aws_eks_pod_identity_association" "cloudwatch_agent" {
 # values.yaml. The EKS managed addon was retired here; the chart install carries
 # metrics-server on every platform, and this layer drops the chart's onprem-oriented
 # --kubelet-insecure-tls arg for cloud (EKS kubelets present proper serving certs) via
-# the app release's metrics-server.args override in logical/kubernetes.tf.
+# the app release's metrics-server.args override in logical/flux.tf (app_base_values).

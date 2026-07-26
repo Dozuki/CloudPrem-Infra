@@ -28,6 +28,10 @@ variable "environment" {
   }
 }
 
+# Absorbs the account.hcl `aws_profile` that root.hcl merges into every stack's inputs (and uses for
+# the provider block); the module itself does not read it. Dropping the declaration would emit an
+# undeclared-variable warning per account.
+# tflint-ignore: terraform_unused_declarations
 variable "aws_profile" {
   description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
   type        = string
@@ -257,19 +261,6 @@ variable "ingress_hostname" {
 }
 
 
-variable "memcached_cluster_address" {
-  description = <<-EOT
-    DEPRECATED, unused, retained for one release only.
-
-    Memcached is always in-cluster now; the ElastiCache path and this value's only consumer
-    are gone. It cannot be deleted yet because it has never had a default, so removing it
-    would break every infra-live stack that still passes it (logical.hcl passes it on all
-    three paths). Giving it a default lets infra-live drop those inputs, after which this
-    block goes.
-  EOT
-  type        = string
-  default     = ""
-}
 
 variable "s3_kms_key_id" {
   description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
@@ -532,11 +523,6 @@ variable "customer_tls_externally_managed" {
   default     = false
 }
 
-variable "operator_image_tag" {
-  description = "dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion)."
-  type        = string
-  default     = "3.0.3"
-}
 
 variable "gateway_dns_label" {
   description = "Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label."
@@ -573,11 +559,6 @@ variable "external_dns_sa_name" {
   default     = "external-dns"
 }
 
-variable "gateway_name" {
-  description = "Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon."
-  type        = string
-  default     = "dozuki-gateway"
-}
 
 
 variable "delete_after" {
@@ -590,4 +571,10 @@ variable "db_migrations_active_deadline_seconds" {
   description = "activeDeadlineSeconds for the chart's db-migrations Job. The chart default (900) is too short for the Q1->Q2 forward migration on a large snapshot-restored DB (~100 GB dies DeadlineExceeded). Default here is generous; the job exits when migrations finish, so a high ceiling costs nothing on small DBs."
   type        = number
   default     = 3600
+}
+
+variable "flux_chart_version" {
+  description = "fluxcd-community/flux2 chart version for the app-delivery controllers. 2.19.0 = Flux 2.9.1 (helm-controller v1.6.2, Helm 4/SSA line), validated adopting the release cleanly on min under Helm 3 and 4."
+  type        = string
+  default     = "2.19.0"
 }

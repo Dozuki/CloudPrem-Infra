@@ -297,7 +297,6 @@
 | <a name="output_guide_images_bucket"></a> [guide\_images\_bucket](#output\_guide\_images\_bucket) | n/a |
 | <a name="output_guide_objects_bucket"></a> [guide\_objects\_bucket](#output\_guide\_objects\_bucket) | n/a |
 | <a name="output_guide_pdfs_bucket"></a> [guide\_pdfs\_bucket](#output\_guide\_pdfs\_bucket) | n/a |
-| <a name="output_memcached_cluster_address"></a> [memcached\_cluster\_address](#output\_memcached\_cluster\_address) | DEPRECATED, retained for one release only. ElastiCache is gone, so there is no endpoint to report. Kept non-empty-keyed because infra-live's logical.hcl still reads dependency.physical.outputs.memcached\_cluster\_address; removing it now would fail those stacks at parse time. Delete once infra-live no longer references it. |
 | <a name="output_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#output\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list |
 | <a name="output_nlb_dns_name"></a> [nlb\_dns\_name](#output\_nlb\_dns\_name) | The FQDN of the NLB. |
 | <a name="output_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#output\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding |

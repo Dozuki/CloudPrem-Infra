@@ -3,7 +3,7 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.7.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 4.0 |
 | <a name="requirement_external"></a> [external](#requirement\_external) | ~> 2.0 |
@@ -39,16 +39,21 @@ No modules.
 | Name | Type |
 | ---- | ---- |
 | [aws_eks_addon.cloudwatch_observability](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
+| [aws_eks_pod_identity_association.flux_source_controller](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
+| [aws_iam_role.flux_source_controller](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy.flux_source_ecr_read](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [azurerm_key_vault_secret.app](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault_secret) | resource |
-| [helm_release.app](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.cert_manager](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.envoy_gateway](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.external_dns](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.external_secrets](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [helm_release.flux](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.istio_base](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.istio_cni](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.istiod](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.ztunnel](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
+| [kubectl_manifest.dozuki_helmrelease](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
+| [kubectl_manifest.dozuki_ocirepository](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.peer_auth_carveouts](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.peer_auth_strict](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
@@ -66,11 +71,14 @@ No modules.
 | [kubernetes_manifest.nodepool_spot](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
 | [kubernetes_namespace_v1.app](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/namespace_v1) | resource |
 | [kubernetes_namespace_v1.cert_manager](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/namespace_v1) | resource |
+| [kubernetes_namespace_v1.flux_system](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/namespace_v1) | resource |
 | [kubernetes_namespace_v1.istio_system](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/namespace_v1) | resource |
 | [kubernetes_namespace_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/namespace_v1) | resource |
 | [kubernetes_network_policy_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/network_policy_v1) | resource |
 | [kubernetes_role_binding_v1.dozuki_subsite_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/role_binding_v1) | resource |
 | [kubernetes_role_v1.dozuki_subsite_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/role_v1) | resource |
+| [kubernetes_secret_v1.flux_ghcr_pull](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
+| [kubernetes_secret_v1.flux_values](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.gateway_tls](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.ghcr_pull](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.grafana_db_credentials](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
@@ -108,6 +116,7 @@ No modules.
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_ecr_authorization_token.chart](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ecr_authorization_token) | data source |
 | [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/eks_cluster) | data source |
+| [aws_iam_policy_document.flux_source_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
@@ -153,12 +162,12 @@ No modules.
 | <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_dns_sa_name"></a> [external\_dns\_sa\_name](#input\_external\_dns\_sa\_name) | external-dns service account name (must match the AWS role trust subject). | `string` | `"external-dns"` | no |
+| <a name="input_flux_chart_version"></a> [flux\_chart\_version](#input\_flux\_chart\_version) | fluxcd-community/flux2 chart version for the app-delivery controllers. 2.19.0 = Flux 2.9.1 (helm-controller v1.6.2, Helm 4/SSA line), validated adopting the release cleanly on min under Helm 3 and 4. | `string` | `"2.19.0"` | no |
 | <a name="input_frontegg_api_token"></a> [frontegg\_api\_token](#input\_frontegg\_api\_token) | Frontegg API token (Azure only; AWS reads Vault). | `string` | `""` | no |
 | <a name="input_frontegg_client_id"></a> [frontegg\_client\_id](#input\_frontegg\_client\_id) | Frontegg client ID (Azure only; AWS reads Vault). | `string` | `""` | no |
 | <a name="input_frontegg_docker_password"></a> [frontegg\_docker\_password](#input\_frontegg\_docker\_password) | Docker Hub password/token paired with frontegg\_docker\_username (secret/dozuki/global/frontegg -> dockerPassword). | `string` | `""` | no |
 | <a name="input_frontegg_docker_username"></a> [frontegg\_docker\_username](#input\_frontegg\_docker\_username) | Docker Hub username for frontegg's private images (secret/dozuki/global/frontegg -> dockerUsername). Required when enable\_webhooks is true: the connectivity subcharts pull docker.io/frontegg/* via an imagePullSecret named regcred. Empty disables creation of that secret. | `string` | `""` | no |
 | <a name="input_gateway_dns_label"></a> [gateway\_dns\_label](#input\_gateway\_dns\_label) | Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label. | `string` | `""` | no |
-| <a name="input_gateway_name"></a> [gateway\_name](#input\_gateway\_name) | Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon. | `string` | `"dozuki-gateway"` | no |
 | <a name="input_ghcr_pull_token"></a> [ghcr\_pull\_token](#input\_ghcr\_pull\_token) | GitHub token (read:packages) for pulling MPC images from GHCR (Azure only). | `string` | `""` | no |
 | <a name="input_ghcr_pull_username"></a> [ghcr\_pull\_username](#input\_ghcr\_pull\_username) | GitHub username for pulling MPC images from GHCR (Azure only). | `string` | `""` | no |
 | <a name="input_google_translate_api_token"></a> [google\_translate\_api\_token](#input\_google\_translate\_api\_token) | If using machine translation, enter your google translate API token here. | `string` | `""` | no |
@@ -167,14 +176,12 @@ No modules.
 | <a name="input_image_tag"></a> [image\_tag](#input\_image\_tag) | Docker image tag for the main Dozuki app container. Changes with every deploy. | `string` | n/a | yes |
 | <a name="input_ingress_hostname"></a> [ingress\_hostname](#input\_ingress\_hostname) | Hostname for the app ingress. Set to a wildcard (e.g. *.customer.com) for customer-provided certs. Defaults to dns\_domain\_name. | `string` | `""` | no |
 | <a name="input_istio_mesh_state"></a> [istio\_mesh\_state](#input\_istio\_mesh\_state) | Istio ambient mesh lifecycle state. disabled: nothing installed. installed: control plane + node dataplane running, NodePool startup taints active, no namespaces enrolled. permissive: dozuki/envoy-gateway-system/redis-system enrolled (mesh-to-mesh traffic is auto-mTLS, nothing rejected). strict: STRICT PeerAuthentication enforced with documented carve-outs. States are ordered supersets; walk one step per apply, forward or back. Commercial AWS only until gov phase 2. | `string` | `"disabled"` | no |
-| <a name="input_memcached_cluster_address"></a> [memcached\_cluster\_address](#input\_memcached\_cluster\_address) | DEPRECATED, unused, retained for one release only.<br/><br/>Memcached is always in-cluster now; the ElastiCache path and this value's only consumer<br/>are gone. It cannot be deleted yet because it has never had a default, so removing it<br/>would break every infra-live stack that still passes it (logical.hcl passes it on all<br/>three paths). Giving it a default lets infra-live drop those inputs, after which this<br/>block goes. | `string` | `""` | no |
 | <a name="input_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#input\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list | `any` | n/a | yes |
 | <a name="input_nextjs_extra_env"></a> [nextjs\_extra\_env](#input\_nextjs\_extra\_env) | Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs. | `map(string)` | `{}` | no |
 | <a name="input_nextjs_service_jwt_private_key"></a> [nextjs\_service\_jwt\_private\_key](#input\_nextjs\_service\_jwt\_private\_key) | web-nextjs service JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'nextjs' secret, which chart >= 1.9.0 reads unconditionally. | `string` | `""` | no |
 | <a name="input_nextjs_tag"></a> [nextjs\_tag](#input\_nextjs\_tag) | Docker image tag for the Next.js frontend container. Changes with every deploy. | `string` | n/a | yes |
 | <a name="input_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#input\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding | `string` | n/a | yes |
 | <a name="input_nlb_https_target_group_arn"></a> [nlb\_https\_target\_group\_arn](#input\_nlb\_https\_target\_group\_arn) | NLB HTTPS target group ARN for TargetGroupBinding | `string` | n/a | yes |
-| <a name="input_operator_image_tag"></a> [operator\_image\_tag](#input\_operator\_image\_tag) | dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion). | `string` | `"3.0.3"` | no |
 | <a name="input_primary_db_secret"></a> [primary\_db\_secret](#input\_primary\_db\_secret) | ARN to secret containing primary db credentials | `string` | n/a | yes |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | When true, retain Vault secrets on destroy (soft delete). When false, permanently purge all versions. | `bool` | `true` | no |
 | <a name="input_rustici_managed_password"></a> [rustici\_managed\_password](#input\_rustici\_managed\_password) | Rustici managed password (Azure only; AWS reads Vault). | `string` | `""` | no |
