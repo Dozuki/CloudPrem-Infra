@@ -136,7 +136,21 @@ resource "aws_rds_cluster" "dr_aurora_secondary" {
     ignore_changes = [replication_source_identifier]
   }
 
-  depends_on = [aws_rds_global_cluster.aurora]
+  # module.aurora, not just the global cluster: RDS rejects the cross-region replica
+  # while the PRIMARY is still settling —
+  #   InvalidDBClusterStateFault: Source cluster: <id> is in a state which is not
+  #   valid for physical replication
+  # The global cluster only needs module.aurora[0].cluster_arn, which terraform has as
+  # soon as the cluster resource returns, so neither it nor this replica waited for the
+  # primary's instances to finish provisioning. That left a race this usually won but
+  # sometimes lost (observed on a fresh full deploy: the replica was attempted while the
+  # writer was still creating). Depending on the whole module makes it wait for the
+  # instances, which is what "available for replication" actually requires.
+  #
+  # This is a resource-level depends_on pointing AT a module, not a depends_on ON a
+  # module block — it does not defer the module's own data sources (see the eks_cluster
+  # warning in this layer's notes).
+  depends_on = [aws_rds_global_cluster.aurora, module.aurora]
 }
 
 # --- Outputs (consumed by the failover runbook) -------------------------------
