@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.19.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.0...v7.19.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **physical:** wait for the primary before creating the Aurora DR replica ([#301](https://github.com/Dozuki/CloudPrem-Infra/issues/301)) ([a2ffdeb](https://github.com/Dozuki/CloudPrem-Infra/commit/a2ffdeb6b1993dbf69372b755c84d79ca6f387d4))
+
 ## [7.19.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.18.0...v7.19.0) (2026-07-26)
 
 
