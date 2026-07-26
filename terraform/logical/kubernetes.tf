@@ -564,25 +564,33 @@ resource "helm_release" "app" {
   # passed it, so these URLs had to be hand-patched onto every stack (nextjs BFF 500s
   # without them). Wire it here. Empty map is a no-op — the chart's env defaults
   # (SERVER_SIDE_MONOLITH_API_URL) are preserved by the merge.
-  values = concat([yamlencode({ deployments = { webNextjs = { env = var.webnextjs_env } } })], var.cloud == "azure" ? [yamlencode(merge({
-    global = {
-      imagePullSecrets = [{ name = "ghcr-pull" }]
-      # SeaweedFS subchart replication: keep a second copy of every volume so a
-      # single PVC loss does not lose data (matches the old standalone posture).
-      seaweedfs = {
-        enableReplication    = true
-        replicationPlacement = "001"
+  values = concat([yamlencode({
+    deployments = { webNextjs = { env = var.webnextjs_env } }
+    # metrics-server ships in the chart (default on) as the single source of truth
+    # across onprem+cloud; the EKS addon was retired (see physical/eks.tf). Cloud
+    # kubelets present proper serving certs, so drop the chart's onprem-oriented
+    # --kubelet-insecure-tls default here (args=[] leaves the subchart's secure
+    # defaultArgs). Ignored harmlessly on chart versions predating the dependency.
+    "metrics-server" = { args = [] }
+    })], var.cloud == "azure" ? [yamlencode(merge({
+      global = {
+        imagePullSecrets = [{ name = "ghcr-pull" }]
+        # SeaweedFS subchart replication: keep a second copy of every volume so a
+        # single PVC loss does not lose data (matches the old standalone posture).
+        seaweedfs = {
+          enableReplication    = true
+          replicationPlacement = "001"
+        }
       }
-    }
-    gateway = {
-      service = {
-        type        = "LoadBalancer"
-        annotations = var.gateway_dns_label != "" ? { "service.beta.kubernetes.io/azure-dns-label-name" = var.gateway_dns_label } : {}
+      gateway = {
+        service = {
+          type        = "LoadBalancer"
+          annotations = var.gateway_dns_label != "" ? { "service.beta.kubernetes.io/azure-dns-label-name" = var.gateway_dns_label } : {}
+        }
+        dnsTarget = local.lb_fqdn
       }
-      dnsTarget = local.lb_fqdn
-    }
-    }, local.seaweedfs_values, var.azure_acme_server != "" ? {
-    cert_manager = { acmeServer = var.azure_acme_server }
+      }, local.seaweedfs_values, var.azure_acme_server != "" ? {
+      cert_manager = { acmeServer = var.azure_acme_server }
   } : {}))] : [])
 
   # helm provider 3.x: set/set_sensitive are list-of-object attributes, not
