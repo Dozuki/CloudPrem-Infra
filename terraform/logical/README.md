@@ -56,7 +56,6 @@ No modules.
 | [kubernetes_cluster_role_binding_v1.vault_auth_delegator](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_v1.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_v1) | resource |
 | [kubernetes_config_map_v1.grafana_create_db_script](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1) | resource |
-| [kubernetes_config_map_v1_data.coredns_objects](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1_data) | resource |
 | [kubernetes_deployment_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/deployment_v1) | resource |
 | [kubernetes_job_v1.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
 | [kubernetes_job_v1.grafana_db_create](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
@@ -118,7 +117,6 @@ No modules.
 | [azurerm_kubernetes_cluster.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/kubernetes_cluster) | data source |
 | [external_external.ops_htpasswd_hash](https://registry.terraform.io/providers/hashicorp/external/latest/docs/data-sources/external) | data source |
 | [kubectl_file_documents.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/data-sources/file_documents) | data source |
-| [kubernetes_resources.envoy_gateway_svc](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/resources) | data source |
 | [kubernetes_service_v1.envoy_proxy_azure](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/service_v1) | data source |
 
 ## Inputs
@@ -157,6 +155,8 @@ No modules.
 | <a name="input_external_dns_sa_name"></a> [external\_dns\_sa\_name](#input\_external\_dns\_sa\_name) | external-dns service account name (must match the AWS role trust subject). | `string` | `"external-dns"` | no |
 | <a name="input_frontegg_api_token"></a> [frontegg\_api\_token](#input\_frontegg\_api\_token) | Frontegg API token (Azure only; AWS reads Vault). | `string` | `""` | no |
 | <a name="input_frontegg_client_id"></a> [frontegg\_client\_id](#input\_frontegg\_client\_id) | Frontegg client ID (Azure only; AWS reads Vault). | `string` | `""` | no |
+| <a name="input_frontegg_docker_password"></a> [frontegg\_docker\_password](#input\_frontegg\_docker\_password) | Docker Hub password/token paired with frontegg\_docker\_username (secret/dozuki/global/frontegg -> dockerPassword). | `string` | `""` | no |
+| <a name="input_frontegg_docker_username"></a> [frontegg\_docker\_username](#input\_frontegg\_docker\_username) | Docker Hub username for frontegg's private images (secret/dozuki/global/frontegg -> dockerUsername). Required when enable\_webhooks is true: the connectivity subcharts pull docker.io/frontegg/* via an imagePullSecret named regcred. Empty disables creation of that secret. | `string` | `""` | no |
 | <a name="input_gateway_dns_label"></a> [gateway\_dns\_label](#input\_gateway\_dns\_label) | Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label. | `string` | `""` | no |
 | <a name="input_gateway_name"></a> [gateway\_name](#input\_gateway\_name) | Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon. | `string` | `"dozuki-gateway"` | no |
 | <a name="input_ghcr_pull_token"></a> [ghcr\_pull\_token](#input\_ghcr\_pull\_token) | GitHub token (read:packages) for pulling MPC images from GHCR (Azure only). | `string` | `""` | no |
