@@ -13,9 +13,21 @@ resource "kubernetes_job_v1" "dms_start" {
       spec {
         container {
           name = "dms-start"
-          # TODO: pin to a digest and mirror into the airgap registries. ":latest" is
-          # a supply-chain/reproducibility risk; unchanged here to keep this fix scoped.
-          image = "bearengineer/awscli-kubectl:latest"
+          # Was bearengineer/awscli-kubectl:latest, which ships aws-cli 1.16.234 /
+          # botocore 1.12.224 (2019). That predates EKS Pod Identity, so every
+          # credential lookup died with:
+          #   Unsupported host '169.254.170.23'. Can only retrieve metadata from
+          #   these hosts: 169.254.170.2, localhost, 127.0.0.1
+          # 169.254.170.23 is the Pod Identity agent; 169.254.170.2 is the old ECS
+          # endpoint that botocore knew about. The job therefore could never call
+          # DMS, and because wait_for_completion is false the apply still reported
+          # success — which is why DMS silently never started and cutover envs kept
+          # having to be started by hand.
+          #
+          # alpine/k8s carries both kubectl and aws (botocore 1.35, well past the
+          # ~1.33 that added Pod Identity support) and is pinned, which also retires
+          # the ":latest" supply-chain TODO this line used to carry.
+          image = "alpine/k8s:1.31.0"
           command = [
             "/bin/sh",
             "-c",
@@ -161,6 +173,15 @@ resource "kubernetes_job_v1" "grafana_db_create" {
     backoff_limit = 50
   }
   wait_for_completion = true
+
+  # Without this the provider's default create timeout applies, which a fresh
+  # deploy blows through: the pod has to pull mysql:9.3 from Docker Hub onto a
+  # just-provisioned node and then reach Aurora. Existing stacks never saw it —
+  # the job is only created once and isn't recreated on later applies — so it
+  # only bites brand-new BI-enabled deploys.
+  timeouts {
+    create = "15m"
+  }
 }
 
 resource "random_password" "grafana_admin" {
