@@ -466,6 +466,11 @@ locals {
   # OVERRIDES the chart config map) — all three must agree or the app reads an
   # empty/invalid host.
   memcached_host = "dozuki-memcached.${local.k8s_namespace_name}.svc.cluster.local"
+
+  # MSK bootstrap brokers, comma-escaped for helm's strvals parser (see the
+  # connectivity brokerList entries below). Empty when webhooks are off, in which
+  # case replace() is a no-op and this stays "".
+  msk_brokers_helm_escaped = replace(var.msk_bootstrap_brokers, ",", "\\,")
 }
 
 resource "helm_release" "app" {
@@ -668,20 +673,29 @@ resource "helm_release" "app" {
     { name = "dashboards.enabled", value = var.enable_dashboards ? "true" : "false" },
 
     # --- Connectivity (sunset planned) ---
-    { name = "connectivity.webhook-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    # brokerList goes through helm's strvals parser, which reads a comma as the
+    # separator between key=value pairs. MSK hands back a multi-broker string
+    # ("b-1...:9092,b-2...:9092,..."), so an unescaped value makes the whole apply
+    # fail with 'key "com:9092" has no value'. Escape the commas so strvals treats
+    # them as literals. Single-broker values are unaffected.
+    { name = "connectivity.webhook-service.messageBroker.brokerList", value = local.msk_brokers_helm_escaped },
     { name = "connectivity.webhook-service.mysql.host", value = local.db_master_host },
     { name = "connectivity.webhook-service.mysql.username", value = local.db_master_username },
     { name = "connectivity.webhook-service.mongo.connectionString", value = "mongodb://dozuki-mongodb/webhooks" },
-    { name = "connectivity.integrations-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    { name = "connectivity.integrations-service.messageBroker.brokerList", value = local.msk_brokers_helm_escaped },
     { name = "connectivity.integrations-service.mongo.connectionString", value = "mongodb://dozuki-mongodb/integrations" },
     { name = "connectivity.event-service.database.host", value = local.db_master_host },
     { name = "connectivity.event-service.database.username", value = local.db_master_username },
-    { name = "connectivity.event-service.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    { name = "connectivity.event-service.messageBroker.brokerList", value = local.msk_brokers_helm_escaped },
     { name = "connectivity.event-service.redis.host", value = "dozuki-redis-master" },
-    { name = "connectivity.event-service.redis.tls", value = "false" },
-    { name = "connectivity.connectors-worker.messageBroker.brokerList", value = var.msk_bootstrap_brokers },
+    # type = "string" (helm --set-string) is REQUIRED here. helm's strvals parser
+    # coerces a bare false into a real boolean, and both subcharts render this through
+    # b64enc, which rejects a non-string: "wrong type for value; expected string; got
+    # bool". The chart's own default is a quoted string; only this override broke it.
+    { name = "connectivity.event-service.redis.tls", value = "false", type = "string" },
+    { name = "connectivity.connectors-worker.messageBroker.brokerList", value = local.msk_brokers_helm_escaped },
     { name = "connectivity.connectors-worker.redis.host", value = "dozuki-redis-master" },
-    { name = "connectivity.connectors-worker.redis.tls", value = "false" },
+    { name = "connectivity.connectors-worker.redis.tls", value = "false", type = "string" },
 
     # --- Operator ---
     # Redirect the operator subchart to the env's registry. Its default repo is the
@@ -754,6 +768,21 @@ resource "helm_release" "app" {
     # seeded into the "grafana" Vault/Key Vault secret's "secret" property, since
     # ESO syncs that same value into grafana.json for the app to mint tokens with.
     { name = "dashboards.jwtSecret", value = local.dashboards_jwt_secret },
+
+    # Frontegg's private Docker Hub credentials for the webhooks tier. The connectivity
+    # subchart renders the "regcred" imagePullSecret from these two values, but the
+    # chart ships LITERAL PLACEHOLDERS for them ("frontegg_docker_username" /
+    # "frontegg_docker_password" in the parent values.yaml). They are non-empty, so the
+    # chart's `required` guard passes and the secret renders — with credentials Docker
+    # Hub rejects. Every enable_webhooks deploy therefore got ImagePullBackOff / 401 on
+    # docker.io/frontegg/*, and helm_release.app never went Ready.
+    #
+    # Real values live in Vault at secret/dozuki/global/frontegg (dockerUsername /
+    # dockerPassword). Empty vars leave the chart placeholders in place, which fails at
+    # image pull exactly as before rather than changing behaviour for callers that do
+    # not set them.
+    { name = "connectivity.frontegg.images.username", value = var.frontegg_docker_username },
+    { name = "connectivity.frontegg.images.password", value = var.frontegg_docker_password },
   ]
 
   lifecycle {
