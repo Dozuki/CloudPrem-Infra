@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.19.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.2...v7.19.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **logical:** grafana MySQL TLS needs a CA cert path (skip-verify still reads it) ([690f87c](https://github.com/Dozuki/CloudPrem-Infra/commit/690f87ca0fbc46509a5d0ac329bdc8d2eb1907e8))
+
 ## [7.19.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.1...v7.19.2) (2026-07-26)
 
 
