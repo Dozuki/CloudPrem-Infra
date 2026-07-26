@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.20.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.4...v7.20.0) (2026-07-26)
+
+
+### Features
+
+* **logical:** pull the frontegg connectivity images from our own registry ([#307](https://github.com/Dozuki/CloudPrem-Infra/issues/307)) ([0e9c27e](https://github.com/Dozuki/CloudPrem-Infra/commit/0e9c27ed557bf412db6c6b55b0c7889d78770abf))
+
 ## [7.19.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.3...v7.19.4) (2026-07-26)
 
 
