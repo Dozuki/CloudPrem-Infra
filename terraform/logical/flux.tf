@@ -188,6 +188,11 @@ locals {
         GF_DATABASE_HOST = var.enable_dashboards ? "${local.db_master_host}:3306" : ""
         GF_DATABASE_NAME = var.enable_dashboards ? "grafana_primary" : ""
         GF_DATABASE_USER = var.enable_dashboards ? local.db_master_username : ""
+        # RDS enforces require_secure_transport=ON, so grafana's backend MySQL connection must be
+        # TLS or it is refused (Error 3159, crashloops the dashboards-grafana pod and wedges the
+        # helm upgrade). skip-verify encrypts without pinning the RDS CA (not mounted into the
+        # grafana subchart pod); the app's own primary DB path keeps full CA verification.
+        GF_DATABASE_SSL_MODE = var.enable_dashboards ? "skip-verify" : ""
       }
       envValueFrom = {
         GF_DATABASE_PASSWORD = { secretKeyRef = {
