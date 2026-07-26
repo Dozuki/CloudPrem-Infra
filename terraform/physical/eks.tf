@@ -145,6 +145,11 @@ data "aws_iam_policy_document" "eks_worker" {
       # This was masked until now: the Job's image shipped a 2019 AWS CLI that could not
       # use EKS Pod Identity at all, so it never got far enough to be denied.
       "dms:DescribeReplicationTasks",
+      # DMS will not start a task whose endpoints have never had a successful
+      # test-connection, which is always true on a fresh stack. The Job therefore has to
+      # test both endpoints and poll for the result before starting.
+      "dms:DescribeConnections",
+      "dms:TestConnection",
       "dms:StartReplicationTask"
     ]
 

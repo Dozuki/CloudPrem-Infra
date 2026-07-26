@@ -56,6 +56,34 @@ resource "kubernetes_job_v1" "dms_start" {
                 creating|modifying|stopping|testing|deleting) echo "transient state '$STATUS' - a later reconcile will act" ;;
                 None|"") echo "replication task not found: $ARN" >&2; exit 1 ;;
                 ready|stopped|failed)
+                  # DMS refuses to start a task whose endpoints have never had a
+                  # successful test-connection:
+                  #   InvalidResourceStateFault: Test connection for replication instance
+                  #   <ri> and endpoint <ep> should be successful for starting the
+                  #   replication task
+                  # On a FRESH stack that is always the case - nothing has ever tested
+                  # them - so this is the normal path, not the rare post-DB-replace edge
+                  # case the old comment assumed. Test both endpoints and wait for
+                  # success before starting. test-connection is idempotent; an
+                  # already-successful endpoint returns successful again.
+                  RI=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-arn,Values=$ARN" --query 'ReplicationTasks[0].ReplicationInstanceArn' --output text)
+                  for EP in $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-arn,Values=$ARN" --query 'ReplicationTasks[0].[SourceEndpointArn,TargetEndpointArn]' --output text); do
+                    ST=$(aws dms describe-connections --region "$REGION" --filters "Name=endpoint-arn,Values=$EP" "Name=replication-instance-arn,Values=$RI" --query 'Connections[0].Status' --output text 2>/dev/null)
+                    if [ "$ST" != "successful" ]; then
+                      echo "testing endpoint $EP (current: $ST)"
+                      aws dms test-connection --replication-instance-arn "$RI" --endpoint-arn "$EP" --region "$REGION" >/dev/null 2>&1 || true
+                    fi
+                  done
+                  for i in $(seq 1 30); do
+                    PENDING=0
+                    for EP in $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-arn,Values=$ARN" --query 'ReplicationTasks[0].[SourceEndpointArn,TargetEndpointArn]' --output text); do
+                      ST=$(aws dms describe-connections --region "$REGION" --filters "Name=endpoint-arn,Values=$EP" "Name=replication-instance-arn,Values=$RI" --query 'Connections[0].Status' --output text 2>/dev/null)
+                      [ "$ST" = "successful" ] || { PENDING=1; echo "endpoint $EP connection: $ST ($i/30)"; }
+                    done
+                    [ "$PENDING" -eq 0 ] && break
+                    sleep 20
+                  done
+
                   # start-replication redoes a full load - intended for the cutover
                   # restore-from-new-primary path. For a steady-state task known to have
                   # completed its full load, resume-processing (CDC from last stop) is
