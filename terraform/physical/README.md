@@ -15,11 +15,11 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.56.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.56.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.56.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | ~> 6.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | ~> 6.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 
 ## Modules
 
@@ -72,7 +72,6 @@
 | [aws_dms_replication_instance.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_instance) | resource |
 | [aws_dms_replication_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_subnet_group) | resource |
 | [aws_dms_replication_task.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_task) | resource |
-| [aws_eks_addon.metrics_server](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_addon) | resource |
 | [aws_eks_pod_identity_association.app_default](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.app_migration_wait](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.cert_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |

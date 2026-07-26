@@ -443,19 +443,9 @@ resource "aws_eks_pod_identity_association" "cloudwatch_agent" {
   tags = local.tags
 }
 
-# Managed metrics-server addon. Provides the Kubernetes Metrics API (metrics.k8s.io) that
-# HorizontalPodAutoscalers read for their CPU/memory targets. EKS Auto Mode does NOT bundle
-# metrics-server, so without this every HPA reads <unknown> and never scales — the app stays
-# pinned at minReplicas under load. No IAM is needed: metrics-server reads kubelet metrics via
-# the Kubernetes API, not the AWS API. addon_version is left unset so EKS selects the default
-# compatible with the cluster's Kubernetes version. As with the addon above, a cluster that
-# already has metrics-server installed out-of-band must have it removed once before first apply.
-resource "aws_eks_addon" "metrics_server" {
-  cluster_name = module.eks_cluster.cluster_name
-  addon_name   = "metrics-server"
-
-  resolve_conflicts_on_create = "OVERWRITE"
-  resolve_conflicts_on_update = "OVERWRITE"
-
-  tags = local.tags
-}
+# metrics-server is now provided by the dozuki chart (metrics-server.enabled, default
+# on) so it's a single source of truth across onprem and cloud - see the chart's
+# values.yaml. The EKS managed addon was retired here; the chart install carries
+# metrics-server on every platform, and this layer drops the chart's onprem-oriented
+# --kubelet-insecure-tls arg for cloud (EKS kubelets present proper serving certs) via
+# the app release's metrics-server.args override in logical/flux.tf (app_base_values).
