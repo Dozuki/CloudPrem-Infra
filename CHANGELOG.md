@@ -2,6 +2,19 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.19.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.18.0...v7.19.0) (2026-07-26)
+
+
+### Features
+
+* **logical:** deliver the dozuki app via Flux (HelmRelease), not the TF helm provider ([#295](https://github.com/Dozuki/CloudPrem-Infra/issues/295)) ([d7099ff](https://github.com/Dozuki/CloudPrem-Infra/commit/d7099ff1361a18db9168a4725fa375e860bfb92f))
+* **metrics-server:** retire the EKS addon, let the chart own it ([#297](https://github.com/Dozuki/CloudPrem-Infra/issues/297)) ([e433c4a](https://github.com/Dozuki/CloudPrem-Infra/commit/e433c4a74c5147e6cc389e9b25f4e07c549acb0a))
+
+
+### Bug Fixes
+
+* **logical:** DMS endpoint test-connection, and correct the connectivity secret key ([#294](https://github.com/Dozuki/CloudPrem-Infra/issues/294)) ([55b9a70](https://github.com/Dozuki/CloudPrem-Infra/commit/55b9a704cf55e0054e53111632a0dafa855750e4))
+
 ## [7.18.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.17.2...v7.18.0) (2026-07-26)
 
 
