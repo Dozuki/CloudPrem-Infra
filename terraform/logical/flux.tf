@@ -9,6 +9,14 @@
 # referenced by the HelmRelease `valuesFrom`.
 
 locals {
+  # Tags for the frontegg connectivity images in our registry. Two tags because two
+  # kinds of artifact: -mirror is upstream byte-for-byte, -mysql-tls is our fork with
+  # the migration TLS fix. Both pin the upstream digest they were built from (recorded
+  # with the images), so what we shipped is always traceable. Immutable tags, never
+  # :latest — the upstream tag moved under us historically.
+  frontegg_mirror_tag = "20260726-mirror"
+  frontegg_fork_tag   = "20260726-mysql-tls"
+
   # deployments.webNextjs.env came from two sources on helm_release.app: the values-block
   # (var.webnextjs_env) and appended set entries (var.nextjs_extra_env). Merge them (nextjs_extra_env
   # wins on key collisions, matching the old later-set-overrides-earlier-value order).
@@ -151,28 +159,62 @@ locals {
       jwtSecret = local.dashboards_jwt_secret # (was set_sensitive)
     }
 
+    # The frontegg connectivity images come from OUR registry, not Docker Hub.
+    #
+    # They are mirrored into the dozukicloud ECR (and follow var.image_repository, so gov
+    # and airgapped envs resolve their own registry the same way dozuki-operator does).
+    # That removes the private Docker Hub pull entirely: no regcred, no frontegg docker
+    # credentials in values, and no dependency on a vendor registry for a product
+    # frontegg no longer maintains.
+    #
+    # event-service and webhook-service are FORKS, not straight mirrors: their migration
+    # path ignored TLS. Aurora MySQL 8.4 defaults require_secure_transport ON and refuses
+    # the plaintext connection outright, so both crashlooped on migrate and the webhook
+    # tier could never start. The forks add dialectOptions.ssl, verified against the RDS
+    # CA baked into the image. Hence the different tag: -mysql-tls vs -mirror.
     connectivity = {
       "webhook-service" = {
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        mysql         = { host = local.db_master_host, username = local.db_master_username }
+        image            = { repository = "${var.image_repository}/hybrid-webhook-service" }
+        appVersion       = local.frontegg_fork_tag
+        imagePullSecrets = []
+        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
+        # useSSL is a STRING: helm coerces a bare true to a bool and the chart b64encs it.
+        mysql         = { host = local.db_master_host, username = local.db_master_username, useSSL = "true" }
         mongo         = { connectionString = "mongodb://dozuki-mongodb/webhooks" }
         configuration = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_WEBHOOK_MYSQL_DB_PASSWORD = "master_password" } } }
       }
       "integrations-service" = {
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        mongo         = { connectionString = "mongodb://dozuki-mongodb/integrations" }
+        image            = { repository = "${var.image_repository}/hybrid-integrations-service" }
+        appVersion       = local.frontegg_mirror_tag
+        imagePullSecrets = []
+        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
+        mongo            = { connectionString = "mongodb://dozuki-mongodb/integrations" }
       }
       "event-service" = {
-        database      = { host = local.db_master_host, username = local.db_master_username }
-        configuration = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "master_password" } } }
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING (was --set-string)
+        image            = { repository = "${var.image_repository}/hybrid-event-service" }
+        appVersion       = local.frontegg_fork_tag
+        imagePullSecrets = []
+        database         = { host = local.db_master_host, username = local.db_master_username, useSSL = "true" }
+        configuration    = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "master_password" } } }
+        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
+        redis            = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING (was --set-string)
       }
       "connectors-worker" = {
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING
+        image            = { repository = "${var.image_repository}/hybrid-connectors-worker" }
+        appVersion       = local.frontegg_mirror_tag
+        imagePullSecrets = []
+        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
+        redis            = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING
       }
-      frontegg = { images = { username = var.frontegg_docker_username, password = var.frontegg_docker_password } } # (was set_sensitive)
+      "api-gateway" = {
+        image            = { repository = "${var.image_repository}/hybrid-api-gateway" }
+        appVersion       = local.frontegg_mirror_tag
+        imagePullSecrets = []
+      }
+      # Stops the subchart rendering its regcred Secret. Nothing pulls from Docker Hub
+      # now, and the chart's default credentials were literal placeholders that Docker
+      # Hub rejected anyway.
+      frontegg = { images = { enabled = false } }
     }
 
     "dozuki-operator" = {

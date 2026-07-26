@@ -442,20 +442,6 @@ variable "frontegg_api_token" {
   default     = ""
 }
 
-variable "frontegg_docker_username" {
-  description = "Docker Hub username for frontegg's private images (secret/dozuki/global/frontegg -> dockerUsername). Required when enable_webhooks is true: the connectivity subcharts pull docker.io/frontegg/* via an imagePullSecret named regcred. Empty disables creation of that secret."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "frontegg_docker_password" {
-  description = "Docker Hub password/token paired with frontegg_docker_username (secret/dozuki/global/frontegg -> dockerPassword)."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "surveyjs_license_key" {
   description = "SurveyJS license key (Azure only; AWS reads Vault)."
   type        = string
