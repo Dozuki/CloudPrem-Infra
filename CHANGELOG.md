@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.21.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.0...v7.21.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **logical:** carve metrics-server out of namespace-wide STRICT mTLS ([#312](https://github.com/Dozuki/CloudPrem-Infra/issues/312)) ([dfe4ba2](https://github.com/Dozuki/CloudPrem-Infra/commit/dfe4ba2843697e54c11d8ff85b531026ae7ecbc7))
+
 ## [7.21.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.20.0...v7.21.0) (2026-07-26)
 
 
