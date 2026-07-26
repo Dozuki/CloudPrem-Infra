@@ -32564,7 +32564,6 @@ spec:
                                       procMount denotes the type of proc mount to use for the containers.
                                       The default value is Default which uses the container runtime defaults for
                                       readonly paths and masked paths.
-                                      This requires the ProcMountType feature flag to be enabled.
                                       Note that this field cannot be set when spec.os.name is windows.
                                     type: string
                                   readOnlyRootFilesystem:
@@ -35165,7 +35164,7 @@ spec:
                                         A failure to resolve or pull the image during pod startup will block containers from starting and may add significant latency. Failures will be retried using normal volume backoff and will be reported on the pod reason and message.
                                         The types of objects that may be mounted by this volume are defined by the container runtime implementation on a host machine and at minimum must include all valid types supported by the container image field.
                                         The OCI object gets mounted in a single directory (spec.containers[*].volumeMounts.mountPath) by merging the manifest layers in the same way as for container images.
-                                        The volume will be mounted read-only (ro) and non-executable files (noexec).
+                                        The volume will be mounted read-only (ro).
                                         Sub path mounts for containers are not supported (spec.containers[*].volumeMounts.subpath) before 1.33.
                                         The field spec.securityContext.fsGroupChangePolicy has no effect on this volume type.
                                       properties:
@@ -35339,8 +35338,7 @@ spec:
                                       description: |-
                                         portworxVolume represents a portworx volume attached and mounted on kubelets host machine.
                                         Deprecated: PortworxVolume is deprecated. All operations for the in-tree portworxVolume type
-                                        are redirected to the pxd.portworx.com CSI driver when the CSIMigrationPortworx feature-gate
-                                        is on.
+                                        are redirected to the pxd.portworx.com CSI driver.
                                       properties:
                                         fsType:
                                           description: |-
@@ -36573,7 +36571,6 @@ spec:
                                       procMount denotes the type of proc mount to use for the containers.
                                       The default value is Default which uses the container runtime defaults for
                                       readonly paths and masked paths.
-                                      This requires the ProcMountType feature flag to be enabled.
                                       Note that this field cannot be set when spec.os.name is windows.
                                     type: string
                                   readOnlyRootFilesystem:
@@ -37886,7 +37883,6 @@ spec:
                                         procMount denotes the type of proc mount to use for the containers.
                                         The default value is Default which uses the container runtime defaults for
                                         readonly paths and masked paths.
-                                        This requires the ProcMountType feature flag to be enabled.
                                         Note that this field cannot be set when spec.os.name is windows.
                                       type: string
                                     readOnlyRootFilesystem:
@@ -40725,7 +40721,7 @@ spec:
                                         A failure to resolve or pull the image during pod startup will block containers from starting and may add significant latency. Failures will be retried using normal volume backoff and will be reported on the pod reason and message.
                                         The types of objects that may be mounted by this volume are defined by the container runtime implementation on a host machine and at minimum must include all valid types supported by the container image field.
                                         The OCI object gets mounted in a single directory (spec.containers[*].volumeMounts.mountPath) by merging the manifest layers in the same way as for container images.
-                                        The volume will be mounted read-only (ro) and non-executable files (noexec).
+                                        The volume will be mounted read-only (ro).
                                         Sub path mounts for containers are not supported (spec.containers[*].volumeMounts.subpath) before 1.33.
                                         The field spec.securityContext.fsGroupChangePolicy has no effect on this volume type.
                                       properties:
@@ -40899,8 +40895,7 @@ spec:
                                       description: |-
                                         portworxVolume represents a portworx volume attached and mounted on kubelets host machine.
                                         Deprecated: PortworxVolume is deprecated. All operations for the in-tree portworxVolume type
-                                        are redirected to the pxd.portworx.com CSI driver when the CSIMigrationPortworx feature-gate
-                                        is on.
+                                        are redirected to the pxd.portworx.com CSI driver.
                                       properties:
                                         fsType:
                                           description: |-
@@ -50136,33 +50131,45 @@ spec:
                     items:
                       description: |-
                         ExtractFrom is where to fetch the key from the coming request.
-                        Only one of header, param or cookie is supposed to be specified.
+                        Only one of headers, params or cookies must be specified.
                       properties:
                         cookies:
                           description: |-
                             Cookies is the names of the cookie to fetch the key from.
                             If multiple cookies are specified, envoy will look for the api key in the order of the list.
-                            This field is optional, but only one of headers, params or cookies is supposed to be specified.
+                            This field is optional, but only one of headers, params or cookies must be specified.
                           items:
+                            minLength: 1
                             type: string
+                          minItems: 1
                           type: array
                         headers:
                           description: |-
                             Headers is the names of the header to fetch the key from.
                             If multiple headers are specified, envoy will look for the api key in the order of the list.
-                            This field is optional, but only one of headers, params or cookies is supposed to be specified.
+                            This field is optional, but only one of headers, params or cookies must be specified.
                           items:
+                            minLength: 1
                             type: string
+                          minItems: 1
                           type: array
                         params:
                           description: |-
                             Params is the names of the query parameter to fetch the key from.
                             If multiple params are specified, envoy will look for the api key in the order of the list.
-                            This field is optional, but only one of headers, params or cookies is supposed to be specified.
+                            This field is optional, but only one of headers, params or cookies must be specified.
                           items:
+                            minLength: 1
                             type: string
+                          minItems: 1
                           type: array
                       type: object
+                      x-kubernetes-validations:
+                      - message: exactly one of headers, params, or cookies must be
+                          specified
+                        rule: '(has(self.headers) ? 1 : 0) + (has(self.params) ? 1
+                          : 0) + (has(self.cookies) ? 1 : 0) == 1'
+                    minItems: 1
                     type: array
                   forwardClientIDHeader:
                     description: |-
