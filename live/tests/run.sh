@@ -227,6 +227,25 @@ if [ -z "${TF_VAR_tls_cert:-}" ]; then
   echo ">> TLS: generated self-signed cert -> manual TLS (no cert-manager/ACME)."
 fi
 
+# Frontegg Docker Hub credentials for the webhooks tier. The connectivity subcharts
+# pull PRIVATE docker.io/frontegg/* images via an imagePullSecret named "regcred";
+# CPI creates it from these vars. Without them an enable_webhooks run dies in
+# ImagePullBackOff ~15 min in, after the whole physical layer has been built. Read
+# from the same central Vault the run already authenticated to, so nothing is
+# hardcoded here. Only needed for configs with webhooks on; harmless otherwise.
+if [ -z "${TF_VAR_frontegg_docker_username:-}" ] && [ -n "${VAULT_TOKEN:-}" ]; then
+  _fe="$(vault kv get -format=json secret/dozuki/global/frontegg 2>/dev/null)" || _fe=""
+  if [ -n "$_fe" ]; then
+    export TF_VAR_frontegg_docker_username="$(printf '%s' "$_fe" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["data"].get("dockerUsername",""))' 2>/dev/null)"
+    export TF_VAR_frontegg_docker_password="$(printf '%s' "$_fe" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["data"].get("dockerPassword",""))' 2>/dev/null)"
+    [ -n "${TF_VAR_frontegg_docker_username:-}" ] \
+      && echo ">> Frontegg: docker credentials loaded from Vault (regcred will be created)." \
+      || echo ">> Frontegg: WARNING - secret/dozuki/global/frontegg has no dockerUsername; webhooks images will fail to pull." >&2
+  else
+    echo ">> Frontegg: WARNING - could not read secret/dozuki/global/frontegg; webhooks images will fail to pull." >&2
+  fi
+fi
+
 # From here on, the run can create cloud resources — arm the backstop cleanup (see trap).
 STARTED_RUN=1
 

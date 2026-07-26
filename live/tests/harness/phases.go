@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -48,6 +49,16 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 	envDir := filepath.Join(wt.Dir, envSub)
 	if werr := WriteEnvHCL(envDir, withDeleteAfter(p.Matrix.MergedInputs(cfg, ref), deleteAfter)); werr != nil {
 		return nil, TGOptions{}, "", werr
+	}
+	// Record which worktree the state now corresponds to, so cleanup-orphans.sh can
+	// destroy against the deployed code. Without it the script falls back to the LIVE
+	// tree, where find_in_parent_folders blows up before terragrunt runs at all — the
+	// destroy silently never happens and a failed run leaks its whole stack (EKS,
+	// Aurora, MSK, DMS). writeAppliedMarker existed but had no caller; its unit test
+	// calls it directly, so nothing caught that. Best-effort: a marker failure must not
+	// fail the run, and a stale marker is still better than the live-tree fallback.
+	if merr := writeAppliedMarker(p.RepoDir, p.statePrefix(cfg), envDir); merr != nil {
+		step("WARNING: could not write applied-worktree marker (%v) — cleanup-orphans.sh will fall back to the live tree", merr)
 	}
 	identifier := ""
 	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
@@ -226,6 +237,25 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	if oerr != nil {
 		return fmt.Errorf("readOutputs: %w", oerr)
 	}
+
+	// Feature-tier assertions, gated on the config's own flags. These are named-exact
+	// rather than glob-matched: if enable_webhooks/enable_bi is set but the release
+	// never rendered those workloads, that is a failure, not a silent pass. Deliberately
+	// after the generic cluster-health gate so the app is already up and the only thing
+	// still settling is the feature tier itself.
+	if cfg.HarnessFlag("enable_webhooks") {
+		step("verifying webhooks tier in-cluster (%d workloads + Kafka client stability)", len(validation.WebhookWorkloads()))
+		if werr := validation.AssertWebhooksHealthy(kc, rm.Namespace, 15*time.Minute); werr != nil {
+			return fmt.Errorf("webhooks validation: %w", werr)
+		}
+	}
+	if cfg.HarnessFlag("enable_bi") {
+		step("verifying BI tier in-cluster (grafana + grafana-db-create)")
+		if berr := validation.AssertBIHealthy(kc, rm.Namespace, 15*time.Minute); berr != nil {
+			return fmt.Errorf("bi validation: %w", berr)
+		}
+	}
+
 	if rm.Scenario == "upgrade" {
 		wantChart, _ := p.Matrix.VersionVar(rm.ToRef, "chart_version").(string)
 		step("verifying upgrade proof (advanced from rev %d; chart %q)", rm.BaselineRev, wantChart)
@@ -247,6 +277,9 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	}
 	rm, ok, err := p.Store.Load(ctx, p.statePrefix(cfg))
 	if err != nil {
+		// Log before returning. This path used to be silent, so a manifest read failure
+		// looked identical to a teardown that never ran at all.
+		step("teardown: could not load manifest for %s: %v — NOT destroying; run ./cleanup-orphans.sh %s", p.statePrefix(cfg), err, p.RunID)
 		return err
 	}
 	if !ok {
