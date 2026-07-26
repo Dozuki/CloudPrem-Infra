@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.21.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.1...v7.21.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* **logical:** pin the connectivity images to the versions the chart actually uses ([#314](https://github.com/Dozuki/CloudPrem-Infra/issues/314)) ([5e74f09](https://github.com/Dozuki/CloudPrem-Infra/commit/5e74f09df34a90563b11c9eb2da7236b219094a5))
+
 ## [7.21.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.0...v7.21.1) (2026-07-26)
 
 
