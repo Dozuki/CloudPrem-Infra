@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.19.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.3...v7.19.4) (2026-07-26)
+
+
+### Bug Fixes
+
+* **physical:** abort incomplete multipart uploads on DR buckets ([3e5326a](https://github.com/Dozuki/CloudPrem-Infra/commit/3e5326aed5f37136c93decb4ca5258aec7a7cd84))
+* **physical:** abort incomplete multipart uploads on DR buckets ([e70f7ee](https://github.com/Dozuki/CloudPrem-Infra/commit/e70f7ee838594dbece30544b2684a4664a8b4b4a))
+
 ## [7.19.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.2...v7.19.3) (2026-07-26)
 
 
