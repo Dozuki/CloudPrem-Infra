@@ -688,10 +688,14 @@ resource "helm_release" "app" {
     { name = "connectivity.event-service.database.username", value = local.db_master_username },
     { name = "connectivity.event-service.messageBroker.brokerList", value = local.msk_brokers_helm_escaped },
     { name = "connectivity.event-service.redis.host", value = "dozuki-redis-master" },
-    { name = "connectivity.event-service.redis.tls", value = "false" },
+    # type = "string" (helm --set-string) is REQUIRED here. helm's strvals parser
+    # coerces a bare false into a real boolean, and both subcharts render this through
+    # b64enc, which rejects a non-string: "wrong type for value; expected string; got
+    # bool". The chart's own default is a quoted string; only this override broke it.
+    { name = "connectivity.event-service.redis.tls", value = "false", type = "string" },
     { name = "connectivity.connectors-worker.messageBroker.brokerList", value = local.msk_brokers_helm_escaped },
     { name = "connectivity.connectors-worker.redis.host", value = "dozuki-redis-master" },
-    { name = "connectivity.connectors-worker.redis.tls", value = "false" },
+    { name = "connectivity.connectors-worker.redis.tls", value = "false", type = "string" },
 
     # --- Operator ---
     # Redirect the operator subchart to the env's registry. Its default repo is the
