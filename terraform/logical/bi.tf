@@ -158,6 +158,15 @@ resource "kubernetes_job_v1" "grafana_db_create" {
     backoff_limit = 50
   }
   wait_for_completion = true
+
+  # Without this the provider's default create timeout applies, which a fresh
+  # deploy blows through: the pod has to pull mysql:9.3 from Docker Hub onto a
+  # just-provisioned node and then reach Aurora. Existing stacks never saw it —
+  # the job is only created once and isn't recreated on later applies — so it
+  # only bites brand-new BI-enabled deploys.
+  timeouts {
+    create = "15m"
+  }
 }
 
 resource "random_password" "grafana_admin" {
