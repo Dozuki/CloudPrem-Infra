@@ -156,14 +156,23 @@ while IFS= read -r pfx; do
       DESTROY_ATTEMPTS="${DESTROY_ATTEMPTS:-4}"
       DESTROY_BACKOFF="${DESTROY_BACKOFF:-120}"
       destroyed_ok=1
+      _dlog="$(mktemp -t cleanup-destroy.XXXXXX)"
       for attempt in $(seq 1 "$DESTROY_ATTEMPTS"); do
         ( cd "$tgt/physical"
           rm -rf .terragrunt-cache
           TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
           TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
-            terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false )
-        destroyed_ok=$?
+            terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) 2>&1 | tee "$_dlog"
+        destroyed_ok=${PIPESTATUS[0]}
         [ "$destroyed_ok" -eq 0 ] && break
+        # Only retry things that can actually clear on their own. A config-resolution
+        # failure (e.g. falling back to the LIVE tree, where find_in_parent_folders has
+        # no terragrunt.hcl to find) fails identically every time, so retrying burns
+        # DESTROY_ATTEMPTS * DESTROY_BACKOFF for nothing — 8 minutes per pass, observed.
+        if grep -qE "find_in_parent_folders|ParentFileNotFound|Could not find a terragrunt" "$_dlog" 2>/dev/null; then
+          echo "  physical destroy failed to even load a config (no usable tree for $pfx) — not retrying" >&2
+          break
+        fi
         if [ "$attempt" -lt "$DESTROY_ATTEMPTS" ]; then
           echo "  physical destroy attempt $attempt/$DESTROY_ATTEMPTS failed — waiting ${DESTROY_BACKOFF}s for in-flight deletions to drain, then retrying" >&2
           sleep "$DESTROY_BACKOFF"
