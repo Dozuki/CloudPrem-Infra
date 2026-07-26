@@ -14,7 +14,10 @@
 
 locals {
   # Operator-supplied cert/key via tls_cert/tls_key (env.hcl or stack TF_VARs).
-  tls_supplied = var.tls_cert != "" && var.tls_key != ""
+  # nonsensitive: tls_key is a sensitive variable, and a comparison against a
+  # sensitive value yields a sensitive bool, which would poison the whole
+  # tls_manual/count chain. Whether a key was supplied is not a secret.
+  tls_supplied = var.tls_cert != "" && nonsensitive(var.tls_key != "")
   # Generated self-signed cert (dev). Azure-only for now; follow-up to generalize.
   tls_selfsigned = var.cloud == "azure" && var.azure_tls_mode == "self-signed"
   # On AWS (Vault always enabled), supplied certs are seeded into Vault by TF and
