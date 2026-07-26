@@ -190,9 +190,12 @@ locals {
         GF_DATABASE_USER = var.enable_dashboards ? local.db_master_username : ""
         # RDS enforces require_secure_transport=ON, so grafana's backend MySQL connection must be
         # TLS or it is refused (Error 3159, crashloops the dashboards-grafana pod and wedges the
-        # helm upgrade). skip-verify encrypts without pinning the RDS CA (not mounted into the
-        # grafana subchart pod); the app's own primary DB path keeps full CA verification.
-        GF_DATABASE_SSL_MODE = var.enable_dashboards ? "skip-verify" : ""
+        # helm upgrade). skip-verify encrypts without pinning the RDS CA. grafana's makeCert reads
+        # ca_cert_path unconditionally even for skip-verify, so it needs a readable PEM: point it at
+        # the CA bundle already in the grafana image (skip-verify ignores its contents, so it just
+        # has to exist). The app's own primary DB path keeps full CA verification separately.
+        GF_DATABASE_SSL_MODE     = var.enable_dashboards ? "skip-verify" : ""
+        GF_DATABASE_CA_CERT_PATH = var.enable_dashboards ? "/etc/ssl/certs/ca-certificates.crt" : ""
       }
       envValueFrom = {
         GF_DATABASE_PASSWORD = { secretKeyRef = {
