@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.21.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.20.0...v7.21.0) (2026-07-26)
+
+
+### Features
+
+* **logical:** values diff view ConfigMap for per-key plan diffs ([#309](https://github.com/Dozuki/CloudPrem-Infra/issues/309)) ([9bdd7c1](https://github.com/Dozuki/CloudPrem-Infra/commit/9bdd7c159828e1cdd1557b0213c8a91a9d9d473b))
+
 ## [7.20.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.19.4...v7.20.0) (2026-07-26)
 
 
