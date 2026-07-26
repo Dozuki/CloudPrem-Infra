@@ -228,6 +228,21 @@ locals {
       # external.metrics.k8s.io APIService callback; HPAs break without it.
       ports = [6443]
     }
+    metrics-server = {
+      namespace = "dozuki"
+      selector = {
+        "app.kubernetes.io/name" = "metrics-server"
+      }
+      # metrics.k8s.io APIService callback on the chart's --secure-port. Same class
+      # as prometheus-adapter above, and it arrived with #297/#151: retiring the EKS
+      # addon moved metrics-server out of kube-system (unmeshed) and into the app
+      # namespace, where namespace-wide STRICT rejects the API server's plain-HTTPS
+      # probe. Symptom is `kubectl top` returning "Metrics API not available" and the
+      # APIService going Available=False/FailedDiscoveryCheck, which leaves every
+      # resource-metric HPA reading <unknown> and unable to scale. Custom-metric HPAs
+      # keep working (they go via prometheus-adapter), so this hides well.
+      ports = [10250]
+    }
   }
   mesh_strict_namespaces = ["dozuki", "envoy-gateway-system", "redis-system"]
 }
