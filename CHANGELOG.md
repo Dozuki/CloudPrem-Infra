@@ -2,6 +2,20 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.18.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.17.2...v7.18.0) (2026-07-26)
+
+
+### Features
+
+* **logical:** envoy gateway 1.8.3, and keep the CRDs out of the run log ([#289](https://github.com/Dozuki/CloudPrem-Infra/issues/289)) ([7bcd3d4](https://github.com/Dozuki/CloudPrem-Infra/commit/7bcd3d4745066e7f75085ed2f1e4081ec85ca914))
+
+
+### Bug Fixes
+
+* **logical:** exclude the frontegg services from otel auto-instrumentation ([#293](https://github.com/Dozuki/CloudPrem-Infra/issues/293)) ([d142284](https://github.com/Dozuki/CloudPrem-Infra/commit/d142284917f975942cb595e341c985efbc2ab8b1))
+* **logical:** source connectivity DB passwords from the ESO secret ([#290](https://github.com/Dozuki/CloudPrem-Infra/issues/290)) ([4f972c1](https://github.com/Dozuki/CloudPrem-Infra/commit/4f972c10cbfbd22303c25e02da28460427713f88))
+* **physical:** grant dms:DescribeReplicationTasks to the app pod identity ([#292](https://github.com/Dozuki/CloudPrem-Infra/issues/292)) ([e2499c3](https://github.com/Dozuki/CloudPrem-Infra/commit/e2499c3ac79f3924fe3ee82325ac08d8bb4cc947))
+
 ## [7.17.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.17.1...v7.17.2) (2026-07-26)
 
 
