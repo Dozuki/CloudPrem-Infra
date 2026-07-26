@@ -99,6 +99,12 @@ resource "kubernetes_job_v1" "dms_start" {
     }
     completions = 1
   }
+  # INTENTIONAL, do not flip to true. The job's first step waits for the app deployment to
+  # become available, which on a fresh install is gated behind the db-migrations Job and can
+  # take hours (dbMigrations.activeDeadlineSeconds is 14400). Blocking the apply on that would
+  # wedge every logical run for the length of a migration. The cost is that a failed
+  # dms-start leaves the run green, so DMS not starting is invisible here - check the Job
+  # itself rather than the run status when replication is suspect.
   wait_for_completion = false
 
   timeouts {
