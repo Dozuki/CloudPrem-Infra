@@ -147,23 +147,23 @@ locals {
 
     connectivity = {
       "webhook-service" = {
-        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        messageBroker = { brokerList = var.msk_bootstrap_brokers }
         mysql         = { host = local.db_master_host, username = local.db_master_username }
         mongo         = { connectionString = "mongodb://dozuki-mongodb/webhooks" }
         configuration = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_WEBHOOK_MYSQL_DB_PASSWORD = "master_password" } } }
       }
       "integrations-service" = {
-        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        messageBroker = { brokerList = var.msk_bootstrap_brokers }
         mongo         = { connectionString = "mongodb://dozuki-mongodb/integrations" }
       }
       "event-service" = {
         database      = { host = local.db_master_host, username = local.db_master_username }
         configuration = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "master_password" } } }
-        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        messageBroker = { brokerList = var.msk_bootstrap_brokers }
         redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING (was --set-string)
       }
       "connectors-worker" = {
-        messageBroker = { brokerList = local.msk_brokers_helm_escaped }
+        messageBroker = { brokerList = var.msk_bootstrap_brokers }
         redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING
       }
       frontegg = { images = { username = var.frontegg_docker_username, password = var.frontegg_docker_password } } # (was set_sensitive)
