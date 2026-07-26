@@ -2,6 +2,15 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.17.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.17.1...v7.17.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* **logical:** make enable_bi actually work on a fresh deploy ([#286](https://github.com/Dozuki/CloudPrem-Infra/issues/286)) ([d3a0d72](https://github.com/Dozuki/CloudPrem-Infra/commit/d3a0d729acd6909127a181a3ecec4486dcc58fcd))
+* **logical:** make enable_webhooks actually work ([#285](https://github.com/Dozuki/CloudPrem-Infra/issues/285)) ([d3906b4](https://github.com/Dozuki/CloudPrem-Infra/commit/d3906b44f5a3bfae1ff6b6d36d9955e3ce727d36))
+* **logical:** raise the app helm timeout so a full deploy can converge ([#287](https://github.com/Dozuki/CloudPrem-Infra/issues/287)) ([97a4210](https://github.com/Dozuki/CloudPrem-Infra/commit/97a4210d42c0a938aacc7f93106d35d8de5f73e9))
+
 ## [7.17.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.17.0...v7.17.1) (2026-07-26)
 
 
