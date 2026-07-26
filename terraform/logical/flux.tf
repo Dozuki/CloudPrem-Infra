@@ -20,20 +20,31 @@ locals {
     [for host in var.additional_gateway_hosts : { hostname = host.hostname, tlsSecretName = host.tls_secret_name }],
   )
 
-  # Azure-only overrides (were the helm_release.app `values` yamlencode block). Empty on non-azure.
-  app_azure_values = var.cloud == "azure" ? merge({
-    global = {
-      imagePullSecrets = [{ name = "ghcr-pull" }]
-      seaweedfs        = { enableReplication = true, replicationPlacement = "001" }
-    }
-    gateway = {
-      service = {
-        type        = "LoadBalancer"
-        annotations = var.gateway_dns_label != "" ? { "service.beta.kubernetes.io/azure-dns-label-name" = var.gateway_dns_label } : {}
-      }
-      dnsTarget = local.lb_fqdn
-    }
-  }, local.seaweedfs_values, var.azure_acme_server != "" ? { cert_manager = { acmeServer = var.azure_acme_server } } : {}) : {}
+  # Azure-only overrides (were the helm_release.app `values` yamlencode block). Built as a native map
+  # that is EMPTY on non-azure via `for ... if` - a `cond ? {object} : {}` ternary fails because
+  # Terraform won't unify a populated object with an empty one (the original only worked because it
+  # was inside yamlencode() -> a string). try() guards keep the azure-only refs (lb_fqdn,
+  # seaweedfs_values) from erroring when this is evaluated on aws/gov. Inner optional keys
+  # (annotations, cert_manager) use the same `for ... if` idiom for the same reason.
+  app_azure_values = {
+    for k, v in merge(
+      {
+        global = {
+          imagePullSecrets = [{ name = "ghcr-pull" }]
+          seaweedfs        = { enableReplication = true, replicationPlacement = "001" }
+        }
+        gateway = {
+          service = merge(
+            { type = "LoadBalancer" },
+            { for ak, av in { annotations = { "service.beta.kubernetes.io/azure-dns-label-name" = var.gateway_dns_label } } : ak => av if var.gateway_dns_label != "" },
+          )
+          dnsTarget = try(local.lb_fqdn, "")
+        }
+      },
+      try(local.seaweedfs_values, {}),
+      { for ck, cv in { cert_manager = { acmeServer = var.azure_acme_server } } : ck => cv if var.azure_acme_server != "" },
+    ) : k => v if var.cloud == "azure"
+  }
 
   # The base values, mirroring the old set + set_sensitive lists with correct types.
   app_base_values = {
@@ -190,10 +201,12 @@ locals {
   # merged one level deeper; every other azure key (global, cert_manager, seaweedfs...) has no base
   # collision and shallow-merges cleanly. helm_release.app got the same effect from helm's deep
   # merge of its two values files + set list.
+  # gateway is deep-merged unconditionally (no cond?{}:{} ternary): on non-azure app_azure_values has
+  # no gateway key, so try(...,{}) yields {} and gateway == base.gateway; on azure it adds service/dnsTarget.
   app_values = merge(
     local.app_base_values,
     { for k, v in local.app_azure_values : k => v if k != "gateway" },
-    var.cloud == "azure" ? { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) } : {},
+    { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
   )
 }
 
