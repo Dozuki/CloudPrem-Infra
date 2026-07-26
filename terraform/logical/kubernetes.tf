@@ -694,6 +694,23 @@ resource "helm_release" "app" {
     { name = "connectivity.integrations-service.mongo.connectionString", value = "mongodb://dozuki-mongodb/integrations" },
     { name = "connectivity.event-service.database.host", value = local.db_master_host },
     { name = "connectivity.event-service.database.username", value = local.db_master_username },
+
+    # DB passwords for the connectivity services, sourced from the ESO-managed secret
+    # rather than passed as values.
+    #
+    # These were never set at all, so the subcharts fell back to the chart default of ""
+    # and their migrations died with "Access denied for user 'dozuki'" — the webhook tier
+    # could not start. The obvious fix is to pass local.db_master_password like db.password
+    # above, but that writes the credential into Terraform state AND the Helm release
+    # secret, and it cannot rotate without an apply.
+    #
+    # Instead point the env var at dozuki-infra-credentials, which the chart's own
+    # ExternalSecret already syncs from Vault (<customer>/<env>/db -> db_password). The
+    # subcharts expose configuration.secrets as {secret-name: {ENV_VAR: key}}, rendering a
+    # secretKeyRef; explicit env beats envFrom, so this overrides the subchart's own empty
+    # value. Only the KEY NAME travels through terraform — never the password.
+    { name = "connectivity.event-service.configuration.secrets.dozuki-infra-credentials.FRONTEGG_EVENTS_MYSQL_DB_PASSWORD", value = "db_password" },
+    { name = "connectivity.webhook-service.configuration.secrets.dozuki-infra-credentials.FRONTEGG_WEBHOOK_MYSQL_DB_PASSWORD", value = "db_password" },
     { name = "connectivity.event-service.messageBroker.brokerList", value = local.msk_brokers_helm_escaped },
     { name = "connectivity.event-service.redis.host", value = "dozuki-redis-master" },
     # type = "string" (helm --set-string) is REQUIRED here. helm's strvals parser
