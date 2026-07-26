@@ -336,6 +336,18 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       valuesFrom = [{ kind = "Secret", name = kubernetes_secret_v1.flux_values.metadata[0].name, valuesKey = "values.yaml" }]
     }
   })
+
+  # These guarded the old helm_release.app; they move here with app delivery.
+  lifecycle {
+    precondition {
+      condition     = var.cloud == "aws" || (!var.enable_webhooks && !var.enable_bi)
+      error_message = "enable_webhooks and enable_bi are not supported on Azure."
+    }
+    precondition {
+      condition     = var.istio_mesh_state == "disabled" || local.mesh_supported
+      error_message = "istio_mesh_state requires commercial AWS EKS (non-GovCloud). Gov needs the phase-2 image mirror; Azure is not supported yet."
+    }
+  }
 }
 
 # Hand the running release off to Flux without uninstalling it: forget helm_release.app from state

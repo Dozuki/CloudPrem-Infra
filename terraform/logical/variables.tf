@@ -28,6 +28,10 @@ variable "environment" {
   }
 }
 
+# Absorbs the account.hcl `aws_profile` that root.hcl merges into every stack's inputs (and uses for
+# the provider block); the module itself does not read it. Dropping the declaration would emit an
+# undeclared-variable warning per account.
+# tflint-ignore: terraform_unused_declarations
 variable "aws_profile" {
   description = "If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning."
   type        = string
@@ -257,6 +261,9 @@ variable "ingress_hostname" {
 }
 
 
+# Deliberately retained (with a default) for the two-step removal; live/logical.hcl still passes it,
+# so the declaration must stay until that input is dropped. See the description.
+# tflint-ignore: terraform_unused_declarations
 variable "memcached_cluster_address" {
   description = <<-EOT
     DEPRECATED, unused, retained for one release only.
@@ -532,11 +539,6 @@ variable "customer_tls_externally_managed" {
   default     = false
 }
 
-variable "operator_image_tag" {
-  description = "dozuki-operator image tag to pull on azure (matches the bundled operator subchart appVersion)."
-  type        = string
-  default     = "3.0.3"
-}
 
 variable "gateway_dns_label" {
   description = "Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label."
@@ -573,11 +575,6 @@ variable "external_dns_sa_name" {
   default     = "external-dns"
 }
 
-variable "gateway_name" {
-  description = "Envoy Gateway resource name (matches the chart gateway.name); used to discover its in-cluster data-plane Service for the object-host CoreDNS split-horizon."
-  type        = string
-  default     = "dozuki-gateway"
-}
 
 
 variable "delete_after" {
