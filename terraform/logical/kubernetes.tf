@@ -702,6 +702,20 @@ resource "helm_release" "app" {
     # empty when disabled — a nonempty URL would point the operator at a Grafana
     # that was never installed.
     { name = "dozuki-operator.grafana.url", value = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" },
+    # Point the dashboards Grafana subchart at the shared grafana_primary MySQL DB (created by
+    # bi.tf's grafana-db-create job) instead of its default on-PVC SQLite. SQLite serializes the
+    # operator's per-subsite org/datasource writes into "database is locked" -> 500s that never
+    # converge; MySQL handles the concurrency. Only the dashboards Grafana (top-level grafana:
+    # subchart); the ops Grafana under kube-prometheus-stack is untouched. Ignored unless
+    # dashboards.enabled renders the subchart. GF_DATABASE_HOST needs an explicit port.
+    { name = "grafana.env.GF_DATABASE_TYPE", value = var.enable_dashboards ? "mysql" : "" },
+    { name = "grafana.env.GF_DATABASE_HOST", value = var.enable_dashboards ? "${local.db_master_host}:3306" : "" },
+    { name = "grafana.env.GF_DATABASE_NAME", value = var.enable_dashboards ? "grafana_primary" : "" },
+    { name = "grafana.env.GF_DATABASE_USER", value = var.enable_dashboards ? local.db_master_username : "" },
+    # Password via envValueFrom from grafana-db-credentials (bi.tf) so it stays out of the pod
+    # spec / helm values rather than a plaintext env.
+    { name = "grafana.envValueFrom.GF_DATABASE_PASSWORD.secretKeyRef.name", value = var.enable_dashboards ? "grafana-db-credentials" : "" },
+    { name = "grafana.envValueFrom.GF_DATABASE_PASSWORD.secretKeyRef.key", value = var.enable_dashboards ? "password" : "" },
     # Subsite routing mode. When true the operator reconciles a Gateway API HTTPRoute per
     # subsite off the chart's dozuki-gateway (instead of the legacy nginx Ingress), so subsites
     # route automatically on Envoy Gateway installs - no more hand-created wildcard HTTPRoutes.

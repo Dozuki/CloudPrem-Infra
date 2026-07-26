@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.17.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.17.0...v7.17.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **logical:** back the dashboards Grafana with MySQL, not SQLite ([61d15db](https://github.com/Dozuki/CloudPrem-Infra/commit/61d15db8ed2bcf81293dc6209f9d00c92c7865e7))
+
 ## [7.17.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.16.0...v7.17.0) (2026-07-25)
 
 
