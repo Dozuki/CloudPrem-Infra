@@ -68,11 +68,18 @@ unclean_validation_count() {
 # fenced source's final coordinate. DMS stopping is NOT a drain gate by itself;
 # this comparison is what proves every fenced-source event was consumed.
 checkpoint_reached() { # $1=final_file_seq $2=final_pos
-  local ck seq pos
+  local ck m seq pos
   ck=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)
-  seq=$(echo "$ck" | grep -oE '\$\.[0-9]+:[0-9]+' | head -1 | cut -d. -f2 | cut -d: -f1)
-  pos=$(echo "$ck" | grep -oE '\$\.[0-9]+:[0-9]+' | head -1 | cut -d: -f2)
-  [ -n "$seq" ] && [ -n "$pos" ] || return 1
+  # Two checkpoint spellings observed in the wild: "mysql-bin-changelog.009875:153"
+  # (documented) and the abbreviated "$.583860:1357" (seen live in the rehearsal).
+  m=$(echo "$ck" | grep -oE 'mysql-bin-changelog\.[0-9]+:[0-9]+' | head -1)
+  [ -n "$m" ] && { seq=$(echo "$m" | cut -d. -f2 | cut -d: -f1); pos=$(echo "$m" | cut -d: -f2); }
+  if [ -z "${seq:-}" ]; then
+    m=$(echo "$ck" | grep -oE '\$\.[0-9]+:[0-9]+' | head -1)
+    [ -n "$m" ] && { seq=$(echo "$m" | cut -d. -f2 | cut -d: -f1); pos=$(echo "$m" | cut -d: -f2); }
+  fi
+  [ -n "${seq:-}" ] && [ -n "${pos:-}" ] || return 1
+  seq=$((10#$seq)); pos=$((10#$pos))
   [ "$seq" -gt "$1" ] || { [ "$seq" -eq "$1" ] && [ "$pos" -ge "$2" ]; }
 }
 
@@ -308,7 +315,13 @@ mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "S
 EOF
 ); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break; sleep 10; done
   say "gate: DMS checkpoint at or past the final coordinate (the actual drain proof)"
-  while :; do if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached"; break; fi; say "  waiting for checkpoint..."; sleep 15; done
+  FINAL_FILE=$((10#$FINAL_FILE))
+  CKTRIES=0
+  while :; do
+    if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached"; break; fi
+    CKTRIES=$((CKTRIES+1)); [ "$CKTRIES" -gt 60 ] && die "checkpoint did not reach the final coordinate in 15m - inspect the task (unparseable checkpoint formats also land here; RecoveryCheckpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text))"
+    say "  waiting for checkpoint..."; sleep 15
+  done
   say "gate: validation fully clean (whitelist)"
   while :; do U=$(unclean_validation_count); say "  unclean=$U"; [ "$U" = "0" ] && break; sleep 20; done
   say "FINAL task stop + checkpoint record"
@@ -324,11 +337,15 @@ S="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
 $S -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','information_schema','performance_schema','sys','innodb','tmp','aurora_mig_ctl') AND schema_name NOT LIKE 'awsdms%'" > /tmp/fence-schemas.txt
 mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-opt --databases $(tr '\n' ' ' < /tmp/fence-schemas.txt) > /tmp/fence-objects.sql
 SRC_COUNTS="$($S -e "SELECT CONCAT((SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')))")"
-if [ "$SRC_COUNTS" = "0/0/0" ]; then echo "NO_OBJECTS_ON_SOURCE (verified live, not from a stale artifact)"; exit 0; fi
-mariadb --defaults-extra-file=/tmp/mig-tgt.cnf < /tmp/fence-objects.sql
 T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names"
+if [ "$SRC_COUNTS" != "0/0/0" ]; then
+  mariadb --defaults-extra-file=/tmp/mig-tgt.cnf < /tmp/fence-objects.sql
+fi
+# the src-vs-tgt comparison ALWAYS runs: with a 0/0/0 source it proves no stale
+# objects linger on the target from an earlier aborted attempt.
 TGT_COUNTS="$($T -e "SELECT CONCAT((SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')))")"
-[ "$SRC_COUNTS" = "$TGT_COUNTS" ] && echo "OBJECTS_INSTALLED_AND_VERIFIED $SRC_COUNTS" || { echo "OBJECT_COUNT_MISMATCH src=$SRC_COUNTS tgt=$TGT_COUNTS"; exit 1; }
+[ -n "$TGT_COUNTS" ] || { echo "OBJECT_COUNT_UNREADABLE"; exit 1; }
+[ "$SRC_COUNTS" = "$TGT_COUNTS" ] && echo "OBJECTS_VERIFIED $SRC_COUNTS" || { echo "OBJECT_COUNT_MISMATCH src=$SRC_COUNTS tgt=$TGT_COUNTS"; exit 1; }
 EOF
   say ""
   say "GO: the gate has passed. Confirming the aurora_migration_state=cutover"
@@ -385,9 +402,13 @@ EOF
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
 ); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "0" ] && break; sleep 30; done
-  # re-verify the guard AFTER the human-gated apply window (TOCTOU close-out)
-  H2=$(primary_secret_host) || die "post-unfence verification failed (fail closed)"
-  [ "$H2" = "$(aurora_endpoint)" ] && die "INCONSISTENT: secret now points at Aurora after unfence - investigate before touching writers"
+  # re-verify the guard AFTER the human-gated apply window (TOCTOU close-out).
+  # Every fact is captured with an explicit error check: an unreadable fact is a
+  # refusal, never a pass.
+  H2=$(primary_secret_host) || die "post-unfence verification failed reading the secret (fail closed)"
+  A2=$(aurora_endpoint) || die "post-unfence verification failed resolving Aurora (fail closed)"
+  [ -n "$H2" ] && [ "$H2" != "null" ] && [ -n "$A2" ] && [ "$A2" != "null" ] || die "post-unfence verification got empty facts (fail closed)"
+  [ "$H2" = "$A2" ] && die "INCONSISTENT: secret now points at Aurora after unfence - investigate before touching writers"
   if [ "$(task_status)" = "stopped" ]; then
     say "re-establishing CDC from the checkpoint (so the migration can retry later)"
     aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null

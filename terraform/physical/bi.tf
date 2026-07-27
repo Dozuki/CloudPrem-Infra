@@ -1,6 +1,6 @@
 
 data "aws_iam_role" "dms-vpc-role" {
-  count = local.dms_enabled ? try(length(data.aws_iam_roles.dms-vpc-roles.arns), 0) > 0 ? 1 : 0 : 0
+  count = (local.dms_enabled || local.aurora_migration_dms) ? try(length(data.aws_iam_roles.dms-vpc-roles.arns), 0) > 0 ? 1 : 0 : 0
 
   name = "dms-vpc-role"
 }
@@ -8,7 +8,7 @@ data "aws_iam_roles" "dms-vpc-roles" {
   name_regex = "dms-vpc-role"
 }
 data "aws_iam_role" "dms-cloudwatch-role" {
-  count = local.dms_enabled ? try(length(data.aws_iam_roles.dms-cloudwatch-roles.arns), 0) > 0 ? 1 : 0 : 0
+  count = (local.dms_enabled || local.aurora_migration_dms) ? try(length(data.aws_iam_roles.dms-cloudwatch-roles.arns), 0) > 0 ? 1 : 0 : 0
 
   name = "dms-cloudwatch-logs-role"
 }
@@ -229,11 +229,26 @@ module "rds_replica_database" {
 # primary's group, and the DMS BI replica is a writable DMS target that must
 # not be frozen with the source, so it moves to this group for the migration.
 resource "aws_db_parameter_group" "bi_replica" {
+  # Keep parameter parity with aws_db_parameter_group.default: a replica moved
+  # here (aurora stacks always; rds stacks during a migration) must not silently
+  # lose its slow/general log exports on the next reboot.
   count = local.dms_enabled && (var.db_engine == "aurora" || local.aurora_migration_active) ? 1 : 0
 
   name_prefix = "${local.identifier}-bi-"
   family      = "mysql${var.rds_engine_family}"
 
+  parameter {
+    name  = "slow_query_log"
+    value = "1"
+  }
+  parameter {
+    name  = "general_log"
+    value = "1"
+  }
+  parameter {
+    name  = "log_output"
+    value = "FILE"
+  }
   parameter {
     name  = "binlog_format"
     value = "ROW"
