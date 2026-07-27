@@ -117,6 +117,15 @@ resource "null_resource" "create_dms_access_for_tasks_role" {
 resource "aws_dms_replication_subnet_group" "aurora_migration" {
   count = local.aurora_migration_dms ? 1 : 0
 
+  # AWS requires the account-wide DMS roles to exist before the first DMS
+  # resource is created; the create-if-absent null_resources must win the race
+  # on a fresh account.
+  depends_on = [
+    null_resource.create_dms_vpc_role,
+    null_resource.create_dms_cloudwatch_role,
+    null_resource.create_dms_access_for_tasks_role,
+  ]
+
   replication_subnet_group_id          = "${local.identifier}-aurora-migration"
   replication_subnet_group_description = "${local.identifier} aurora migration subnet group"
 

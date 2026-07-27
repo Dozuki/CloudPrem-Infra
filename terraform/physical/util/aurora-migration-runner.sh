@@ -60,7 +60,20 @@ primary_secret_host() { aws secretsmanager get-secret-value --region "$REGION" -
 unclean_validation_count() {
   aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
     --query 'TableStatistics[].ValidationState' --output text | tr '\t' '\n' | \
-    awk 'BEGIN{IGNORECASE=1} !/^validated$/ && !/^no primary key$/ && NF {c++} END{print c+0}'
+    awk '{ l=tolower($0) } l != "validated" && l != "no primary key" && NF { c++ } END { print c+0 }'
+}
+
+# Parse "mysql-bin-changelog.NNNN / POS" style coordinates out of the task's
+# RecoveryCheckpoint ("checkpoint:V1#...#$.NNNN:POS:...") and compare with the
+# fenced source's final coordinate. DMS stopping is NOT a drain gate by itself;
+# this comparison is what proves every fenced-source event was consumed.
+checkpoint_reached() { # $1=final_file_seq $2=final_pos
+  local ck seq pos
+  ck=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)
+  seq=$(echo "$ck" | grep -oE '\$\.[0-9]+:[0-9]+' | head -1 | cut -d. -f2 | cut -d: -f1)
+  pos=$(echo "$ck" | grep -oE '\$\.[0-9]+:[0-9]+' | head -1 | cut -d: -f2)
+  [ -n "$seq" ] && [ -n "$pos" ] || return 1
+  [ "$seq" -gt "$1" ] || { [ "$seq" -eq "$1" ] && [ "$pos" -ge "$2" ]; }
 }
 
 # --- bastion exec (SSM) ------------------------------------------------------
@@ -122,7 +135,7 @@ echo "dangling FKs: $(wc -l < dangling-fks.txt)"; cat dangling-fks.txt
 # object artifacts: routines/events/triggers are NOT migrated by DMS and NOT in
 # base DDL. Dumped here; installed on the target by fence (after the final task
 # stop, so triggers can never fire on DMS-applied DML). Empty on the 3M fleet.
-mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-opt --databases $(tr '\n' ' ' < schemas.txt) > objects.sql || true
+mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-opt --databases $(tr '\n' ' ' < schemas.txt) > objects.sql
 echo "object artifact counts: routines=$($S -e "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')") triggers=$($S -e "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')") events=$($S -e "SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')")"
 mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --skip-triggers --databases $(tr '\n' ' ' < schemas.txt) > full.sql
 python3 - <<'PYEOF'
@@ -213,12 +226,16 @@ validate)
     say "checksums (source vs target) - writers should be quiet for a stable compare"
     for t in $CHECKSUM_TABLES; do
       R=$(ssm_run <<EOF
+set -e
 A=\$(mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "CHECKSUM TABLE $t" | awk '{print \$2}')
 B=\$(mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "CHECKSUM TABLE $t" | awk '{print \$2}')
-[ "\$A" = "\$B" ] && echo "MATCH \$A" || echo "MISMATCH src=\$A tgt=\$B"
+# fail CLOSED: empty (connection/SQL failure) or NULL (nonexistent table) are
+# errors, never matches.
+case "\$A\$B" in (*NULL*|"") echo "INVALID src=\$A tgt=\$B"; exit 0;; esac
+[ -n "\$A" ] && [ -n "\$B" ] && [ "\$A" = "\$B" ] && echo "MATCH \$A" || echo "MISMATCH src=\$A tgt=\$B"
 EOF
 )
-      say "  $t: $(echo "$R" | tail -1)"; echo "$R" | grep -q MISMATCH && die "checksum mismatch on $t"
+      say "  $t: $(echo "$R" | tail -1)"; echo "$R" | grep -qE "MISMATCH|INVALID" && die "checksum gate failed on $t"
     done
   fi
   say "VALIDATION GATE PASS"
@@ -235,60 +252,84 @@ fence)
     while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
   fi
   MARK="cutover-$(date -u +%s)"
-  say "killing every DB session except our own (by connection id - the app and
-       this runner share the master user, so a username filter would spare the
-       app), then committing marker '$MARK' in the same session"
+  say "kill sweep (by connection id - app and runner share the master user) + marker '$MARK'"
   ssm_run <<EOF
 set -e
-mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names <<'SQL'
+M="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
+\$M <<'SQL'
 CREATE DATABASE IF NOT EXISTS aurora_mig_ctl;
 CREATE TABLE IF NOT EXISTS aurora_mig_ctl.marker (id INT AUTO_INCREMENT PRIMARY KEY, tag VARCHAR(64), at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6));
 SQL
-mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "
-  SELECT GROUP_CONCAT(CONCAT('CALL mysql.rds_kill(', id, ');') SEPARATOR ' ')
-  FROM information_schema.processlist
-  WHERE id != CONNECTION_ID() AND user NOT IN ('rdsadmin') AND command != 'Binlog Dump';" | \
-  tr ' ' '\n' | grep -v '^\$' | while read -r stmt; do mariadb --defaults-extra-file=/tmp/mig-src.cnf -e "\$stmt" 2>/dev/null || true; done
+# one CALL per session id; sweep repeatedly until no foreign sessions remain
+# (each sweep's SELECT excludes its own momentary connection + rdsadmin + the
+# DMS binlog reader, which must keep streaming until the final stop)
+for sweep in 1 2 3; do
+  IDS=\$(\$M -e "SELECT id FROM information_schema.processlist WHERE id != CONNECTION_ID() AND user NOT IN ('rdsadmin') AND command != 'Binlog Dump'")
+  [ -z "\$IDS" ] && break
+  for i in \$IDS; do \$M -e "CALL mysql.rds_kill(\$i);" 2>/dev/null || true; done
+  sleep 2
+done
+LEFT=\$(\$M -e "SELECT COUNT(*) FROM information_schema.processlist WHERE id != CONNECTION_ID() AND user NOT IN ('rdsadmin') AND command != 'Binlog Dump'")
+echo "foreign_sessions_remaining=\$LEFT"
+[ "\$LEFT" = "0" ] || exit 1
 mariadb --defaults-extra-file=/tmp/mig-src.cnf -e "INSERT INTO aurora_mig_ctl.marker (tag) VALUES ('$MARK');"
 echo MARKER_COMMITTED
 EOF
   say ""
   say ">>> NOW APPLY THE TERRAFORM FENCE: set aurora_migration_source_fenced = true"
   say ">>> in this env's env.hcl and confirm the gated physical apply, then return."
-  say "Polling for read_only=1 (the apply + parameter propagation)..."
+  say "Polling for read_only=1..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
 ); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "1" ] && break; sleep 30; done
+  say "post-fence kill sweep (anything that connected during the apply window;"
+  say "read_only already blocks their writes, this just tidies sessions)"
+  ssm_run <<'EOF'
+M="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
+for i in $($M -e "SELECT id FROM information_schema.processlist WHERE id != CONNECTION_ID() AND user NOT IN ('rdsadmin') AND command != 'Binlog Dump'"); do $M -e "CALL mysql.rds_kill($i);" 2>/dev/null || true; done
+echo SWEPT
+EOF
   say "negative write test (must be refused)"
   ssm_run <<'EOF'
 if mariadb --defaults-extra-file=/tmp/mig-src.cnf -e "INSERT INTO aurora_mig_ctl.marker (tag) VALUES ('must-fail');" 2>/tmp/neg.err; then echo FENCE_BREACH; exit 1; else echo FENCE_OK; fi
 EOF
-  say "final source binlog coordinate:"
-  ssm_run <<'EOF'
-mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch -e "SHOW MASTER STATUS;" | head -2
+  say "capturing the FINAL source binlog coordinate (nothing can write past it now)"
+  COORD=$(ssm_run <<'EOF'
+mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SHOW MASTER STATUS" | awk '{print $1, $2}'
 EOF
+)
+  FINAL_FILE=$(echo "$COORD" | awk '{print $1}' | grep -oE '[0-9]+$'); FINAL_POS=$(echo "$COORD" | awk '{print $2}' | tr -d '[:space:]')
+  [ -n "$FINAL_FILE" ] && [ -n "$FINAL_POS" ] || die "could not capture the final binlog coordinate"
+  say "final coordinate: file-seq=$FINAL_FILE pos=$FINAL_POS"
   say "gate: marker on Aurora"
   while :; do N=$(ssm_run <<EOF
 mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag='$MARK'" 2>/dev/null || echo 0
 EOF
 ); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break; sleep 10; done
+  say "gate: DMS checkpoint at or past the final coordinate (the actual drain proof)"
+  while :; do if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached"; break; fi; say "  waiting for checkpoint..."; sleep 15; done
   say "gate: validation fully clean (whitelist)"
   while :; do U=$(unclean_validation_count); say "  unclean=$U"; [ "$U" = "0" ] && break; sleep 20; done
-  say "installing object artifacts on the target (routines/events/triggers; DMS"
-  say "is about to stop for good, so triggers can never fire on replicated DML)"
-  ssm_run <<'EOF'
-set -e
-if [ -s /tmp/mig/objects.sql ]; then
-  mariadb --defaults-extra-file=/tmp/mig-tgt.cnf < /tmp/mig/objects.sql && echo OBJECTS_INSTALLED
-else
-  echo NO_OBJECTS_TO_INSTALL
-fi
-EOF
-  say "final task stop + checkpoint"
+  say "FINAL task stop + checkpoint record"
   aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
   while [ "$(task_status)" != "stopped" ]; do sleep 10; done
   say "checkpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)"
+  say "installing object artifacts AFTER the final stop (DMS can never apply DML"
+  say "through freshly installed triggers). Dumped FRESH from the fenced source -"
+  say "consistent by construction, immune to bastion replacement losing /tmp."
+  ssm_run <<'EOF'
+set -e; umask 177
+S="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
+$S -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','information_schema','performance_schema','sys','innodb','tmp','aurora_mig_ctl') AND schema_name NOT LIKE 'awsdms%'" > /tmp/fence-schemas.txt
+mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-opt --databases $(tr '\n' ' ' < /tmp/fence-schemas.txt) > /tmp/fence-objects.sql
+SRC_COUNTS="$($S -e "SELECT CONCAT((SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')))")"
+if [ "$SRC_COUNTS" = "0/0/0" ]; then echo "NO_OBJECTS_ON_SOURCE (verified live, not from a stale artifact)"; exit 0; fi
+mariadb --defaults-extra-file=/tmp/mig-tgt.cnf < /tmp/fence-objects.sql
+T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names"
+TGT_COUNTS="$($T -e "SELECT CONCAT((SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')))")"
+[ "$SRC_COUNTS" = "$TGT_COUNTS" ] && echo "OBJECTS_INSTALLED_AND_VERIFIED $SRC_COUNTS" || { echo "OBJECT_COUNT_MISMATCH src=$SRC_COUNTS tgt=$TGT_COUNTS"; exit 1; }
+EOF
   say ""
   say "GO: the gate has passed. Confirming the aurora_migration_state=cutover"
   say "physical apply IS the promotion - its auto-following logical apply"
@@ -312,22 +353,41 @@ EOF
   ;;
 
 abort)
-  # Hard guards: abort is PRE-CUTOVER ONLY. After the cutover apply the app is
-  # writing to Aurora and reopening RDS would split-brain.
-  H=$(primary_secret_host); A=$(aurora_endpoint 2>/dev/null || echo none)
+  # Hard, fail-closed guards: abort is PRE-CUTOVER ONLY. Cutover cannot be
+  # in-flight concurrently: the fence-required-at-cutover Terraform validation
+  # means an unfence apply and a cutover apply are mutually exclusive changes
+  # to the same gated stack.
+  H=$(primary_secret_host) || die "REFUSED: cannot read the primary secret (fail closed)"
+  A=$(aurora_endpoint) || die "REFUSED: cannot resolve the Aurora endpoint (fail closed)"
+  [ -n "$H" ] && [ -n "$A" ] || die "REFUSED: empty endpoint facts (fail closed)"
   [ "$H" = "$A" ] && die "REFUSED: primary secret host already points at Aurora - cutover has been applied. Fail forward."
   prep_cnfs
   PW=$(ssm_run <<'EOF'
-mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag LIKE 'post-promotion%'" 2>/dev/null || echo 0
+set -e
+mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag LIKE 'post-promotion%'"
 EOF
-); PW=$(echo "$PW" | tr -d '[:space:]')
+) || die "REFUSED: cannot query Aurora for promotion evidence (fail closed)"
+  PW=$(echo "$PW" | tr -d '[:space:]')
   [ "$PW" = "0" ] || die "REFUSED: post-promotion writes exist on Aurora. Fail forward."
+  say "removing any objects the fence installed on the target (triggers must not"
+  say "fire on replicated DML when CDC resumes for a retry)"
+  ssm_run <<'EOF'
+set -e
+T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names"
+$T -e "SELECT CONCAT('DROP TRIGGER IF EXISTS \`',trigger_schema,'\`.\`',trigger_name,'\`;') FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')" > /tmp/drop-objs.sql
+$T -e "SELECT CONCAT('DROP EVENT IF EXISTS \`',event_schema,'\`.\`',event_name,'\`;') FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')" >> /tmp/drop-objs.sql
+if [ -s /tmp/drop-objs.sql ]; then mariadb --defaults-extra-file=/tmp/mig-tgt.cnf < /tmp/drop-objs.sql && echo TARGET_OBJECTS_DROPPED; else echo NO_TARGET_OBJECTS; fi
+EOF
   say ">>> UNFENCE: set aurora_migration_source_fenced = false in env.hcl and"
-  say ">>> confirm the gated apply. Polling for read_only=0..."
+  say ">>> confirm the gated apply (Terraform refuses this while state=cutover)."
+  say "Polling for read_only=0..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
 ); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "0" ] && break; sleep 30; done
+  # re-verify the guard AFTER the human-gated apply window (TOCTOU close-out)
+  H2=$(primary_secret_host) || die "post-unfence verification failed (fail closed)"
+  [ "$H2" = "$(aurora_endpoint)" ] && die "INCONSISTENT: secret now points at Aurora after unfence - investigate before touching writers"
   if [ "$(task_status)" = "stopped" ]; then
     say "re-establishing CDC from the checkpoint (so the migration can retry later)"
     aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
@@ -336,7 +396,7 @@ EOF
     say "resuming the BI task against the (still RDS) source"
     aws dms start-replication-task --replication-task-arn "$(bi_task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
   fi
-  say "ABORTED cleanly: source writable again, Aurora untouched by the app, CDC re-established. Scale writers back up."
+  say "ABORTED cleanly: source writable, Aurora untouched by the app, CDC re-established. Scale writers back up."
   ;;
 
 bi-epoch)

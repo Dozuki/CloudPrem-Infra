@@ -224,9 +224,12 @@ module "rds_replica_database" {
 
 # Aurora stacks have no instance-level parameter group to reuse (the cluster
 # uses a cluster parameter group), so the DMS replica gets its own copy of
-# aws_db_parameter_group.default. rds stacks keep sharing the primary's group.
+# aws_db_parameter_group.default. rds stacks keep sharing the primary's group -
+# EXCEPT during an Aurora migration: the fence injects read_only=1 into the
+# primary's group, and the DMS BI replica is a writable DMS target that must
+# not be frozen with the source, so it moves to this group for the migration.
 resource "aws_db_parameter_group" "bi_replica" {
-  count = local.dms_enabled && var.db_engine == "aurora" ? 1 : 0
+  count = local.dms_enabled && (var.db_engine == "aurora" || local.aurora_migration_active) ? 1 : 0
 
   name_prefix = "${local.identifier}-bi-"
   family      = "mysql${var.rds_engine_family}"
@@ -300,7 +303,7 @@ module "dms_replica_database" {
 
   # DB parameter group
   create_db_parameter_group = false
-  parameter_group_name      = var.db_engine == "rds" ? aws_db_parameter_group.default[0].name : aws_db_parameter_group.bi_replica[0].name
+  parameter_group_name      = var.db_engine == "rds" && !local.aurora_migration_active ? aws_db_parameter_group.default[0].name : aws_db_parameter_group.bi_replica[0].name
 
   create_db_option_group = false
 
