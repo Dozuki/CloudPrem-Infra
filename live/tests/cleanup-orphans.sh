@@ -163,6 +163,42 @@ while IFS= read -r pfx; do
       --key "{\"LockID\":{\"S\":\"$lk\"}}" >/dev/null 2>&1 && echo "  cleared lock/digest: $lk"
   done
 
+  # 2b) Drop the harness's own objects from the DR replica buckets before destroying.
+  #
+  # The DR buckets are created WITHOUT force_destroy (physical/dr.tf), unlike their source
+  # counterparts, so terraform cannot delete one that holds anything:
+  #
+  #   deleting S3 Bucket (…-image-dr-…): api error BucketNotEmpty
+  #
+  # and the whole destroy dies there, stranding the DR buckets plus everything it had not
+  # reached yet. The harness reliably puts objects there: the DR replication canary, and on
+  # upgrade runs the continuity sentinel, both of which replicate from source by design.
+  #
+  # Scoped to the _harness/ prefix and to this run's buckets, and deletes by VERSION -
+  # these buckets are versioned, so a plain delete would only add a delete marker and leave
+  # the bucket non-empty. The proper fix is force_destroy on the DR buckets; this keeps
+  # teardown working on stacks pinned to a ref that predates it.
+  for _reg in "$R" "${DR_REGION:-us-west-2}"; do
+    for _b in $(aws s3api list-buckets --profile "$P" \
+                  --query "Buckets[?starts_with(Name, '${CUSTOMER}-')].Name" --output text 2>/dev/null); do
+      aws s3api list-object-versions --bucket "$_b" --region "$_reg" --prefix "_harness/" \
+          --profile "$P" --output json 2>/dev/null \
+        | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit()
+o=[{'Key':x['Key'],'VersionId':x['VersionId']} for k in ('Versions','DeleteMarkers') for x in d.get(k) or []]
+print(json.dumps({'Objects':o}) if o else '', end='')
+" > /tmp/.cleanup-harness-objs.$$ 2>/dev/null
+      if [ -s /tmp/.cleanup-harness-objs.$$ ]; then
+        aws s3api delete-objects --bucket "$_b" --region "$_reg" --profile "$P" \
+          --delete "file:///tmp/.cleanup-harness-objs.$$" >/dev/null 2>&1 \
+          && echo "  purged _harness/ objects from $_b ($_reg)"
+      fi
+      rm -f /tmp/.cleanup-harness-objs.$$
+    done
+  done
+
   # 3) Destroy against the worktree whose code matches the deployed state (recorded
   #    by the harness in a marker). The live tree is the current branch's code, which
   #    does NOT match for cross-architecture upgrades — use it only as a last resort.

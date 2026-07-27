@@ -141,6 +141,24 @@ resource "aws_s3_bucket" "dr_guide_buckets" {
   bucket_prefix = "${local.identifier}-${each.key}-dr-"
   tags          = local.tags
 
+  # Mirror the SOURCE buckets (s3.tf aws_s3_bucket.guide_buckets), which have always been
+  # force_destroy = !protect_resources. This resource omitted it entirely and so defaulted
+  # to false on EVERY stack, protected or not.
+  #
+  # That made a DR-enabled stack undestroyable the moment replication put anything in the
+  # destination - which is its whole job. Terraform empties the source bucket, then dies on
+  # the replica:
+  #
+  #   deleting S3 Bucket (…-image-dr-…): api error BucketNotEmpty
+  #
+  # leaving the DR buckets, and everything the failed destroy had not reached yet,
+  # stranded. Hit twice by ephemeral harness stacks (protect_resources = false) whose
+  # teardown then had to be finished by hand.
+  #
+  # protect_resources = true is unaffected: those keep force_destroy = false, so a real
+  # deploy's DR data still cannot be deleted out from under it.
+  force_destroy = !var.protect_resources
+
   lifecycle {
     ignore_changes = [bucket, bucket_prefix]
   }

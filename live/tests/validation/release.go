@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+	"strings"
 )
 
 type helmRelease struct {
@@ -64,11 +65,27 @@ func AssertUpgraded(kubeconfig, namespace, name string, baselineRevision int, wa
 		}
 		if wantChartVersion != "" {
 			want := name + "-" + wantChartVersion
-			if r.Chart != want {
+			if stripBuildMetadata(r.Chart) != stripBuildMetadata(want) {
 				return fmt.Errorf("release chart=%q, want %q", r.Chart, want)
 			}
 		}
 		return nil
 	}
 	return fmt.Errorf("release %s not found", name)
+}
+
+// stripBuildMetadata drops a SemVer build-metadata suffix (everything from the first '+').
+//
+// The published chart carries one: helm reports the deployed release as
+// "dozuki-1.26.1+731c2096df83" while the matrix pins "1.26.1". SemVer says build metadata
+// is ignored when determining version precedence, so an exact string compare is simply the
+// wrong test - it failed an upgrade that had in fact deployed the requested chart.
+//
+// Only the metadata is dropped. A pre-release suffix ("-rc.1") is part of precedence and
+// stays, so a chart that really is a different version still fails.
+func stripBuildMetadata(v string) string {
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		return v[:i]
+	}
+	return v
 }
