@@ -20,6 +20,7 @@
 | <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.56.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+| <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
 
 ## Modules
 
@@ -153,8 +154,10 @@
 | [aws_s3_bucket_versioning.dr_guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
 | [aws_s3_bucket_versioning.guide_buckets_versioning](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
 | [aws_s3_bucket_versioning.logging_bucket_versioning_block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
+| [aws_secretsmanager_secret.aurora_migration_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
+| [aws_secretsmanager_secret_version.aurora_migration_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
@@ -185,6 +188,7 @@
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.s3_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [random_password.aurora](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
+| [terraform_data.aurora_migration_phase](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 | [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
 | [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
@@ -233,6 +237,7 @@
 | <a name="input_aurora_migration_dms_engine_version"></a> [aurora\_migration\_dms\_engine\_version](#input\_aurora\_migration\_dms\_engine\_version) | Pinned DMS engine version for the migration rig (run-to-run reproducibility; 3.6.1 = the rehearsal-proven version). | `string` | `"3.6.1"` | no |
 | <a name="input_aurora_migration_dms_instance_type"></a> [aurora\_migration\_dms\_instance\_type](#input\_aurora\_migration\_dms\_instance\_type) | Replication instance class for the Aurora migration DMS rig. | `string` | `"dms.c5.large"` | no |
 | <a name="input_aurora_migration_dms_storage"></a> [aurora\_migration\_dms\_storage](#input\_aurora\_migration\_dms\_storage) | Allocated storage (GB) for the Aurora migration DMS replication instance. | `number` | `100` | no |
+| <a name="input_aurora_migration_source_fenced"></a> [aurora\_migration\_source\_fenced](#input\_aurora\_migration\_source\_fenced) | Cutover write-fence for the RDS source during an Aurora migration. When true,<br>read\_only=1 is injected into the RDS parameter group AS CONFIG, so the fence<br>is Terraform-owned: no concurrent or subsequent apply can silently revert it<br>(an out-of-band fence would be reset by any refreshed apply mid-cutover).<br>Set true (gated apply) at the runner's fence step; back to false only on a<br>pre-cutover abort. On RDS MySQL 8.0.36+ read\_only=1 is a complete fence for<br>every customer account - no grantable privilege bypasses it. | `bool` | `false` | no |
 | <a name="input_aurora_migration_state"></a> [aurora\_migration\_state](#input\_aurora\_migration\_state) | RDS -> Aurora DMS migration state machine (aurora-migration.tf). off = no<br>migration (default). provision = Aurora comes up empty alongside the live RDS,<br>guarded to DMS+bastion, with the DMS rig created but not started. cutover =<br>connection facts (secret/outputs/BI DMS/bastion) flip to Aurora and the app SG<br>path opens - apply only at the migration runner's go-live gate. cleanup = the<br>DMS rig is removed; Aurora stays primary, the RDS survives as the fail-forward<br>net until the env's final db\_engine="aurora" flip. Only meaningful while<br>db\_engine="rds". | `string` | `"off"` | no |
 | <a name="input_aurora_min_acu"></a> [aurora\_min\_acu](#input\_aurora\_min\_acu) | Aurora Serverless v2 minimum capacity (ACUs). | `number` | `0.5` | no |
 | <a name="input_aurora_snapshot_identifier"></a> [aurora\_snapshot\_identifier](#input\_aurora\_snapshot\_identifier) | Optional RDS DB snapshot ARN to restore the Aurora cluster from (migration path). Empty = fresh cluster. | `string` | `""` | no |
@@ -293,6 +298,7 @@
 |------|-------------|
 | <a name="output_aurora_dr_global_cluster_id"></a> [aurora\_dr\_global\_cluster\_id](#output\_aurora\_dr\_global\_cluster\_id) | Aurora global cluster id (empty unless the Aurora DR secondary is enabled). |
 | <a name="output_aurora_dr_secondary_endpoint"></a> [aurora\_dr\_secondary\_endpoint](#output\_aurora\_dr\_secondary\_endpoint) | Reader endpoint of the headless DR secondary (populated once instances exist post-failover). |
+| <a name="output_aurora_migration_credentials_secret"></a> [aurora\_migration\_credentials\_secret](#output\_aurora\_migration\_credentials\_secret) | Secret ARN holding the Aurora migration target credentials (empty when no migration is active). Runner use only. |
 | <a name="output_aurora_migration_target_endpoint"></a> [aurora\_migration\_target\_endpoint](#output\_aurora\_migration\_target\_endpoint) | Aurora cluster writer endpoint during a migration (empty otherwise). Runner/runbook convenience; the app only ever sees it through the credentials secret after cutover. |
 | <a name="output_aurora_migration_task_arn"></a> [aurora\_migration\_task\_arn](#output\_aurora\_migration\_task\_arn) | ARN of the Aurora migration DMS task (empty when no migration is active). Consumed by the migration runner. |
 | <a name="output_azs_count"></a> [azs\_count](#output\_azs\_count) | n/a |

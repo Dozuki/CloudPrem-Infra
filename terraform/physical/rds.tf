@@ -133,6 +133,18 @@ resource "aws_db_parameter_group" "default" {
     value = "33554432"
   }
 
+  # Terraform-owned cutover fence (see var.aurora_migration_source_fenced): the
+  # parameter exists in config only while fenced, so a mid-cutover apply can
+  # never silently reopen the source. Absent = engine default (writable).
+  dynamic "parameter" {
+    for_each = var.aurora_migration_source_fenced ? [1] : []
+    content {
+      name         = "read_only"
+      value        = "1"
+      apply_method = "immediate"
+    }
+  }
+
   lifecycle {
     create_before_destroy = true
   }

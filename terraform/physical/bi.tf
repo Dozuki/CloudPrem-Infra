@@ -1,6 +1,6 @@
 
 data "aws_iam_role" "dms-vpc-role" {
-  count = local.dms_enabled ? try(length(data.aws_iam_roles.dms-vpc-roles.arns), 0) > 0 ? 1 : 0 : 0
+  count = (local.dms_enabled || local.aurora_migration_dms) ? try(length(data.aws_iam_roles.dms-vpc-roles.arns), 0) > 0 ? 1 : 0 : 0
 
   name = "dms-vpc-role"
 }
@@ -8,7 +8,7 @@ data "aws_iam_roles" "dms-vpc-roles" {
   name_regex = "dms-vpc-role"
 }
 data "aws_iam_role" "dms-cloudwatch-role" {
-  count = local.dms_enabled ? try(length(data.aws_iam_roles.dms-cloudwatch-roles.arns), 0) > 0 ? 1 : 0 : 0
+  count = (local.dms_enabled || local.aurora_migration_dms) ? try(length(data.aws_iam_roles.dms-cloudwatch-roles.arns), 0) > 0 ? 1 : 0 : 0
 
   name = "dms-cloudwatch-logs-role"
 }
@@ -18,7 +18,8 @@ data "aws_iam_roles" "dms-cloudwatch-roles" {
 # We create the dms-vpc-role and dms-cloudwatch-logs-role using a null_resource to prevent the removal of the
 # account-wide role should this stack be deleted. In other words, to keep the role out of the state.
 resource "null_resource" "create_dms_vpc_role" {
-  count = local.dms_enabled ? length(data.aws_iam_role.dms-vpc-role) > 0 ? 0 : 1 : 0
+  # Needed by BI DMS and the Aurora migration rig alike.
+  count = (local.dms_enabled || local.aurora_migration_dms) ? length(data.aws_iam_role.dms-vpc-role) > 0 ? 0 : 1 : 0
 
   provisioner "local-exec" {
     command = <<-EOT
@@ -32,7 +33,8 @@ resource "null_resource" "create_dms_vpc_role" {
   }
 }
 resource "null_resource" "create_dms_cloudwatch_role" {
-  count = local.dms_enabled ? length(data.aws_iam_role.dms-cloudwatch-role) > 0 ? 0 : 1 : 0
+  # Needed by BI DMS and the Aurora migration rig alike.
+  count = (local.dms_enabled || local.aurora_migration_dms) ? length(data.aws_iam_role.dms-cloudwatch-role) > 0 ? 0 : 1 : 0
 
   provisioner "local-exec" {
     command = <<-EOT
@@ -222,13 +224,31 @@ module "rds_replica_database" {
 
 # Aurora stacks have no instance-level parameter group to reuse (the cluster
 # uses a cluster parameter group), so the DMS replica gets its own copy of
-# aws_db_parameter_group.default. rds stacks keep sharing the primary's group.
+# aws_db_parameter_group.default. rds stacks keep sharing the primary's group -
+# EXCEPT during an Aurora migration: the fence injects read_only=1 into the
+# primary's group, and the DMS BI replica is a writable DMS target that must
+# not be frozen with the source, so it moves to this group for the migration.
 resource "aws_db_parameter_group" "bi_replica" {
-  count = local.dms_enabled && var.db_engine == "aurora" ? 1 : 0
+  # Keep parameter parity with aws_db_parameter_group.default: a replica moved
+  # here (aurora stacks always; rds stacks during a migration) must not silently
+  # lose its slow/general log exports on the next reboot.
+  count = local.dms_enabled && (var.db_engine == "aurora" || local.aurora_migration_active) ? 1 : 0
 
   name_prefix = "${local.identifier}-bi-"
   family      = "mysql${var.rds_engine_family}"
 
+  parameter {
+    name  = "slow_query_log"
+    value = "1"
+  }
+  parameter {
+    name  = "general_log"
+    value = "1"
+  }
+  parameter {
+    name  = "log_output"
+    value = "FILE"
+  }
   parameter {
     name  = "binlog_format"
     value = "ROW"
@@ -298,7 +318,7 @@ module "dms_replica_database" {
 
   # DB parameter group
   create_db_parameter_group = false
-  parameter_group_name      = var.db_engine == "rds" ? aws_db_parameter_group.default[0].name : aws_db_parameter_group.bi_replica[0].name
+  parameter_group_name      = var.db_engine == "rds" && !local.aurora_migration_active ? aws_db_parameter_group.default[0].name : aws_db_parameter_group.bi_replica[0].name
 
   create_db_option_group = false
 

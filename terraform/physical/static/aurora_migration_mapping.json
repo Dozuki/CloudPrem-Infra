@@ -6,6 +6,13 @@
       "rule-name": "all-app-schemas",
       "object-locator": { "schema-name": "%", "table-name": "%" },
       "rule-action": "include"
-    }
+    },
+    { "rule-type": "selection", "rule-id": "2", "rule-name": "x-mysql", "object-locator": { "schema-name": "mysql", "table-name": "%" }, "rule-action": "exclude" },
+    { "rule-type": "selection", "rule-id": "3", "rule-name": "x-sys", "object-locator": { "schema-name": "sys", "table-name": "%" }, "rule-action": "exclude" },
+    { "rule-type": "selection", "rule-id": "4", "rule-name": "x-ischema", "object-locator": { "schema-name": "information_schema", "table-name": "%" }, "rule-action": "exclude" },
+    { "rule-type": "selection", "rule-id": "5", "rule-name": "x-pschema", "object-locator": { "schema-name": "performance_schema", "table-name": "%" }, "rule-action": "exclude" },
+    { "rule-type": "selection", "rule-id": "6", "rule-name": "x-innodb", "object-locator": { "schema-name": "innodb", "table-name": "%" }, "rule-action": "exclude" },
+    { "rule-type": "selection", "rule-id": "7", "rule-name": "x-tmp", "object-locator": { "schema-name": "tmp", "table-name": "%" }, "rule-action": "exclude" },
+    { "rule-type": "selection", "rule-id": "8", "rule-name": "x-dmsctl", "object-locator": { "schema-name": "awsdms%", "table-name": "%" }, "rule-action": "exclude" }
   ]
 }

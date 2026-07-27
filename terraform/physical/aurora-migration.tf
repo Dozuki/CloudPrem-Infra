@@ -117,6 +117,15 @@ resource "null_resource" "create_dms_access_for_tasks_role" {
 resource "aws_dms_replication_subnet_group" "aurora_migration" {
   count = local.aurora_migration_dms ? 1 : 0
 
+  # AWS requires the account-wide DMS roles to exist before the first DMS
+  # resource is created; the create-if-absent null_resources must win the race
+  # on a fresh account.
+  depends_on = [
+    null_resource.create_dms_vpc_role,
+    null_resource.create_dms_cloudwatch_role,
+    null_resource.create_dms_access_for_tasks_role,
+  ]
+
   replication_subnet_group_id          = "${local.identifier}-aurora-migration"
   replication_subnet_group_description = "${local.identifier} aurora migration subnet group"
 
@@ -220,5 +229,63 @@ resource "aws_dms_replication_task" "aurora_migration" {
     # The runner owns the task lifecycle (start/stop/resume around its gates);
     # settings drift (e.g. validation counters) must not dirty the plan.
     ignore_changes = [replication_task_settings]
+  }
+}
+
+# --- migration credentials -----------------------------------------------------
+
+# Aurora's master password (random_password.aurora) exists only in Terraform
+# state until cutover updates the primary credentials secret. The migration
+# runner needs target credentials from provision onward, so they get their own
+# secret for the migration's lifetime.
+resource "aws_secretsmanager_secret" "aurora_migration_credentials" {
+  count = local.aurora_migration_dms ? 1 : 0
+
+  name_prefix             = "${local.identifier}-aurora-migration"
+  description             = "Aurora migration target credentials (runner use only; removed at cleanup)"
+  recovery_window_in_days = 0
+
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "aurora_migration_credentials" {
+  count = local.aurora_migration_dms ? 1 : 0
+
+  secret_id = aws_secretsmanager_secret.aurora_migration_credentials[0].id
+  secret_string = jsonencode({
+    host     = module.aurora[0].cluster_endpoint
+    port     = 3306
+    username = local.db_username
+    password = random_password.aurora[0].result
+  })
+}
+
+# --- transition safety ---------------------------------------------------------
+
+# Phase memory: replaced on every state change, so the PLAN DIFF always shows
+# "aurora_migration_phase must be replaced: <old> -> <new>" - the reviewer of the
+# gated apply sees the transition explicitly. Terraform cannot hard-enforce a
+# transition graph at plan time (the previous value is unknowable exactly when it
+# changes), so enforcement is layered instead:
+#   - the db-replace-guard OPA policy already fails any plan that destroys the
+#     Aurora cluster or the RDS instance without the allow-db-replace label
+#     (covers the catastrophic cutover/cleanup -> off reversal);
+#   - every transition is a gated, human-confirmed Spacelift apply showing this
+#     resource's replacement diff;
+#   - the migration runner's phases each assert the AWS-side facts they need
+#     (task exists/stopped, marker present, secret host) before acting.
+resource "terraform_data" "aurora_migration_phase" {
+  input            = var.aurora_migration_state
+  triggers_replace = var.aurora_migration_state
+
+  lifecycle {
+    # The BI replica secret mixes hosts/credentials across engines if a
+    # non-DMS BI path is active during a migration (its host selector keys on
+    # db_engine, its credentials on local.db_*). The 3M fleet is BI-via-DMS;
+    # anything else must not migrate until that seam is reworked.
+    precondition {
+      condition     = var.aurora_migration_state == "off" || !var.enable_bi || local.dms_enabled
+      error_message = "aurora_migration_state requires BI disabled or BI-via-DMS (bi_dms_enabled/bi_public_access): the RDS-read-replica BI path would mix engines at cutover."
+    }
   }
 }

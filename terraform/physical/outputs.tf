@@ -126,3 +126,8 @@ output "aurora_migration_target_endpoint" {
   description = "Aurora cluster writer endpoint during a migration (empty otherwise). Runner/runbook convenience; the app only ever sees it through the credentials secret after cutover."
   value       = try(module.aurora[0].cluster_endpoint, "")
 }
+
+output "aurora_migration_credentials_secret" {
+  description = "Secret ARN holding the Aurora migration target credentials (empty when no migration is active). Runner use only."
+  value       = try(aws_secretsmanager_secret.aurora_migration_credentials[0].arn, "")
+}

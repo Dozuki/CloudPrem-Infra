@@ -504,6 +504,31 @@ variable "aurora_migration_dms_engine_version" {
   default     = "3.6.1"
 }
 
+variable "aurora_migration_source_fenced" {
+  description = <<-EOT
+    Cutover write-fence for the RDS source during an Aurora migration. When true,
+    read_only=1 is injected into the RDS parameter group AS CONFIG, so the fence
+    is Terraform-owned: no concurrent or subsequent apply can silently revert it
+    (an out-of-band fence would be reset by any refreshed apply mid-cutover).
+    Set true (gated apply) at the runner's fence step; back to false only on a
+    pre-cutover abort. On RDS MySQL 8.0.36+ read_only=1 is a complete fence for
+    every customer account - no grantable privilege bypasses it.
+  EOT
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.aurora_migration_source_fenced || var.aurora_migration_state != "off"
+    error_message = "aurora_migration_source_fenced requires an active aurora_migration_state."
+  }
+  validation {
+    # Once cutover is applied the app writes to Aurora; unfencing the RDS then
+    # would split-brain. The fence stays on through cutover and cleanup - the
+    # RDS unfreezes only at its final retirement (db_engine flip).
+    condition     = var.aurora_migration_source_fenced || !contains(["cutover", "cleanup"], var.aurora_migration_state)
+    error_message = "aurora_migration_source_fenced must remain true while aurora_migration_state is cutover or cleanup (unfencing a replaced source would split-brain)."
+  }
+}
+
 
 variable "delete_after" {
   description = "Optional RFC3339 timestamp. When set, every resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys)."
