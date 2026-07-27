@@ -11,7 +11,7 @@ locals {
 }
 
 resource "random_password" "aurora" {
-  count   = local.db_is_aurora ? 1 : 0
+  count   = local.aurora_present ? 1 : 0
   length  = 40
   special = false
 }
@@ -20,7 +20,11 @@ module "aurora" {
   source  = "terraform-aws-modules/rds-aurora/aws"
   version = "10.2.0"
 
-  count = local.db_is_aurora ? 1 : 0
+  # Present for the steady-state aurora engine AND during an RDS->Aurora DMS
+  # migration (aurora-migration.tf), where it runs ALONGSIDE the live RDS. Both
+  # gates keep the same module instance alive, so the eventual db_engine="aurora"
+  # + aurora_migration_state="off" flip is a no-op for this cluster.
+  count = local.aurora_present ? 1 : 0
 
   name            = local.identifier
   engine          = "aurora-mysql"
@@ -47,7 +51,16 @@ module "aurora" {
     var.rds_multi_az ? { reader = { instance_class = "db.serverless", performance_insights_enabled = true } } : {}
   )
 
-  vpc_security_group_ids = [module.primary_database_sg.security_group_id]
+  # Network guard during a migration: while state="provision" the cluster is
+  # reachable ONLY by the migration DMS instance + the bastion (guard SG,
+  # aurora-migration.tf) - the app cannot touch the empty/loading target even by
+  # misconfiguration (the fresh-install sharp edge). At "cutover" this swaps
+  # in-place to the primary DB SG and the app path opens.
+  vpc_security_group_ids = (
+    var.aurora_migration_state == "provision"
+    ? [module.aurora_migration_guard_sg[0].security_group_id]
+    : [module.primary_database_sg.security_group_id]
+  )
   subnets                = local.private_subnet_ids
   create_db_subnet_group = true
 
@@ -79,7 +92,18 @@ module "aurora" {
         { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
         { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
         { name = "binlog_checksum", value = "NONE", apply_method = "pending-reboot" },
+        # Explicit even though 0 is the engine default: it must match the RDS
+        # source at migration time and is immutable after cluster creation.
+        { name = "lower_case_table_names", value = "0", apply_method = "pending-reboot" },
       ],
+      # Migration-only relaxations, removed again after cleanup. local_infile is
+      # required by DMS full load; the event scheduler stays OFF until the
+      # cutover repoint so nothing fires on the target before the first app
+      # write (the migration runner asserts both at its gates).
+      local.aurora_migration_active && var.aurora_migration_state == "provision" ? [
+        { name = "local_infile", value = "1", apply_method = "immediate" },
+        { name = "event_scheduler", value = "OFF", apply_method = "immediate" },
+      ] : [],
       contains(var.rds_log_exports, "audit") ? [
         { name = "server_audit_logging", value = "1", apply_method = "immediate" },
         { name = "server_audit_events", value = "CONNECT,QUERY_DCL,QUERY_DDL", apply_method = "immediate" },

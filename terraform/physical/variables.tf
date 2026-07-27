@@ -463,6 +463,47 @@ variable "aurora_snapshot_identifier" {
   default     = ""
 }
 
+variable "aurora_migration_state" {
+  description = <<-EOT
+    RDS -> Aurora DMS migration state machine (aurora-migration.tf). off = no
+    migration (default). provision = Aurora comes up empty alongside the live RDS,
+    guarded to DMS+bastion, with the DMS rig created but not started. cutover =
+    connection facts (secret/outputs/BI DMS/bastion) flip to Aurora and the app SG
+    path opens - apply only at the migration runner's go-live gate. cleanup = the
+    DMS rig is removed; Aurora stays primary, the RDS survives as the fail-forward
+    net until the env's final db_engine="aurora" flip. Only meaningful while
+    db_engine="rds".
+  EOT
+  type        = string
+  default     = "off"
+  validation {
+    condition     = contains(["off", "provision", "cutover", "cleanup"], var.aurora_migration_state)
+    error_message = "aurora_migration_state must be one of: off, provision, cutover, cleanup."
+  }
+  validation {
+    condition     = var.aurora_migration_state == "off" || var.db_engine == "rds"
+    error_message = "aurora_migration_state is only meaningful while db_engine=\"rds\" (it migrates RDS to Aurora)."
+  }
+}
+
+variable "aurora_migration_dms_instance_type" {
+  description = "Replication instance class for the Aurora migration DMS rig."
+  type        = string
+  default     = "dms.c5.large"
+}
+
+variable "aurora_migration_dms_storage" {
+  description = "Allocated storage (GB) for the Aurora migration DMS replication instance."
+  type        = number
+  default     = 100
+}
+
+variable "aurora_migration_dms_engine_version" {
+  description = "Pinned DMS engine version for the migration rig (run-to-run reproducibility; 3.6.1 = the rehearsal-proven version)."
+  type        = string
+  default     = "3.6.1"
+}
+
 
 variable "delete_after" {
   description = "Optional RFC3339 timestamp. When set, every resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys)."
