@@ -38,15 +38,32 @@ type schemaExpectation struct {
 	database string
 }
 
-// The greenfield set. onprem_guide is the tenant the deploy FQDN routes to (the one that
-// served the 500s), dozuki_guide is the platform tenant; both are built from the same
-// guide dump. sites/metrics are seeded directly by db_initialize.sh.
+// The databases the bootstrap loads a dump into WHOLE. Only these can be compared against
+// a dump; anything seeded some other way would report a false shortfall.
+//
+// Derived from the bootstrap the APP IMAGE actually runs, which is not the copy of
+// db_initialize.sh in the monolith repo — the repo's LocalDev overlay creates `metrics`
+// and drives tenant creation through Exec/sites.php, while the shipped image runs a fixed
+// sequence of mysql calls. Read the db-migrations log from a real run before adding an
+// entry here; the image is authoritative and the two have already diverged.
+//
+// What that sequence does, observed:
+//
+//	create database sites        + 1 import   -> full sites.sql
+//	create database dozuki_guide + 3 imports  -> NOT the guide dump (a smaller seed set)
+//	create database onprem_guide + 1 import   -> full ifixit_guide.sql
+//
+// so `metrics` (never created) and `dozuki_guide` (loaded with something else) are both
+// out. onprem_guide is the one that matters most anyway: it is the tenant the deploy FQDN
+// routes to, and its truncation is what produced the 500s.
+//
+// dozuki_guide is left UNVERIFIED rather than asserted-correct. Its 3 tables are
+// consistent with 3 small seed imports, but nothing here proves that is the intended
+// content, and it is not covered by any check.
 func greenfieldSchemas() []schemaExpectation {
 	return []schemaExpectation{
 		{dump: "Migrations/SchemaSQL/sites.sql", database: "sites"},
-		{dump: "Migrations/SchemaSQL/metrics.sql", database: "metrics"},
 		{dump: "Migrations/SchemaSQL/ifixit_guide.sql", database: "onprem_guide"},
-		{dump: "Migrations/SchemaSQL/ifixit_guide.sql", database: "dozuki_guide"},
 	}
 }
 
