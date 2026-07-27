@@ -206,9 +206,22 @@ locals {
         appVersion       = local.frontegg_event_service_tag
         imagePullSecrets = []
         database         = { host = local.db_master_host, username = local.db_master_username, useSSL = "true" }
-        configuration    = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "master_password" } } }
-        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
-        redis            = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING (was --set-string)
+        # event-service is the only connectivity service that calls api.frontegg.com itself
+        # (FronteggAuthenticator.onModuleInit), so it is the only one that needs the vendor
+        # credentials. Left unmapped it inherits the chart's literal placeholders
+        # ("frontegg_client_id" / "frontegg_api_key") from its own subchart Secret, frontegg
+        # 401s, and the process exits: "Failed to authenticate 3 times. Shutting down..."
+        #
+        # These come from the flat keys on dozuki-infra-credentials (helm #158) rather than
+        # frontegg.json — configuration.secrets maps an env var to one secret KEY and cannot
+        # index into a JSON document. Explicit env beats the subchart's envFrom secretRef.
+        configuration = { secrets = { "dozuki-infra-credentials" = {
+          FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "master_password"
+          FRONTEGG_CLIENT_ID                = "frontegg_client_id"
+          FRONTEGG_API_KEY                  = "frontegg_api_key"
+        } } }
+        messageBroker = { brokerList = var.msk_bootstrap_brokers }
+        redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING (was --set-string)
       }
       "connectors-worker" = {
         image            = { repository = "${var.image_repository}/hybrid-connectors-worker" }
