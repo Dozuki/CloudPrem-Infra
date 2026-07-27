@@ -256,6 +256,17 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		}
 	}
 
+	// Greenfield only: compare each seeded database against the schema dump in the
+	// deployed image. The migration Job reporting Complete does not mean the schema is
+	// complete — a rejected statement truncates the import and the retry then skips the
+	// whole block and exits 0. Nothing else in this run asks that question.
+	if rm.Scenario == "fresh" {
+		step("verifying greenfield schema matches the image's dumps")
+		if serr := validation.AssertFreshSchemaComplete(kc, rm.Namespace); serr != nil {
+			return fmt.Errorf("schema validation: %w", serr)
+		}
+	}
+
 	if rm.Scenario == "upgrade" {
 		wantChart, _ := p.Matrix.VersionVar(rm.ToRef, "chart_version").(string)
 		step("verifying upgrade proof (advanced from rev %d; chart %q)", rm.BaselineRev, wantChart)
