@@ -50,8 +50,16 @@ task_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Na
 task_status() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none; }
 bi_task_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null; }
 bi_task_status() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none; }
-primary_secret() { aws secretsmanager list-secrets --region "$REGION" --query "SecretList[?starts_with(Name, '${ID}-database')].ARN | [0]" --output text; }
-migration_secret() { aws secretsmanager list-secrets --region "$REGION" --query "SecretList[?starts_with(Name, '${ID}-aurora-migration')].ARN | [0]" --output text; }
+# NOTE: the projection query has NO `| [0]`. A `| [0]` inside --query is a
+# pipe-expression the AWS CLI evaluates PER PAGE of paginated list-secrets
+# results, so a page without a match emits "None" and the match on a later page
+# emits the ARN - the caller then sees "None" first and the whole chain fails.
+# The bare projection aggregates across every page; we pick the first real ARN.
+first_secret_arn() { # $1 = name prefix
+  aws secretsmanager list-secrets --region "$REGION" --query "SecretList[?starts_with(Name, '$1')].ARN" --output text | tr '\t' '\n' | grep -v '^None$' | grep . | head -1
+}
+primary_secret() { first_secret_arn "${ID}-database"; }
+migration_secret() { first_secret_arn "${ID}-aurora-migration"; }
 src_pg() { aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text; }
 primary_secret_host() { aws secretsmanager get-secret-value --region "$REGION" --secret-id "$(primary_secret)" --query SecretString --output text | jq -r .host; }
 
