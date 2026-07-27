@@ -92,9 +92,13 @@ module "aurora" {
         { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
         { name = "binlog_row_image", value = "full", apply_method = "pending-reboot" },
         { name = "binlog_checksum", value = "NONE", apply_method = "pending-reboot" },
-        # Explicit even though 0 is the engine default: it must match the RDS
-        # source at migration time and is immutable after cluster creation.
-        { name = "lower_case_table_names", value = "0", apply_method = "pending-reboot" },
+        # lower_case_table_names is intentionally NOT set here even though the
+        # migration requires 0 (it must match the RDS source). 0 IS the engine
+        # default, and AWS refuses ModifyDBClusterParameterGroup on that
+        # parameter once the PG is associated with a live cluster - so an
+        # explicit entry bricks every EXISTING aurora env's first apply of this
+        # code (caught on dev-min). The migration runner asserts the effective
+        # value at its gates instead.
       ],
       # Migration-only relaxations, removed again after cleanup. local_infile is
       # required by DMS full load; the event scheduler stays OFF until the
