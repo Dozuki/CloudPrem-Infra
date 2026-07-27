@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.21.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.2...v7.21.3) (2026-07-27)
+
+
+### Bug Fixes
+
+* **logical:** give event-service real frontegg credentials ([#316](https://github.com/Dozuki/CloudPrem-Infra/issues/316)) ([cddf57d](https://github.com/Dozuki/CloudPrem-Infra/commit/cddf57d490f66c9af52a27fdd6c168f74dc694e1))
+
 ## [7.21.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.1...v7.21.2) (2026-07-26)
 
 
