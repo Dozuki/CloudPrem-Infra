@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.22.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.3...v7.22.0) (2026-07-27)
+
+
+### Features
+
+* **physical:** aurora_migration_state - RDS to Aurora alongside-migration rig ([#320](https://github.com/Dozuki/CloudPrem-Infra/issues/320)) ([9f0623c](https://github.com/Dozuki/CloudPrem-Infra/commit/9f0623c9b9b9b76f71b42acb3b705bf50e38c2a4))
+
 ## [7.21.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.2...v7.21.3) (2026-07-27)
 
 
