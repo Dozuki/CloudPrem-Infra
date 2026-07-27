@@ -13,8 +13,26 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-// AssertDRExistence: DR-region buckets exist + versioned; replicated RDS backup present.
-func AssertDRExistence(ctx context.Context, drRegion string, drBuckets []string, sourceDBIdentifier string) error {
+// AssertDRExistence: DR-region buckets exist + are versioned, and the database's
+// cross-region DR artifact is actually present.
+//
+// Which artifact that is depends on db_engine, and the check must not assume:
+//
+//	aurora (the default) — an Aurora Global Database with a headless secondary cluster
+//	                       in the DR region. There is no replicated instance backup.
+//	rds                  — cross-region automated backup replication.
+//
+// This check only knew the rds shape, and looked it up by a `db_identifier` physical
+// output that does not exist — so it read "", searched for a backup belonging to nothing,
+// and failed every aurora run with the empty-identifier message
+//
+//	no replicated automated backup for  in us-west-2
+//
+// while the actual Aurora DR (global cluster + headless secondary, both present in the
+// outputs) went entirely unverified. Engine is inferred from which output is populated
+// rather than threaded through, so a stack that emits neither is a hard failure instead of
+// a silent pass — the failure mode that hid this.
+func AssertDRExistence(ctx context.Context, drRegion string, drBuckets []string, outs StackOutputs) error {
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(drRegion))
 	if err != nil {
 		return err
@@ -29,17 +47,66 @@ func AssertDRExistence(ctx context.Context, drRegion string, drBuckets []string,
 			return fmt.Errorf("DR bucket %s versioning=%s, want Enabled", b, v.Status)
 		}
 	}
+
 	rc := rds.NewFromConfig(cfg)
+
+	switch {
+	case outs.AuroraDRGlobalClusterID != "":
+		return assertAuroraGlobalDR(ctx, rc, drRegion, outs)
+	case outs.DRBackupReplicationARN != "":
+		return assertRDSBackupReplication(ctx, rc, drRegion, outs.DRBackupReplicationARN)
+	default:
+		return fmt.Errorf("DR is enabled but the stack emitted no DR database artifact "+
+			"(aurora_dr_global_cluster_id and dr_rds_backup_replication_arn are both empty) — "+
+			"nothing to verify in %s", drRegion)
+	}
+}
+
+// assertAuroraGlobalDR verifies the global cluster exists and actually has a member in the
+// DR region. Existence of the global cluster alone is not enough: adoption stamps the
+// PRIMARY into it immediately, so a global cluster with only the primary as a member looks
+// healthy while providing no DR at all.
+func assertAuroraGlobalDR(ctx context.Context, rc *rds.Client, drRegion string, outs StackOutputs) error {
+	id := outs.AuroraDRGlobalClusterID
+	out, err := rc.DescribeGlobalClusters(ctx, &rds.DescribeGlobalClustersInput{
+		GlobalClusterIdentifier: aws.String(id),
+	})
+	if err != nil {
+		return fmt.Errorf("describe global cluster %s: %w", id, err)
+	}
+	for _, g := range out.GlobalClusters {
+		if g.GlobalClusterIdentifier == nil || *g.GlobalClusterIdentifier != id {
+			continue
+		}
+		for _, m := range g.GlobalClusterMembers {
+			if m.DBClusterArn == nil {
+				continue
+			}
+			// Members carry their region in the ARN; a member in drRegion is the
+			// secondary. IsWriter is the primary, which lives in the source region.
+			if strings.Contains(*m.DBClusterArn, ":"+drRegion+":") {
+				return nil
+			}
+		}
+		return fmt.Errorf("Aurora global cluster %s has no member in %s (members: %d) — "+
+			"the DR secondary did not join", id, drRegion, len(g.GlobalClusterMembers))
+	}
+	return fmt.Errorf("Aurora global cluster %s not found", id)
+}
+
+// assertRDSBackupReplication verifies a replicated automated backup exists in the DR
+// region, matched on the source instance ARN the physical layer reports.
+func assertRDSBackupReplication(ctx context.Context, rc *rds.Client, drRegion, sourceARN string) error {
 	ab, err := rc.DescribeDBInstanceAutomatedBackups(ctx, &rds.DescribeDBInstanceAutomatedBackupsInput{})
 	if err != nil {
 		return err
 	}
 	for _, b := range ab.DBInstanceAutomatedBackups {
-		if b.DBInstanceIdentifier != nil && *b.DBInstanceIdentifier == sourceDBIdentifier {
+		if b.DBInstanceArn != nil && *b.DBInstanceArn == sourceARN {
 			return nil
 		}
 	}
-	return fmt.Errorf("no replicated automated backup for %s in %s", sourceDBIdentifier, drRegion)
+	return fmt.Errorf("no replicated automated backup for %s in %s", sourceARN, drRegion)
 }
 
 // AssertS3ReplicationFlow: put a canary in the source bucket, poll the DR bucket.

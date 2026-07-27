@@ -214,7 +214,7 @@ func runInfraValidators(ctx context.Context, p RunParams, region string, caps Ca
 
 	if p.EnableDR && caps.HasDR {
 		// Existence check: DR buckets versioned + replicated RDS backup present.
-		if derr := validation.AssertDRExistence(ctx, p.DRRegion, outs.DRBucketNames, outs.DBIdentifier); derr != nil {
+		if derr := validation.AssertDRExistence(ctx, p.DRRegion, outs.DRBucketNames, outs); derr != nil {
 			return fmt.Errorf("DR existence: %w", derr)
 		}
 
@@ -232,11 +232,26 @@ func runInfraValidators(ctx context.Context, p RunParams, region string, caps Ca
 		step("skipped: DR (enable_dr set but no DR outputs in %s)", p.ToRef)
 	}
 
-	// Restore drill — only when requested (full config).
+	// Restore drill — only when requested (full config), and only on the rds engine.
+	//
+	// The drill restores a replicated automated backup, which is an RDS-INSTANCE feature.
+	// Aurora has no such artifact: its DR is a global cluster whose secondary is promoted,
+	// a materially different operation this harness does not implement. Since db_engine
+	// now defaults to aurora, that is the common path — so say so out loud rather than
+	// attempting it and reporting a confusing "no automated-backup ARN for ''".
 	if p.RestoreDrill {
-		step("restore drill: restoring %s from DR backup in %s", outs.DBIdentifier, p.DRRegion)
-		if rderr := validation.RestoreDrill(ctx, p.DRRegion, outs.DBIdentifier, p.RunID); rderr != nil {
-			return fmt.Errorf("restore drill: %w", rderr)
+		switch {
+		case outs.DRBackupReplicationARN != "":
+			step("restore drill: restoring %s from DR backup in %s", outs.DRBackupReplicationARN, p.DRRegion)
+			if rderr := validation.RestoreDrill(ctx, p.DRRegion, outs.DRBackupReplicationARN, p.RunID); rderr != nil {
+				return fmt.Errorf("restore drill: %w", rderr)
+			}
+		case outs.AuroraDRGlobalClusterID != "":
+			step("SKIPPED (not implemented): restore drill on the aurora engine — DR is global cluster %s, "+
+				"which is promoted rather than restored; this run proves the secondary EXISTS, not that it recovers",
+				outs.AuroraDRGlobalClusterID)
+		default:
+			return fmt.Errorf("restore drill requested but the stack emitted no DR database artifact")
 		}
 	}
 	return nil
@@ -313,7 +328,9 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 //   - guide_pdfs_bucket     → GuideBuckets[2] (if non-empty)
 //   - documents_bucket      → GuideBuckets[3] (if non-empty)
 //   - dr_s3_bucket_names    → DRBucketNames (values from the map)
-//   - db_identifier         → DBIdentifier
+//   - aurora_dr_global_cluster_id  → AuroraDRGlobalClusterID (aurora engine)
+//   - aurora_dr_secondary_endpoint → AuroraDRSecondaryHost   (aurora engine)
+//   - dr_rds_backup_replication_arn → DRBackupReplicationARN (rds engine)
 func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 	logical, err := tg.OutputJSON("logical")
 	if err != nil {
@@ -361,14 +378,16 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 	}
 
 	return validation.StackOutputs{
-		DozukiURL:     str(logical, "dozuki_url"),
-		ClusterName:   str(physical, "eks_cluster_id"),
-		Region:        region,
-		DMSTaskARN:    str(physical, "dms_task_arn"),
-		DMSEnabled:    boolVal(physical, "dms_enabled"),
-		GuideBuckets:  guideBuckets,
-		DRBucketNames: drBucketNames,
-		DBIdentifier:  str(physical, "db_identifier"),
+		DozukiURL:               str(logical, "dozuki_url"),
+		ClusterName:             str(physical, "eks_cluster_id"),
+		Region:                  region,
+		DMSTaskARN:              str(physical, "dms_task_arn"),
+		DMSEnabled:              boolVal(physical, "dms_enabled"),
+		GuideBuckets:            guideBuckets,
+		DRBucketNames:           drBucketNames,
+		AuroraDRGlobalClusterID: str(physical, "aurora_dr_global_cluster_id"),
+		AuroraDRSecondaryHost:   str(physical, "aurora_dr_secondary_endpoint"),
+		DRBackupReplicationARN:  str(physical, "dr_rds_backup_replication_arn"),
 	}, nil
 }
 
