@@ -225,7 +225,7 @@ EOF
 # leaves them behind). Two families: the containerinsights groups the CloudWatch addon
 # creates, and /aws/lambda/<identifier>-* which Lambda creates on first invocation —
 # the latter outlived every teardown and was the last straggler on each run.
-for prefix in "/aws/containerinsights/${CUSTOMER}-" "/aws/lambda/${CUSTOMER}-"; do
+for prefix in "/aws/containerinsights/${CUSTOMER}-" "/aws/lambda/${CUSTOMER}-" "dms-tasks-${CUSTOMER}-"; do
   for lg in $(aws logs describe-log-groups --region "$R" --profile "$P" \
         --query "logGroups[?starts_with(logGroupName,'${prefix}')].logGroupName" --output text 2>/dev/null); do
     aws logs delete-log-group --log-group-name "$lg" --region "$R" --profile "$P" 2>/dev/null && echo "  deleted log group: $lg"
