@@ -15,17 +15,19 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | ~> 6.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | ~> 6.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.56.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.56.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.56.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
 | <a name="module_aurora"></a> [aurora](#module\_aurora) | terraform-aws-modules/rds-aurora/aws | 10.2.0 |
+| <a name="module_aurora_migration_dms_sg"></a> [aurora\_migration\_dms\_sg](#module\_aurora\_migration\_dms\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
+| <a name="module_aurora_migration_guard_sg"></a> [aurora\_migration\_guard\_sg](#module\_aurora\_migration\_guard\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
 | <a name="module_bastion"></a> [bastion](#module\_bastion) | terraform-aws-modules/autoscaling/aws | ~> 9.0 |
 | <a name="module_bastion_sg"></a> [bastion\_sg](#module\_bastion\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
 | <a name="module_bi_database_sg"></a> [bi\_database\_sg](#module\_bi\_database\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
@@ -66,11 +68,17 @@
 | [aws_db_parameter_group.bi_replica](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_parameter_group) | resource |
 | [aws_db_parameter_group.default](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_parameter_group) | resource |
 | [aws_db_subnet_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_subnet_group) | resource |
+| [aws_dms_certificate.aurora_migration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_certificate) | resource |
 | [aws_dms_certificate.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_certificate) | resource |
+| [aws_dms_endpoint.aurora_migration_source](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_endpoint) | resource |
+| [aws_dms_endpoint.aurora_migration_target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_endpoint) | resource |
 | [aws_dms_endpoint.source](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_endpoint) | resource |
 | [aws_dms_endpoint.target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_endpoint) | resource |
+| [aws_dms_replication_instance.aurora_migration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_instance) | resource |
 | [aws_dms_replication_instance.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_instance) | resource |
+| [aws_dms_replication_subnet_group.aurora_migration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_subnet_group) | resource |
 | [aws_dms_replication_subnet_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_subnet_group) | resource |
+| [aws_dms_replication_task.aurora_migration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_task) | resource |
 | [aws_dms_replication_task.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dms_replication_task) | resource |
 | [aws_eks_pod_identity_association.app_default](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
 | [aws_eks_pod_identity_association.app_migration_wait](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_pod_identity_association) | resource |
@@ -152,6 +160,7 @@
 | [aws_security_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group_rule.aurora_migration_dms_to_rds](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
@@ -170,6 +179,7 @@
 | [aws_vpc.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
+| [null_resource.create_dms_access_for_tasks_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_vpc_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.replication_control](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
@@ -193,6 +203,7 @@
 | [aws_iam_policy_document.s3_replication_assume_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_role.dms-cloudwatch-role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
 | [aws_iam_role.dms-vpc-role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
+| [aws_iam_roles.dms-access-for-tasks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_roles) | data source |
 | [aws_iam_roles.dms-cloudwatch-roles](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_roles) | data source |
 | [aws_iam_roles.dms-vpc-roles](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_roles) | data source |
 | [aws_kms_key.eks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
@@ -219,6 +230,10 @@
 | <a name="input_app_public_access"></a> [app\_public\_access](#input\_app\_public\_access) | Should the app and dashboard be accessible via a publicly routable IP and domain? | `bool` | `true` | no |
 | <a name="input_aurora_engine_version"></a> [aurora\_engine\_version](#input\_aurora\_engine\_version) | Aurora MySQL engine version, full aws RDS format (e.g. 8.4.mysql\_aurora.8.4.7 — the bare 8.4.7 is rejected with 'Cannot find version'). Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade. | `string` | `"8.4.mysql_aurora.8.4.7"` | no |
 | <a name="input_aurora_max_acu"></a> [aurora\_max\_acu](#input\_aurora\_max\_acu) | Aurora Serverless v2 maximum capacity (ACUs). | `number` | `16` | no |
+| <a name="input_aurora_migration_dms_engine_version"></a> [aurora\_migration\_dms\_engine\_version](#input\_aurora\_migration\_dms\_engine\_version) | Pinned DMS engine version for the migration rig (run-to-run reproducibility; 3.6.1 = the rehearsal-proven version). | `string` | `"3.6.1"` | no |
+| <a name="input_aurora_migration_dms_instance_type"></a> [aurora\_migration\_dms\_instance\_type](#input\_aurora\_migration\_dms\_instance\_type) | Replication instance class for the Aurora migration DMS rig. | `string` | `"dms.c5.large"` | no |
+| <a name="input_aurora_migration_dms_storage"></a> [aurora\_migration\_dms\_storage](#input\_aurora\_migration\_dms\_storage) | Allocated storage (GB) for the Aurora migration DMS replication instance. | `number` | `100` | no |
+| <a name="input_aurora_migration_state"></a> [aurora\_migration\_state](#input\_aurora\_migration\_state) | RDS -> Aurora DMS migration state machine (aurora-migration.tf). off = no<br>migration (default). provision = Aurora comes up empty alongside the live RDS,<br>guarded to DMS+bastion, with the DMS rig created but not started. cutover =<br>connection facts (secret/outputs/BI DMS/bastion) flip to Aurora and the app SG<br>path opens - apply only at the migration runner's go-live gate. cleanup = the<br>DMS rig is removed; Aurora stays primary, the RDS survives as the fail-forward<br>net until the env's final db\_engine="aurora" flip. Only meaningful while<br>db\_engine="rds". | `string` | `"off"` | no |
 | <a name="input_aurora_min_acu"></a> [aurora\_min\_acu](#input\_aurora\_min\_acu) | Aurora Serverless v2 minimum capacity (ACUs). | `number` | `0.5` | no |
 | <a name="input_aurora_snapshot_identifier"></a> [aurora\_snapshot\_identifier](#input\_aurora\_snapshot\_identifier) | Optional RDS DB snapshot ARN to restore the Aurora cluster from (migration path). Empty = fresh cluster. | `string` | `""` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
@@ -278,6 +293,8 @@
 |------|-------------|
 | <a name="output_aurora_dr_global_cluster_id"></a> [aurora\_dr\_global\_cluster\_id](#output\_aurora\_dr\_global\_cluster\_id) | Aurora global cluster id (empty unless the Aurora DR secondary is enabled). |
 | <a name="output_aurora_dr_secondary_endpoint"></a> [aurora\_dr\_secondary\_endpoint](#output\_aurora\_dr\_secondary\_endpoint) | Reader endpoint of the headless DR secondary (populated once instances exist post-failover). |
+| <a name="output_aurora_migration_target_endpoint"></a> [aurora\_migration\_target\_endpoint](#output\_aurora\_migration\_target\_endpoint) | Aurora cluster writer endpoint during a migration (empty otherwise). Runner/runbook convenience; the app only ever sees it through the credentials secret after cutover. |
+| <a name="output_aurora_migration_task_arn"></a> [aurora\_migration\_task\_arn](#output\_aurora\_migration\_task\_arn) | ARN of the Aurora migration DMS task (empty when no migration is active). Consumed by the migration runner. |
 | <a name="output_azs_count"></a> [azs\_count](#output\_azs\_count) | n/a |
 | <a name="output_bastion_asg_name"></a> [bastion\_asg\_name](#output\_bastion\_asg\_name) | n/a |
 | <a name="output_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#output\_bi\_database\_credential\_secret) | If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database. |

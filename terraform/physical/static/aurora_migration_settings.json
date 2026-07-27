@@ -1,0 +1,33 @@
+{
+  "TargetMetadata": {
+    "TargetSchema": "",
+    "SupportLobs": true,
+    "FullLobMode": false,
+    "LimitedSizeLobMode": true,
+    "LobMaxSize": 128,
+    "BatchApplyEnabled": false,
+    "TaskRecoveryTableEnabled": false
+  },
+  "FullLoadSettings": {
+    "TargetTablePrepMode": "DO_NOTHING",
+    "StopTaskCachedChangesApplied": true,
+    "StopTaskCachedChangesNotApplied": false,
+    "MaxFullLoadSubTasks": 8,
+    "CommitRate": 10000
+  },
+  "ValidationSettings": {
+    "EnableValidation": true,
+    "ValidationMode": "ROW_LEVEL",
+    "ThreadCount": 5,
+    "FailureMaxCount": 10000,
+    "TableFailureMaxCount": 1000
+  },
+  "ErrorBehavior": {
+    "DataErrorPolicy": "STOP_TASK",
+    "DataTruncationErrorPolicy": "STOP_TASK",
+    "TableErrorPolicy": "STOP_TASK",
+    "DataErrorEscalationPolicy": "STOP_TASK"
+  },
+  "Logging": { "EnableLogging": true },
+  "ControlTablesSettings": { "ControlSchema": "awsdms_control" }
+}
