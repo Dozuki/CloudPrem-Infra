@@ -39,10 +39,18 @@ die() { say "FATAL: $*" >&2; exit 1; }
 
 # --- discovery ---------------------------------------------------------------
 bastion_id() {
-  aws ec2 describe-instances --region "$REGION" \
+  # Pin the Name tag to "<id>-bastion", NOT tag:Environment. A 3M account keeps
+  # both the new Dozuki-managed (m3-*) and the legacy (mmm-*) bastion, and BOTH
+  # carry Environment=<env>. Matching on Environment alone grabs whichever
+  # Reservations[0] happens to be first - often the legacy bastion, which sits
+  # in a different VPC and cannot route to the m3 RDS (connect times out).
+  local id
+  id=$(aws ec2 describe-instances --region "$REGION" \
     --filters "Name=tag:Role,Values=Bastion" "Name=instance-state-name,Values=running" \
-               "Name=tag:Environment,Values=${ID#*-}" \
-    --query 'Reservations[0].Instances[0].InstanceId' --output text
+               "Name=tag:Name,Values=${ID}-bastion" \
+    --query 'Reservations[].Instances[].InstanceId' --output text | tr '\t' '\n' | grep . | head -1)
+  [ -n "$id" ] || die "no running bastion named ${ID}-bastion in $REGION"
+  printf '%s' "$id"
 }
 rds_endpoint() { aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].Endpoint.Address' --output text; }
 aurora_endpoint() { aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER_ID" --region "$REGION" --query 'DBClusters[0].Endpoint' --output text; }
@@ -150,9 +158,9 @@ echo "dangling FKs: $(wc -l < dangling-fks.txt)"; cat dangling-fks.txt
 # object artifacts: routines/events/triggers are NOT migrated by DMS and NOT in
 # base DDL. Dumped here; installed on the target by fence (after the final task
 # stop, so triggers can never fire on DMS-applied DML). Empty on the 3M fleet.
-mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-opt --databases $(tr '\n' ' ' < schemas.txt) > objects.sql
+mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-lock-tables --no-tablespaces --databases $(tr '\n' ' ' < schemas.txt) > objects.sql
 echo "object artifact counts: routines=$($S -e "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')") triggers=$($S -e "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')") events=$($S -e "SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')")"
-mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --skip-triggers --databases $(tr '\n' ' ' < schemas.txt) > full.sql
+mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --skip-triggers --skip-lock-tables --no-tablespaces --databases $(tr '\n' ' ' < schemas.txt) > full.sql
 python3 - <<'PYEOF'
 import re
 base, deferred, buf, cur_t, cur_s, inc = [], [], [], None, None, False
@@ -343,7 +351,7 @@ EOF
 set -e; umask 177
 S="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
 $S -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','information_schema','performance_schema','sys','innodb','tmp','aurora_mig_ctl') AND schema_name NOT LIKE 'awsdms%'" > /tmp/fence-schemas.txt
-mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-opt --databases $(tr '\n' ' ' < /tmp/fence-schemas.txt) > /tmp/fence-objects.sql
+mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-lock-tables --no-tablespaces --databases $(tr '\n' ' ' < /tmp/fence-schemas.txt) > /tmp/fence-objects.sql
 SRC_COUNTS="$($S -e "SELECT CONCAT((SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')),'/',(SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')))")"
 T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names"
 if [ "$SRC_COUNTS" != "0/0/0" ]; then
