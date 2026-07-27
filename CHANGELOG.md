@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.22.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.22.0...v7.22.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **physical:** aurora migration review round 2 - fence ownership, creds, gates ([#322](https://github.com/Dozuki/CloudPrem-Infra/issues/322)) ([6d9ab81](https://github.com/Dozuki/CloudPrem-Infra/commit/6d9ab81901726fa03c6af0731b301d9d31339300))
+
 ## [7.22.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.21.3...v7.22.0) (2026-07-27)
 
 
