@@ -37,6 +37,44 @@ ACCT="$(aws sts get-caller-identity --profile "$P" --query Account --output text
 BUCKET="dozuki-terraform-state-${R}-${ACCT}"
 LOCK_TABLE="dozuki-terraform-lock"
 
+# Number of managed CLOUD resource instances a run's state still tracks, summed over its
+# state files. Two kinds of entry are excluded, for different reasons:
+#
+#   data sources - re-read on every plan, own nothing.
+#   in-cluster resources (kubernetes_*, helm_*, vault_*) - these live inside the EKS
+#     cluster this same state built. Once the cluster is gone they refer to nothing and
+#     cannot be destroyed even in principle; a stranded kubernetes_namespace_v1 is not a
+#     reason to keep a dead state forever. verify-clean scans the account for the cluster
+#     itself, so a surviving cluster is caught there rather than inferred from here.
+#
+# What is left is the cloud footprint - the things that actually cost money and hold
+# quota. Zero of those means the stack is genuinely gone.
+#
+# Prints -1 if any state file cannot be read or parsed, which callers must treat as "might
+# still manage something" — this decides whether state is safe to delete, so an unreadable
+# file has to fail closed.
+managed_resource_count() {
+  local prefix="$1" total=0 n k
+  for k in $(aws s3 ls "s3://$BUCKET/$prefix/" --recursive --profile "$P" 2>/dev/null \
+             | awk '$4 ~ /terraform\.tfstate$/ {print $4}'); do
+    n=$(aws s3 cp "s3://$BUCKET/$k" - --profile "$P" 2>/dev/null | python3 -c '
+import json, sys
+CLOUD = ("aws_", "azurerm_")
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(-1); raise SystemExit
+print(sum(1 for r in d.get("resources", [])
+          if r.get("mode") == "managed"
+          and r.get("instances")
+          and str(r.get("type", "")).startswith(CLOUD)))' 2>/dev/null)
+    [ -z "$n" ] && n=-1
+    if [ "$n" -lt 0 ]; then echo -1; return; fi
+    total=$((total + n))
+  done
+  echo "$total"
+}
+
 # Target prefixes, filtered to those that START WITH an arg — so a full prefix matches
 # itself, and a RUN_ID like "local-<ts>-" matches all of that run's per-config prefixes
 # (and nothing else).
@@ -185,9 +223,24 @@ while IFS= read -r pfx; do
   fi
 
   # 4) Purge state objects ONLY if the destroy succeeded (else keep state so it can retry).
+  #
+  # "Keep it for retry" is right when a destroy failed on something transient, but wrong
+  # when the destroy could not run at all. Once a run's worktree is gone the fallback is
+  # the LIVE tree, where find_in_parent_folders has no terragrunt.hcl to find, so the
+  # destroy fails identically forever. The prefix is then kept forever, verify-clean
+  # reports it as a leak forever, and no future cycle can ever start — a deadlock that
+  # has to be broken by hand (observed: cycle 14 refused to start against an account
+  # whose only "leak" was the dead state of an already-destroyed stack).
+  #
+  # Ask terraform instead of guessing: a state whose entries are all data sources manages
+  # nothing, so there is nothing left to destroy and nothing a retry could accomplish.
+  # Anything unreadable counts as "might still manage something" and is kept.
   if [ "${DRY_RUN:-0}" = 1 ]; then
     echo "  DRY_RUN: would purge state prefix $pfx (only if the real destroy succeeded)"
   elif [ "$destroyed_ok" -eq 0 ] || [ -z "$key" ]; then
+    aws s3 rm "s3://$BUCKET/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
+  elif [ "$(managed_resource_count "$pfx")" = 0 ]; then
+    echo "  destroy could not run, but the state manages 0 resources (data sources only) — purging dead prefix: $pfx" >&2
     aws s3 rm "s3://$BUCKET/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
   else
     echo "  destroy did NOT fully succeed — state prefix kept for retry: $pfx" >&2
