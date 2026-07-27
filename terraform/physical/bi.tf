@@ -18,7 +18,8 @@ data "aws_iam_roles" "dms-cloudwatch-roles" {
 # We create the dms-vpc-role and dms-cloudwatch-logs-role using a null_resource to prevent the removal of the
 # account-wide role should this stack be deleted. In other words, to keep the role out of the state.
 resource "null_resource" "create_dms_vpc_role" {
-  count = local.dms_enabled ? length(data.aws_iam_role.dms-vpc-role) > 0 ? 0 : 1 : 0
+  # Needed by BI DMS and the Aurora migration rig alike.
+  count = (local.dms_enabled || local.aurora_migration_dms) ? length(data.aws_iam_role.dms-vpc-role) > 0 ? 0 : 1 : 0
 
   provisioner "local-exec" {
     command = <<-EOT
@@ -32,7 +33,8 @@ resource "null_resource" "create_dms_vpc_role" {
   }
 }
 resource "null_resource" "create_dms_cloudwatch_role" {
-  count = local.dms_enabled ? length(data.aws_iam_role.dms-cloudwatch-role) > 0 ? 0 : 1 : 0
+  # Needed by BI DMS and the Aurora migration rig alike.
+  count = (local.dms_enabled || local.aurora_migration_dms) ? length(data.aws_iam_role.dms-cloudwatch-role) > 0 ? 0 : 1 : 0
 
   provisioner "local-exec" {
     command = <<-EOT
