@@ -212,7 +212,20 @@ EOF
 
 load)
   [ "$(task_status)" = "ready" ] || die "task not ready (status=$(task_status))"
-  aws dms start-replication-task-assessment --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null 2>&1 && say "premigration assessment started" || say "WARN: assessment API unavailable - preload inventory gates stand in"
+  if aws dms start-replication-task-assessment --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null 2>&1; then
+    # The legacy assessment flips the task to "testing" and back to "ready" when
+    # its report is written. StartReplicationTask is refused (InvalidResourceState)
+    # while "testing", so wait for the task to settle before starting the load.
+    say "premigration assessment started - waiting for it to settle"
+    AWAIT=0
+    while :; do s=$(task_status); [ "$s" = "ready" ] && break
+      [ "$s" = "failed" ] && die "task failed during assessment"
+      AWAIT=$((AWAIT+1)); [ "$AWAIT" -gt 60 ] && die "assessment did not settle to ready in 10m (status=$s)"
+      say "  assessment: task=$s"; sleep 10
+    done
+  else
+    say "WARN: assessment API unavailable - preload inventory gates stand in"
+  fi
   say "starting full load + CDC"
   aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type start-replication --region "$REGION" >/dev/null
   say "waiting for the automatic post-full-load stop"
@@ -229,8 +242,19 @@ EOF
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
   aws dms modify-endpoint --endpoint-arn "$TEP" --extra-connection-attributes "" --region "$REGION" >/dev/null
   RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
-  aws dms test-connection --replication-instance-arn "$RIARN" --endpoint-arn "$TEP" --region "$REGION" >/dev/null
-  while [ "$(aws dms describe-connections --region "$REGION" --filters "Name=endpoint-arn,Values=$TEP" --query 'Connections[0].Status' --output text)" != "successful" ]; do sleep 10; done
+  # modify-endpoint auto-triggers its own connection test, so issuing ours races
+  # with "Connection is already being tested" (InvalidResourceState). Tolerate
+  # that - the poll below is the real gate - and bound the wait so a genuinely
+  # broken endpoint fails loudly instead of looping forever.
+  aws dms test-connection --replication-instance-arn "$RIARN" --endpoint-arn "$TEP" --region "$REGION" >/dev/null 2>&1 || true
+  CWAIT=0
+  while :; do
+    cs=$(aws dms describe-connections --region "$REGION" --filters "Name=endpoint-arn,Values=$TEP" --query 'Connections[0].Status' --output text 2>/dev/null || echo none)
+    [ "$cs" = "successful" ] && break
+    [ "$cs" = "failed" ] && die "target endpoint connection test failed after Initstmt removal"
+    CWAIT=$((CWAIT+1)); [ "$CWAIT" -gt 30 ] && die "target endpoint connection did not go successful in 5m (status=$cs)"
+    sleep 10
+  done
   say "resuming CDC (fresh sessions, FK checks ON)"
   aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
   while [ "$(task_status)" != "running" ]; do sleep 10; done
