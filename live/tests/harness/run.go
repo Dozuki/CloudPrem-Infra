@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -218,13 +219,14 @@ func runInfraValidators(ctx context.Context, p RunParams, region string, caps Ca
 			return fmt.Errorf("DR existence: %w", derr)
 		}
 
-		// S3 replication flow: one representative check — first guide bucket vs first
-		// DR bucket. A full per-bucket pairing is non-trivial (the map key ordering
-		// from dr_s3_bucket_names is not guaranteed to align with guide bucket order),
-		// so we validate a single representative pair; the existence check covers all
-		// DR buckets above.
+		// S3 replication flow: every source->DR pair, matched by kind. The map key
+		// ordering genuinely does not align with guide bucket order — which is why
+		// pairing by index put the canary in the image bucket and waited for it in the
+		// doc bucket. Keyed pairing makes all four checkable for the same wall-clock.
 		if caps.HasGuideBuckets {
-			if rerr := validation.AssertS3ReplicationFlow(ctx, region, p.DRRegion, outs.GuideBuckets[0], outs.DRBucketNames[0], p.RunID); rerr != nil {
+			pairs := validation.SourceDRBucketPairs(outs)
+			step("DR S3 replication: canarying %d source->DR bucket pair(s)", len(pairs))
+			if rerr := validation.AssertS3ReplicationFlowAll(ctx, region, p.DRRegion, pairs, p.RunID); rerr != nil {
 				return fmt.Errorf("DR S3 replication flow: %w", rerr)
 			}
 		}
@@ -357,25 +359,40 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		return false
 	}
 
-	// Collect non-empty guide bucket names from the four typed outputs.
+	// Guide buckets, kept BOTH as a flat list (existence checks) and keyed by kind. The
+	// kind keys match dr_s3_bucket_names' own keys, which is what makes a source bucket
+	// pairable with its DR counterpart — see SourceDRBucketPairs.
+	guideBucketKinds := map[string]string{
+		"guide_images_bucket":  "image",
+		"guide_objects_bucket": "obj",
+		"guide_pdfs_bucket":    "pdf",
+		"documents_bucket":     "doc",
+	}
 	var guideBuckets []string
+	guideByKind := map[string]string{}
 	for _, key := range []string{"guide_images_bucket", "guide_objects_bucket", "guide_pdfs_bucket", "documents_bucket"} {
 		if name := str(physical, key); name != "" {
 			guideBuckets = append(guideBuckets, name)
+			guideByKind[guideBucketKinds[key]] = name
 		}
 	}
 
-	// dr_s3_bucket_names is a map[string]string output; collect its values.
+	// dr_s3_bucket_names is a map[string]string output keyed by kind (image/obj/pdf/doc).
+	// Keep the keys: dropping them to a bare list is what made the replication check pair
+	// buckets by array index, i.e. arbitrarily.
 	var drBucketNames []string
+	drByKind := map[string]string{}
 	if v, ok := physical["dr_s3_bucket_names"]; ok {
 		if m, ok := v.(map[string]interface{}); ok {
-			for _, val := range m {
+			for kind, val := range m {
 				if s, ok := val.(string); ok && s != "" {
 					drBucketNames = append(drBucketNames, s)
+					drByKind[kind] = s
 				}
 			}
 		}
 	}
+	sort.Strings(drBucketNames) // stable ordering for logs; pairing uses the kind map
 
 	return validation.StackOutputs{
 		DozukiURL:               str(logical, "dozuki_url"),
@@ -384,7 +401,9 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		DMSTaskARN:              str(physical, "dms_task_arn"),
 		DMSEnabled:              boolVal(physical, "dms_enabled"),
 		GuideBuckets:            guideBuckets,
+		GuideBucketByKind:       guideByKind,
 		DRBucketNames:           drBucketNames,
+		DRBucketByKind:          drByKind,
 		AuroraDRGlobalClusterID: str(physical, "aurora_dr_global_cluster_id"),
 		AuroraDRSecondaryHost:   str(physical, "aurora_dr_secondary_endpoint"),
 		DRBackupReplicationARN:  str(physical, "dr_rds_backup_replication_arn"),

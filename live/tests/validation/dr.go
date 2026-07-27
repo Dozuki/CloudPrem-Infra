@@ -109,31 +109,160 @@ func assertRDSBackupReplication(ctx context.Context, rc *rds.Client, drRegion, s
 	return fmt.Errorf("no replicated automated backup for %s in %s", sourceARN, drRegion)
 }
 
-// AssertS3ReplicationFlow: put a canary in the source bucket, poll the DR bucket.
+// SourceDRBucketPairs matches each source guide bucket with its DR counterpart BY KIND.
+//
+// The previous code paired them by array index — guideBuckets[0] against
+// drBucketNames[0] — with a comment conceding the orderings were not guaranteed to
+// align and calling one pair "representative". They do not align: guideBuckets[0] is the
+// image bucket, while dr_s3_bucket_names iterates to "doc" first. So the canary was
+// written to the IMAGE source bucket and awaited in the DOC DR bucket, which cannot ever
+// replicate. The check could only fail, and did, the first time a run reached it.
+//
+// Both outputs are keyed by the same kinds (image/obj/pdf/doc), so pair on those and the
+// question becomes answerable.
+func SourceDRBucketPairs(outs StackOutputs) []BucketPair {
+	var pairs []BucketPair
+	for _, kind := range []string{"image", "obj", "pdf", "doc"} {
+		src, dst := outs.GuideBucketByKind[kind], outs.DRBucketByKind[kind]
+		if src != "" && dst != "" {
+			pairs = append(pairs, BucketPair{Kind: kind, Source: src, DR: dst})
+		}
+	}
+	return pairs
+}
+
+// BucketPair is one source bucket and the DR bucket it replicates into.
+type BucketPair struct {
+	Kind   string
+	Source string
+	DR     string
+}
+
+// AssertS3ReplicationFlow puts a canary in the source bucket and polls its DR counterpart.
+//
+// The canary is ALWAYS removed, from both buckets, including on the failure path — and by
+// version, not with a plain DeleteObject. Both details are load-bearing on a versioned
+// bucket: a leftover canary version leaves the bucket non-empty, the DR buckets are
+// created with force_destroy = false, and terraform then cannot delete them:
+//
+//	deleting S3 Bucket (smoke-full-image-dr-...): api error BucketNotEmpty
+//
+// which failed teardown and stranded five buckets. A plain DeleteObject would not have
+// helped: on a versioned bucket it only adds a delete marker, leaving both the version and
+// the marker behind.
 func AssertS3ReplicationFlow(ctx context.Context, srcRegion, drRegion, srcBucket, drBucket, runID string) error {
 	src, err := s3client(ctx, srcRegion)
 	if err != nil {
-		return err
-	}
-	key := "_harness/dr-canary-" + runID
-	body := strings.NewReader("")
-	if _, err := src.PutObject(ctx, &s3.PutObjectInput{Bucket: &srcBucket, Key: &key, Body: body, ServerSideEncryption: s3types.ServerSideEncryptionAwsKms}); err != nil {
 		return err
 	}
 	dst, err := s3client(ctx, drRegion)
 	if err != nil {
 		return err
 	}
+	key := "_harness/dr-canary-" + runID
+
+	defer func() {
+		purgeAllVersions(ctx, src, srcBucket, key)
+		purgeAllVersions(ctx, dst, drBucket, key)
+	}()
+
+	body := strings.NewReader("")
+	if _, err := src.PutObject(ctx, &s3.PutObjectInput{Bucket: &srcBucket, Key: &key, Body: body, ServerSideEncryption: s3types.ServerSideEncryptionAwsKms}); err != nil {
+		return err
+	}
+
 	deadline := time.Now().Add(10 * time.Minute)
 	for time.Now().Before(deadline) {
 		if _, err := dst.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &drBucket, Key: &key}); err == nil {
-			_, _ = src.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &srcBucket, Key: &key})
-			_, _ = dst.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &drBucket, Key: &key})
 			return nil
 		}
 		time.Sleep(20 * time.Second)
 	}
-	return fmt.Errorf("canary %s not replicated to %s within 10m", key, drBucket)
+	return fmt.Errorf("canary %s not replicated from %s to %s within 10m", key, srcBucket, drBucket)
+}
+
+// AssertS3ReplicationFlowAll canaries EVERY source/DR pair, not one "representative" one.
+//
+// All canaries are written up front and then polled together against a single shared
+// deadline, so covering four pairs costs the same wall-clock as covering one. The old code
+// checked a single pair specifically because it could not pair them correctly; now that it
+// can, there is no reason to leave three of the four replication rules unverified.
+func AssertS3ReplicationFlowAll(ctx context.Context, srcRegion, drRegion string, pairs []BucketPair, runID string) error {
+	if len(pairs) == 0 {
+		return fmt.Errorf("no source/DR bucket pairs could be matched by kind — " +
+			"guide bucket and dr_s3_bucket_names outputs do not line up")
+	}
+	src, err := s3client(ctx, srcRegion)
+	if err != nil {
+		return err
+	}
+	dst, err := s3client(ctx, drRegion)
+	if err != nil {
+		return err
+	}
+	key := "_harness/dr-canary-" + runID
+
+	defer func() {
+		for _, pr := range pairs {
+			purgeAllVersions(ctx, src, pr.Source, key)
+			purgeAllVersions(ctx, dst, pr.DR, key)
+		}
+	}()
+
+	for _, pr := range pairs {
+		body := strings.NewReader("")
+		if _, err := src.PutObject(ctx, &s3.PutObjectInput{
+			Bucket: aws.String(pr.Source), Key: &key, Body: body,
+			ServerSideEncryption: s3types.ServerSideEncryptionAwsKms,
+		}); err != nil {
+			return fmt.Errorf("put canary in %s (%s): %w", pr.Source, pr.Kind, err)
+		}
+	}
+
+	pending := append([]BucketPair(nil), pairs...)
+	deadline := time.Now().Add(10 * time.Minute)
+	for {
+		var still []BucketPair
+		for _, pr := range pending {
+			if _, err := dst.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(pr.DR), Key: &key}); err != nil {
+				still = append(still, pr)
+			}
+		}
+		if len(still) == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			var names []string
+			for _, pr := range still {
+				names = append(names, fmt.Sprintf("%s (%s -> %s)", pr.Kind, pr.Source, pr.DR))
+			}
+			return fmt.Errorf("canary %s not replicated within 10m for: %s", key, strings.Join(names, ", "))
+		}
+		pending = still
+		time.Sleep(20 * time.Second)
+	}
+}
+
+// purgeAllVersions deletes every version and delete-marker of key. Best-effort: this runs
+// in a defer on the cleanup path, and failing to tidy a canary must not mask the real
+// result of the check.
+func purgeAllVersions(ctx context.Context, c *s3.Client, bucket, key string) {
+	out, err := c.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucket), Prefix: aws.String(key),
+	})
+	if err != nil {
+		return
+	}
+	for _, v := range out.Versions {
+		if v.Key != nil && *v.Key == key {
+			_, _ = c.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &bucket, Key: v.Key, VersionId: v.VersionId})
+		}
+	}
+	for _, m := range out.DeleteMarkers {
+		if m.Key != nil && *m.Key == key {
+			_, _ = c.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &bucket, Key: m.Key, VersionId: m.VersionId})
+		}
+	}
 }
 
 // RestoreDrill (full only): restore the replicated automated backup to a throwaway
