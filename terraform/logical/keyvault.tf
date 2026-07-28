@@ -19,10 +19,6 @@ locals {
     sentry = jsonencode({
       dsn = var.sentry_dsn
     })
-    frontegg = jsonencode({
-      clientId = var.frontegg_client_id
-      apiToken = var.frontegg_api_token
-    })
     surveyjs = jsonencode({
       licenseKey = var.surveyjs_license_key
     })

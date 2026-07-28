@@ -424,20 +424,6 @@ variable "sentry_dsn" {
   default     = ""
 }
 
-variable "frontegg_client_id" {
-  description = "Frontegg client ID (Azure only; AWS reads Vault)."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "frontegg_api_token" {
-  description = "Frontegg API token (Azure only; AWS reads Vault)."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "surveyjs_license_key" {
   description = "SurveyJS license key (Azure only; AWS reads Vault)."
   type        = string
