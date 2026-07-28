@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,6 +27,10 @@ import (
 // in seconds on a broken one instead of burning the whole budget to reach the same
 // conclusion. Timer-based waiting can only ever report "still not ready", never why.
 
+// The HelmRelease CR is created in flux-system (terraform/logical/flux.tf), NOT in the
+// namespace the release deploys into.
+const fluxNamespace = "flux-system"
+
 var helmReleaseGVR = schema.GroupVersionResource{
 	Group:    "helm.toolkit.fluxcd.io",
 	Version:  "v2",
@@ -41,8 +46,43 @@ func HelmReleaseManaged(kubeconfig, namespace, name string) bool {
 	if err != nil {
 		return false
 	}
-	_, err = dc.Resource(helmReleaseGVR).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	_, _, err = findHelmRelease(context.Background(), dc, namespace, name)
 	return err == nil
+}
+
+// findHelmRelease locates the HelmRelease by name, WITHOUT assuming which namespace holds
+// it. The CR lives in flux-system while the release it manages targets the app namespace
+// (spec.targetNamespace / storageNamespace), so looking only in the app namespace finds
+// nothing — which is exactly what happened: HelmReleaseManaged silently returned false on
+// every run and the readiness wait never executed once. Fresh runs won the race anyway;
+// an upgrade then caught the release mid-flight as "pending-upgrade".
+//
+// Searched in order: flux-system, the app namespace (older layouts), then cluster-wide.
+// The cluster-wide sweep is the backstop that keeps this from breaking again if the CR
+// moves; a not-found is still a real answer (no Flux, e.g. a pre-v7.19.0 baseline).
+func findHelmRelease(ctx context.Context, dc dynamic.Interface, appNamespace, name string) (*unstructured.Unstructured, string, error) {
+	for _, ns := range []string{fluxNamespace, appNamespace} {
+		if ns == "" {
+			continue
+		}
+		hr, err := dc.Resource(helmReleaseGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			return hr, ns, nil
+		}
+		if !errors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+			return nil, "", err
+		}
+	}
+	list, err := dc.Resource(helmReleaseGVR).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, "", err
+	}
+	for i := range list.Items {
+		if list.Items[i].GetName() == name {
+			return &list.Items[i], list.Items[i].GetNamespace(), nil
+		}
+	}
+	return nil, "", errors.NewNotFound(schema.GroupResource{Group: helmReleaseGVR.Group, Resource: helmReleaseGVR.Resource}, name)
 }
 
 // AwaitHelmReleaseReady blocks until Flux reports the HelmRelease Ready, or returns the
@@ -59,7 +99,7 @@ func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Dura
 	lastMsg := ""
 
 	for {
-		hr, gerr := dc.Resource(helmReleaseGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		hr, _, gerr := findHelmRelease(ctx, dc, namespace, name)
 		if gerr != nil {
 			if !errors.IsNotFound(gerr) {
 				return fmt.Errorf("get HelmRelease %s/%s: %w", namespace, name, gerr)
