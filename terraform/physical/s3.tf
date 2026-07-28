@@ -439,6 +439,28 @@ resource "aws_s3_bucket_logging" "guide_buckets_logging" {
   target_bucket = aws_s3_bucket.logging_bucket.bucket
   target_prefix = "${each.key}/"
 }
+# The pdf bucket is the one bucket whose objects the app manages with per-object
+# ACLs: GuidePDFLib sets an ACL on every upload and flips it when a guide's
+# privacy changes. Buckets created after S3 switched its default to
+# BucketOwnerEnforced (Apr 2023) reject those calls with
+# AccessControlListNotSupported, which 500s the guide privacy PATCH (after the
+# DB write, so state splits) and breaks PDF regeneration. ObjectWriter lets the
+# calls succeed again.
+#
+# Public access stays fully blocked. On a private site - which every MPC site is
+# - the app only ever sets `private`, and PDFs are served by presigned URL, so
+# no object ACL is ever load-bearing for delivery. This carve-out exists purely
+# so the ACL calls stop throwing. Remove it once the app can run ACL-free.
+resource "aws_s3_bucket_ownership_controls" "guide_pdf_bucket" {
+  for_each = contains(local.create_s3_bucket_names, "pdf") ? { pdf = aws_s3_bucket.guide_buckets["pdf"] } : {}
+
+  bucket = each.value.id
+
+  rule {
+    object_ownership = "ObjectWriter"
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "guide_buckets_acl_block" {
   for_each = local.s3_public_access_block_buckets
 
