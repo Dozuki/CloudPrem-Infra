@@ -39,11 +39,14 @@ import (
 // the cluster's destroy with "Cluster cannot be deleted, it still has instances".
 
 const (
-	drillInstanceClass   = "db.r6g.large" // provisioned, supported on every aurora-mysql 3.x/8.x family
-	drillPromoteTimeout  = 10 * time.Minute
-	drillInstanceTimeout = 25 * time.Minute
-	drillCleanupTimeout  = 20 * time.Minute
-	drillPollEvery       = 20 * time.Second
+	// Fallback only - see drillClassFor. Provisioned, supported on every aurora-mysql
+	// 3.x/8.x family, used when the promoted cluster predates the Serverless v2 scaling
+	// config on the DR secondary (CPI #352).
+	drillFallbackInstanceClass = "db.r6g.large"
+	drillPromoteTimeout        = 10 * time.Minute
+	drillInstanceTimeout       = 25 * time.Minute
+	drillCleanupTimeout        = 20 * time.Minute
+	drillPollEvery             = 20 * time.Second
 )
 
 // DrillParams carries everything the drill needs; phase 2 (the data probe) added enough
@@ -114,16 +117,27 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 	// instance is the step that proves recovery produces something a repointed app could
 	// use - and it is where an engine-version/instance-class incompatibility would
 	// surface, which no amount of metadata inspection can rule out.
+	//
+	// Class selection mirrors what a real failover can actually do: db.serverless when
+	// the cluster carries a Serverless v2 scaling config (the fleet posture, and what
+	// the failover runbook prescribes - present once the stack includes CPI #352),
+	// provisioned fallback for refs that predate it. Deciding by inspecting the CLUSTER
+	// rather than pinning one class means the drill always exercises the same path a
+	// failover on that ref would take.
+	class, cerr2 := drillClassFor(ctx, rc, clusterID)
+	if cerr2 != nil {
+		return cerr2
+	}
 	instanceID := fmt.Sprintf("%s-drill-%s", clusterID, shortRunID(runID))
-	logStep("dr-drill: creating %s instance %s (this is the slow part, ~10m)", drillInstanceClass, instanceID)
+	logStep("dr-drill: creating %s instance %s (this is the slow part, ~10m)", class, instanceID)
 	instStart := time.Now()
 	if _, err := rc.CreateDBInstance(ctx, &rds.CreateDBInstanceInput{
 		DBInstanceIdentifier: aws.String(instanceID),
 		DBClusterIdentifier:  aws.String(clusterID),
-		DBInstanceClass:      aws.String(drillInstanceClass),
+		DBInstanceClass:      aws.String(class),
 		Engine:               aws.String("aurora-mysql"),
 	}); err != nil {
-		return fmt.Errorf("dr-drill: CreateDBInstance: %w", err)
+		return fmt.Errorf("dr-drill: CreateDBInstance (%s): %w", class, err)
 	}
 
 	// From here on the instance exists, so cleanup must run even when verification
@@ -192,6 +206,21 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 	}
 	logStep("dr-drill: instance + probe removed; promoted cluster %s left for the stack's own teardown (destroying it post-promotion is part of the test)", clusterID)
 	return verifyErr
+}
+
+// drillClassFor picks the failover instance class the way a real failover would: the
+// promoted cluster's own ServerlessV2ScalingConfiguration decides. Present -> the
+// runbook's db.serverless path is exercised; absent (refs predating CPI #352) -> the
+// provisioned fallback that predates the fix.
+func drillClassFor(ctx context.Context, rc *rds.Client, clusterID string) (string, error) {
+	out, err := rc.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(clusterID)})
+	if err != nil || len(out.DBClusters) == 0 {
+		return "", fmt.Errorf("dr-drill: describe cluster for class selection: %w", err)
+	}
+	if out.DBClusters[0].ServerlessV2ScalingConfiguration != nil {
+		return "db.serverless", nil
+	}
+	return drillFallbackInstanceClass, nil
 }
 
 // drSecondaryCluster finds the global cluster's member in the DR region. Done via the
