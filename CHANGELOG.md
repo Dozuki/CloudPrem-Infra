@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.23.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.3...v7.23.4) (2026-07-28)
+
+
+### Bug Fixes
+
+* **physical:** scope dms event alerts to own tasks + apply resizes immediately ([#338](https://github.com/Dozuki/CloudPrem-Infra/issues/338)) ([492424e](https://github.com/Dozuki/CloudPrem-Infra/commit/492424ef22873e112f8f6e21d2e110da16c04371))
+
 ## [7.23.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.2...v7.23.3) (2026-07-28)
 
 
