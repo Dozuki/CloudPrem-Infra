@@ -18,7 +18,6 @@ config layer, not produced by the cloud layer.
 | `s3_kms_key_id` | Object-store KMS key | `s3_kms_key_id` | N/A — `""` (SeaweedFS volumes ride Azure Storage encryption at rest) |
 | `s3_replicate_buckets` | Migration-from-existing-buckets flag | `s3_replicate_buckets` | N/A — `false` |
 | `vpc_id` | Network ID † | `vpc_id` | `vnet_id` |
-| `azs_count` | AZ count † | `azs_count` | N/A — `3` (zonal layout is Azure-internal) |
 | `vault_address` | HashiCorp Vault address (secret backend) | `"http://" + vault_endpoint_dns + ":8200"` | N/A — Azure uses Key Vault via ESO (`key_vault_uri`) |
 | `dms_task_arn` / `dms_enabled` | BI replication | `dms_task_arn` / `dms_enabled` | N/A — `""` / `false` (BI deferred past Azure v1) |
 | `bi_database_credential_secret` | BI DB secret | `bi_database_credential_secret` | N/A — `""` |

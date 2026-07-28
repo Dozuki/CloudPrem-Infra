@@ -164,7 +164,15 @@ locals {
   s3_public_access_block_buckets = var.s3_block_public_access ? aws_s3_bucket.guide_buckets : {}
 
   # --VPC--
-  azs_count          = var.azs_count
+  # Hardcoded 3. The old azs_count variable was never set to anything else in five
+  # years, and it never actually worked as a knob: private subnet indices started AT
+  # azs_count, so changing it renumbered (replaced) every private subnet, and values
+  # above 3 silently round-robined onto the first three AZs anyway because the module
+  # azs list was sliced to 3. Three is the right number for this product (EKS quorum,
+  # Aurora spread, one NAT per AZ under HA). If per-region flexibility is ever really
+  # needed, it requires an append-only subnet layout (private at fixed low indices,
+  # public carved from the top), gated to new stacks - not a tunable variable.
+  azs_count          = 3
   create_vpc         = var.vpc_id == "" ? true : false
   vpc_id             = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
   vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block

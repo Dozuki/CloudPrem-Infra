@@ -35,7 +35,7 @@ module "vpc" {
 
   name = local.identifier
   cidr = var.vpc_cidr
-  azs  = slice(data.aws_availability_zones.available.names, 0, 3)
+  azs  = slice(data.aws_availability_zones.available.names, 0, local.azs_count)
 
   enable_nat_gateway   = true
   single_nat_gateway   = !var.highly_available_nat_gateway

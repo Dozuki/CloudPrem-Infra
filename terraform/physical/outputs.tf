@@ -41,9 +41,6 @@ output "vpc_id" {
   description = "VPC ID"
   value       = local.vpc_id
 }
-output "azs_count" {
-  value = local.azs_count
-}
 output "dms_task_arn" {
   description = "DMS Replication Task ARN for BI"
   value       = try(aws_dms_replication_task.this[0].replication_task_arn, "")
