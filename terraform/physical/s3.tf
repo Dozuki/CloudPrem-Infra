@@ -552,7 +552,18 @@ resource "aws_s3_bucket_cors_configuration" "guide_images" {
 # recoverable indefinitely (~$1/TB-mo; MPC customers store <1TB, so the undo
 # outweighs the pennies). Objects under the 128K transition minimum just stay
 # on standard storage, which is cheaper than archiving them anyway. The
-# access-log bucket keeps hard deletion. Current versions are untouched.
+# access-log bucket keeps hard deletion.
+#
+# Current versions go to Intelligent-Tiering on day 0. A guide library is
+# overwhelmingly cold - old procedures and their images are written once and
+# read rarely - but any object can be requested at any time, so a fixed
+# transition to IA or an archive tier is wrong: those charge a retrieval fee,
+# and the archive tiers add restore latency to a user-facing page load.
+# Intelligent-Tiering keeps millisecond access and no retrieval fee, its
+# frequent tier is priced as Standard (so the hot set costs the same as it
+# does today), and it demotes objects only after 30 days without access.
+# Objects under 128K are never charged the monitoring fee and never transition,
+# which covers most thumbnails, so the small-object case cannot become a loss.
 resource "aws_s3_bucket_lifecycle_configuration" "guide_buckets" {
   for_each = toset(local.create_s3_bucket_names)
 
@@ -566,6 +577,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "guide_buckets" {
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
+    }
+
+    transition {
+      days          = 0
+      storage_class = "INTELLIGENT_TIERING"
     }
 
     noncurrent_version_transition {
