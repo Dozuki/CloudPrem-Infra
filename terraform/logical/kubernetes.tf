@@ -449,35 +449,56 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
-  # Keep Application Signals away from the frontegg (connectivity) services.
+  # Keep Application Signals away from workloads it cannot help.
   #
   # autoMonitor.monitorAllServices defaults to TRUE, so the operator's mutating webhook
   # stamps instrumentation.opentelemetry.io/inject-<lang>="true" onto every pod at
-  # admission. The injected Node.js SDK uses optional chaining, which the frontegg
-  # images' Node 12 cannot parse — so all five connectivity services crashloop on
-  # startup with:
-  #   SyntaxError: Unexpected token '?'
-  #     at .../@opentelemetry/auto-instrumentations-node/build/src/index.js:8
-  # and helm_release.app never goes Ready. Only reachable with enable_webhooks = true,
-  # which is why no live stack has hit it.
+  # admission — one init container per enabled language, each with CPU/memory requests.
   #
-  # Excluding here rather than per-pod: this is one declarative place, it needs no
-  # support from the (vendored, third-party) subcharts, and it leaves auto-monitoring
-  # ON for everything else in the namespace — the monolith still gets instrumented.
-  # Scoped to nodejs so a future JVM/python workload in these deployments would still
-  # be picked up. The cost is no Application Signals for the frontegg tier, forced by
-  # the vendor's runtime being too old.
+  # Excluding here rather than per-pod: one declarative place, no support needed from the
+  # (vendored, third-party) subcharts, and auto-monitoring stays ON for everything else in
+  # the namespace, so the monolith is still instrumented.
+  #
+  # The monitoring stack is excluded for EVERY language, not just nodejs. autoMonitor
+  # injects one init container per enabled language into every pod it matches, each with
+  # CPU and memory requests. prometheus-node-exporter is a single Go binary that can use
+  # none of them, and it is a DAEMONSET: its pod carries a nodeAffinity pinning it to one
+  # specific node, so it cannot be rescheduled elsewhere when that node is full. Four
+  # unusable init containers were enough to make it unschedulable:
+  #
+  #   0/6 nodes are available: 1 Insufficient cpu, 1 Insufficient memory,
+  #   5 node(s) didn't satisfy plugin(s) [NodeAffinity]
+  #
+  # and because the HelmRelease runs with disableWait = false, helm waited on that one
+  # pod for its full 4h30m timeout - the release never reached Ready, on every deploy.
+  # It went unnoticed because a stuck node-exporter fails nothing else: the app serves
+  # fine, and cluster-health checks treat it as non-critical.
+  #
+  # kube-state-metrics and the prometheus operator get the same treatment for the same
+  # reason (Go binaries, nothing to instrument). Application Signals stays ON for the
+  # monolith and anything else in the namespace.
   configuration_values = jsonencode({
     manager = {
       applicationSignals = {
         autoMonitor = {
           exclude = {
-            nodejs = {
-              deployments = [
-                for svc in ["api-gateway", "connectors-worker", "event-service", "integrations-service", "webhook-service"] :
-                # namespace/deployment; the release is always named "dozuki".
-                "${local.k8s_namespace_name}/dozuki-${svc}-deployment"
-              ]
+            for lang in ["java", "nodejs", "python", "dotnet"] : lang => {
+              daemonsets = ["${local.k8s_namespace_name}/dozuki-prometheus-node-exporter"]
+              deployments = concat(
+                [
+                  "${local.k8s_namespace_name}/dozuki-kube-state-metrics",
+                  "${local.k8s_namespace_name}/dozuki-kube-prometheus-sta-operator",
+                ],
+                # The frontegg connectivity tier is nodejs-only: the injected Node.js SDK
+                # uses optional chaining, which those images' Node 12 cannot parse, so all
+                # five crashloop with "SyntaxError: Unexpected token '?'". Kept scoped to
+                # nodejs so a future JVM/python workload there would still be picked up.
+                lang != "nodejs" ? [] : [
+                  for svc in ["api-gateway", "connectors-worker", "event-service", "integrations-service", "webhook-service"] :
+                  # namespace/deployment; the release is always named "dozuki".
+                  "${local.k8s_namespace_name}/dozuki-${svc}-deployment"
+                ],
+              )
             }
           }
         }
