@@ -28,6 +28,35 @@ locals {
 
   dns_role = local.aws_region == "us-gov-west-1" ? "arn:aws-us-gov:iam::446787640263:role/Route53AccessRole" : "arn:aws:iam::010601635461:role/Route53AccessRole"
 
+  # Fleet tagging via provider default_tags, mirroring infra-live root.hcl (the
+  # 2026-07-15 rollout there was never mirrored here despite the "mirror shared
+  # terragrunt config" rule). This matters beyond bookkeeping: physical resources
+  # that pass no explicit tags (the guide/log S3 buckets, the headless DR Aurora
+  # secondary) were left with NO tags at all, so the harness's deleteAfter TTL
+  # never reached them - ResourceReaper flagged them for review daily and, worse,
+  # its purge tier could never collect them if a smoke teardown failed.
+  #
+  # deleteAfter is included here (unlike infra-live, which has no ephemeral
+  # stacks): the test harness writes delete_after into the generated env.hcl, and
+  # only tag-carrying resources are ever purged. ManagedBy=manual per the tagging
+  # policy executor enum - this harness is local terragrunt, not Spacelift.
+  environment_tag = try(local.environment_vars.locals.environment, "dev")
+  customer_tag    = try(local.environment_vars.locals.customer, "dozuki")
+  delete_after    = try(local.environment_vars.locals.delete_after, "")
+
+  default_tags_tf = <<-EOF
+      default_tags {
+        tags = {
+          Environment = "${local.environment_tag}"
+          Customer    = "${local.customer_tag}"
+          ManagedBy   = "manual"
+          StackPath   = "${path_relative_to_include()}"
+          Repo        = "CloudPrem-Infra"
+          %{if local.delete_after != ""}deleteAfter = "${local.delete_after}"%{endif}
+        }
+      }
+  EOF
+
   # Azure scalars (account.hcl provides these when cloud=="azure"; empty otherwise).
   az_subscription_id = try(local.account_vars.locals.subscription_id, "")
   az_tenant_id       = try(local.account_vars.locals.tenant_id, "")
@@ -43,12 +72,13 @@ provider "aws" {
   # Only these AWS Account IDs may be operated on by this template
   allowed_account_ids = ["${local.account_id}"]
   profile = "${local.aws_profile}"
+${local.default_tags_tf}
 }
 provider "aws" {
   alias  = "dns"
   region = "${local.aws_region}"
   profile = "${local.aws_profile}"
-
+${local.default_tags_tf}
   assume_role {
     role_arn = "${local.dns_role}"
   }
@@ -58,6 +88,7 @@ provider "aws" {
   region              = "${local.dr_region}"
   allowed_account_ids = ["${local.account_id}"]
   profile             = "${local.aws_profile}"
+${local.default_tags_tf}
 }
 EOF
 
