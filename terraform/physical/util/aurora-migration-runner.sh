@@ -366,19 +366,17 @@ fence)
   [ "$(effective_apply_policies)" = "STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK" ] || \
     die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
   prep_cnfs
-  # Epoch anchor for the final revalidation gate: the SOURCE server's own clock,
-  # captured before anything in this fence commits (marker included). The
-  # touched set is later derived from information_schema.tables.update_time on
-  # the fenced source - engine truth, immune to DMS task-statistics counters
-  # resetting across task stop/resume cycles.
-  say "capturing the source epoch anchor (for the touched-table derivation)"
-  SRC_EPOCH=$(ssm_run <<'EOF'
-mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT NOW(6)"
-EOF
-)
-  SRC_EPOCH=$(echo "$SRC_EPOCH" | tr -d '\r' | grep . | head -1)
-  [ -n "$SRC_EPOCH" ] || die "could not capture the source epoch anchor"
-  say "  source epoch: $SRC_EPOCH"
+  # NOTE on the validation-epoch scope (see the epoch block after the drain
+  # proof): the fresh task validates the FULL PK-table catalog, not a derived
+  # "touched during the fence" subset. Every cheap touched-signal was tried and
+  # has a documented false-negative hole: DMS table-statistics counters reset
+  # across task lifecycle events, information_schema.tables.update_time is
+  # cached (information_schema_stats_expiry, default 24h) and silently NULLed
+  # by InnoDB dictionary-cache eviction, and performance_schema is OFF on the
+  # fleet's RDS sources (static parameter; enabling needs a reboot). A missed
+  # table in that set would be a silent data-divergence pass, so the epoch
+  # validates everything validatable instead - minutes of extra fence time on
+  # a quiescent pair, zero signal-validity risk.
   # BI task must stop BEFORE the cutover apply mutates its source endpoint
   # (DMS rejects endpoint modification on a running task).
   if [ "$(bi_task_status)" = "running" ]; then
@@ -481,42 +479,38 @@ EOF
   # every selected table starts unvalidated in THIS epoch, so Validated on it is
   # necessarily epoch-new, with an unambiguous completion boundary. Both sides
   # are quiescent (source fenced, main task stopped after the drain proof), so
-  # it is a clean full row compare. The touched set comes from the SOURCE
-  # engine's information_schema.tables.update_time against the fence-start
-  # epoch anchor - NOT from DMS table-statistics counters, which reset across
-  # task stop/resume and would silently drop a baseline-zero table from the
-  # set. Partitioned tables (update_time is NULL for them) are included
-  # unconditionally - a safe superset. Tables without a PK/UNIQUE key cannot be
-  # row-validated and are excluded (the pre-existing documented exception).
-  # aurora_mig_ctl.marker is always in the set (its insert is part of this
-  # fence and it has a PK), so the machinery self-canaries. FK-cascaded child
-  # rows are not binlogged by MySQL and so not in the set; identical FK DDL on
-  # both sides (preload md5 gate) makes their outcomes equal by construction.
-  say "gate: final validation epoch over the drained dataset (fresh validation-only task)"
-  RAWTOUCH=$(ssm_run <<EOF
+  # it is a clean full row compare. Scope = the FULL PK-table catalog (see the
+  # note at fence start: every derived touched-subset signal has a documented
+  # false-negative hole, and a missed table would be a silent divergence pass).
+  # The catalog comes from information_schema.tables + table_constraints -
+  # existence queries with no caching hazard. Tables without a PK/UNIQUE key
+  # cannot be row-validated and are excluded but REPORTED (the documented
+  # users-table exception). aurora_mig_ctl.marker is asserted present: its row
+  # exists only if THIS fence's write replicated, so its Validated verdict
+  # proves the epoch task compared current data.
+  say "gate: final validation epoch over the drained dataset (fresh validation-only task, full PK catalog)"
+  RAWCAT=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names <<'SQL'
-SELECT t.table_schema, t.table_name
+SELECT t.table_schema, t.table_name,
+       EXISTS (SELECT 1 FROM information_schema.table_constraints tc
+               WHERE tc.table_schema = t.table_schema AND tc.table_name = t.table_name
+                 AND tc.constraint_type IN ('PRIMARY KEY','UNIQUE'))
 FROM information_schema.tables t
 WHERE t.table_type = 'BASE TABLE'
   AND t.table_schema NOT IN ('mysql','information_schema','performance_schema','sys','innodb','tmp')
   AND t.table_schema NOT LIKE 'awsdms%'
-  AND (t.update_time >= DATE_SUB('$SRC_EPOCH', INTERVAL 5 SECOND)
-       OR EXISTS (SELECT 1 FROM information_schema.partitions p
-                  WHERE p.table_schema = t.table_schema AND p.table_name = t.table_name
-                    AND p.partition_name IS NOT NULL))
-  AND EXISTS (SELECT 1 FROM information_schema.table_constraints tc
-              WHERE tc.table_schema = t.table_schema AND tc.table_name = t.table_name
-                AND tc.constraint_type IN ('PRIMARY KEY','UNIQUE'))
 SQL
 EOF
 )
-  TOUCHED=$(echo "$RAWTOUCH" | tr -d '\r' | grep . | jq -Rn '[inputs | split("\t") | select(length == 2) | {SchemaName: .[0], TableName: .[1]}]')
+  CATALOG=$(echo "$RAWCAT" | tr -d '\r' | grep . | jq -Rn '[inputs | split("\t") | select(length == 3) | {s: .[0], t: .[1], pk: (.[2] == "1")}]')
+  TOUCHED=$(echo "$CATALOG" | jq '[.[] | select(.pk) | {SchemaName: .s, TableName: .t}]')
+  NOPK_LIST=$(echo "$CATALOG" | jq -r '[.[] | select(.pk | not) | .s + "." + .t] | join(" ")')
+  [ -z "$NOPK_LIST" ] || say "  no-PK tables excluded from row validation (documented exception): $NOPK_LIST"
   NTOUCH=$(echo "$TOUCHED" | jq length)
-  say "  tables touched in the fence window (revalidation set): $NTOUCH"
-  echo "$TOUCHED" | jq -r '.[] | "    " + .SchemaName + "." + .TableName' | head -30
-  [ "$NTOUCH" -ge 1 ] || die "revalidation set is empty - the marker table alone should be in it; the update_time derivation is broken, do not trust this epoch"
+  say "  PK-table validation set: $NTOUCH tables"
+  [ "$NTOUCH" -ge 1 ] || die "the PK-table catalog is empty - the catalog query is broken, do not trust this epoch"
   echo "$TOUCHED" | jq -e '[.[] | select(.SchemaName == "aurora_mig_ctl" and .TableName == "marker")] | length == 1' >/dev/null || \
-    die "the marker table is missing from the touched set - the update_time derivation is broken, do not trust this epoch"
+    die "the marker table is missing from the catalog - it must exist by this point in the fence; do not trust this epoch"
   VTASK_ID="${ID}-aurora-migration-fencevalidate"
   vtask_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null | grep -v '^None$' || true; }
   vtask_status() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none; }
@@ -560,7 +554,7 @@ EOF
     --source-endpoint-arn "$SEP" --target-endpoint-arn "$TEP" \
     --migration-type full-load \
     --table-mappings "$VMAP" \
-    --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":5,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
+    --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":10,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
     --query 'ReplicationTask.ReplicationTaskArn' --output text)
   vwait_status ready 600
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
@@ -574,12 +568,12 @@ EOF
     # task's stats as Validated. Counts alone could be satisfied by a stray
     # extra match while a real table is still pending.
     PENDING=$(jq -n --argjson want "$TOUCHED" --argjson now "$VSTATS" '
-      ($now | map(select((.v | ascii_downcase) == "validated") | {key: (.s + "|" + .t), value: true}) | from_entries) as $ok
-      | [ $want[] | select(($ok[.SchemaName + "|" + .TableName] // false) | not) ] | length')
+      ($now | map(select((.v | ascii_downcase) == "validated") | {key: ([.s, .t] | tojson), value: true}) | from_entries) as $ok
+      | [ $want[] | select(($ok[[.SchemaName, .TableName] | tojson] // false) | not) ] | length')
     say "  pending=$PENDING/$NTOUCH (bad states: $NBAD)"
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
     [ "$PENDING" = "0" ] && break
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 2700 ] && die "fence-epoch validation did not complete in 45m - inspect $VTASK_ID"
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 3600 ] && die "fence-epoch validation did not complete in 60m - inspect $VTASK_ID"
     sleep 20
   done
   say "  epoch validation PASSED - removing the validation task"
