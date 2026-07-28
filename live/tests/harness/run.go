@@ -249,9 +249,15 @@ func runInfraValidators(ctx context.Context, p RunParams, region string, caps Ca
 				return fmt.Errorf("restore drill: %w", rderr)
 			}
 		case outs.AuroraDRGlobalClusterID != "":
-			step("SKIPPED (not implemented): restore drill on the aurora engine — DR is global cluster %s, "+
-				"which is promoted rather than restored; this run proves the secondary EXISTS, not that it recovers",
-				outs.AuroraDRGlobalClusterID)
+			// Promotion is one-way: after this the stack has no DR secondary, so this
+			// must stay the LAST validator before teardown (the DR existence check has
+			// already run). Teardown afterwards is part of the test - it proves the
+			// post-promotion wreckage destroys cleanly.
+			step("DR drill: promoting global cluster %s secondary in %s and provisioning an instance (~15-20m)",
+				outs.AuroraDRGlobalClusterID, p.DRRegion)
+			if dderr := validation.AuroraPromotionDrill(ctx, p.DRRegion, outs.AuroraDRGlobalClusterID, p.RunID); dderr != nil {
+				return fmt.Errorf("aurora promotion drill: %w", dderr)
+			}
 		default:
 			return fmt.Errorf("restore drill requested but the stack emitted no DR database artifact")
 		}
