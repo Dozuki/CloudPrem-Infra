@@ -60,21 +60,17 @@ The defaults included here are 4 separate environments:
 * bi 
   * The same minimum configuration with BI enabled.
   * Takes ~40 minutes to boot
-* webhooks 
-  * The same minimum configuration with webhooks enabled.
-  * Takes ~60 minutes to boot (thanks kafka)
 * full
-  * Both BI and Webhooks enabled.
+  * BI enabled plus multi-AZ and DR.
   * Takes ~60 minutes to boot
 
 **Note:** Because this is meant for development, all HA and deletion protection options
-are disabled for all 4 environments to save on cost and spin-up time.
+are disabled for all environments to save on cost and spin-up time.
 
 An example environment configuration for minimum looks like:
 ```hcl
 locals {
   environment = "min"
-  enable_webhooks = false
   enable_bi = false
   rds_multi_az = false
   dozuki_license_parameter_name = "/dozuki/workstation/beta/license"
@@ -98,7 +94,7 @@ $ cd live/standard/us-east-1/
 # Run all terraform modules in this directory recursively
 $ terragrunt run-all apply
 ```
-This would spin up 4 stacks: min, bi, webhooks, and full. This is probably not what
+This would spin up every stack: min, bi, and full. This is probably not what
 you want to do, but it's possible.
 
 For a more realistic example:
@@ -132,7 +128,6 @@ will build the license key path based on the identifier and environment variable
 two existing license files on our dev account in each region we support: `/dozuki/workstation/alpha/license` and `/dozuki/workstation/beta/license`.
 You'll notice the added keyword "workstation" here: this is to ensure there are no collisions with existing keys from
 other environments. These keys are for the `DDV-Alpha` and `DDV-Beta` customer keys in replicated.
-The main difference between them is alpha has webhooks enabled, and beta does not. 
 
 ### Don'ts
 Don't modify the root `terragrunt.hcl` file in this directory. It uses black magic to build things and is

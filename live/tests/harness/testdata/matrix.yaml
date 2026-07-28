@@ -18,7 +18,6 @@ configs:
     env: min
     feature_flags:
       enable_bi: false
-      enable_webhooks: false
   - name: full
     env: full
     feature_flags:

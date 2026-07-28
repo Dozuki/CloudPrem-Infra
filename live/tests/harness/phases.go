@@ -243,12 +243,6 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	// never rendered those workloads, that is a failure, not a silent pass. Deliberately
 	// after the generic cluster-health gate so the app is already up and the only thing
 	// still settling is the feature tier itself.
-	if cfg.HarnessFlag("enable_webhooks") {
-		step("verifying webhooks tier in-cluster (%d workloads + Kafka client stability)", len(validation.WebhookWorkloads()))
-		if werr := validation.AssertWebhooksHealthy(kc, rm.Namespace, 15*time.Minute); werr != nil {
-			return fmt.Errorf("webhooks validation: %w", werr)
-		}
-	}
 	if cfg.HarnessFlag("enable_bi") {
 		step("verifying BI tier in-cluster (grafana + grafana-db-create)")
 		if berr := validation.AssertBIHealthy(kc, rm.Namespace, 15*time.Minute); berr != nil {
