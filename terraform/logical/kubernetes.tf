@@ -274,12 +274,38 @@ resource "kubernetes_manifest" "nodepool_spot" {
               {
                 key      = "karpenter.sh/capacity-type"
                 operator = "In"
-                values   = ["spot"]
+                # Spot preferred, on-demand as fallback. Karpenter's
+                # price-capacity-optimized allocation picks spot whenever any
+                # spot offering exists, so steady-state cost is unchanged - but
+                # when an AZ's spot pool empties (a real ICE event), pods on
+                # this pool get on-demand capacity there instead of pending
+                # until AWS restores spot to that zone. Matters most for a pod
+                # whose EBS volume pins it to the dry AZ: with spot-only this
+                # was an unbounded outage (the adversarial AZ/PVC review's top
+                # finding, and the same terminal state as the old spot-fleet
+                # stranding incidents).
+                values = ["spot", "on-demand"]
               },
               {
                 key      = "kubernetes.io/arch"
                 operator = "In"
                 values   = ["amd64"]
+              },
+              # Floor the hardware: without these, arch-only requirements let
+              # Karpenter buy previous-generation burstable spot - a live smoke
+              # cluster ran prometheus, alertmanager and opensearch on a
+              # c4.xlarge, with t2.medium alongside (t-class CPU credits
+              # throttle sustained load into mystery latency). Mirrors the
+              # built-in system pool's own category/generation floor.
+              {
+                key      = "eks.amazonaws.com/instance-category"
+                operator = "In"
+                values   = ["c", "m", "r"]
+              },
+              {
+                key      = "eks.amazonaws.com/instance-generation"
+                operator = "Gt"
+                values   = ["4"]
               }
             ]
           },
@@ -334,6 +360,17 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
                 key      = "kubernetes.io/arch"
                 operator = "In"
                 values   = ["amd64"]
+              },
+              # Same hardware floor as the spot pool (see the comment there).
+              {
+                key      = "eks.amazonaws.com/instance-category"
+                operator = "In"
+                values   = ["c", "m", "r"]
+              },
+              {
+                key      = "eks.amazonaws.com/instance-generation"
+                operator = "Gt"
+                values   = ["4"]
               }
             ]
             taints = [
@@ -354,7 +391,14 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         )
       }
       disruption = {
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        # WhenEmpty, not WhenEmptyOrUnderutilized: this pool exists for workloads
+        # that are expensive to move - the on-demand-pinned app tier and (via the
+        # values CPI sets on the monitoring/search subcharts) every EBS-backed
+        # singleton. Underutilization-driven bin-packing was detaching and
+        # re-attaching 50Gi volumes on routine 60-second consolidation passes,
+        # and every forced reschedule re-rolls the AZ-capacity dice. These nodes
+        # now go away only when empty, on AMI drift, or at the 336h expiry.
+        consolidationPolicy = "WhenEmpty"
         consolidateAfter    = "1m"
       }
       weight = 10
