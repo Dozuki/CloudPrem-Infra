@@ -543,7 +543,12 @@ EOF
   # matched table could then satisfy a count-based gate while a real touched
   # table was still pending. Belt and braces: the completion gate below also
   # compares the exact validated (schema, table) SET, never counts.
-  VMAP=$(echo "$TOUCHED" | jq '{rules: [to_entries[] | {"rule-type":"selection","rule-id":(.key+1|tostring),"rule-name":(.key+1|tostring),"object-locator":{"schema-name":.value.SchemaName,"table-name":.value.TableName},"rule-action":"explicit"}]}')
+  # Large JSON blobs (thousands of rules/rows) travel via FILES, never argv:
+  # a full-catalog mapping can exceed ARG_MAX and would kill the fence mid-
+  # read-only window with "argument list too long".
+  VDIR=$(mktemp -d "/tmp/fence-epoch-${ID}.XXXXXX")
+  echo "$TOUCHED" > "$VDIR/want.json"
+  echo "$TOUCHED" | jq '{rules: [to_entries[] | {"rule-type":"selection","rule-id":(.key+1|tostring),"rule-name":(.key+1|tostring),"object-locator":{"schema-name":.value.SchemaName,"table-name":.value.TableName},"rule-action":"explicit"}]}' > "$VDIR/mappings.json"
   RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
   SEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-source" --query 'Endpoints[0].EndpointArn' --output text)
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
@@ -553,23 +558,23 @@ EOF
     --replication-instance-arn "$RIARN" \
     --source-endpoint-arn "$SEP" --target-endpoint-arn "$TEP" \
     --migration-type full-load \
-    --table-mappings "$VMAP" \
+    --table-mappings "file://$VDIR/mappings.json" \
     --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":10,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
     --query 'ReplicationTask.ReplicationTaskArn' --output text)
   vwait_status ready 600
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
-  say "  validating the touched set (every touched table must reach Validated in this epoch)"
+  say "  validating the PK catalog (every table must reach Validated in this epoch)"
   VWAIT=0
   while :; do
-    VSTATS=$(aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
-      --query 'TableStatistics[].{s:SchemaName,t:TableName,v:ValidationState}' --output json)
-    NBAD=$(echo "$VSTATS" | jq '[.[] | select(.v | test("mismatch|error|suspend|no primary"; "i"))] | length')
-    # exact SET comparison: every table in TOUCHED must appear in the fresh
+    aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
+      --query 'TableStatistics[].{s:SchemaName,t:TableName,v:ValidationState}' --output json > "$VDIR/vstats.json"
+    NBAD=$(jq '[.[] | select(.v | test("mismatch|error|suspend|no primary"; "i"))] | length' "$VDIR/vstats.json")
+    # exact SET comparison: every table in the catalog must appear in the fresh
     # task's stats as Validated. Counts alone could be satisfied by a stray
     # extra match while a real table is still pending.
-    PENDING=$(jq -n --argjson want "$TOUCHED" --argjson now "$VSTATS" '
-      ($now | map(select((.v | ascii_downcase) == "validated") | {key: ([.s, .t] | tojson), value: true}) | from_entries) as $ok
-      | [ $want[] | select(($ok[[.SchemaName, .TableName] | tojson] // false) | not) ] | length')
+    PENDING=$(jq -n --slurpfile want "$VDIR/want.json" --slurpfile now "$VDIR/vstats.json" '
+      ($now[0] | map(select((.v | ascii_downcase) == "validated") | {key: ([.s, .t] | tojson), value: true}) | from_entries) as $ok
+      | [ $want[0][] | select(($ok[[.SchemaName, .TableName] | tojson] // false) | not) ] | length')
     say "  pending=$PENDING/$NTOUCH (bad states: $NBAD)"
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
     [ "$PENDING" = "0" ] && break
@@ -578,6 +583,7 @@ EOF
   done
   say "  epoch validation PASSED - removing the validation task"
   vtask_teardown
+  rm -rf "$VDIR"
   # main-task whole-task whitelist gate (its stats survive the stop): catches a
   # table that went Mismatched/Suspended during soak outside the touched set.
   U=$(unclean_validation_count)
