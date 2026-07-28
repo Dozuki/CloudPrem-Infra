@@ -354,12 +354,14 @@ resource "helm_release" "flux" {
     aws_iam_role_policy.flux_source_ecr_read,
   ]
 
-  # Only the two controllers the app-delivery path needs; the rest add footprint + images to mirror.
+  # Only the controllers the app-delivery path needs; the rest add footprint + images to mirror.
+  # notification-controller comes up only when a Slack webhook is wired (var.flux_slack_webhook_url);
+  # it is what turns the Provider/Alert below into actual Slack posts, so no webhook means no controller.
   values = [yamlencode({
     imageAutomationController = { create = false }
     imageReflectionController = { create = false }
     kustomizeController       = { create = false }
-    notificationController    = { create = false }
+    notificationController    = { create = var.flux_slack_webhook_url != "" }
     helmController            = { create = true }
     sourceController          = { create = true }
   })]
@@ -460,11 +462,18 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       releaseName      = "dozuki"
       targetNamespace  = kubernetes_namespace_v1.app.metadata[0].name
       storageNamespace = kubernetes_namespace_v1.app.metadata[0].name
-      maxHistory       = 0 # keep unlimited history; helm-controller defaults to 5 and would prune
+      maxHistory       = 20 # cap stored release revisions; unbounded history piles up storage-namespace Secrets over time
       chartRef         = { kind = "OCIRepository", name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
       install          = { disableWait = false, timeout = "4h30m", remediation = { retries = 0 } }
-      upgrade          = { disableWait = false, timeout = "4h30m", remediation = { retries = 0, remediateLastFailure = false } }
-      # driftDetection intentionally omitted: a completed migration Job must not be recreated/rerun.
+      # crds=CreateReplace so chart CRD changes actually apply on upgrade - helm-controller skips CRD updates by default.
+      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 0, remediateLastFailure = false } }
+      # driftDetection in warn mode surfaces cluster drift (events + metrics) WITHOUT auto-correcting it, so nothing gets
+      # reverted under us. Jobs are ignored (empty-string JSON pointer = the whole object) so a completed migration/db-create
+      # Job never registers as drift and never gets recreated/rerun - the reason drift detection was omitted before.
+      driftDetection = {
+        mode   = "warn"
+        ignore = [{ paths = [""], target = { kind = "Job" } }]
+      }
       valuesFrom = [{ kind = "Secret", name = kubernetes_secret_v1.flux_values.metadata[0].name, valuesKey = "values.yaml" }]
     }
   })
@@ -480,6 +489,56 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       error_message = "istio_mesh_state requires commercial AWS EKS (non-GovCloud). Gov needs the phase-2 image mirror; Azure is not supported yet."
     }
   }
+}
+
+# ---------------------------------------------------------------------------
+# notification-controller -> Slack. Flux posts HelmRelease/OCIRepository events (both failures and
+# successes, eventSeverity=info) to a Slack incoming webhook. Entirely gated on var.flux_slack_webhook_url:
+# empty (the default) creates NO Secret/Provider/Alert and leaves notification-controller off (above), so
+# an env without a webhook wired stays exactly as it was. This layer has no Kustomizations, so the Alert
+# scopes to the resources that actually exist here: the app HelmRelease and its OCIRepository source.
+# ---------------------------------------------------------------------------
+
+# The webhook URL as a Secret the Provider references by `address` key (never inlined in the Provider spec).
+resource "kubernetes_secret_v1" "flux_slack_webhook" {
+  count = var.flux_slack_webhook_url != "" ? 1 : 0
+  metadata {
+    name      = "flux-slack-webhook"
+    namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
+  }
+  data = { address = var.flux_slack_webhook_url }
+}
+
+resource "kubectl_manifest" "flux_slack_provider" {
+  count      = var.flux_slack_webhook_url != "" ? 1 : 0
+  depends_on = [helm_release.flux, kubernetes_secret_v1.flux_slack_webhook]
+  yaml_body = yamlencode({
+    apiVersion = "notification.toolkit.fluxcd.io/v1beta3"
+    kind       = "Provider"
+    metadata   = { name = "slack", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
+    spec = {
+      type      = "slack"
+      secretRef = { name = kubernetes_secret_v1.flux_slack_webhook[0].metadata[0].name }
+    }
+  })
+}
+
+resource "kubectl_manifest" "flux_slack_alert" {
+  count      = var.flux_slack_webhook_url != "" ? 1 : 0
+  depends_on = [kubectl_manifest.flux_slack_provider]
+  yaml_body = yamlencode({
+    apiVersion = "notification.toolkit.fluxcd.io/v1beta3"
+    kind       = "Alert"
+    metadata   = { name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
+    spec = {
+      providerRef   = { name = "slack" }
+      eventSeverity = "info" # info => both success and failure events; "error" would drop successes
+      eventSources = [
+        { kind = "HelmRelease", name = "*" },
+        { kind = "OCIRepository", name = "*" },
+      ]
+    }
+  })
 }
 
 # Hand the running release off to Flux without uninstalling it: forget helm_release.app from state

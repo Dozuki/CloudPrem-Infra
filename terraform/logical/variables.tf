@@ -565,3 +565,10 @@ variable "flux_chart_version" {
   type        = string
   default     = "2.19.0"
 }
+
+variable "flux_slack_webhook_url" {
+  description = "Slack incoming-webhook URL for Flux notifications. When set, notification-controller comes up and a Provider(type=slack)+Alert post HelmRelease/OCIRepository events (successes and failures) to Slack. Empty (default) wires nothing and leaves the controller off - fully opt-in per env."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
