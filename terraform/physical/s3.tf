@@ -344,6 +344,30 @@ data "aws_iam_policy_document" "logging_policy" {
       "${aws_s3_bucket.logging_bucket.arn}/*",
     ]
   }
+
+  # S3.5: reject plaintext requests. The S3 log-delivery service and any
+  # consumers use TLS, so nothing legitimate is denied.
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+
+    resources = [
+      aws_s3_bucket.logging_bucket.arn,
+      "${aws_s3_bucket.logging_bucket.arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "logging_bucket_acl_block" {
@@ -547,6 +571,42 @@ resource "aws_s3_bucket_lifecycle_configuration" "guide_buckets" {
     noncurrent_version_transition {
       noncurrent_days = 30
       storage_class   = "DEEP_ARCHIVE"
+    }
+  }
+}
+
+# S3.5: reject plaintext requests on the content buckets. App, replication,
+# and presigned-URL access are all TLS, so the deny breaks nothing. The DR
+# replicas carry the same policy in dr.tf.
+resource "aws_s3_bucket_policy" "guide_buckets" {
+  for_each = aws_s3_bucket.guide_buckets
+
+  bucket = each.value.id
+  policy = data.aws_iam_policy_document.guide_buckets_ssl_only[each.key].json
+}
+
+data "aws_iam_policy_document" "guide_buckets_ssl_only" {
+  for_each = aws_s3_bucket.guide_buckets
+
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+
+    resources = [
+      each.value.arn,
+      "${each.value.arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
     }
   }
 }
