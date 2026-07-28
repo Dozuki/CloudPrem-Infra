@@ -15,9 +15,9 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.56.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.56.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.56.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.54.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.54.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.54.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
@@ -122,8 +122,6 @@
 | [aws_lambda_function.sns_to_slack](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
 | [aws_lambda_permission.dms_restart_permission](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_lambda_permission.sns_to_slack_permission](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
-| [aws_msk_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/msk_cluster) | resource |
-| [aws_msk_configuration.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/msk_configuration) | resource |
 | [aws_rds_cluster.dr_aurora_secondary](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster) | resource |
 | [aws_rds_global_cluster.aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_global_cluster) | resource |
 | [aws_route53_record.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
@@ -160,12 +158,8 @@
 | [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
-| [aws_security_group.kafka](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group_rule.aurora_migration_dms_to_rds](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.kafka_egress](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.kafka_ingress_cidr_blocks](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
-| [aws_security_group_rule.kafka_ingress_security_groups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_http_shifted](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
@@ -241,7 +235,6 @@
 | <a name="input_aurora_min_acu"></a> [aurora\_min\_acu](#input\_aurora\_min\_acu) | Aurora Serverless v2 minimum capacity (ACUs). | `number` | `0.5` | no |
 | <a name="input_aurora_snapshot_identifier"></a> [aurora\_snapshot\_identifier](#input\_aurora\_snapshot\_identifier) | Optional RDS DB snapshot ARN to restore the Aurora cluster from (migration path). Empty = fresh cluster. | `string` | `""` | no |
 | <a name="input_aws_profile"></a> [aws\_profile](#input\_aws\_profile) | If running terraform from a workstation, which AWS CLI profile should we use for asset provisioning. | `string` | `""` | no |
-| <a name="input_azs_count"></a> [azs\_count](#input\_azs\_count) | The number of availability zones we should use for deployment. | `number` | `3` | no |
 | <a name="input_bi_access_cidrs"></a> [bi\_access\_cidrs](#input\_bi\_access\_cidrs) | If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. If left empty it will default to your VPC CIDR | `list(string)` | `[]` | no |
 | <a name="input_bi_dms_enabled"></a> [bi\_dms\_enabled](#input\_bi\_dms\_enabled) | If BI is enabled, whether or not to use DMS for conditional replication if true or a basic RDS read replica if false. | `bool` | `false` | no |
 | <a name="input_bi_public_access"></a> [bi\_public\_access](#input\_bi\_public\_access) | NOTE: This is mutually exclusive with VPN access, both cannot be enabled at the same time. If BI is enabled and you need access to the BI database server from outside the amazon network, set this to true. | `bool` | `false` | no |
@@ -261,7 +254,6 @@
 | <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users). | `bool` | `false` | no |
 | <a name="input_enable_dr"></a> [enable\_dr](#input\_enable\_dr) | Enable the always-on cross-region DR data-protection layer (RDS automated-backup replication + S3 CRR). On by default; ephemeral/dev stacks may set false. | `bool` | `true` | no |
-| <a name="input_enable_webhooks"></a> [enable\_webhooks](#input\_enable\_webhooks) | This option will spin up a managed Kafka & Redis cluster to support private webhooks. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
@@ -300,7 +292,6 @@
 | <a name="output_aurora_migration_credentials_secret"></a> [aurora\_migration\_credentials\_secret](#output\_aurora\_migration\_credentials\_secret) | Secret ARN holding the Aurora migration target credentials (empty when no migration is active). Runner use only. |
 | <a name="output_aurora_migration_target_endpoint"></a> [aurora\_migration\_target\_endpoint](#output\_aurora\_migration\_target\_endpoint) | Aurora cluster writer endpoint during a migration (empty otherwise). Runner/runbook convenience; the app only ever sees it through the credentials secret after cutover. |
 | <a name="output_aurora_migration_task_arn"></a> [aurora\_migration\_task\_arn](#output\_aurora\_migration\_task\_arn) | ARN of the Aurora migration DMS task (empty when no migration is active). Consumed by the migration runner. |
-| <a name="output_azs_count"></a> [azs\_count](#output\_azs\_count) | n/a |
 | <a name="output_bastion_asg_name"></a> [bastion\_asg\_name](#output\_bastion\_asg\_name) | n/a |
 | <a name="output_bi_database_credential_secret"></a> [bi\_database\_credential\_secret](#output\_bi\_database\_credential\_secret) | If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database. |
 | <a name="output_bi_vpn_configuration_bucket"></a> [bi\_vpn\_configuration\_bucket](#output\_bi\_vpn\_configuration\_bucket) | If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet. |
@@ -320,7 +311,6 @@
 | <a name="output_guide_images_bucket"></a> [guide\_images\_bucket](#output\_guide\_images\_bucket) | n/a |
 | <a name="output_guide_objects_bucket"></a> [guide\_objects\_bucket](#output\_guide\_objects\_bucket) | n/a |
 | <a name="output_guide_pdfs_bucket"></a> [guide\_pdfs\_bucket](#output\_guide\_pdfs\_bucket) | n/a |
-| <a name="output_msk_bootstrap_brokers"></a> [msk\_bootstrap\_brokers](#output\_msk\_bootstrap\_brokers) | Kafka bootstrap broker list |
 | <a name="output_nlb_dns_name"></a> [nlb\_dns\_name](#output\_nlb\_dns\_name) | The FQDN of the NLB. |
 | <a name="output_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#output\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding |
 | <a name="output_nlb_https_target_group_arn"></a> [nlb\_https\_target\_group\_arn](#output\_nlb\_https\_target\_group\_arn) | NLB HTTPS target group ARN for TargetGroupBinding |

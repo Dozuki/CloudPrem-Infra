@@ -166,17 +166,6 @@ variable "vpc_cidr" {
   default     = "172.16.0.0/16"
 }
 
-variable "azs_count" {
-  description = "The number of availability zones we should use for deployment."
-  type        = number
-  default     = 3
-
-  validation {
-    condition     = var.azs_count >= 3 && var.azs_count <= 10
-    error_message = "AZ count must be between 3 and 10."
-  }
-}
-
 variable "highly_available_nat_gateway" {
   description = "Should be true if you want to provision a highly available NAT Gateway across all of your private networks"
   type        = bool

@@ -5,7 +5,6 @@ dependency "physical" {
 
   mock_outputs = {
     vpc_id                        = "temporary-dummy-id"
-    azs_count                     = 3
     eks_cluster_id                = "dummy-cluster-id"
     eks_cluster_access_role_arn   = "dummy-arn"
     dns_domain_name               = "dummy-lb-dns"
@@ -31,7 +30,6 @@ dependency "physical" {
 
 inputs = {
   vpc_id    = dependency.physical.outputs.vpc_id
-  azs_count = dependency.physical.outputs.azs_count
 
 
   eks_cluster_id              = dependency.physical.outputs.eks_cluster_id
