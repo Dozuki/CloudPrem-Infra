@@ -124,6 +124,18 @@ resource "aws_rds_cluster" "dr_aurora_secondary" {
   db_subnet_group_name   = aws_db_subnet_group.dr_aurora[0].name
   vpc_security_group_ids = [aws_security_group.dr_aurora[0].id]
 
+  # Serverless v2 scaling config, mirroring the primary. Costs nothing while headless
+  # (the config bills nothing without instances) but is REQUIRED for a failover to
+  # create db.serverless instances - without it, CreateDBInstance with
+  # db.serverless fails and the runbook's own step 1 errors at the worst possible
+  # moment. Found by the harness's promotion drill, which had to fall back to a
+  # provisioned class because this was missing. With it, failover compute matches
+  # the fleet's serverless posture.
+  serverlessv2_scaling_configuration {
+    min_capacity = var.aurora_min_acu
+    max_capacity = var.aurora_max_acu
+  }
+
   # master_username / master_password / database_name are inherited from the global
   # primary and must NOT be set on a secondary.
   skip_final_snapshot = !var.protect_resources
