@@ -135,6 +135,11 @@ resource "aws_dms_replication_subnet_group" "aurora_migration" {
 }
 
 resource "aws_dms_replication_instance" "aurora_migration" {
+  # Modifications (e.g. an instance-class bump when a load OOMs) must take
+  # effect NOW, not at the maintenance window - the apac full load crash-looped
+  # for an hour while a scheduled resize sat waiting.
+  apply_immediately = true
+
   count = local.aurora_migration_dms ? 1 : 0
 
   replication_instance_id    = "${local.identifier}-aurora-migration"
