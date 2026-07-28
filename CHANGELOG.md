@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.0.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.5...v8.0.0) (2026-07-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **webhooks:** enable_webhooks and msk_bootstrap_brokers are gone from both layers, along with the MSK cluster the flag provisioned. Any stack still setting enable_webhooks will fail with an unsupported-variable error and must drop the line.
+
+### Features
+
+* **logical:** datadog apm + continuous profiler behind enable_datadog ([#251](https://github.com/Dozuki/CloudPrem-Infra/issues/251)) ([5e7ec10](https://github.com/Dozuki/CloudPrem-Infra/commit/5e7ec1005e9921801829b342479a7a8d8ec5f255))
+* **webhooks:** remove webhooks, frontegg and MSK from both layers ([#343](https://github.com/Dozuki/CloudPrem-Infra/issues/343)) ([f9ab850](https://github.com/Dozuki/CloudPrem-Infra/commit/f9ab850e7e27ae2b5ef42a509a45210d4ffa8245))
+
 ## [7.23.5](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.4...v7.23.5) (2026-07-28)
 
 
