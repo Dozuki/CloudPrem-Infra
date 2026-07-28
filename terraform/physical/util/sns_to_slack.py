@@ -79,9 +79,13 @@ def lambda_handler(event, context):
         detail_message = message_json['detail'].get('detailMessage', 'N/A')
         resource_arn = message_json['resources'][0] if message_json['resources'] else 'N/A'
         replication_task_name = get_task_name(resource_arn)
-        replication_task_link = f"https://console.aws.amazon.com/dms/v2/home?region=us-east-1#taskDetails/{replication_task_name}"
+        # Link to THIS region's console (was hardcoded us-east-1).
+        replication_task_link = f"https://console.aws.amazon.com/dms/v2/home?region={region}#taskDetails/{replication_task_name}"
 
-        if "stopped" in detail_message or "ERROR" in detail_message:
+        # Page the channel only on failures. A plain "Replication task stopped"
+        # is routine (operator stops, the migration's automatic
+        # post-full-load stop, fence-time stops) and must not @channel.
+        if "ERROR" in detail_message or "FATAL" in detail_message or "fail" in detail_message.lower():
             header = "*DMS Alarm! <!channel>*"
         else:
             header = "*DMS Notification*"
