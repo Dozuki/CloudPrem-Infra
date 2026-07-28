@@ -147,7 +147,14 @@ resource "kubernetes_job_v1" "grafana_db_create" {
   count = (var.enable_bi || var.enable_dashboards) ? 1 : 0
 
   metadata {
-    name      = "grafana-db-create"
+    # Fold the primary DB's resourceId into the Job name (short sha256 suffix) so a database
+    # replacement (new db_resource_id, e.g. a snapshot re-restore to a new cluster) yields a new
+    # name and Terraform creates a fresh Job. The old static name meant the already-Completed Job
+    # was never recreated on later applies, so grafana_primary never got created on the replaced
+    # DB and the dashboards Grafana couldn't start. Same #4a fix the migration Job uses. When
+    # db_resource_id is empty (default) the name stays "grafana-db-create" - no diff for stacks not
+    # wiring it yet.
+    name      = var.db_resource_id == "" ? "grafana-db-create" : "grafana-db-create-${substr(sha256(var.db_resource_id), 0, 8)}"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
   spec {
