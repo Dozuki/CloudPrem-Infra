@@ -136,6 +136,20 @@ resource "aws_rds_cluster" "dr_aurora_secondary" {
     max_capacity = var.aurora_max_acu
   }
 
+  # Same log posture as the primary (aurora.tf). The secondary is headless, so it
+  # emits nothing today - this is entirely about what happens AFTER a failover.
+  # Promotion turns this cluster into the live database, and enabling exports at
+  # that point is another modify in the middle of an incident, on the one cluster
+  # whose audit trail suddenly matters most. Set it now so a promoted cluster
+  # keeps logging without anyone remembering to ask. Same reasoning that put
+  # serverlessv2_scaling_configuration here: the promotion drill found it missing
+  # at the worst moment.
+  enabled_cloudwatch_logs_exports = var.rds_log_exports
+
+  # RDS.16/17. Snapshots taken from the promoted cluster keep the stack's tags,
+  # so DR-region snapshots stay attributable to a customer and environment.
+  copy_tags_to_snapshot = true
+
   # master_username / master_password / database_name are inherited from the global
   # primary and must NOT be set on a secondary.
   skip_final_snapshot = !var.protect_resources
@@ -162,7 +176,24 @@ resource "aws_rds_cluster" "dr_aurora_secondary" {
   # This is a resource-level depends_on pointing AT a module, not a depends_on ON a
   # module block — it does not defer the module's own data sources (see the eks_cluster
   # warning in this layer's notes).
-  depends_on = [aws_rds_global_cluster.aurora, module.aurora]
+  #
+  # The log groups are in here too: RDS auto-creates any export target it does not
+  # find, and an auto-created group never expires. Creating them first is what keeps
+  # the DR region's retention at 365 days instead of forever, matching the primary
+  # (aurora.tf uses the module's create_cloudwatch_log_group for the same reason).
+  depends_on = [aws_rds_global_cluster.aurora, module.aurora, aws_cloudwatch_log_group.dr_aurora]
+}
+
+# Export targets for the secondary, created ahead of the cluster so they carry
+# retention. Named the way RDS expects for cluster exports; a mismatch here means
+# RDS silently makes its own never-expire group next to these.
+resource "aws_cloudwatch_log_group" "dr_aurora" {
+  for_each = local.aurora_dr_enabled ? toset(var.rds_log_exports) : toset([])
+  provider = aws.dr
+
+  name              = "/aws/rds/cluster/${local.identifier}-dr/${each.value}"
+  retention_in_days = 365
+  tags              = local.tags
 }
 
 # --- Outputs (consumed by the failover runbook) -------------------------------
