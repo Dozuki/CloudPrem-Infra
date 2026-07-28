@@ -81,8 +81,10 @@ unclean_validation_count() {
 
 # Parse "mysql-bin-changelog.NNNN / POS" style coordinates out of the task's
 # RecoveryCheckpoint ("checkpoint:V1#...#$.NNNN:POS:...") and compare with the
-# fenced source's final coordinate. DMS stopping is NOT a drain gate by itself;
-# this comparison is what proves every fenced-source event was consumed.
+# fenced source's final coordinate. Call this ONLY after the task has stopped:
+# RecoveryCheckpoint is a stopped-task safepoint that lags the live apply while
+# the task runs and flushes to the true applied commit position only on stop.
+# Stop + this comparison together are the drain proof.
 checkpoint_reached() { # $1=final_file_seq $2=final_pos
   local ck m seq pos
   ck=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)
@@ -317,8 +319,13 @@ for sweep in 1 2 3; do
   sleep 2
 done
 LEFT=\$(\$M -e "SELECT COUNT(*) FROM information_schema.processlist WHERE id != CONNECTION_ID() AND user NOT IN ('rdsadmin') AND command != 'Binlog Dump'")
-echo "foreign_sessions_remaining=\$LEFT"
-[ "\$LEFT" = "0" ] || exit 1
+# Best-effort with a LIVE app: its connection pool reconnects between sweeps, so
+# zero is unreachable in a fence-only cutover (writers are NOT scaled to zero).
+# Correctness does not depend on it - the write cutoff is read_only=1 itself.
+# Anything a lingering session commits before the fence lands in the binlog
+# BEFORE the final coordinate (captured post-fence), so the checkpoint drain
+# proof covers it; the post-fence sweep + negative test are the hard guarantees.
+echo "foreign_sessions_remaining=\$LEFT (best-effort; fence is the cutoff)"
 mariadb --defaults-extra-file=/tmp/mig-src.cnf -e "INSERT INTO aurora_mig_ctl.marker (tag) VALUES ('$MARK');"
 echo MARKER_COMMITTED
 EOF
@@ -354,19 +361,33 @@ EOF
 mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag='$MARK'" 2>/dev/null || echo 0
 EOF
 ); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break; sleep 10; done
-  say "gate: DMS checkpoint at or past the final coordinate (the actual drain proof)"
-  FINAL_FILE=$((10#$FINAL_FILE))
-  CKTRIES=0
-  while :; do
-    if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached"; break; fi
-    CKTRIES=$((CKTRIES+1)); [ "$CKTRIES" -gt 60 ] && die "checkpoint did not reach the final coordinate in 15m - inspect the task (unparseable checkpoint formats also land here; RecoveryCheckpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text))"
-    say "  waiting for checkpoint..."; sleep 15
-  done
-  say "gate: validation fully clean (whitelist)"
+  say "gate: validation fully clean (whitelist) - checked while the task still runs"
   while :; do U=$(unclean_validation_count); say "  unclean=$U"; [ "$U" = "0" ] && break; sleep 20; done
-  say "FINAL task stop + checkpoint record"
+  # Drain proof - STOP FIRST, then assert the checkpoint. RecoveryCheckpoint is a
+  # stopped-task safepoint: it advances to the true applied position only when the
+  # task stops, NOT while it runs. The old code asserted checkpoint >= coordinate
+  # while the task ran, which can never pass once the source's filtered-schema
+  # tail (rds_heartbeat and other mysql-schema system writes DMS excludes) rotates
+  # the binlog past the last applied real event - the checkpoint parks at the last
+  # consumable event and the app stays fenced until the 15m timeout. So: stop,
+  # read the flushed checkpoint, and if a genuine backlog left it short of the
+  # fenced source's final coordinate, resume to drain and re-stop. Bounded.
+  FINAL_FILE=$((10#$FINAL_FILE))
+  say "FINAL task stop (flushes RecoveryCheckpoint to the true applied position)"
   aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
   while [ "$(task_status)" != "stopped" ]; do sleep 10; done
+  say "gate: post-stop checkpoint at or past the final coordinate (the drain proof)"
+  CKTRIES=0
+  while :; do
+    if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached (post-stop)"; break; fi
+    CKTRIES=$((CKTRIES+1)); [ "$CKTRIES" -gt 10 ] && die "post-stop checkpoint short of the final coordinate after 10 resume/stop cycles - inspect the task (RecoveryCheckpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text); final=$FINAL_FILE:$FINAL_POS)"
+    say "  checkpoint short of final - resuming to drain the backlog, then re-stopping (cycle $CKTRIES)"
+    aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+    while [ "$(task_status)" != "running" ]; do sleep 5; done
+    sleep 45
+    aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
+    while [ "$(task_status)" != "stopped" ]; do sleep 10; done
+  done
   say "checkpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)"
   say "installing object artifacts AFTER the final stop (DMS can never apply DML"
   say "through freshly installed triggers). Dumped FRESH from the fenced source -"
