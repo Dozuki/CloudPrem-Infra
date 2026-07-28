@@ -533,6 +533,14 @@ resource "kubectl_manifest" "flux_slack_alert" {
     spec = {
       providerRef   = { name = "slack" }
       eventSeverity = "info" # info => both success and failure events; "error" would drop successes
+      # Every env posts to the same channel with the identical object title
+      # (helmrelease/dozuki.flux-system), so stamp the env identity onto each
+      # notification - otherwise fleet messages are indistinguishable.
+      summary = "${var.customer}-${var.environment}"
+      eventMetadata = {
+        env     = "${var.customer}-${var.environment}"
+        cluster = var.eks_cluster_id
+      }
       eventSources = [
         { kind = "HelmRelease", name = "*" },
         { kind = "OCIRepository", name = "*" },
