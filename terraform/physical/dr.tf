@@ -209,15 +209,32 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_guide_buckets"
   }
 }
 
+# Replica of the primary pdf bucket's ACL carve-out (s3.tf): replication of
+# ACL'd objects needs the destination to accept ACLs too. Same removal
+# condition as the primary.
+resource "aws_s3_bucket_ownership_controls" "dr_guide_pdf_bucket" {
+  for_each = contains(keys(aws_s3_bucket.dr_guide_buckets), "pdf") ? { pdf = aws_s3_bucket.dr_guide_buckets["pdf"] } : {}
+  provider = aws.dr
+
+  bucket = each.value.id
+
+  rule {
+    object_ownership = "ObjectWriter"
+  }
+}
+
+#tfsec:ignore:aws-s3-block-public-acls
+#tfsec:ignore:aws-s3-ignore-public-acls
+#tfsec:ignore:aws-s3-no-public-buckets
 resource "aws_s3_bucket_public_access_block" "dr_guide_buckets" {
   for_each = aws_s3_bucket.dr_guide_buckets
   provider = aws.dr
 
   bucket                  = each.value.id
-  block_public_acls       = true
+  block_public_acls       = each.key == "pdf" ? false : true
   block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  ignore_public_acls      = each.key == "pdf" ? false : true
+  restrict_public_buckets = each.key == "pdf" ? false : true
 }
 
 data "aws_iam_policy_document" "dr_s3_replication_assume" {

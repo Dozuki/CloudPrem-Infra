@@ -439,15 +439,39 @@ resource "aws_s3_bucket_logging" "guide_buckets_logging" {
   target_bucket = aws_s3_bucket.logging_bucket.bucket
   target_prefix = "${each.key}/"
 }
+# The pdf bucket is the one bucket whose objects the app manages with per-object
+# ACLs: guide PDFs flip between public-read / authenticated-read / private when
+# a guide's privacy changes, and public guides are served by their bare object
+# URL. Buckets created after S3 switched its default to BucketOwnerEnforced
+# (Apr 2023) reject every one of those calls with AccessControlListNotSupported,
+# which breaks the privacy flip (500s the guide PATCH), PDF regeneration, and
+# public-guide PDF serving. ObjectWriter restores the pre-2023 semantics the app
+# was built against. Scoped to pdf only; every other bucket stays ACL-disabled.
+# Remove when the app can run ACL-free (deployment flag + presigned-only serving).
+resource "aws_s3_bucket_ownership_controls" "guide_pdf_bucket" {
+  for_each = contains(local.create_s3_bucket_names, "pdf") ? { pdf = aws_s3_bucket.guide_buckets["pdf"] } : {}
+
+  bucket = each.value.id
+
+  rule {
+    object_ownership = "ObjectWriter"
+  }
+}
+
+# pdf carve-outs below: ACL-based public reads need BlockPublicAcls and
+# RestrictPublicBuckets off. Public bucket POLICIES stay blocked everywhere.
+#tfsec:ignore:aws-s3-block-public-acls
+#tfsec:ignore:aws-s3-ignore-public-acls
+#tfsec:ignore:aws-s3-no-public-buckets
 resource "aws_s3_bucket_public_access_block" "guide_buckets_acl_block" {
   for_each = local.s3_public_access_block_buckets
 
   bucket = each.value.id
 
-  block_public_acls       = true
+  block_public_acls       = each.key == "pdf" ? false : true
   block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  ignore_public_acls      = each.key == "pdf" ? false : true
+  restrict_public_buckets = each.key == "pdf" ? false : true
 }
 resource "aws_s3_bucket_versioning" "guide_buckets_versioning" {
   for_each = aws_s3_bucket.guide_buckets
