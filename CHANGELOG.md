@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.0.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.3...v8.0.4) (2026-07-28)
+
+
+### Bug Fixes
+
+* **physical:** log exports and snapshot tags on the DR aurora secondary ([#356](https://github.com/Dozuki/CloudPrem-Infra/issues/356)) ([492d475](https://github.com/Dozuki/CloudPrem-Infra/commit/492d475cacf990c5dcb548420cb95ef1942080b5))
+
 ## [8.0.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.2...v8.0.3) (2026-07-28)
 
 
