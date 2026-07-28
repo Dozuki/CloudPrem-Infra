@@ -65,6 +65,12 @@ variable "subsite_gateway_api_enabled" {
   default     = false
 }
 
+variable "enable_datadog" {
+  description = "Installs the Datadog agent (lean: APM trace intake + SSI library injection + continuous profiler only) and instruments the monolith PHP pods. Dozuki-internal observability for MPC stacks - never enable on CloudPrem customer installs. AWS only; reads the API key from Vault secret/dozuki/global/datadog. See datadog.tf."
+  type        = bool
+  default     = false
+}
+
 variable "istio_mesh_state" {
   description = "Istio ambient mesh lifecycle state. disabled: nothing installed. installed: control plane + node dataplane running, NodePool startup taints active, no namespaces enrolled. permissive: dozuki/envoy-gateway-system/redis-system enrolled (mesh-to-mesh traffic is auto-mTLS, nothing rejected). strict: STRICT PeerAuthentication enforced with documented carve-outs. States are ordered supersets; walk one step per apply, forward or back. Commercial AWS only until gov phase 2."
   type        = string
