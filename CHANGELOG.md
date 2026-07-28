@@ -2,6 +2,15 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.0.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.1...v8.0.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* **physical:** aurora fence drain-proof must stop the task before asserting the checkpoint ([#349](https://github.com/Dozuki/CloudPrem-Infra/issues/349)) ([710cc9d](https://github.com/Dozuki/CloudPrem-Infra/commit/710cc9d0417310a683ccc37c2e2ced72df2678ae))
+* **physical:** dr bucket lifecycle + ssl-only policies on content buckets ([#347](https://github.com/Dozuki/CloudPrem-Infra/issues/347)) ([1fd3973](https://github.com/Dozuki/CloudPrem-Infra/commit/1fd397339620162b67cc9602f4b1bf921aab5aeb))
+* **physical:** restore acl support on the pdf bucket ([#348](https://github.com/Dozuki/CloudPrem-Infra/issues/348)) ([0a5eef7](https://github.com/Dozuki/CloudPrem-Infra/commit/0a5eef727aea72b18c6e3bd2bd5f4e5e7921b18a))
+
 ## [8.0.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.0...v8.0.1) (2026-07-28)
 
 
