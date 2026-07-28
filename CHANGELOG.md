@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.0.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.0...v8.0.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **logical:** keep EBS-backed workloads off spot and stop stranding them ([#345](https://github.com/Dozuki/CloudPrem-Infra/issues/345)) ([350ceec](https://github.com/Dozuki/CloudPrem-Infra/commit/350ceec81a9b0ff0a73dc18de4d34fe47b8cc9c2))
+
 ## [8.0.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.5...v8.0.0) (2026-07-28)
 
 
