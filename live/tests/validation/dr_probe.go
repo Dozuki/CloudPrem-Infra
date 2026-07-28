@@ -47,8 +47,13 @@ import (
 
 const (
 	probeRuntimeTimeout = 30
-	probeENIWait        = 12 * time.Minute
-	probeCreateRetry    = 90 * time.Second // IAM role propagation to Lambda is eventually consistent
+	// Lambda releases Hyperplane ENIs lazily after function deletion - observed ~13-18
+	// minutes on a real run, documented worst case ~20. The first budget (12m) was
+	// tighter than reality and failed a run whose data verification had SUCCEEDED,
+	// leaving the scratch SG behind for manual rescue. Most of this wait overlaps the
+	// drill's ~12m instance deletion, so the marginal wall-clock cost is small.
+	probeENIWait     = 25 * time.Minute
+	probeCreateRetry = 90 * time.Second // IAM role propagation to Lambda is eventually consistent
 )
 
 // DRProbeResult is what the Lambda reports back from the promoted cluster.
