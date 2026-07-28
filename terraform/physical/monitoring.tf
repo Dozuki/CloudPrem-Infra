@@ -384,7 +384,11 @@ module "rds_write_latency_alarm" {
 
 
 resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
-  count = var.enable_bi ? 1 : 0
+  # Present whenever ANY dms task this env owns exists: the BI task OR the
+  # aurora migration task. Gating on enable_bi alone left a migration on an
+  # enable_bi=false env alertless - with the STOP_TASK apply-error policies a
+  # soak-phase stop must page, or it sits unnoticed past binlog retention.
+  count = var.enable_bi || local.aurora_migration_dms ? 1 : 0
 
   name        = "${local.identifier}-dms-task-changed-rule"
   description = "Capture change state of DMS replication tasks"
@@ -408,7 +412,7 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
 }
 
 resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
-  count = var.enable_bi ? 1 : 0
+  count = var.enable_bi || local.aurora_migration_dms ? 1 : 0
 
   rule      = aws_cloudwatch_event_rule.dms_task_state_changed_rule[0].name
   target_id = "DmsTaskChangedTarget"

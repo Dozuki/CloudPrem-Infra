@@ -26,7 +26,11 @@
     "DataErrorPolicy": "STOP_TASK",
     "DataTruncationErrorPolicy": "STOP_TASK",
     "TableErrorPolicy": "STOP_TASK",
-    "DataErrorEscalationPolicy": "STOP_TASK"
+    "DataErrorEscalationPolicy": "STOP_TASK",
+    "ApplyErrorInsertPolicy": "STOP_TASK",
+    "ApplyErrorUpdatePolicy": "STOP_TASK",
+    "ApplyErrorDeletePolicy": "STOP_TASK",
+    "ApplyErrorEscalationPolicy": "STOP_TASK"
   },
   "Logging": { "EnableLogging": true },
   "ControlTablesSettings": { "ControlSchema": "awsdms_control" }
