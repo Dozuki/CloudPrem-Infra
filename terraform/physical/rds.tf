@@ -222,6 +222,18 @@ resource "aws_secretsmanager_secret" "primary_database_credentials" {
 
   recovery_window_in_days = var.protect_resources ? 7 : 0
 
+  # When the Aurora DR secondary exists, replicate the credentials to the DR region.
+  # A failover has to read this secret while the primary region is unreachable; the
+  # replica ARN is the primary's with the region swapped, which is what the failover
+  # tooling constructs. DB users travel with the cluster storage, so the replicated
+  # credentials are valid on the promoted secondary as-is.
+  dynamic "replica" {
+    for_each = local.aurora_dr_enabled ? [var.dr_region] : []
+    content {
+      region = replica.value
+    }
+  }
+
   lifecycle {
     ignore_changes = [
       name,
