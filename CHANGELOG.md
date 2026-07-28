@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.23.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.0...v7.23.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **logical:** stamp env identity on flux slack notifications ([#331](https://github.com/Dozuki/CloudPrem-Infra/issues/331)) ([627c566](https://github.com/Dozuki/CloudPrem-Infra/commit/627c5669e2b948bdb3e7c2b114696d8e276e0ab0))
+
 ## [7.23.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.22.1...v7.23.0) (2026-07-28)
 
 
