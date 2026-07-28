@@ -1,7 +1,3 @@
-output "msk_bootstrap_brokers" {
-  description = "Kafka bootstrap broker list"
-  value       = try(aws_msk_cluster.this[0].bootstrap_brokers, "")
-}
 output "eks_cluster_id" {
   description = "EKS Cluster Name"
   value       = module.eks_cluster.cluster_name

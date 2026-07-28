@@ -6,7 +6,6 @@ dependency "physical" {
   mock_outputs = {
     vpc_id                        = "temporary-dummy-id"
     azs_count                     = 3
-    msk_bootstrap_brokers         = "bootstrap-brokers"
     eks_cluster_id                = "dummy-cluster-id"
     eks_cluster_access_role_arn   = "dummy-arn"
     dns_domain_name               = "dummy-lb-dns"
@@ -34,7 +33,6 @@ inputs = {
   vpc_id    = dependency.physical.outputs.vpc_id
   azs_count = dependency.physical.outputs.azs_count
 
-  msk_bootstrap_brokers = dependency.physical.outputs.msk_bootstrap_brokers
 
   eks_cluster_id              = dependency.physical.outputs.eks_cluster_id
   eks_cluster_access_role_arn = dependency.physical.outputs.eks_cluster_access_role_arn

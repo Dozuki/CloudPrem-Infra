@@ -41,12 +41,6 @@ variable "aws_profile" {
 
 # --- BEGIN App Configuration --- #
 
-variable "enable_webhooks" {
-  description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
-  type        = bool
-  default     = false
-}
-
 variable "enable_bi" {
   description = "Whether to deploy resources for BI, a replica database, a DMS task, and a Kafka cluster"
   type        = bool
@@ -307,10 +301,6 @@ variable "s3_replicate_buckets" {
 # This needs to have no type due to terraform's weird handling of string lists. If you set a type it will convert it to
 # a format we can't feed into helm
 # tflint-ignore: terraform_typed_variables
-variable "msk_bootstrap_brokers" {
-  description = "Kafka bootstrap broker list"
-}
-
 variable "dms_task_arn" {
   type        = string
   description = "If BI is enabled, the DMS replication task arn."

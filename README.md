@@ -80,9 +80,8 @@ live/standard/                       partition
 | Env                 | Purpose                                                        |
 |---------------------|---------------------------------------------------------------|
 | `min`               | Minimal single-AZ stack — dev / smoke testing                 |
-| `full`              | Production preset — multi-AZ, DR, webhooks, BI all on          |
+| `full`              | Production preset — multi-AZ, DR, BI all on                    |
 | `bi`                | Adds the business-intelligence database path                  |
-| `hooks`             | Adds the webhooks (Kafka) path                                 |
 | `workstation_setup` | Bootstrap/workstation tooling                                 |
 
 New partitions and environments are scaffolded from [`live/.skel/`](./live/.skel)
@@ -126,7 +125,6 @@ Feature flags are set per-environment in `env.hcl` and flow through the root
 | `db_engine`                    | physical | `rds`   | `rds` (provisioned MySQL) or `aurora` (Aurora Serverless v2)    |
 | `rds_multi_az`                 | physical | `true`  | Multi-AZ RDS standby                                            |
 | `highly_available_nat_gateway` | physical | `true`  | One NAT gateway per AZ                                          |
-| `enable_webhooks`              | both     | `false` | Provision MSK (Kafka) for webhooks                             |
 | `enable_bi`                    | both     | `false` | Provision the business-intelligence database path             |
 | `image_tag` / `nextjs_tag`     | logical  | —       | Dozuki application image tags                                   |
 | `chart_version`                | logical  | —       | Dozuki Helm chart version (pulled from the OCI/ECR registry)   |

@@ -63,7 +63,6 @@ live/
 │       │   ├── env.hcl
 │       │   ├── physical/terragrunt.hcl
 │       │   └── logical/terragrunt.hcl
-│       └── hooks/          # Webhooks-enabled environment
 └── gov/                    # GovCloud partition
     ├── account.hcl
     └── us-gov-west-1/
@@ -114,7 +113,6 @@ Edit `env.hcl` for your environment:
 ```hcl
 locals {
   environment                   = "min"
-  enable_webhooks               = false      # MSK Kafka for webhooks
   enable_bi                     = false      # BI replica database + Grafana dashboards
   rds_multi_az                  = false      # Multi-AZ RDS (production only)
   highly_available_nat_gateway  = false      # NAT per AZ (production only)
@@ -129,12 +127,11 @@ locals {
 
 ### Environment Types
 
-| Type | `enable_webhooks` | `enable_bi` | What it deploys |
+| Type | `enable_bi` | What it deploys |
 |------|:-:|:-:|---|
 | `min` | false | false | Core application stack + monitoring |
-| `hooks` | **true** | false | Core + webhooks infrastructure (MSK Kafka) |
 | `bi` | false | **true** | Core + business-intelligence replica database |
-| `full` | **true** | **true** | All features (webhooks + BI); pair with multi-AZ + DR for production |
+| `full` | **true** | All features (BI); pair with multi-AZ + DR for production |
 
 ## Step 4: Configure Physical Inputs
 
@@ -164,7 +161,7 @@ cd live/standard/us-east-1/<env>
 terragrunt run-all apply
 ```
 
-Terragrunt automatically applies physical before logical based on the dependency declared in `common.hcl`. The full deploy takes **20-40 minutes** (EKS ~12 min, RDS ~10 min, MSK ~20 min if webhooks enabled).
+Terragrunt automatically applies physical before logical based on the dependency declared in `common.hcl`. The full deploy takes **20-40 minutes** (EKS ~12 min, RDS ~10 min).
 
 ### Credential Workaround
 
