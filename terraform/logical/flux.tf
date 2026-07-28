@@ -471,8 +471,15 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # reverted under us. Jobs are ignored (empty-string JSON pointer = the whole object) so a completed migration/db-create
       # Job never registers as drift and never gets recreated/rerun - the reason drift detection was omitted before.
       driftDetection = {
-        mode   = "warn"
-        ignore = [{ paths = [""], target = { kind = "Job" } }]
+        mode = "warn"
+        ignore = [
+          # Completed migration/db-create Jobs must never register as drift.
+          { paths = [""], target = { kind = "Job" } },
+          # HPAs own spec.replicas on the app tier (app-hpa, nextjs memory-HPA);
+          # the chart's static count differs whenever an HPA has scaled, which
+          # made every reconcile warn DriftDetected (first seen live on apac).
+          { paths = ["/spec/replicas"], target = { kind = "Deployment" } },
+        ]
       }
       valuesFrom = [{ kind = "Secret", name = kubernetes_secret_v1.flux_values.metadata[0].name, valuesKey = "values.yaml" }]
     }
