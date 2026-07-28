@@ -366,15 +366,19 @@ fence)
   [ "$(effective_apply_policies)" = "STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK" ] || \
     die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
   prep_cnfs
-  # Epoch baseline for the final revalidation gate: per-table CDC apply counters
-  # BEFORE anything in this fence commits (marker included). After the drain,
-  # every table whose counters moved is a table the fence window touched - the
-  # exact set the epoch-specific revalidation must re-prove.
-  STATS0="/tmp/fence-stats0-${ID}.json"
-  say "snapshotting per-table apply counters (revalidation epoch baseline)"
-  aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
-    --query 'TableStatistics[].{s:SchemaName,t:TableName,c:sum([Inserts,Updates,Deletes]),v:ValidationState,u:LastUpdateTime}' \
-    --output json > "$STATS0"
+  # Epoch anchor for the final revalidation gate: the SOURCE server's own clock,
+  # captured before anything in this fence commits (marker included). The
+  # touched set is later derived from information_schema.tables.update_time on
+  # the fenced source - engine truth, immune to DMS task-statistics counters
+  # resetting across task stop/resume cycles.
+  say "capturing the source epoch anchor (for the touched-table derivation)"
+  SRC_EPOCH=$(ssm_run <<'EOF'
+mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT NOW(6)"
+EOF
+)
+  SRC_EPOCH=$(echo "$SRC_EPOCH" | tr -d '\r' | grep . | head -1)
+  [ -n "$SRC_EPOCH" ] || die "could not capture the source epoch anchor"
+  say "  source epoch: $SRC_EPOCH"
   # BI task must stop BEFORE the cutover apply mutates its source endpoint
   # (DMS rejects endpoint modification on a running task).
   if [ "$(bi_task_status)" = "running" ]; then
@@ -472,44 +476,80 @@ EOF
   done
   # Final validation epoch, AFTER the drain - a FRESH validation-only DMS task
   # scoped to the tables the fence window touched. Why fresh: the main task's
-  # validation is asynchronous with no resume barrier and no epoch token
-  # (LastUpdateTime is "stats record touched", not "this validation completed"),
-  # so ANY observation of its state can be stale. A fresh task has no history -
+  # validation is asynchronous with no resume barrier and no epoch token, so
+  # ANY observation of its state can be stale. A fresh task has no history -
   # every selected table starts unvalidated in THIS epoch, so Validated on it is
   # necessarily epoch-new, with an unambiguous completion boundary. Both sides
   # are quiescent (source fenced, main task stopped after the drain proof), so
-  # it is a clean full row compare. The touched set comes from diffing per-table
-  # source-observed counters (Inserts+Updates+Deletes - deliberately NOT the
-  # Applied* counters: an attempted change counts as touched even if its apply
-  # failed) against the fence-start baseline. aurora_mig_ctl.marker is always in
-  # the set (its insert is part of this fence), so the machinery self-canaries.
-  # FK-cascaded child rows are not binlogged by MySQL and so not in the set;
-  # identical FK DDL on both sides (preload md5 gate) makes their outcomes
-  # equal by construction.
+  # it is a clean full row compare. The touched set comes from the SOURCE
+  # engine's information_schema.tables.update_time against the fence-start
+  # epoch anchor - NOT from DMS table-statistics counters, which reset across
+  # task stop/resume and would silently drop a baseline-zero table from the
+  # set. Partitioned tables (update_time is NULL for them) are included
+  # unconditionally - a safe superset. Tables without a PK/UNIQUE key cannot be
+  # row-validated and are excluded (the pre-existing documented exception).
+  # aurora_mig_ctl.marker is always in the set (its insert is part of this
+  # fence and it has a PK), so the machinery self-canaries. FK-cascaded child
+  # rows are not binlogged by MySQL and so not in the set; identical FK DDL on
+  # both sides (preload md5 gate) makes their outcomes equal by construction.
   say "gate: final validation epoch over the drained dataset (fresh validation-only task)"
-  STATS1="/tmp/fence-stats1-${ID}.json"
-  aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
-    --query 'TableStatistics[].{s:SchemaName,t:TableName,c:sum([Inserts,Updates,Deletes]),v:ValidationState}' \
-    --output json > "$STATS1"
-  TOUCHED=$(jq -n --slurpfile a "$STATS0" --slurpfile b "$STATS1" '
-    ($a[0] | map({key: (.s + "|" + .t), value: .c}) | from_entries) as $base
-    | [ $b[0][]
-        | select((($base[.s + "|" + .t] // -1) != .c) and ((.v | ascii_downcase) != "no primary key"))
-        | {SchemaName: .s, TableName: .t} ]')
+  RAWTOUCH=$(ssm_run <<EOF
+mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names <<'SQL'
+SELECT t.table_schema, t.table_name
+FROM information_schema.tables t
+WHERE t.table_type = 'BASE TABLE'
+  AND t.table_schema NOT IN ('mysql','information_schema','performance_schema','sys','innodb','tmp')
+  AND t.table_schema NOT LIKE 'awsdms%'
+  AND (t.update_time >= DATE_SUB('$SRC_EPOCH', INTERVAL 5 SECOND)
+       OR EXISTS (SELECT 1 FROM information_schema.partitions p
+                  WHERE p.table_schema = t.table_schema AND p.table_name = t.table_name
+                    AND p.partition_name IS NOT NULL))
+  AND EXISTS (SELECT 1 FROM information_schema.table_constraints tc
+              WHERE tc.table_schema = t.table_schema AND tc.table_name = t.table_name
+                AND tc.constraint_type IN ('PRIMARY KEY','UNIQUE'))
+SQL
+EOF
+)
+  TOUCHED=$(echo "$RAWTOUCH" | tr -d '\r' | grep . | jq -Rn '[inputs | split("\t") | select(length == 2) | {SchemaName: .[0], TableName: .[1]}]')
   NTOUCH=$(echo "$TOUCHED" | jq length)
   say "  tables touched in the fence window (revalidation set): $NTOUCH"
-  [ "$NTOUCH" -ge 1 ] || die "revalidation set is empty - the marker table alone should be in it; the counter baseline is broken, do not trust this epoch"
+  echo "$TOUCHED" | jq -r '.[] | "    " + .SchemaName + "." + .TableName' | head -30
+  [ "$NTOUCH" -ge 1 ] || die "revalidation set is empty - the marker table alone should be in it; the update_time derivation is broken, do not trust this epoch"
+  echo "$TOUCHED" | jq -e '[.[] | select(.SchemaName == "aurora_mig_ctl" and .TableName == "marker")] | length == 1' >/dev/null || \
+    die "the marker table is missing from the touched set - the update_time derivation is broken, do not trust this epoch"
   VTASK_ID="${ID}-aurora-migration-fencevalidate"
   vtask_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null | grep -v '^None$' || true; }
-  OLD=$(vtask_arn)
-  if [ -n "$OLD" ]; then
+  vtask_status() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none; }
+  vwait_status() { # $1=wanted $2=timeout seconds - bounded, dies on failure states
+    local waited=0 s
+    while :; do
+      s=$(vtask_status)
+      [ "$s" = "$1" ] && return 0
+      case "$s" in failed|stopped-after-fail|deleting) [ "$1" = "deleting" ] || die "validation task entered '$s' while waiting for '$1'";; esac
+      [ "$waited" -ge "$2" ] && die "validation task did not reach '$1' in ${2}s (status=$s)"
+      sleep 10; waited=$((waited+10))
+    done
+  }
+  vtask_teardown() { # stop if running, delete, wait gone - every wait bounded
+    local arn; arn=$(vtask_arn); [ -n "$arn" ] || return 0
+    [ "$(vtask_status)" = "running" ] && { aws dms stop-replication-task --replication-task-arn "$arn" --region "$REGION" >/dev/null; vwait_status stopped 900; }
+    aws dms delete-replication-task --replication-task-arn "$arn" --region "$REGION" >/dev/null
+    local waited=0
+    while [ -n "$(vtask_arn)" ]; do
+      [ "$waited" -ge 600 ] && die "validation task did not delete in 600s"
+      sleep 10; waited=$((waited+10))
+    done
+  }
+  if [ -n "$(vtask_arn)" ]; then
     say "  deleting a leftover fence-validation task from a prior attempt"
-    ST=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)
-    [ "$ST" = "running" ] && { aws dms stop-replication-task --replication-task-arn "$OLD" --region "$REGION" >/dev/null; while [ "$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)" != "stopped" ]; do sleep 10; done; }
-    aws dms delete-replication-task --replication-task-arn "$OLD" --region "$REGION" >/dev/null
-    while [ -n "$(vtask_arn)" ]; do sleep 10; done
+    vtask_teardown
   fi
-  VMAP=$(echo "$TOUCHED" | jq '{rules: [to_entries[] | {"rule-type":"selection","rule-id":(.key+1|tostring),"rule-name":(.key+1|tostring),"object-locator":{"schema-name":.value.SchemaName,"table-name":.value.TableName},"rule-action":"include"}]}')
+  # rule-action "explicit" = exact-name match. "include" treats _ and % as
+  # wildcards, so e.g. server_lock would also select serverXlock - an extra
+  # matched table could then satisfy a count-based gate while a real touched
+  # table was still pending. Belt and braces: the completion gate below also
+  # compares the exact validated (schema, table) SET, never counts.
+  VMAP=$(echo "$TOUCHED" | jq '{rules: [to_entries[] | {"rule-type":"selection","rule-id":(.key+1|tostring),"rule-name":(.key+1|tostring),"object-locator":{"schema-name":.value.SchemaName,"table-name":.value.TableName},"rule-action":"explicit"}]}')
   RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
   SEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-source" --query 'Endpoints[0].EndpointArn' --output text)
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
@@ -522,27 +562,28 @@ EOF
     --table-mappings "$VMAP" \
     --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":5,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
     --query 'ReplicationTask.ReplicationTaskArn' --output text)
-  while [ "$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)" != "ready" ]; do sleep 10; done
+  vwait_status ready 600
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
-  say "  validating the touched set (all tables must reach Validated in this epoch)"
+  say "  validating the touched set (every touched table must reach Validated in this epoch)"
   VWAIT=0
   while :; do
-    VSTATES=$(aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
-      --query 'TableStatistics[].ValidationState' --output text | tr '\t' '\n' | grep . || true)
-    NDONE=$(echo "$VSTATES" | grep -ic '^validated$' || true)
-    # terminal-bad states fail immediately; anything else (pending/validating)
-    # is in-progress and covered by the bound
-    NBAD=$(echo "$VSTATES" | grep -icE 'mismatch|error|suspend|no primary key' || true)
-    say "  validated $NDONE/$NTOUCH (bad states: $NBAD)"
+    VSTATS=$(aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
+      --query 'TableStatistics[].{s:SchemaName,t:TableName,v:ValidationState}' --output json)
+    NBAD=$(echo "$VSTATS" | jq '[.[] | select(.v | test("mismatch|error|suspend|no primary"; "i"))] | length')
+    # exact SET comparison: every table in TOUCHED must appear in the fresh
+    # task's stats as Validated. Counts alone could be satisfied by a stray
+    # extra match while a real table is still pending.
+    PENDING=$(jq -n --argjson want "$TOUCHED" --argjson now "$VSTATS" '
+      ($now | map(select((.v | ascii_downcase) == "validated") | {key: (.s + "|" + .t), value: true}) | from_entries) as $ok
+      | [ $want[] | select(($ok[.SchemaName + "|" + .TableName] // false) | not) ] | length')
+    say "  pending=$PENDING/$NTOUCH (bad states: $NBAD)"
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
-    [ "$NDONE" -eq "$NTOUCH" ] && break
+    [ "$PENDING" = "0" ] && break
     VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 2700 ] && die "fence-epoch validation did not complete in 45m - inspect $VTASK_ID"
     sleep 20
   done
   say "  epoch validation PASSED - removing the validation task"
-  VST=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)
-  [ "$VST" = "running" ] && { aws dms stop-replication-task --replication-task-arn "$VARN" --region "$REGION" >/dev/null; while [ "$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)" != "stopped" ]; do sleep 10; done; }
-  aws dms delete-replication-task --replication-task-arn "$VARN" --region "$REGION" >/dev/null
+  vtask_teardown
   # main-task whole-task whitelist gate (its stats survive the stop): catches a
   # table that went Mismatched/Suspended during soak outside the touched set.
   U=$(unclean_validation_count)
