@@ -367,16 +367,18 @@ fence)
     die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
   prep_cnfs
   # NOTE on the validation-epoch scope (see the epoch block after the drain
-  # proof): the fresh task validates the FULL PK-table catalog, not a derived
-  # "touched during the fence" subset. Every cheap touched-signal was tried and
-  # has a documented false-negative hole: DMS table-statistics counters reset
-  # across task lifecycle events, information_schema.tables.update_time is
-  # cached (information_schema_stats_expiry, default 24h) and silently NULLed
-  # by InnoDB dictionary-cache eviction, and performance_schema is OFF on the
-  # fleet's RDS sources (static parameter; enabling needs a reboot). A missed
-  # table in that set would be a silent data-divergence pass, so the epoch
-  # validates everything validatable instead - minutes of extra fence time on
-  # a quiescent pair, zero signal-validity risk.
+  # proof): the fresh task validates the main task's ENTIRE mapping scope (a
+  # clone of its TableMappings), not a derived "touched during the fence"
+  # subset. Every cheap touched-signal was tried and has a documented
+  # false-negative hole: DMS table-statistics counters reset across task
+  # lifecycle events, information_schema.tables.update_time is cached
+  # (information_schema_stats_expiry, default 24h) and silently NULLed by
+  # InnoDB dictionary-cache eviction, performance_schema is OFF on the fleet's
+  # RDS sources (static parameter; enabling needs a reboot), and any catalog
+  # fetched over SSM truncates at 24k chars of stdout. A missed table would be
+  # a silent data-divergence pass, so the epoch validates everything the
+  # migration migrated instead - minutes of extra fence time on a quiescent
+  # pair, zero signal-validity risk.
   # BI task must stop BEFORE the cutover apply mutates its source endpoint
   # (DMS rejects endpoint modification on a running task).
   if [ "$(bi_task_status)" = "running" ]; then
@@ -479,38 +481,20 @@ EOF
   # every selected table starts unvalidated in THIS epoch, so Validated on it is
   # necessarily epoch-new, with an unambiguous completion boundary. Both sides
   # are quiescent (source fenced, main task stopped after the drain proof), so
-  # it is a clean full row compare. Scope = the FULL PK-table catalog (see the
-  # note at fence start: every derived touched-subset signal has a documented
-  # false-negative hole, and a missed table would be a silent divergence pass).
-  # The catalog comes from information_schema.tables + table_constraints -
-  # existence queries with no caching hazard. Tables without a PK/UNIQUE key
-  # cannot be row-validated and are excluded but REPORTED (the documented
-  # users-table exception). aurora_mig_ctl.marker is asserted present: its row
-  # exists only if THIS fence's write replicated, so its Validated verdict
-  # proves the epoch task compared current data.
-  say "gate: final validation epoch over the drained dataset (fresh validation-only task, full PK catalog)"
-  RAWCAT=$(ssm_run <<'EOF'
-mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names <<'SQL'
-SELECT t.table_schema, t.table_name,
-       EXISTS (SELECT 1 FROM information_schema.table_constraints tc
-               WHERE tc.table_schema = t.table_schema AND tc.table_name = t.table_name
-                 AND tc.constraint_type IN ('PRIMARY KEY','UNIQUE'))
-FROM information_schema.tables t
-WHERE t.table_type = 'BASE TABLE'
-  AND t.table_schema NOT IN ('mysql','information_schema','performance_schema','sys','innodb','tmp')
-  AND t.table_schema NOT LIKE 'awsdms%'
-SQL
-EOF
-)
-  CATALOG=$(echo "$RAWCAT" | tr -d '\r' | grep . | jq -Rn '[inputs | split("\t") | select(length == 3) | {s: .[0], t: .[1], pk: (.[2] == "1")}]')
-  TOUCHED=$(echo "$CATALOG" | jq '[.[] | select(.pk) | {SchemaName: .s, TableName: .t}]')
-  NOPK_LIST=$(echo "$CATALOG" | jq -r '[.[] | select(.pk | not) | .s + "." + .t] | join(" ")')
-  [ -z "$NOPK_LIST" ] || say "  no-PK tables excluded from row validation (documented exception): $NOPK_LIST"
-  NTOUCH=$(echo "$TOUCHED" | jq length)
-  say "  PK-table validation set: $NTOUCH tables"
-  [ "$NTOUCH" -ge 1 ] || die "the PK-table catalog is empty - the catalog query is broken, do not trust this epoch"
-  echo "$TOUCHED" | jq -e '[.[] | select(.SchemaName == "aurora_mig_ctl" and .TableName == "marker")] | length == 1' >/dev/null || \
-    die "the marker table is missing from the catalog - it must exist by this point in the fence; do not trust this epoch"
+  # it is a clean full row compare. Scope = a CLONE of the main task's own
+  # TableMappings: the mappings that DEFINE what was migrated. Against the
+  # frozen source the fresh task enumerates exactly the migrated table set -
+  # no operator-side catalog derivation at all. (Every derived-catalog path
+  # failed adversarial review: DMS counters reset, update_time is cached and
+  # eviction-NULLed, performance_schema is off on the fleet, and an SSM-fetched
+  # catalog silently truncates at 24k chars of stdout. The mappings clone has
+  # no such channel: it travels via DMS APIs with real pagination.)
+  # Completion requires the fresh task's enumerated count to MATCH the main
+  # task's stats count (same mappings + frozen source = same set), every row
+  # in {Validated, No primary key} (no-PK rows reported - the documented
+  # users-table exception), and the marker table's row Validated: that row
+  # exists only if THIS fence's write replicated, so the epoch is self-proving.
+  say "gate: final validation epoch over the drained dataset (fresh validation-only task, mappings-clone scope)"
   VTASK_ID="${ID}-aurora-migration-fencevalidate"
   vtask_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null | grep -v '^None$' || true; }
   vtask_status() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none; }
@@ -538,17 +522,21 @@ EOF
     say "  deleting a leftover fence-validation task from a prior attempt"
     vtask_teardown
   fi
-  # rule-action "explicit" = exact-name match. "include" treats _ and % as
-  # wildcards, so e.g. server_lock would also select serverXlock - an extra
-  # matched table could then satisfy a count-based gate while a real touched
-  # table was still pending. Belt and braces: the completion gate below also
-  # compares the exact validated (schema, table) SET, never counts.
-  # Large JSON blobs (thousands of rules/rows) travel via FILES, never argv:
-  # a full-catalog mapping can exceed ARG_MAX and would kill the fence mid-
-  # read-only window with "argument list too long".
+  # The mappings clone + all large JSON travel via FILES, never argv (a large
+  # mapping can exceed ARG_MAX and would kill the fence mid-read-only window).
   VDIR=$(mktemp -d "/tmp/fence-epoch-${ID}.XXXXXX")
-  echo "$TOUCHED" > "$VDIR/want.json"
-  echo "$TOUCHED" | jq '{rules: [to_entries[] | {"rule-type":"selection","rule-id":(.key+1|tostring),"rule-name":(.key+1|tostring),"object-locator":{"schema-name":.value.SchemaName,"table-name":.value.TableName},"rule-action":"explicit"}]}' > "$VDIR/mappings.json"
+  aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" \
+    --query 'ReplicationTasks[0].TableMappings' --output text > "$VDIR/mappings.json"
+  jq -e '.rules | length >= 1' "$VDIR/mappings.json" >/dev/null || die "could not clone the main task's TableMappings - do not trust this epoch"
+  # the authoritative table count: the main task's own statistics (stable on a
+  # stopped task; survives the stop - proven live on the gca cutover).
+  # NO --query aggregates here: JMESPath functions evaluate PER PAGE under CLI
+  # pagination (observed live: length() returned one line per 100-row page).
+  # jq -s normalizes whether the CLI emits one merged doc or one doc per page.
+  MAIN_COUNT=$(aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
+    --output json | jq -s '[.[].TableStatistics[]] | length')
+  [ "$MAIN_COUNT" -ge 1 ] 2>/dev/null || die "main task reports no table statistics - cannot anchor the epoch's expected table count"
+  say "  scope: main-task mappings clone; expected table count $MAIN_COUNT"
   RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
   SEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-source" --query 'Endpoints[0].EndpointArn' --output text)
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
@@ -563,24 +551,26 @@ EOF
     --query 'ReplicationTask.ReplicationTaskArn' --output text)
   vwait_status ready 600
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
-  say "  validating the PK catalog (every table must reach Validated in this epoch)"
+  say "  validating (every enumerated table must reach Validated or No-primary-key in this epoch)"
   VWAIT=0
   while :; do
+    # same pagination rule: raw json + jq -s, never --query aggregates/projections
     aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
-      --query 'TableStatistics[].{s:SchemaName,t:TableName,v:ValidationState}' --output json > "$VDIR/vstats.json"
-    NBAD=$(jq '[.[] | select(.v | test("mismatch|error|suspend|no primary"; "i"))] | length' "$VDIR/vstats.json")
-    # exact SET comparison: every table in the catalog must appear in the fresh
-    # task's stats as Validated. Counts alone could be satisfied by a stray
-    # extra match while a real table is still pending.
-    PENDING=$(jq -n --slurpfile want "$VDIR/want.json" --slurpfile now "$VDIR/vstats.json" '
-      ($now[0] | map(select((.v | ascii_downcase) == "validated") | {key: ([.s, .t] | tojson), value: true}) | from_entries) as $ok
-      | [ $want[0][] | select(($ok[[.SchemaName, .TableName] | tojson] // false) | not) ] | length')
-    say "  pending=$PENDING/$NTOUCH (bad states: $NBAD)"
+      --output json | jq -s '[.[].TableStatistics[] | {s: .SchemaName, t: .TableName, v: .ValidationState}]' > "$VDIR/vstats.json"
+    NROWS=$(jq 'length' "$VDIR/vstats.json")
+    # terminal-bad states die immediately; "no primary key" is the accepted,
+    # reported exception (those tables cannot be row-validated at all)
+    NBAD=$(jq '[.[] | select(.v | test("mismatch|error|suspend"; "i"))] | length' "$VDIR/vstats.json")
+    NDONE=$(jq '[.[] | select((.v | ascii_downcase) == "validated" or (.v | ascii_downcase) == "no primary key")] | length' "$VDIR/vstats.json")
+    MARKER_OK=$(jq '[.[] | select(.s == "aurora_mig_ctl" and .t == "marker" and ((.v | ascii_downcase) == "validated"))] | length' "$VDIR/vstats.json")
+    say "  done=$NDONE/$NROWS enumerated (expect $MAIN_COUNT; bad states: $NBAD; marker validated: $MARKER_OK)"
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
-    [ "$PENDING" = "0" ] && break
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 3600 ] && die "fence-epoch validation did not complete in 60m - inspect $VTASK_ID"
+    if [ "$NROWS" = "$MAIN_COUNT" ] && [ "$NDONE" = "$NROWS" ] && [ "$MARKER_OK" = "1" ]; then break; fi
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 3600 ] && die "fence-epoch validation did not complete in 60m (done=$NDONE/$NROWS, expected $MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
     sleep 20
   done
+  NOPK_LIST=$(jq -r '[.[] | select((.v | ascii_downcase) == "no primary key") | .s + "." + .t] | join(" ")' "$VDIR/vstats.json")
+  [ -z "$NOPK_LIST" ] || say "  no-PK tables outside row validation (documented exception): $NOPK_LIST"
   say "  epoch validation PASSED - removing the validation task"
   vtask_teardown
   rm -rf "$VDIR"
