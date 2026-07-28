@@ -304,6 +304,17 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 			return 0, "", caps, herr
 		}
 	}
+
+	// Ephemeral test stacks must not page anyone: they inherit the production Sentry DSN
+	// from the shared Vault global, so boot-order transients (and any bug the harness is
+	// deliberately provoking) otherwise land in the real project as alerts. Runs AFTER
+	// the release is Ready (patching mid-install would race helm's own rollout watch)
+	// and BEFORE the cluster-health wait, which absorbs the resulting re-roll.
+	step("silencing Sentry on the app tier (test stacks must not alert production)")
+	if serr := validation.SilenceSentry(kc, p.Namespace, "dozuki"); serr != nil {
+		return 0, "", caps, serr
+	}
+
 	advisory, err := validation.CheckClusterHealth(kc, p.Namespace, critical, 20*time.Minute)
 	if err != nil {
 		return 0, "", caps, err
