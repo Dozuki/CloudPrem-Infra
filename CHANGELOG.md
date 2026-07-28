@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.23.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.1...v7.23.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* **logical:** ignore hpa-owned spec.replicas in flux drift detection ([#334](https://github.com/Dozuki/CloudPrem-Infra/issues/334)) ([709ebf0](https://github.com/Dozuki/CloudPrem-Infra/commit/709ebf09246b0ff7167b874740640b92bd38577d))
+
 ## [7.23.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.23.0...v7.23.1) (2026-07-28)
 
 
