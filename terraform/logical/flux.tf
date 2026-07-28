@@ -543,10 +543,10 @@ resource "kubectl_manifest" "flux_slack_alert" {
       # Every env posts to the same channel with the identical object title
       # (helmrelease/dozuki.flux-system), so stamp the env identity onto each
       # notification - otherwise fleet messages are indistinguishable.
-      summary = "${var.customer}-${var.environment}"
+      # Just env + versions: summary and cluster duplicated env on every fleet
+      # stack (eks_cluster_id == customer-environment), tripling the same value.
       eventMetadata = {
         env             = "${var.customer}-${var.environment}"
-        cluster         = var.eks_cluster_id
         chart           = var.chart_version
         app-image       = var.image_tag
         webnextjs-image = var.nextjs_tag
