@@ -61,11 +61,12 @@ type DrillParams struct {
 	RunID           string
 }
 
-// AuroraPromotionDrill proves DR recovery end to end: heartbeat rows are written to the
-// PRIMARY, the DR secondary is promoted, an instance is provisioned on it, and an
-// ephemeral in-VPC Lambda reads the heartbeats back FROM THE PROMOTED CLUSTER - data
-// survival, not just mechanics. The instance is then removed and the promoted cluster is
-// left for the stack's own teardown.
+// AuroraPromotionDrill proves DR recovery end to end in the PRODUCTION ordering: an
+// instance is provisioned on the still-attached secondary (prepare - reversible),
+// heartbeat rows are written to the PRIMARY, the secondary is promoted (the ~2s
+// irreversible act), and an ephemeral in-VPC Lambda reads the heartbeats back FROM THE
+// PROMOTED CLUSTER - data survival, not just mechanics. The instance is then removed and
+// the promoted cluster is left for the stack's own teardown.
 func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 	drRegion, globalClusterID, runID := dp.DRRegion, dp.GlobalClusterID, dp.RunID
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(drRegion))
@@ -79,44 +80,12 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 		return err
 	}
 
-	// Sentinels BEFORE promotion: a short train of timestamped rows on the primary. The
-	// count read back on the primary immediately before promoting is the ground truth
-	// the probe's post-promotion count is judged against.
-	written, herr := WriteDRHeartbeats(dp.Kubeconfig, dp.Namespace, runID, 6, 10*time.Second)
-	if herr != nil {
-		return fmt.Errorf("dr-drill: heartbeats: %w", herr)
-	}
-	primaryCount, cerr := PrimaryHeartbeatCount(dp.Kubeconfig, dp.Namespace, runID)
-	if cerr != nil {
-		return fmt.Errorf("dr-drill: %w", cerr)
-	}
-	if primaryCount < written {
-		return fmt.Errorf("dr-drill: primary reports %d heartbeats, wrote %d - primary-side loss makes the DR comparison meaningless", primaryCount, written)
-	}
-	// Give storage-level replication a moment to carry the tail of the train before the
-	// link is severed. Global Database lag is typically sub-second; this is margin, not
-	// a correctness requirement - the comparison below is the real check.
-	time.Sleep(15 * time.Second)
-
-	logStep("dr-drill: %d heartbeats on primary; promoting %s out of global cluster %s", primaryCount, clusterID, globalClusterID)
-
-	started := time.Now()
-	if _, err := rc.RemoveFromGlobalCluster(ctx, &rds.RemoveFromGlobalClusterInput{
-		GlobalClusterIdentifier: aws.String(globalClusterID),
-		DbClusterIdentifier:     aws.String(clusterArn),
-	}); err != nil {
-		return fmt.Errorf("dr-drill: RemoveFromGlobalCluster: %w", err)
-	}
-	if err := waitClusterAvailable(ctx, rc, clusterID, drillPromoteTimeout); err != nil {
-		return fmt.Errorf("dr-drill: promoted cluster never became available: %w", err)
-	}
-	promoteTook := time.Since(started).Round(time.Second)
-	logStep("dr-drill: promotion complete in %s — %s is standalone", promoteTook, clusterID)
-
-	// A promoted cluster with no instances is storage, not a database. Provisioning the
-	// instance is the step that proves recovery produces something a repointed app could
-	// use - and it is where an engine-version/instance-class incompatibility would
-	// surface, which no amount of metadata inspection can rule out.
+	// PREPARE first, PROMOTE second - the production ordering (and the cpi-dr
+	// prepare/promote split): the instance is provisioned on the STILL-ATTACHED
+	// secondary, overlapping the slow step with the diagnosis window, so the
+	// irreversible promotion is the ~2s final act. The drill originally promoted first
+	// and the design review called that out: a drill that doesn't match the runbook
+	// rehearses the wrong thing.
 	//
 	// Class selection mirrors what a real failover can actually do: db.serverless when
 	// the cluster carries a Serverless v2 scaling config (the fleet posture, and what
@@ -129,7 +98,7 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 		return cerr2
 	}
 	instanceID := fmt.Sprintf("%s-drill-%s", clusterID, shortRunID(runID))
-	logStep("dr-drill: creating %s instance %s (this is the slow part, ~10m)", class, instanceID)
+	logStep("dr-drill: PREPARE - creating %s instance %s on the attached secondary (the slow part, ~5m)", class, instanceID)
 	instStart := time.Now()
 	if _, err := rc.CreateDBInstance(ctx, &rds.CreateDBInstanceInput{
 		DBInstanceIdentifier: aws.String(instanceID),
@@ -148,7 +117,47 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 		if err := waitInstanceAvailable(ctx, rc, instanceID, drillInstanceTimeout); err != nil {
 			return fmt.Errorf("dr-drill: instance never became available: %w", err)
 		}
-		logStep("dr-drill: instance available in %s", time.Since(instStart).Round(time.Second))
+		logStep("dr-drill: instance ready in %s (reader on the attached secondary; prepare is reversible and the promotion decision is still open)", time.Since(instStart).Round(time.Second))
+
+		// Sentinels immediately BEFORE promotion: a short train of timestamped rows on
+		// the primary. Writing them after the instance wait keeps the newest row seconds
+		// from the promotion, which is what makes the RPO evidence sharp. The count read
+		// back on the primary is the ground truth the probe's post-promotion count is
+		// judged against.
+		written, herr := WriteDRHeartbeats(dp.Kubeconfig, dp.Namespace, runID, 6, 10*time.Second)
+		if herr != nil {
+			return fmt.Errorf("dr-drill: heartbeats: %w", herr)
+		}
+		primaryCount, cerr := PrimaryHeartbeatCount(dp.Kubeconfig, dp.Namespace, runID)
+		if cerr != nil {
+			return fmt.Errorf("dr-drill: %w", cerr)
+		}
+		if primaryCount < written {
+			return fmt.Errorf("dr-drill: primary reports %d heartbeats, wrote %d - primary-side loss makes the DR comparison meaningless", primaryCount, written)
+		}
+		// Give storage-level replication a moment to carry the tail of the train before
+		// the link is severed. Global Database lag is typically sub-second; this is
+		// margin, not a correctness requirement - the comparison below is the real check.
+		time.Sleep(15 * time.Second)
+
+		logStep("dr-drill: PROMOTE - %d heartbeats on primary; removing %s from global cluster %s", primaryCount, clusterID, globalClusterID)
+		started := time.Now()
+		if _, err := rc.RemoveFromGlobalCluster(ctx, &rds.RemoveFromGlobalClusterInput{
+			GlobalClusterIdentifier: aws.String(globalClusterID),
+			DbClusterIdentifier:     aws.String(clusterArn),
+		}); err != nil {
+			return fmt.Errorf("dr-drill: RemoveFromGlobalCluster: %w", err)
+		}
+		if err := waitClusterAvailable(ctx, rc, clusterID, drillPromoteTimeout); err != nil {
+			return fmt.Errorf("dr-drill: promoted cluster never became available: %w", err)
+		}
+		// The pre-created instance transitions reader -> writer during promotion (it may
+		// bounce); writable means the member reports IsClusterWriter AND available.
+		if err := waitInstanceWriter(ctx, rc, clusterID, instanceID, drillPromoteTimeout); err != nil {
+			return fmt.Errorf("dr-drill: instance never became the writer after promotion: %w", err)
+		}
+		promoteTook := time.Since(started).Round(time.Second)
+		logStep("dr-drill: promotion complete in %s — prepared-failover DB RTO (decision→writable) = %s, instance pre-provisioned in %s", promoteTook, promoteTook, time.Since(instStart).Round(time.Second))
 
 		out, err := rc.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(clusterID)})
 		if err != nil || len(out.DBClusters) == 0 {
@@ -163,7 +172,7 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 		}
 		logStep("dr-drill: standalone writer %s up (endpoint %s) — probing data content from inside the DR VPC", clusterID, *c.Endpoint)
 
-		user, password, err := DBCredentials(ctx, dp.PrimaryRegion, dp.DBSecretARN)
+		user, password, err := DBCredentials(ctx, dp.PrimaryRegion, drRegion, dp.DBSecretARN)
 		if err != nil {
 			return err
 		}
@@ -296,6 +305,33 @@ func waitInstanceAvailable(ctx context.Context, rc *rds.Client, id string, timeo
 			return false, "", fmt.Errorf("instance reached terminal status %q", st)
 		}
 		return st == "available", "instance " + st, nil
+	})
+}
+
+// waitInstanceWriter waits until the given instance is the cluster's writer AND
+// available - the honest "writable" signal after a promotion, since the pre-created
+// reader bounces while it transitions to writer.
+func waitInstanceWriter(ctx context.Context, rc *rds.Client, clusterID, instanceID string, timeout time.Duration) error {
+	return pollUntil(ctx, timeout, func() (bool, string, error) {
+		out, err := rc.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(clusterID)})
+		if err != nil || len(out.DBClusters) == 0 {
+			return false, "", err
+		}
+		writer := false
+		for _, m := range out.DBClusters[0].DBClusterMembers {
+			if aws.ToString(m.DBInstanceIdentifier) == instanceID && aws.ToBool(m.IsClusterWriter) {
+				writer = true
+			}
+		}
+		if !writer {
+			return false, "instance still reader", nil
+		}
+		inst, err := rc.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(instanceID)})
+		if err != nil || len(inst.DBInstances) == 0 {
+			return false, "", err
+		}
+		st := aws.ToString(inst.DBInstances[0].DBInstanceStatus)
+		return st == "available", "writer " + st, nil
 	})
 }
 

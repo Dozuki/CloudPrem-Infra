@@ -4,13 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"io/fs"
+	"path"
 	"strings"
 	"time"
 
@@ -321,70 +319,42 @@ func (p *probeInfra) reapENIs(ctx context.Context) error {
 	}
 }
 
-// buildProbeZip packages the handler with a vendored PyMySQL (pure python, no compiled
-// deps) via pip install --target, plus the region's RDS CA bundle so the function
-// VERIFIES the server certificate chain. The bundle is fetched at BUILD time by the
-// harness host (which has internet); the air-gapped Lambda only reads the baked-in file.
-// Requires python3+pip on the harness host - the hosts that run the harness have both.
-func buildProbeZip(drRegion string) ([]byte, error) {
-	tmp, err := os.MkdirTemp("", "dr-probe-*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(tmp)
-	if out, err := exec.Command("python3", "-m", "pip", "install", "--quiet", "--target", tmp, "pymysql").CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("pip install pymysql: %w (%s)", err, firstLine(string(out)))
-	}
-	caURL := fmt.Sprintf("https://truststore.pki.rds.amazonaws.com/%s/%s-bundle.pem", drRegion, drRegion)
-	ca, err := fetchURL(caURL)
-	if err != nil {
-		// No insecure fallback: a probe that cannot verify the server should fail to
-		// build, not connect blind.
-		return nil, fmt.Errorf("fetch RDS CA bundle %s: %w", caURL, err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, "rds-ca.pem"), ca, 0o644); err != nil {
-		return nil, err
-	}
-	handler := `import json, os, ssl
-import pymysql
+// Everything the probe zip needs is vendored in the repo and compiled into the harness
+// binary: handler.py, a pure-python PyMySQL, and the RDS CA bundles for both partitions.
+// The original build ran pip + fetched the CA over the internet at run time - fine for a
+// weekly drill, unacceptable for a 2am failover tool (design review correction #5). Now
+// the packaging needs neither python nor network on the host.
+//
+//go:embed all:probe_assets
+var probeAssets embed.FS
 
-def handler(event, context):
-    try:
-        # VERIFY_CA semantics: the chain is validated against the baked-in RDS CA
-        # bundle (MITM defense), but hostname checking stays off - RDS certificates
-        # carry the INSTANCE endpoint SAN while this connects via the CLUSTER
-        # endpoint, so check_hostname would reject legitimate certs.
-        sctx = ssl.create_default_context(
-            cafile=os.path.join(os.path.dirname(__file__), "rds-ca.pem"))
-        sctx.check_hostname = False
-        sctx.verify_mode = ssl.CERT_REQUIRED
-        conn = pymysql.connect(host=event["host"], user=event["user"],
-                               password=event["password"], database="harness_dr",
-                               connect_timeout=10, ssl=sctx)
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*), MAX(wrote_at) FROM heartbeat WHERE run_id=%s",
-                        (event["run_id"],))
-            n, mx = cur.fetchone()
-        conn.close()
-        return {"count": int(n), "max_wrote_at": str(mx) if mx else ""}
-    except Exception as e:
-        return {"count": -1, "max_wrote_at": "", "error": f"{type(e).__name__}: {e}"}
-`
-	if err := os.WriteFile(filepath.Join(tmp, "handler.py"), []byte(handler), 0o644); err != nil {
-		return nil, err
+// buildProbeZip packages the embedded handler + PyMySQL plus the partition's RDS CA
+// bundle (as rds-ca.pem) so the function VERIFIES the server certificate chain. There is
+// no insecure fallback: a probe that cannot verify the server should fail to build, not
+// connect blind.
+func buildProbeZip(drRegion string) ([]byte, error) {
+	caFile := "rds-global-bundle.pem"
+	if strings.HasPrefix(drRegion, "us-gov-") {
+		caFile = "rds-global-bundle-us-gov.pem"
 	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	err = filepath.Walk(tmp, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	err := fs.WalkDir(probeAssets, "probe_assets", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
 			return err
 		}
-		rel, _ := filepath.Rel(tmp, path)
-		w, err := zw.Create(filepath.ToSlash(rel))
+		rel := strings.TrimPrefix(p, "probe_assets/")
+		switch rel {
+		case caFile:
+			rel = "rds-ca.pem" // the name handler.py loads
+		case "rds-global-bundle.pem", "rds-global-bundle-us-gov.pem":
+			return nil // the other partition's bundle stays out of the zip
+		}
+		b, err := probeAssets.ReadFile(p)
 		if err != nil {
 			return err
 		}
-		b, err := os.ReadFile(path)
+		w, err := zw.Create(path.Clean(rel))
 		if err != nil {
 			return err
 		}
@@ -400,21 +370,47 @@ def handler(event, context):
 	return buf.Bytes(), nil
 }
 
-// DBCredentials fetches username/password from the stack's primary DB secret (Secrets
-// Manager, primary region). The users replicate with the cluster, so the primary's
-// credentials are valid on the promoted secondary.
-func DBCredentials(ctx context.Context, primaryRegion, secretARN string) (user, password string, err error) {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(primaryRegion))
-	if err != nil {
-		return "", "", err
+// DBCredentials fetches username/password from the stack's DB secret, preferring the
+// DR-REGION replica (the primary ARN with the region swapped - Secrets Manager replicas
+// keep name and suffix). A real failover reads credentials while the primary region is
+// unreachable, so the drill exercises that path; the primary-region fallback only covers
+// refs that predate the replication (CPI #355) and is logged loudly when taken.
+func DBCredentials(ctx context.Context, primaryRegion, drRegion, secretARN string) (user, password string, err error) {
+	fetch := func(region, arn string) (string, string, error) {
+		cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+		if err != nil {
+			return "", "", err
+		}
+		out, err := secretsmanager.NewFromConfig(cfg).GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+			SecretId: aws.String(arn),
+		})
+		if err != nil {
+			return "", "", err
+		}
+		return parseDBSecret(aws.ToString(out.SecretString))
 	}
-	out, err := secretsmanager.NewFromConfig(cfg).GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
-		SecretId: aws.String(secretARN),
-	})
+	if replicaARN := swapARNRegion(secretARN, drRegion); replicaARN != "" {
+		if user, password, err = fetch(drRegion, replicaARN); err == nil {
+			return user, password, nil
+		}
+		logStep("dr-probe: DR-region secret replica unavailable (%v) - falling back to the PRIMARY region; a real failover could not do this (ref predates CPI #355?)", err)
+	}
+	user, password, err = fetch(primaryRegion, secretARN)
 	if err != nil {
 		return "", "", fmt.Errorf("dr-probe: get db secret: %w", err)
 	}
-	return parseDBSecret(aws.ToString(out.SecretString))
+	return user, password, nil
+}
+
+// swapARNRegion returns arn with its region field (index 3) replaced, or "" if the ARN
+// does not have the expected shape.
+func swapARNRegion(arn, region string) string {
+	parts := strings.Split(arn, ":")
+	if len(parts) < 6 || parts[0] != "arn" {
+		return ""
+	}
+	parts[3] = region
+	return strings.Join(parts, ":")
 }
 
 // parseDBSecret tolerates the two key spellings RDS-style secrets use.
@@ -436,25 +432,6 @@ func parseDBSecret(raw string) (user, password string, err error) {
 		return "", "", fmt.Errorf("db secret missing username/password keys (has: %s)", strings.Join(mapKeys(m), ", "))
 	}
 	return user, password, nil
-}
-
-func fetchURL(url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if !strings.Contains(string(b), "BEGIN CERTIFICATE") {
-		return nil, fmt.Errorf("response is not a PEM bundle")
-	}
-	return b, nil
 }
 
 func mapKeys(m map[string]interface{}) []string {
