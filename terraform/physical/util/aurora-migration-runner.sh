@@ -308,6 +308,15 @@ EOF
 fence)
   say "PRECONDITIONS (yours): app writers scaled to zero + DDL freeze in effect"
   prep_cnfs
+  # Epoch baseline for the final revalidation gate: per-table CDC apply counters
+  # BEFORE anything in this fence commits (marker included). After the drain,
+  # every table whose counters moved is a table the fence window touched - the
+  # exact set the epoch-specific revalidation must re-prove.
+  STATS0="/tmp/fence-stats0-${ID}.json"
+  say "snapshotting per-table apply counters (revalidation epoch baseline)"
+  aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
+    --query 'TableStatistics[].{s:SchemaName,t:TableName,c:sum([Inserts,Updates,Deletes]),v:ValidationState,u:LastUpdateTime}' \
+    --output json > "$STATS0"
   # BI task must stop BEFORE the cutover apply mutates its source endpoint
   # (DMS rejects endpoint modification on a running task).
   if [ "$(bi_task_status)" = "running" ]; then
@@ -403,26 +412,53 @@ EOF
     aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
     wait_task_status stopped 900
   done
-  # Final validation epoch, AFTER the drain. A validation observation taken
-  # before the stop cannot cover writes DMS had not yet processed (the
-  # marker->read_only window), and validation only runs while the task runs -
-  # so resume against the fenced source (no new events can arrive), give the
-  # validator a settle window, and require consecutive clean reads over the
-  # complete drained dataset. This is the guard against a CDC apply silently
-  # dropping a row (defense in depth beside the STOP_TASK ApplyError policies):
-  # row-level validation compares actual data, not positions.
-  say "gate: final validation epoch over the drained dataset"
+  # Final validation epoch, AFTER the drain - epoch-SPECIFIC, not timed. DMS
+  # validation is asynchronous with no resume barrier, so any number of clean
+  # whole-task reads can be stale snapshots taken before the validator even
+  # identified the final-window changes. Instead: diff the per-table apply
+  # counters against the fence-start baseline to get exactly the tables the
+  # fence window touched (the aurora_mig_ctl.marker table is always in the set,
+  # so the epoch machinery is self-canarying), force revalidation of that set
+  # via reload-tables validate-only, and require each table to come back
+  # Validated WITH a changed LastUpdateTime - demonstrable this-epoch proof.
+  # Row-level validation compares actual data, not positions: the guard against
+  # a CDC apply discrepancy no error policy reports.
+  say "gate: final validation epoch over the drained dataset (epoch-specific)"
   aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
   wait_task_status running 300
-  say "  validator settling..."
-  sleep 60
-  VCLEAN=0; VWAIT=0
+  STATS1="/tmp/fence-stats1-${ID}.json"
+  aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
+    --query 'TableStatistics[].{s:SchemaName,t:TableName,c:sum([Inserts,Updates,Deletes]),v:ValidationState,u:LastUpdateTime}' \
+    --output json > "$STATS1"
+  # touched = counters moved since fence start; exclude no-PK tables (cannot be
+  # row-validated - the whole-task whitelist gate below still covers their state)
+  TOUCHED=$(jq -n --slurpfile a "$STATS0" --slurpfile b "$STATS1" '
+    ($a[0] | map({key: (.s + "|" + .t), value: .c}) | from_entries) as $base
+    | [ $b[0][]
+        | select((($base[.s + "|" + .t] // -1) != .c) and ((.v | ascii_downcase) != "no primary key"))
+        | {SchemaName: .s, TableName: .t, before: .u} ]')
+  NTOUCH=$(echo "$TOUCHED" | jq length)
+  say "  tables touched in the fence window (revalidation set): $NTOUCH"
+  [ "$NTOUCH" -ge 1 ] || die "revalidation set is empty - the marker table alone should be in it; the counter baseline is broken, do not trust this epoch"
+  echo "$TOUCHED" | jq -c '[.[] | {SchemaName, TableName}] as $all | range(0; ($all | length); 50) as $i | $all[$i:$i+50]' | while read -r batch; do
+    aws dms reload-tables --replication-task-arn "$(task_arn)" --region "$REGION" \
+      --tables-to-reload "$batch" --reload-option validate-only >/dev/null
+  done
+  say "  revalidation requested; waiting for every touched table to return Validated with a new LastUpdateTime"
+  VWAIT=0
   while :; do
+    aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
+      --query 'TableStatistics[].{s:SchemaName,t:TableName,v:ValidationState,u:LastUpdateTime}' \
+      --output json > "$STATS1"
+    PENDING=$(jq -n --slurpfile want <(echo "$TOUCHED") --slurpfile now "$STATS1" '
+      ($now[0] | map({key: (.s + "|" + .t), value: {v: (.v | ascii_downcase), u: .u}}) | from_entries) as $cur
+      | [ $want[0][]
+          | ($cur[.SchemaName + "|" + .TableName]) as $c
+          | select(($c == null) or ($c.v != "validated") or ($c.u == .before)) ] | length')
     U=$(unclean_validation_count)
-    if [ "$U" = "0" ]; then VCLEAN=$((VCLEAN+1)); else VCLEAN=0; fi
-    say "  unclean=$U (consecutive clean $VCLEAN/3)"
-    [ "$VCLEAN" -ge 3 ] && break
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 1200 ] && die "validation did not settle clean in 20m after the drain - inspect table statistics"
+    say "  revalidation pending=$PENDING unclean=$U"
+    [ "$PENDING" = "0" ] && [ "$U" = "0" ] && break
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 1800 ] && die "epoch revalidation did not complete clean in 30m - inspect table statistics for the touched set"
     sleep 20
   done
   say "FINAL task stop (definitive)"
