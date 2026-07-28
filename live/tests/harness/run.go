@@ -185,7 +185,7 @@ func RunFresh(p RunParams) (err error) {
 // silent. It (re)probes logging from the live cluster, overriding caps.HasLogging.
 // verifyContinuity runs the continuity-sentinel verification (UPGRADE only — a fresh
 // deploy writes no baseline sentinel, so callers pass false).
-func runInfraValidators(ctx context.Context, p RunParams, region string, caps Capabilities, outs validation.StackOutputs, verifyContinuity bool) error {
+func runInfraValidators(ctx context.Context, p RunParams, region, kubeconfig string, caps Capabilities, outs validation.StackOutputs, verifyContinuity bool) error {
 	caps.HasLogging = validation.LoggingEnabled(ctx, region, outs.ClusterName)
 	if caps.HasLogging {
 		if lerr := validation.AssertControlPlaneLogging(ctx, region, outs.ClusterName); lerr != nil {
@@ -253,9 +253,17 @@ func runInfraValidators(ctx context.Context, p RunParams, region string, caps Ca
 			// must stay the LAST validator before teardown (the DR existence check has
 			// already run). Teardown afterwards is part of the test - it proves the
 			// post-promotion wreckage destroys cleanly.
-			step("DR drill: promoting global cluster %s secondary in %s and provisioning an instance (~15-20m)",
+			step("DR drill: heartbeats -> promote %s in %s -> instance -> in-VPC data probe (~20m)",
 				outs.AuroraDRGlobalClusterID, p.DRRegion)
-			if dderr := validation.AuroraPromotionDrill(ctx, p.DRRegion, outs.AuroraDRGlobalClusterID, p.RunID); dderr != nil {
+			if dderr := validation.AuroraPromotionDrill(ctx, validation.DrillParams{
+				Kubeconfig:      kubeconfig,
+				Namespace:       p.Namespace,
+				PrimaryRegion:   region,
+				DRRegion:        p.DRRegion,
+				GlobalClusterID: outs.AuroraDRGlobalClusterID,
+				DBSecretARN:     outs.PrimaryDBSecretARN,
+				RunID:           p.RunID,
+			}); dderr != nil {
 				return fmt.Errorf("aurora promotion drill: %w", dderr)
 			}
 		default:
@@ -435,6 +443,7 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		AuroraDRGlobalClusterID: str(physical, "aurora_dr_global_cluster_id"),
 		AuroraDRSecondaryHost:   str(physical, "aurora_dr_secondary_endpoint"),
 		DRBackupReplicationARN:  str(physical, "dr_rds_backup_replication_arn"),
+		PrimaryDBSecretARN:      str(physical, "primary_db_secret"),
 	}, nil
 }
 

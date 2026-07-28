@@ -46,10 +46,25 @@ const (
 	drillPollEvery       = 20 * time.Second
 )
 
-// AuroraPromotionDrill promotes the DR secondary, provisions an instance, verifies the
-// cluster reaches available as a standalone writer, then removes the instance so the
-// stack's own teardown can destroy the promoted cluster.
-func AuroraPromotionDrill(ctx context.Context, drRegion, globalClusterID, runID string) error {
+// DrillParams carries everything the drill needs; phase 2 (the data probe) added enough
+// inputs that positional arguments stopped being readable.
+type DrillParams struct {
+	Kubeconfig      string // app cluster access, for the heartbeat writes via the app pod
+	Namespace       string
+	PrimaryRegion   string // where the primary cluster + its Secrets Manager secret live
+	DRRegion        string
+	GlobalClusterID string
+	DBSecretARN     string // primary_db_secret output; users replicate, so valid on the promoted side
+	RunID           string
+}
+
+// AuroraPromotionDrill proves DR recovery end to end: heartbeat rows are written to the
+// PRIMARY, the DR secondary is promoted, an instance is provisioned on it, and an
+// ephemeral in-VPC Lambda reads the heartbeats back FROM THE PROMOTED CLUSTER - data
+// survival, not just mechanics. The instance is then removed and the promoted cluster is
+// left for the stack's own teardown.
+func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
+	drRegion, globalClusterID, runID := dp.DRRegion, dp.GlobalClusterID, dp.RunID
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(drRegion))
 	if err != nil {
 		return err
@@ -60,7 +75,27 @@ func AuroraPromotionDrill(ctx context.Context, drRegion, globalClusterID, runID 
 	if err != nil {
 		return err
 	}
-	logStep("dr-drill: promoting %s out of global cluster %s", clusterID, globalClusterID)
+
+	// Sentinels BEFORE promotion: a short train of timestamped rows on the primary. The
+	// count read back on the primary immediately before promoting is the ground truth
+	// the probe's post-promotion count is judged against.
+	written, herr := WriteDRHeartbeats(dp.Kubeconfig, dp.Namespace, runID, 6, 10*time.Second)
+	if herr != nil {
+		return fmt.Errorf("dr-drill: heartbeats: %w", herr)
+	}
+	primaryCount, cerr := PrimaryHeartbeatCount(dp.Kubeconfig, dp.Namespace, runID)
+	if cerr != nil {
+		return fmt.Errorf("dr-drill: %w", cerr)
+	}
+	if primaryCount < written {
+		return fmt.Errorf("dr-drill: primary reports %d heartbeats, wrote %d - primary-side loss makes the DR comparison meaningless", primaryCount, written)
+	}
+	// Give storage-level replication a moment to carry the tail of the train before the
+	// link is severed. Global Database lag is typically sub-second; this is margin, not
+	// a correctness requirement - the comparison below is the real check.
+	time.Sleep(15 * time.Second)
+
+	logStep("dr-drill: %d heartbeats on primary; promoting %s out of global cluster %s", primaryCount, clusterID, globalClusterID)
 
 	started := time.Now()
 	if _, err := rc.RemoveFromGlobalCluster(ctx, &rds.RemoveFromGlobalClusterInput{
@@ -94,6 +129,7 @@ func AuroraPromotionDrill(ctx context.Context, drRegion, globalClusterID, runID 
 	// From here on the instance exists, so cleanup must run even when verification
 	// fails - a leftover instance Terraform never knew about makes the whole stack
 	// undestroyable. The error (if any) still wins over cleanup's outcome.
+	var probeCleanup func() error
 	verifyErr := func() error {
 		if err := waitInstanceAvailable(ctx, rc, instanceID, drillInstanceTimeout); err != nil {
 			return fmt.Errorf("dr-drill: instance never became available: %w", err)
@@ -111,10 +147,35 @@ func AuroraPromotionDrill(ctx context.Context, drRegion, globalClusterID, runID 
 		if c.Endpoint == nil || *c.Endpoint == "" {
 			return fmt.Errorf("dr-drill: promoted cluster has no writer endpoint")
 		}
-		logStep("dr-drill: RECOVERY VERIFIED — standalone writer %s (endpoint %s). NOT verified: data content (DR VPC is air-gapped; sentinel-read via in-VPC probe is the phase-2 follow-up)",
-			clusterID, *c.Endpoint)
+		logStep("dr-drill: standalone writer %s up (endpoint %s) — probing data content from inside the DR VPC", clusterID, *c.Endpoint)
+
+		user, password, err := DBCredentials(ctx, dp.PrimaryRegion, dp.DBSecretARN)
+		if err != nil {
+			return err
+		}
+		res, cleanup, perr := ProbePromotedCluster(ctx, drRegion, clusterID, *c.Endpoint, user, password, runID)
+		probeCleanup = cleanup
+		if perr != nil {
+			return perr
+		}
+		if res.Count != primaryCount {
+			return fmt.Errorf("dr-drill: DATA LOSS - promoted cluster has %d/%d heartbeats (newest %s)",
+				res.Count, primaryCount, res.MaxWroteAt)
+		}
+		logStep("dr-drill: RECOVERY + DATA VERIFIED — %d/%d heartbeats present on the promoted cluster (newest %s); RPO evidence: nothing written before promotion was lost",
+			res.Count, primaryCount, res.MaxWroteAt)
 		return nil
 	}()
+
+	// The probe's ENI wait (Lambda releases them lazily) and the instance deletion are
+	// both slow and entirely independent - run them together so the drill pays for the
+	// longer of the two, not the sum.
+	probeDone := make(chan error, 1)
+	if probeCleanup != nil {
+		go func() { probeDone <- probeCleanup() }()
+	} else {
+		probeDone <- nil
+	}
 
 	logStep("dr-drill: cleaning up instance %s", instanceID)
 	if _, err := rc.DeleteDBInstance(ctx, &rds.DeleteDBInstanceInput{
@@ -126,7 +187,10 @@ func AuroraPromotionDrill(ctx context.Context, drRegion, globalClusterID, runID 
 	if err := waitInstanceGone(ctx, rc, instanceID, drillCleanupTimeout); err != nil {
 		return combineErrs(verifyErr, fmt.Errorf("dr-drill: instance %s not deleted in time - teardown may wedge on it: %w", instanceID, err))
 	}
-	logStep("dr-drill: instance removed; promoted cluster %s left for the stack's own teardown (destroying it post-promotion is part of the test)", clusterID)
+	if perr := <-probeDone; perr != nil {
+		return combineErrs(verifyErr, perr)
+	}
+	logStep("dr-drill: instance + probe removed; promoted cluster %s left for the stack's own teardown (destroying it post-promotion is part of the test)", clusterID)
 	return verifyErr
 }
 

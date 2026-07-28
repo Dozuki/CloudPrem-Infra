@@ -267,9 +267,9 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		if rerr := validation.AssertUpgraded(kc, rm.Namespace, "dozuki", rm.BaselineRev, wantChart); rerr != nil {
 			return fmt.Errorf("upgrade proof: %w", rerr)
 		}
-		return runInfraValidators(ctx, rp, p.Region, caps, outs, true)
+		return runInfraValidators(ctx, rp, p.Region, kc, caps, outs, true)
 	}
-	return runInfraValidators(ctx, rp, p.Region, caps, outs, false)
+	return runInfraValidators(ctx, rp, p.Region, kc, caps, outs, false)
 }
 
 // Teardown destroys the run's stack against whichever ref the manifest records as

@@ -31,4 +31,9 @@ type StackOutputs struct {
 
 	// rds: DR is cross-region automated backup replication.
 	DRBackupReplicationARN string // dr_rds_backup_replication_arn
+
+	// The stack's primary DB credentials secret (Secrets Manager). The DR drill's
+	// in-VPC probe reads it: users replicate with the cluster, so the primary's
+	// credentials are valid on the promoted secondary.
+	PrimaryDBSecretARN string // primary_db_secret
 }
