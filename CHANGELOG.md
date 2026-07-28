@@ -2,6 +2,15 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.0.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.2...v8.0.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* **physical:** give the DR secondary a Serverless v2 scaling config ([#352](https://github.com/Dozuki/CloudPrem-Infra/issues/352)) ([d796e95](https://github.com/Dozuki/CloudPrem-Infra/commit/d796e957d28b9bbf325183541ba142a93c399e19))
+* **physical:** intelligent-tiering on the primary content buckets ([#353](https://github.com/Dozuki/CloudPrem-Infra/issues/353)) ([a4175cc](https://github.com/Dozuki/CloudPrem-Infra/commit/a4175cc98bb371a9d029bb7e1bfc0501bec243cf))
+* **physical:** replicate the DB credentials secret to the DR region ([#355](https://github.com/Dozuki/CloudPrem-Infra/issues/355)) ([b7bb30b](https://github.com/Dozuki/CloudPrem-Infra/commit/b7bb30b5012c93cb1388b725427c908fd36c5296))
+
 ## [8.0.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.1...v8.0.2) (2026-07-28)
 
 
