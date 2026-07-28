@@ -174,9 +174,14 @@ resource "aws_s3_bucket_versioning" "dr_guide_buckets" {
   }
 }
 
-# Same multipart hygiene as the primary buckets (s3.tf): failed uploads leave
-# invisible parts that bill forever. No noncurrent-version archival here though,
-# a DR restore should not wait on Deep Archive retrieval.
+# Same multipart hygiene as the primary buckets (s3.tf), plus two replica-only
+# rules. Noncurrent versions EXPIRE here (30d) instead of archiving: the
+# indefinite undo history already lives in the primary's Deep Archive tier, and
+# without a rule the replica accumulates every superseded version forever.
+# Current objects go to Intelligent-Tiering on day 0: a replica is write-only
+# until a disaster, IT keeps millisecond access with no retrieval fee (so RTO
+# is unaffected, unlike IA or the archive tiers), and objects under 128K are
+# exempt from the monitoring fee so small images cannot turn it into a loss.
 resource "aws_s3_bucket_lifecycle_configuration" "dr_guide_buckets" {
   for_each = aws_s3_bucket.dr_guide_buckets
   provider = aws.dr
@@ -191,6 +196,51 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_guide_buckets" {
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
+    }
+
+    transition {
+      days          = 0
+      storage_class = "INTELLIGENT_TIERING"
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+}
+
+# S3.5: reject plaintext requests. Replication and restore tooling are TLS-only,
+# so the deny has no legitimate traffic to break.
+resource "aws_s3_bucket_policy" "dr_guide_buckets" {
+  for_each = aws_s3_bucket.dr_guide_buckets
+  provider = aws.dr
+
+  bucket = each.value.id
+  policy = data.aws_iam_policy_document.dr_guide_buckets_ssl_only[each.key].json
+}
+
+data "aws_iam_policy_document" "dr_guide_buckets_ssl_only" {
+  for_each = aws_s3_bucket.dr_guide_buckets
+
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+
+    resources = [
+      each.value.arn,
+      "${each.value.arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
     }
   }
 }
