@@ -79,6 +79,21 @@ unclean_validation_count() {
     awk '{ l=tolower($0) } l != "validated" && l != "no primary key" && NF { c++ } END { print c+0 }'
 }
 
+# Bounded task-state wait. Dies on the DMS failure states and on timeout - an
+# unbounded poll here would hang the fence (source read-only, customers waiting)
+# on a task that will never reach the wanted state.
+wait_task_status() { # $1=wanted status $2=timeout seconds
+  local waited=0 s
+  while :; do
+    s=$(task_status)
+    [ "$s" = "$1" ] && return 0
+    case "$s" in failed|stopped-after-fail|deleting) die "task entered '$s' while waiting for '$1'";; esac
+    # "none" (describe hiccup) is NOT fatal here - the timeout bounds it.
+    [ "$waited" -ge "$2" ] && die "task did not reach '$1' in ${2}s (status=$s)"
+    sleep 10; waited=$((waited+10))
+  done
+}
+
 # Parse "mysql-bin-changelog.NNNN / POS" style coordinates out of the task's
 # RecoveryCheckpoint ("checkpoint:V1#...#$.NNNN:POS:...") and compare with the
 # fenced source's final coordinate. Call this ONLY after the task has stopped:
@@ -361,8 +376,6 @@ EOF
 mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag='$MARK'" 2>/dev/null || echo 0
 EOF
 ); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break; sleep 10; done
-  say "gate: validation fully clean (whitelist) - checked while the task still runs"
-  while :; do U=$(unclean_validation_count); say "  unclean=$U"; [ "$U" = "0" ] && break; sleep 20; done
   # Drain proof - STOP FIRST, then assert the checkpoint. RecoveryCheckpoint is a
   # stopped-task safepoint: it advances to the true applied position only when the
   # task stops, NOT while it runs. The old code asserted checkpoint >= coordinate
@@ -371,11 +384,13 @@ EOF
   # the binlog past the last applied real event - the checkpoint parks at the last
   # consumable event and the app stays fenced until the 15m timeout. So: stop,
   # read the flushed checkpoint, and if a genuine backlog left it short of the
-  # fenced source's final coordinate, resume to drain and re-stop. Bounded.
+  # fenced source's final coordinate, resume to drain and re-stop. Bounded, and
+  # every state transition is a bounded wait (a fenced source must never hang on
+  # a task that silently failed).
   FINAL_FILE=$((10#$FINAL_FILE))
-  say "FINAL task stop (flushes RecoveryCheckpoint to the true applied position)"
+  say "task stop (flushes RecoveryCheckpoint to the true applied position)"
   aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
-  while [ "$(task_status)" != "stopped" ]; do sleep 10; done
+  wait_task_status stopped 900
   say "gate: post-stop checkpoint at or past the final coordinate (the drain proof)"
   CKTRIES=0
   while :; do
@@ -383,11 +398,37 @@ EOF
     CKTRIES=$((CKTRIES+1)); [ "$CKTRIES" -gt 10 ] && die "post-stop checkpoint short of the final coordinate after 10 resume/stop cycles - inspect the task (RecoveryCheckpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text); final=$FINAL_FILE:$FINAL_POS)"
     say "  checkpoint short of final - resuming to drain the backlog, then re-stopping (cycle $CKTRIES)"
     aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
-    while [ "$(task_status)" != "running" ]; do sleep 5; done
+    wait_task_status running 300
     sleep 45
     aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
-    while [ "$(task_status)" != "stopped" ]; do sleep 10; done
+    wait_task_status stopped 900
   done
+  # Final validation epoch, AFTER the drain. A validation observation taken
+  # before the stop cannot cover writes DMS had not yet processed (the
+  # marker->read_only window), and validation only runs while the task runs -
+  # so resume against the fenced source (no new events can arrive), give the
+  # validator a settle window, and require consecutive clean reads over the
+  # complete drained dataset. This is the guard against a CDC apply silently
+  # dropping a row (defense in depth beside the STOP_TASK ApplyError policies):
+  # row-level validation compares actual data, not positions.
+  say "gate: final validation epoch over the drained dataset"
+  aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+  wait_task_status running 300
+  say "  validator settling..."
+  sleep 60
+  VCLEAN=0; VWAIT=0
+  while :; do
+    U=$(unclean_validation_count)
+    if [ "$U" = "0" ]; then VCLEAN=$((VCLEAN+1)); else VCLEAN=0; fi
+    say "  unclean=$U (consecutive clean $VCLEAN/3)"
+    [ "$VCLEAN" -ge 3 ] && break
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 1200 ] && die "validation did not settle clean in 20m after the drain - inspect table statistics"
+    sleep 20
+  done
+  say "FINAL task stop (definitive)"
+  aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
+  wait_task_status stopped 900
+  checkpoint_reached "$FINAL_FILE" "$FINAL_POS" || die "checkpoint fell short of the final coordinate after the validation epoch - inspect the task"
   say "checkpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)"
   say "installing object artifacts AFTER the final stop (DMS can never apply DML"
   say "through freshly installed triggers). Dumped FRESH from the fenced source -"
