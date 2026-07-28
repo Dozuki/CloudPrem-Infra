@@ -195,11 +195,62 @@ locals {
   # cleanly. helm_release.app got the same effect from helm's deep merge of its two values files + set
   # list. Both deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values has
   # neither key, so try(...,{}) yields {} and the merged result equals base.
+  # AWS-only: pin every EBS-backed subchart workload to the on-demand NodePool.
+  #
+  # These pods (opensearch, prometheus, alertmanager, dashboards-grafana) each own a
+  # zonal EBS volume. On the spot pool, an AZ-wide spot shortage left them Pending with
+  # no legal fallback - the volume pins the zone, the on-demand pool's taint blocked
+  # entry, and that is the old spot-fleet stranding incident reproduced (adversarial
+  # AZ/PVC review, 2026-07-28; observed live: all three volumes on one spot c4.xlarge).
+  # On-demand placement plus the on-demand pool's WhenEmpty consolidation makes their
+  # disruptions rare and their replacement capacity reliably provisionable in the
+  # volume's AZ.
+  #
+  # Lives HERE and not in chart defaults on purpose: the selector/toleration reference
+  # Karpenter/EKS labels that do not exist on onprem or AKS clusters - baked into the
+  # chart they would make these pods unschedulable there. Same reason the chart's
+  # dozuki.onDemand* helpers gate on aws.enabled. The `for..if` idiom (not cond?{}:{})
+  # matches app_azure_values - see the type-unification note above it.
+  stateful_node_selector = { "karpenter.sh/capacity-type" = "on-demand" }
+  stateful_tolerations = [{
+    key      = "eks.amazonaws.com/capacity-type"
+    operator = "Equal"
+    value    = "on-demand"
+    effect   = "NoSchedule"
+  }]
+  app_stateful_scheduling = {
+    for k, v in {
+      opensearch = {
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
+      }
+      "kube-prometheus-stack" = {
+        prometheus = { prometheusSpec = {
+          nodeSelector = local.stateful_node_selector
+          tolerations  = local.stateful_tolerations
+        } }
+        alertmanager = { alertmanagerSpec = {
+          nodeSelector = local.stateful_node_selector
+          tolerations  = local.stateful_tolerations
+        } }
+      }
+      # The customer dashboards Grafana (top-level `grafana` key; the kps ops grafana
+      # is emptyDir-only and stays on spot). Deep-merged below - base sets env and
+      # secret mounts under the same key.
+      grafana = {
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
+      }
+    } : k => v if var.cloud == "aws"
+  }
+
   app_values = merge(
     local.app_base_values,
     { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" },
     { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
     { objectStorage = merge(local.app_base_values.objectStorage, try(local.app_azure_values.objectStorage, {})) },
+    { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" },
+    { grafana = merge(local.app_base_values.grafana, try(local.app_stateful_scheduling.grafana, {})) },
   )
 }
 
