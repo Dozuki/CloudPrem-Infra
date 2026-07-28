@@ -42,12 +42,14 @@ import (
 // sentryEmittingDeployments are the app-image (PHP) deployments that report to Sentry.
 // web-nextjs has its own JS-side wiring the harness never configures a DSN for, and the
 // remaining workloads (beanstalkd, memcached, exporters) are not Sentry clients.
+// searchd is gone from the chart (legacy Sphinx, replaced by OpenSearch); old refs that
+// still carry the template ship it enabled: false, so there is never a deployment to
+// patch.
 func sentryEmittingDeployments(release string) []string {
 	return []string{
 		release + "-app-deployment",
 		release + "-crond-deployment",
 		release + "-queueworkerd-deployment",
-		release + "-searchd-deployment",
 	}
 }
 
