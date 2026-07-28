@@ -2,6 +2,24 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [7.23.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.22.1...v7.23.0) (2026-07-28)
+
+
+### Features
+
+* **logical:** flux drift-warn, slack alerts, crds CreateReplace, maxHistory ([#328](https://github.com/Dozuki/CloudPrem-Infra/issues/328)) ([3d1891a](https://github.com/Dozuki/CloudPrem-Infra/commit/3d1891aaae4f39d03a0ffdb2b5683e9f95f0e70a))
+
+
+### Bug Fixes
+
+* **logical:** key grafana-db-create job name on db_resource_id ([#329](https://github.com/Dozuki/CloudPrem-Infra/issues/329)) ([1d12964](https://github.com/Dozuki/CloudPrem-Infra/commit/1d129640bd35e0eaac2a85c9bf970d0ab3581683))
+* **logical:** stop auto-instrumenting workloads that cannot use it ([9bcc7cd](https://github.com/Dozuki/CloudPrem-Infra/commit/9bcc7cd1ecc4068752fcd722c563e185c37bb3ee))
+* **physical:** aurora runner bastion discovery + MySQL-8-safe object dump ([#326](https://github.com/Dozuki/CloudPrem-Infra/issues/326)) ([2983a2c](https://github.com/Dozuki/CloudPrem-Infra/commit/2983a2cd6e87dcfbcc287d263f76d5b323ed0124))
+* **physical:** aurora runner load-phase DMS state sequencing ([#327](https://github.com/Dozuki/CloudPrem-Infra/issues/327)) ([e059107](https://github.com/Dozuki/CloudPrem-Infra/commit/e05910744253c984e6e8ddb967311557b70e7c05))
+* **physical:** aurora runner secret lookup breaks under list-secrets pagination ([#324](https://github.com/Dozuki/CloudPrem-Infra/issues/324)) ([30a904d](https://github.com/Dozuki/CloudPrem-Infra/commit/30a904d3a24ca1f8b60e18db0c71f3bd5d19ab3e))
+* **physical:** DR replica buckets were never destroyable ([c195c5b](https://github.com/Dozuki/CloudPrem-Infra/commit/c195c5b7754531f834d653d4f575052ea5d6c32c))
+* **physical:** drop explicit lower_case_table_names from the aurora cluster PG ([#330](https://github.com/Dozuki/CloudPrem-Infra/issues/330)) ([579a3f6](https://github.com/Dozuki/CloudPrem-Infra/commit/579a3f674b8c82cf0e5e64022845fffe6394267c))
+
 ## [7.22.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v7.22.0...v7.22.1) (2026-07-27)
 
 
