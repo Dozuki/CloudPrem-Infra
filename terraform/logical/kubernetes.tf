@@ -499,11 +499,6 @@ locals {
   # OVERRIDES the chart config map) — all three must agree or the app reads an
   # empty/invalid host.
   memcached_host = "dozuki-memcached.${local.k8s_namespace_name}.svc.cluster.local"
-
-  # MSK bootstrap brokers, comma-escaped for helm's strvals parser (see the
-  # connectivity brokerList entries below). Empty when webhooks are off, in which
-  # case replace() is a no-op and this stays "".
-  msk_brokers_helm_escaped = replace(var.msk_bootstrap_brokers, ",", "\\,")
 }
 
 # Moved blocks: these resources gained `count` when Azure support was added.

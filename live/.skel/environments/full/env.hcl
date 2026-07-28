@@ -2,7 +2,6 @@
 # feed forward to the child modules.
 locals {
   environment = "full"
-  enable_webhooks = true
   enable_bi = true
   rds_multi_az = true
   highly_available_nat_gateway = false

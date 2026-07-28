@@ -58,7 +58,6 @@ configs:
   - name: min_default
     env: min
     feature_flags:
-      enable_webhooks: false
       enable_bi: false
       db_engine: aurora              # Aurora Serverless v2 — the new-stack default; rds_* sizing flags are ignored on aurora
       rds_multi_az: false
@@ -83,7 +82,6 @@ configs:
   - name: bi_ha
     env: bi
     feature_flags:
-      enable_webhooks: false
       enable_bi: true
       db_engine: aurora
       rds_multi_az: true
@@ -107,7 +105,6 @@ configs:
   - name: full
     env: full
     feature_flags:
-      enable_webhooks: true
       enable_bi: true
       db_engine: aurora
       rds_multi_az: true

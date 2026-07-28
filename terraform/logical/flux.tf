@@ -9,25 +9,6 @@
 # referenced by the HelmRelease `valuesFrom`.
 
 locals {
-  # Tags for the frontegg connectivity images in our registry. Two tags because two
-  # kinds of artifact: -mirror is upstream byte-for-byte, -mysql-tls is our fork with
-  # the migration TLS fix. Both pin the upstream digest they were built from (recorded
-  # with the images), so what we shipped is always traceable. Immutable tags, never
-  # :latest — the upstream tag moved under us historically.
-  # Per-service, because each connectivity image has its own upstream version — the
-  # chart has pinned these since 2021. Our tag IS the upstream version (plus -mysql-tls
-  # on the two forks), so the relationship is self-evident and traceable.
-  #
-  # These MUST track the chart's connectivity appVersion pins. Mirroring :latest instead
-  # is not equivalent: latest is a different product generation whose api-gateway
-  # entrypoint expects a service|worker argument the chart never passes, so it
-  # crashloops with "Available startup options are service, worker. Given ".
-  frontegg_api_gateway_tag          = "2021.5.4132030"
-  frontegg_connectors_worker_tag    = "2021.5.5162227"
-  frontegg_integrations_service_tag = "2021.5.5162332"
-  frontegg_event_service_tag        = "2021.5.5183929-mysql-tls"
-  frontegg_webhook_service_tag      = "2021.3.24161215-mysql-tls"
-
   # deployments.webNextjs.env came from two sources on helm_release.app: the values-block
   # (var.webnextjs_env) and appended set entries (var.nextjs_extra_env). Merge them (nextjs_extra_env
   # wins on key collisions, matching the old later-set-overrides-earlier-value order).
@@ -130,7 +111,6 @@ locals {
       vaultExternalSecret = { enabled = local.tls_from_vault }
     }
 
-    webhooks = { enabled = var.enable_webhooks }
 
     objectStorage = {
       kmsKey          = var.cloud == "aws" ? data.aws_kms_key.s3[0].arn : ""
@@ -168,77 +148,6 @@ locals {
     dashboards = {
       enabled   = var.enable_dashboards
       jwtSecret = local.dashboards_jwt_secret # (was set_sensitive)
-    }
-
-    # The frontegg connectivity images come from OUR registry, not Docker Hub.
-    #
-    # They are mirrored into the dozukicloud ECR (and follow var.image_repository, so gov
-    # and airgapped envs resolve their own registry the same way dozuki-operator does).
-    # That removes the private Docker Hub pull entirely: no regcred, no frontegg docker
-    # credentials in values, and no dependency on a vendor registry for a product
-    # frontegg no longer maintains.
-    #
-    # event-service and webhook-service are FORKS, not straight mirrors: their migration
-    # path ignored TLS. Aurora MySQL 8.4 defaults require_secure_transport ON and refuses
-    # the plaintext connection outright, so both crashlooped on migrate and the webhook
-    # tier could never start. The forks add dialectOptions.ssl, verified against the RDS
-    # CA baked into the image. Hence the different tag: -mysql-tls vs -mirror.
-    connectivity = {
-      "webhook-service" = {
-        image            = { repository = "${var.image_repository}/hybrid-webhook-service" }
-        appVersion       = local.frontegg_webhook_service_tag
-        imagePullSecrets = []
-        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
-        # useSSL is a STRING: helm coerces a bare true to a bool and the chart b64encs it.
-        mysql         = { host = local.db_master_host, username = local.db_master_username, useSSL = "true" }
-        mongo         = { connectionString = "mongodb://dozuki-mongodb/webhooks" }
-        configuration = { secrets = { "dozuki-infra-credentials" = { FRONTEGG_WEBHOOK_MYSQL_DB_PASSWORD = "master_password" } } }
-      }
-      "integrations-service" = {
-        image            = { repository = "${var.image_repository}/hybrid-integrations-service" }
-        appVersion       = local.frontegg_integrations_service_tag
-        imagePullSecrets = []
-        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
-        mongo            = { connectionString = "mongodb://dozuki-mongodb/integrations" }
-      }
-      "event-service" = {
-        image            = { repository = "${var.image_repository}/hybrid-event-service" }
-        appVersion       = local.frontegg_event_service_tag
-        imagePullSecrets = []
-        database         = { host = local.db_master_host, username = local.db_master_username, useSSL = "true" }
-        # event-service is the only connectivity service that calls api.frontegg.com itself
-        # (FronteggAuthenticator.onModuleInit), so it is the only one that needs the vendor
-        # credentials. Left unmapped it inherits the chart's literal placeholders
-        # ("frontegg_client_id" / "frontegg_api_key") from its own subchart Secret, frontegg
-        # 401s, and the process exits: "Failed to authenticate 3 times. Shutting down..."
-        #
-        # These come from the flat keys on dozuki-infra-credentials (helm #158) rather than
-        # frontegg.json — configuration.secrets maps an env var to one secret KEY and cannot
-        # index into a JSON document. Explicit env beats the subchart's envFrom secretRef.
-        configuration = { secrets = { "dozuki-infra-credentials" = {
-          FRONTEGG_EVENTS_MYSQL_DB_PASSWORD = "master_password"
-          FRONTEGG_CLIENT_ID                = "frontegg_client_id"
-          FRONTEGG_API_KEY                  = "frontegg_api_key"
-        } } }
-        messageBroker = { brokerList = var.msk_bootstrap_brokers }
-        redis         = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING (was --set-string)
-      }
-      "connectors-worker" = {
-        image            = { repository = "${var.image_repository}/hybrid-connectors-worker" }
-        appVersion       = local.frontegg_connectors_worker_tag
-        imagePullSecrets = []
-        messageBroker    = { brokerList = var.msk_bootstrap_brokers }
-        redis            = { host = "dozuki-redis-master", tls = "false" } # tls stays STRING
-      }
-      "api-gateway" = {
-        image            = { repository = "${var.image_repository}/hybrid-api-gateway" }
-        appVersion       = local.frontegg_api_gateway_tag
-        imagePullSecrets = []
-      }
-      # Stops the subchart rendering its regcred Secret. Nothing pulls from Docker Hub
-      # now, and the chart's default credentials were literal placeholders that Docker
-      # Hub rejected anyway.
-      frontegg = { images = { enabled = false } }
     }
 
     "dozuki-operator" = {
@@ -488,8 +397,8 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
   # These guarded the old helm_release.app; they move here with app delivery.
   lifecycle {
     precondition {
-      condition     = var.cloud == "aws" || (!var.enable_webhooks && !var.enable_bi)
-      error_message = "enable_webhooks and enable_bi are not supported on Azure."
+      condition     = var.cloud == "aws" || !var.enable_bi
+      error_message = "enable_bi is not supported on Azure."
     }
     precondition {
       condition     = var.istio_mesh_state == "disabled" || local.mesh_supported

@@ -387,12 +387,6 @@ variable "eks_enabled_log_types" {
   default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 }
 
-variable "enable_webhooks" {
-  description = "This option will spin up a managed Kafka & Redis cluster to support private webhooks."
-  type        = bool
-  default     = false
-}
-
 variable "vault_endpoint_service_name" {
   description = "VPC Endpoint Service name for the Vault PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). Deploy vault-privatelink-service first."
   type        = string
