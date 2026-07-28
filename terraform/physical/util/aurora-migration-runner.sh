@@ -20,6 +20,10 @@
 #                    removal while stopped + endpoint re-test, CDC resume
 #   validate       - DMS validation whitelist gate + table checksums
 #                    (CHECKSUM_TABLES="db.t1 db.t2" env var adds tables)
+#   harden         - install the STOP_TASK apply-error policies into the task's
+#                    EFFECTIVE settings (stop/modify/resume). Required once per
+#                    task provisioned before the policies landed in the JSON;
+#                    fence refuses to run without them. Safe mid-soak.
 #   fence          - marker + Terraform-owned read_only fence + negative test +
 #                    go-live gate + object install + final task stop.
 #                    Interactive: pauses for the fenced=true Spacelift apply.
@@ -77,6 +81,16 @@ unclean_validation_count() {
   aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
     --query 'TableStatistics[].ValidationState' --output text | tr '\t' '\n' | \
     awk '{ l=tolower($0) } l != "validated" && l != "no primary key" && NF { c++ } END { print c+0 }'
+}
+
+# The four CDC apply-error policies, from the task's EFFECTIVE settings (what
+# the task actually runs with - the Terraform JSON is create-time only, its
+# replication_task_settings is under ignore_changes, so an already-provisioned
+# task keeps whatever it was born with).
+effective_apply_policies() {
+  aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" \
+    --query 'ReplicationTasks[0].ReplicationTaskSettings' --output text | \
+    jq -r '.ErrorBehavior | [.ApplyErrorInsertPolicy, .ApplyErrorUpdatePolicy, .ApplyErrorDeletePolicy, .ApplyErrorEscalationPolicy] | join(",")'
 }
 
 # Bounded task-state wait. Dies on the DMS failure states and on timeout - an
@@ -305,8 +319,52 @@ EOF
   say "VALIDATION GATE PASS"
   ;;
 
+harden)
+  # Roll the STOP_TASK apply-error policies into the task's EFFECTIVE settings.
+  # Terraform cannot: replication_task_settings is ignore_changes (create-time
+  # only), so tasks provisioned before the policies landed keep the permissive
+  # defaults (insert/update LOG_ERROR, delete IGNORE_RECORD) - under which a CDC
+  # apply conflict is logged and skipped, and the fence's positional drain proof
+  # would pass over a row that never landed. Modify requires a stopped task;
+  # resume-processing continues CDC from the checkpoint afterwards.
+  WANT="STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK"
+  if [ "$(effective_apply_policies)" = "$WANT" ]; then say "apply-error policies already STOP_TASK - nothing to do"; exit 0; fi
+  ST=$(task_status)
+  case "$ST" in running|stopped) :;; *) die "task is '$ST' - harden expects running or stopped";; esac
+  if [ "$ST" = "running" ]; then
+    say "stopping the task to modify settings (CDC resumes from the checkpoint after)"
+    aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
+    wait_task_status stopped 900
+  fi
+  say "merging STOP_TASK apply-error policies into the effective settings"
+  NEWSET=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" \
+    --query 'ReplicationTasks[0].ReplicationTaskSettings' --output text | \
+    jq '.ErrorBehavior.ApplyErrorInsertPolicy = "STOP_TASK"
+      | .ErrorBehavior.ApplyErrorUpdatePolicy = "STOP_TASK"
+      | .ErrorBehavior.ApplyErrorDeletePolicy = "STOP_TASK"
+      | .ErrorBehavior.ApplyErrorEscalationPolicy = "STOP_TASK"
+      | del(.Logging.CloudWatchLogGroup, .Logging.CloudWatchLogStream)')
+  aws dms modify-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" \
+    --replication-task-settings "$NEWSET" >/dev/null
+  # modify transitions through "modifying"; wait for it to settle back
+  sleep 15; wait_task_status stopped 600
+  GOT=$(effective_apply_policies)
+  [ "$GOT" = "$WANT" ] || die "effective policies after modify are '$GOT', wanted '$WANT'"
+  if [ "$ST" = "running" ]; then
+    say "resuming CDC"
+    aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+    wait_task_status running 300
+  fi
+  say "HARDENED: effective apply-error policies are STOP_TASK"
+  ;;
+
 fence)
   say "PRECONDITIONS (yours): app writers scaled to zero + DDL freeze in effect"
+  # The drain proof leans on the STOP_TASK apply-error policies (a conflict must
+  # stop the task, never advance the checkpoint past a missing row). Terraform
+  # only sets them at task creation - assert the EFFECTIVE settings.
+  [ "$(effective_apply_policies)" = "STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK" ] || \
+    die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
   prep_cnfs
   # Epoch baseline for the final revalidation gate: per-table CDC apply counters
   # BEFORE anything in this fence commits (marker included). After the drain,
@@ -412,59 +470,83 @@ EOF
     aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
     wait_task_status stopped 900
   done
-  # Final validation epoch, AFTER the drain - epoch-SPECIFIC, not timed. DMS
-  # validation is asynchronous with no resume barrier, so any number of clean
-  # whole-task reads can be stale snapshots taken before the validator even
-  # identified the final-window changes. Instead: diff the per-table apply
-  # counters against the fence-start baseline to get exactly the tables the
-  # fence window touched (the aurora_mig_ctl.marker table is always in the set,
-  # so the epoch machinery is self-canarying), force revalidation of that set
-  # via reload-tables validate-only, and require each table to come back
-  # Validated WITH a changed LastUpdateTime - demonstrable this-epoch proof.
-  # Row-level validation compares actual data, not positions: the guard against
-  # a CDC apply discrepancy no error policy reports.
-  say "gate: final validation epoch over the drained dataset (epoch-specific)"
-  aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
-  wait_task_status running 300
+  # Final validation epoch, AFTER the drain - a FRESH validation-only DMS task
+  # scoped to the tables the fence window touched. Why fresh: the main task's
+  # validation is asynchronous with no resume barrier and no epoch token
+  # (LastUpdateTime is "stats record touched", not "this validation completed"),
+  # so ANY observation of its state can be stale. A fresh task has no history -
+  # every selected table starts unvalidated in THIS epoch, so Validated on it is
+  # necessarily epoch-new, with an unambiguous completion boundary. Both sides
+  # are quiescent (source fenced, main task stopped after the drain proof), so
+  # it is a clean full row compare. The touched set comes from diffing per-table
+  # source-observed counters (Inserts+Updates+Deletes - deliberately NOT the
+  # Applied* counters: an attempted change counts as touched even if its apply
+  # failed) against the fence-start baseline. aurora_mig_ctl.marker is always in
+  # the set (its insert is part of this fence), so the machinery self-canaries.
+  # FK-cascaded child rows are not binlogged by MySQL and so not in the set;
+  # identical FK DDL on both sides (preload md5 gate) makes their outcomes
+  # equal by construction.
+  say "gate: final validation epoch over the drained dataset (fresh validation-only task)"
   STATS1="/tmp/fence-stats1-${ID}.json"
   aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
-    --query 'TableStatistics[].{s:SchemaName,t:TableName,c:sum([Inserts,Updates,Deletes]),v:ValidationState,u:LastUpdateTime}' \
+    --query 'TableStatistics[].{s:SchemaName,t:TableName,c:sum([Inserts,Updates,Deletes]),v:ValidationState}' \
     --output json > "$STATS1"
-  # touched = counters moved since fence start; exclude no-PK tables (cannot be
-  # row-validated - the whole-task whitelist gate below still covers their state)
   TOUCHED=$(jq -n --slurpfile a "$STATS0" --slurpfile b "$STATS1" '
     ($a[0] | map({key: (.s + "|" + .t), value: .c}) | from_entries) as $base
     | [ $b[0][]
         | select((($base[.s + "|" + .t] // -1) != .c) and ((.v | ascii_downcase) != "no primary key"))
-        | {SchemaName: .s, TableName: .t, before: .u} ]')
+        | {SchemaName: .s, TableName: .t} ]')
   NTOUCH=$(echo "$TOUCHED" | jq length)
   say "  tables touched in the fence window (revalidation set): $NTOUCH"
   [ "$NTOUCH" -ge 1 ] || die "revalidation set is empty - the marker table alone should be in it; the counter baseline is broken, do not trust this epoch"
-  echo "$TOUCHED" | jq -c '[.[] | {SchemaName, TableName}] as $all | range(0; ($all | length); 50) as $i | $all[$i:$i+50]' | while read -r batch; do
-    aws dms reload-tables --replication-task-arn "$(task_arn)" --region "$REGION" \
-      --tables-to-reload "$batch" --reload-option validate-only >/dev/null
-  done
-  say "  revalidation requested; waiting for every touched table to return Validated with a new LastUpdateTime"
+  VTASK_ID="${ID}-aurora-migration-fencevalidate"
+  vtask_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null | grep -v '^None$' || true; }
+  OLD=$(vtask_arn)
+  if [ -n "$OLD" ]; then
+    say "  deleting a leftover fence-validation task from a prior attempt"
+    ST=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)
+    [ "$ST" = "running" ] && { aws dms stop-replication-task --replication-task-arn "$OLD" --region "$REGION" >/dev/null; while [ "$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)" != "stopped" ]; do sleep 10; done; }
+    aws dms delete-replication-task --replication-task-arn "$OLD" --region "$REGION" >/dev/null
+    while [ -n "$(vtask_arn)" ]; do sleep 10; done
+  fi
+  VMAP=$(echo "$TOUCHED" | jq '{rules: [to_entries[] | {"rule-type":"selection","rule-id":(.key+1|tostring),"rule-name":(.key+1|tostring),"object-locator":{"schema-name":.value.SchemaName,"table-name":.value.TableName},"rule-action":"include"}]}')
+  RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
+  SEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-source" --query 'Endpoints[0].EndpointArn' --output text)
+  TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
+  say "  creating the validation-only task ($VTASK_ID)"
+  VARN=$(aws dms create-replication-task --region "$REGION" \
+    --replication-task-identifier "$VTASK_ID" \
+    --replication-instance-arn "$RIARN" \
+    --source-endpoint-arn "$SEP" --target-endpoint-arn "$TEP" \
+    --migration-type full-load \
+    --table-mappings "$VMAP" \
+    --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":5,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
+    --query 'ReplicationTask.ReplicationTaskArn' --output text)
+  while [ "$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)" != "ready" ]; do sleep 10; done
+  aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
+  say "  validating the touched set (all tables must reach Validated in this epoch)"
   VWAIT=0
   while :; do
-    aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
-      --query 'TableStatistics[].{s:SchemaName,t:TableName,v:ValidationState,u:LastUpdateTime}' \
-      --output json > "$STATS1"
-    PENDING=$(jq -n --slurpfile want <(echo "$TOUCHED") --slurpfile now "$STATS1" '
-      ($now[0] | map({key: (.s + "|" + .t), value: {v: (.v | ascii_downcase), u: .u}}) | from_entries) as $cur
-      | [ $want[0][]
-          | ($cur[.SchemaName + "|" + .TableName]) as $c
-          | select(($c == null) or ($c.v != "validated") or ($c.u == .before)) ] | length')
-    U=$(unclean_validation_count)
-    say "  revalidation pending=$PENDING unclean=$U"
-    [ "$PENDING" = "0" ] && [ "$U" = "0" ] && break
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 1800 ] && die "epoch revalidation did not complete clean in 30m - inspect table statistics for the touched set"
+    VSTATES=$(aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
+      --query 'TableStatistics[].ValidationState' --output text | tr '\t' '\n' | grep . || true)
+    NDONE=$(echo "$VSTATES" | grep -ic '^validated$' || true)
+    # terminal-bad states fail immediately; anything else (pending/validating)
+    # is in-progress and covered by the bound
+    NBAD=$(echo "$VSTATES" | grep -icE 'mismatch|error|suspend|no primary key' || true)
+    say "  validated $NDONE/$NTOUCH (bad states: $NBAD)"
+    [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
+    [ "$NDONE" -eq "$NTOUCH" ] && break
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 2700 ] && die "fence-epoch validation did not complete in 45m - inspect $VTASK_ID"
     sleep 20
   done
-  say "FINAL task stop (definitive)"
-  aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
-  wait_task_status stopped 900
-  checkpoint_reached "$FINAL_FILE" "$FINAL_POS" || die "checkpoint fell short of the final coordinate after the validation epoch - inspect the task"
+  say "  epoch validation PASSED - removing the validation task"
+  VST=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)
+  [ "$VST" = "running" ] && { aws dms stop-replication-task --replication-task-arn "$VARN" --region "$REGION" >/dev/null; while [ "$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$VTASK_ID" --query 'ReplicationTasks[0].Status' --output text)" != "stopped" ]; do sleep 10; done; }
+  aws dms delete-replication-task --replication-task-arn "$VARN" --region "$REGION" >/dev/null
+  # main-task whole-task whitelist gate (its stats survive the stop): catches a
+  # table that went Mismatched/Suspended during soak outside the touched set.
+  U=$(unclean_validation_count)
+  [ "$U" = "0" ] || die "main-task validation states are not clean (unclean=$U) - inspect before promoting"
   say "checkpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)"
   say "installing object artifacts AFTER the final stop (DMS can never apply DML"
   say "through freshly installed triggers). Dumped FRESH from the fenced source -"
