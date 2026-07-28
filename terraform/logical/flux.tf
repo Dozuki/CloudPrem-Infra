@@ -538,8 +538,11 @@ resource "kubectl_manifest" "flux_slack_alert" {
       # notification - otherwise fleet messages are indistinguishable.
       summary = "${var.customer}-${var.environment}"
       eventMetadata = {
-        env     = "${var.customer}-${var.environment}"
-        cluster = var.eks_cluster_id
+        env             = "${var.customer}-${var.environment}"
+        cluster         = var.eks_cluster_id
+        chart           = var.chart_version
+        app-image       = var.image_tag
+        webnextjs-image = var.nextjs_tag
       }
       eventSources = [
         { kind = "HelmRelease", name = "*" },
