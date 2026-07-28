@@ -553,7 +553,7 @@ EOF
     --source-endpoint-arn "$SEP" --target-endpoint-arn "$TEP" \
     --migration-type full-load \
     --table-mappings "file://$VDIR/mappings.json" \
-    --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":10,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
+    --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":16,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
     --query 'ReplicationTask.ReplicationTaskArn' --output text)
   vwait_status ready 600
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
