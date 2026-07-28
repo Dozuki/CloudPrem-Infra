@@ -475,7 +475,7 @@ EOF
     wait_task_status stopped 900
   done
   # Final validation epoch, AFTER the drain - a FRESH validation-only DMS task
-  # scoped to the tables the fence window touched. Why fresh: the main task's
+  # over the main task's entire mapping scope. Why fresh: the main task's
   # validation is asynchronous with no resume barrier and no epoch token, so
   # ANY observation of its state can be stale. A fresh task has no history -
   # every selected table starts unvalidated in THIS epoch, so Validated on it is
@@ -489,9 +489,10 @@ EOF
   # eviction-NULLed, performance_schema is off on the fleet, and an SSM-fetched
   # catalog silently truncates at 24k chars of stdout. The mappings clone has
   # no such channel: it travels via DMS APIs with real pagination.)
-  # Completion requires the fresh task's enumerated count to MATCH the main
-  # task's stats count (same mappings + frozen source = same set), every row
-  # in {Validated, No primary key} (no-PK rows reported - the documented
+  # Completion requires EXACT set equality with the main task's statistics
+  # identities in both directions (count alone can hide an equal-cardinality
+  # substitution from rename/DDL outside CDC), every main-set table terminal in
+  # {Validated, No primary key} (no-PK rows reported - the documented
   # users-table exception), and the marker table's row Validated: that row
   # exists only if THIS fence's write replicated, so the epoch is self-proving.
   say "gate: final validation epoch over the drained dataset (fresh validation-only task, mappings-clone scope)"
@@ -528,15 +529,20 @@ EOF
   aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" \
     --query 'ReplicationTasks[0].TableMappings' --output text > "$VDIR/mappings.json"
   jq -e '.rules | length >= 1' "$VDIR/mappings.json" >/dev/null || die "could not clone the main task's TableMappings - do not trust this epoch"
-  # the authoritative table count: the main task's own statistics (stable on a
-  # stopped task; survives the stop - proven live on the gca cutover).
-  # NO --query aggregates here: JMESPath functions evaluate PER PAGE under CLI
-  # pagination (observed live: length() returned one line per 100-row page).
-  # jq -s normalizes whether the CLI emits one merged doc or one doc per page.
-  MAIN_COUNT=$(aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
-    --output json | jq -s '[.[].TableStatistics[]] | length')
-  [ "$MAIN_COUNT" -ge 1 ] 2>/dev/null || die "main task reports no table statistics - cannot anchor the epoch's expected table count"
-  say "  scope: main-task mappings clone; expected table count $MAIN_COUNT"
+  # the authoritative table SET: the main task's own statistics identities
+  # (stable on a stopped task; survives the stop - proven live on the gca
+  # cutover). The completion gate requires exact set equality with the fresh
+  # task's enumeration, not count equality - equal counts can hide an
+  # equal-cardinality substitution (e.g. a rename DDL that MySQL CDC does not
+  # replicate leaves the two enumerations different but same-sized).
+  # NO --query aggregates/projections here: JMESPath evaluates PER PAGE under
+  # CLI pagination (observed live: length() returned one line per 100-row
+  # page). jq -s normalizes one merged doc or one doc per page alike.
+  aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
+    --output json | jq -s '[.[].TableStatistics[] | {s: .SchemaName, t: .TableName}]' > "$VDIR/mainset.json"
+  MAIN_COUNT=$(jq 'length' "$VDIR/mainset.json")
+  [ "$MAIN_COUNT" -ge 1 ] 2>/dev/null || die "main task reports no table statistics - cannot anchor the epoch's expected table set"
+  say "  scope: main-task mappings clone; expected table set size $MAIN_COUNT"
   RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
   SEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-source" --query 'Endpoints[0].EndpointArn' --output text)
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
@@ -557,16 +563,26 @@ EOF
     # same pagination rule: raw json + jq -s, never --query aggregates/projections
     aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
       --output json | jq -s '[.[].TableStatistics[] | {s: .SchemaName, t: .TableName, v: .ValidationState}]' > "$VDIR/vstats.json"
-    NROWS=$(jq 'length' "$VDIR/vstats.json")
     # terminal-bad states die immediately; "no primary key" is the accepted,
     # reported exception (those tables cannot be row-validated at all)
     NBAD=$(jq '[.[] | select(.v | test("mismatch|error|suspend"; "i"))] | length' "$VDIR/vstats.json")
-    NDONE=$(jq '[.[] | select((.v | ascii_downcase) == "validated" or (.v | ascii_downcase) == "no primary key")] | length' "$VDIR/vstats.json")
+    # exact SET equality with the main task's identities, both directions:
+    # MISSING = main-set tables not yet terminal-clean in the fresh task;
+    # EXTRA = fresh-task tables outside the main set (enumeration drift - the
+    # fresh enumeration is fixed at its start, so EXTRA never resolves: die).
+    MISSING=$(jq -n --slurpfile main "$VDIR/mainset.json" --slurpfile now "$VDIR/vstats.json" '
+      ($now[0] | map(select((.v | ascii_downcase) == "validated" or (.v | ascii_downcase) == "no primary key")
+                     | {key: ([.s, .t] | tojson), value: true}) | from_entries) as $ok
+      | [ $main[0][] | select(($ok[[.s, .t] | tojson] // false) | not) ] | length')
+    EXTRA=$(jq -n --slurpfile main "$VDIR/mainset.json" --slurpfile now "$VDIR/vstats.json" '
+      ($main[0] | map({key: ([.s, .t] | tojson), value: true}) | from_entries) as $known
+      | [ $now[0][] | select(($known[[.s, .t] | tojson] // false) | not) ] | length')
     MARKER_OK=$(jq '[.[] | select(.s == "aurora_mig_ctl" and .t == "marker" and ((.v | ascii_downcase) == "validated"))] | length' "$VDIR/vstats.json")
-    say "  done=$NDONE/$NROWS enumerated (expect $MAIN_COUNT; bad states: $NBAD; marker validated: $MARKER_OK)"
+    say "  missing=$MISSING/$MAIN_COUNT extra=$EXTRA bad=$NBAD marker_validated=$MARKER_OK"
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
-    if [ "$NROWS" = "$MAIN_COUNT" ] && [ "$NDONE" = "$NROWS" ] && [ "$MARKER_OK" = "1" ]; then break; fi
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 3600 ] && die "fence-epoch validation did not complete in 60m (done=$NDONE/$NROWS, expected $MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
+    [ "$EXTRA" -gt 0 ] && die "the fresh task enumerated tables outside the main task's set - enumeration drift (rename/DDL outside CDC?); inspect before touching anything"
+    if [ "$MISSING" = "0" ] && [ "$MARKER_OK" = "1" ]; then break; fi
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 3600 ] && die "fence-epoch validation did not complete in 60m (missing=$MISSING/$MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
     sleep 20
   done
   NOPK_LIST=$(jq -r '[.[] | select((.v | ascii_downcase) == "no primary key") | .s + "." + .t] | join(" ")' "$VDIR/vstats.json")
@@ -575,7 +591,7 @@ EOF
   vtask_teardown
   rm -rf "$VDIR"
   # main-task whole-task whitelist gate (its stats survive the stop): catches a
-  # table that went Mismatched/Suspended during soak outside the touched set.
+  # table that went Mismatched/Suspended during soak.
   U=$(unclean_validation_count)
   [ "$U" = "0" ] || die "main-task validation states are not clean (unclean=$U) - inspect before promoting"
   say "checkpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)"
