@@ -322,6 +322,17 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 	for _, w := range advisory {
 		step("advisory: workload %s not Ready (non-critical — not failing the run)", w)
 	}
+
+	// Storage invariants from the AZ/PVC review: the default StorageClass must exist and
+	// bind WaitForFirstConsumer, and nothing mounting a PVC may sit on spot. Both were
+	// true only by accident before; both fail silently in a normal green run when broken.
+	step("verifying storage invariants (default SC is WFFC; no PVC pods on spot)")
+	if serr := validation.AssertDefaultStorageClassWFFC(kc); serr != nil {
+		return 0, "", caps, fmt.Errorf("storage class invariant: %w", serr)
+	}
+	if serr := validation.AssertNoPVCPodsOnSpot(kc); serr != nil {
+		return 0, "", caps, fmt.Errorf("pvc placement invariant: %w", serr)
+	}
 	_ = validation.JobSucceeded(kc, p.Namespace, "db-migrations") // best-effort: job may be GC'd
 	rev, _ := validation.ReleaseRevision(kc, p.Namespace, "dozuki")
 	return rev, kc, caps, nil
