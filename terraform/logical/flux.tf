@@ -322,8 +322,33 @@ resource "helm_release" "flux" {
     imageReflectionController = { create = false }
     kustomizeController       = { create = false }
     notificationController    = { create = var.flux_slack_webhook_url != "" }
-    helmController            = { create = true }
-    sourceController          = { create = true }
+    # do-not-disrupt on helm-controller ONLY. Karpenter consolidation was evicting
+    # it mid-upgrade, which kills the reconciliation context and fails the release:
+    #
+    #   17:25:41  helm upgrade running, "checking resources for changes: 220"
+    #   17:28:13  Evicted pod: Underutilized   (helm-controller)
+    #             -> Helm upgrade failed ... : context canceled
+    #   17:28:48  new pod took leadership, retried, succeeded
+    #
+    # Flux retries so it self-heals, but the retry is not free: the same eviction
+    # during the pre-upgrade migration hook interrupts a running database
+    # migration rather than a resource diff, and that is the failed-release state
+    # that needs manual recovery. Already observed once as "pre-upgrade hooks
+    # failed: context canceled".
+    #
+    # Deliberately not applied to source-controller or notification-controller.
+    # Their work is short and idempotent - a re-fetch or a re-send - so eviction
+    # costs nothing there, and every annotated pod is another node consolidation
+    # cannot reclaim. helm-controller is the only one holding a long,
+    # non-idempotent operation.
+    #
+    # The value must stay a QUOTED string: Kubernetes annotation values are
+    # strings and an unquoted true is rejected at apply time.
+    helmController = {
+      create      = true
+      annotations = { "karpenter.sh/do-not-disrupt" = "true" }
+    }
+    sourceController = { create = true }
   })]
 }
 
