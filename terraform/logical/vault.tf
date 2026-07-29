@@ -280,6 +280,28 @@ data "external" "ops_htpasswd_hash" {
   }
 }
 
+# The standalone interaction stack keeps this shared password in a
+# Terraform-managed SSM SecureString. Logical stacks receive the same write-only
+# Spacelift variable, but publish only the Envoy-compatible SHA1 htpasswd line
+# to their own Vault path. The resource is absent while the context is not
+# attached, which keeps the action disabled instead of using a placeholder.
+data "external" "alertmanager_slack_silence_htpasswd_hash" {
+  count = var.cloud == "aws" && var.alertmanager_slack_silence_password != "" ? 1 : 0
+
+  program = ["bash", "-c", <<-EOT
+    set -euo pipefail
+    password=$(jq -r .password)
+    hex=$(printf '%s' "$password" | sha1sum | cut -d' ' -f1)
+    hash=$(printf "$(printf '%s' "$hex" | sed 's/../\\x&/g')" | base64)
+    jq -n --arg hash "$hash" '{hash: $hash}'
+  EOT
+  ]
+
+  query = {
+    password = var.alertmanager_slack_silence_password
+  }
+}
+
 # Keys match the chart's ExternalSecret (ops-basic-auth -> ".htpasswd"): the chart
 # only reads "htpasswd"; username/password are here so ops can look up the plaintext.
 resource "vault_kv_secret_v2" "ops_auth" {
@@ -288,11 +310,16 @@ resource "vault_kv_secret_v2" "ops_auth" {
   name                = "${local.vault_env_prefix}/ops-auth"
   delete_all_versions = !var.protect_resources
 
-  data_json = jsonencode({
-    htpasswd = local.ops_htpasswd
-    username = local.ops_user
-    password = local.ops_admin_password
-  })
+  data_json = jsonencode(merge(
+    {
+      htpasswd = local.ops_htpasswd
+      username = local.ops_user
+      password = local.ops_admin_password
+    },
+    var.alertmanager_slack_silence_password != "" ? {
+      alertmanagerSilenceHtpasswd = "slack-silencer:{SHA}${data.external.alertmanager_slack_silence_htpasswd_hash[0].result.hash}"
+    } : {}
+  ))
 }
 
 # --- State moves: resources gained `count` when the azure cloud gate was added --- #
