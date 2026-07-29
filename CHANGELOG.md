@@ -2,6 +2,22 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.1.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.4...v8.1.0) (2026-07-29)
+
+
+### Features
+
+* **physical:** DR dead-man detection and acknowledged paging ([#358](https://github.com/Dozuki/CloudPrem-Infra/issues/358)) ([153922c](https://github.com/Dozuki/CloudPrem-Infra/commit/153922c0c5154717555e73df0aa045e519fd666b))
+
+
+### Bug Fixes
+
+* **loadtest:** authenticate page GETs with the real session cookie ([#362](https://github.com/Dozuki/CloudPrem-Infra/issues/362)) ([b678060](https://github.com/Dozuki/CloudPrem-Infra/commit/b6780604535ae0da6ac7d9ee6246f41dbb49eff6))
+* **physical:** derive the secret replica region from the aws.dr provider ([#359](https://github.com/Dozuki/CloudPrem-Infra/issues/359)) ([126240c](https://github.com/Dozuki/CloudPrem-Infra/commit/126240ca596d287ebcb54bee2297ad04207a1407))
+* **physical:** dms restart lambda must never touch the aurora migration task ([50e13a2](https://github.com/Dozuki/CloudPrem-Infra/commit/50e13a216ffb06061cca651c6c9a328e817c1bd1))
+* **physical:** export AWS_PROFILE in create-s3-batch instead of using a command prefix ([01ec926](https://github.com/Dozuki/CloudPrem-Infra/commit/01ec9265e59361b471ecbbb0d6956f7a3f1b6e6f))
+* **physical:** wave-2 followups - re-enterable fence, xlarge migration instance default ([#361](https://github.com/Dozuki/CloudPrem-Infra/issues/361)) ([68ac9a7](https://github.com/Dozuki/CloudPrem-Infra/commit/68ac9a788c3761283865bdece07e81b820036c43))
+
 ## [8.0.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.3...v8.0.4) (2026-07-28)
 
 
