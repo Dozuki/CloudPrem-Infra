@@ -15,11 +15,11 @@
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.54.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.54.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.54.0 |
-| <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | ~> 6.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | ~> 6.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
 
 ## Modules
@@ -240,7 +240,7 @@
 | <a name="input_aurora_engine_version"></a> [aurora\_engine\_version](#input\_aurora\_engine\_version) | Aurora MySQL engine version, full aws RDS format (e.g. 8.4.mysql\_aurora.8.4.7 — the bare 8.4.7 is rejected with 'Cannot find version'). Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade. | `string` | `"8.4.mysql_aurora.8.4.7"` | no |
 | <a name="input_aurora_max_acu"></a> [aurora\_max\_acu](#input\_aurora\_max\_acu) | Aurora Serverless v2 maximum capacity (ACUs). | `number` | `16` | no |
 | <a name="input_aurora_migration_dms_engine_version"></a> [aurora\_migration\_dms\_engine\_version](#input\_aurora\_migration\_dms\_engine\_version) | Pinned DMS engine version for the migration rig (run-to-run reproducibility; 3.6.1 = the rehearsal-proven version). | `string` | `"3.6.1"` | no |
-| <a name="input_aurora_migration_dms_instance_type"></a> [aurora\_migration\_dms\_instance\_type](#input\_aurora\_migration\_dms\_instance\_type) | Replication instance class for the Aurora migration DMS rig. | `string` | `"dms.c5.large"` | no |
+| <a name="input_aurora_migration_dms_instance_type"></a> [aurora\_migration\_dms\_instance\_type](#input\_aurora\_migration\_dms\_instance\_type) | Replication instance class for the Aurora migration DMS rig. | `string` | `"dms.c5.xlarge"` | no |
 | <a name="input_aurora_migration_dms_storage"></a> [aurora\_migration\_dms\_storage](#input\_aurora\_migration\_dms\_storage) | Allocated storage (GB) for the Aurora migration DMS replication instance. | `number` | `100` | no |
 | <a name="input_aurora_migration_source_fenced"></a> [aurora\_migration\_source\_fenced](#input\_aurora\_migration\_source\_fenced) | Cutover write-fence for the RDS source during an Aurora migration. When true,<br/>read\_only=1 is injected into the RDS parameter group AS CONFIG, so the fence<br/>is Terraform-owned: no concurrent or subsequent apply can silently revert it<br/>(an out-of-band fence would be reset by any refreshed apply mid-cutover).<br/>Set true (gated apply) at the runner's fence step; back to false only on a<br/>pre-cutover abort. On RDS MySQL 8.0.36+ read\_only=1 is a complete fence for<br/>every customer account - no grantable privilege bypasses it. | `bool` | `false` | no |
 | <a name="input_aurora_migration_state"></a> [aurora\_migration\_state](#input\_aurora\_migration\_state) | RDS -> Aurora DMS migration state machine (aurora-migration.tf). off = no<br/>migration (default). provision = Aurora comes up empty alongside the live RDS,<br/>guarded to DMS+bastion, with the DMS rig created but not started. cutover =<br/>connection facts (secret/outputs/BI DMS/bastion) flip to Aurora and the app SG<br/>path opens - apply only at the migration runner's go-live gate. cleanup = the<br/>DMS rig is removed; Aurora stays primary, the RDS survives as the fail-forward<br/>net until the env's final db\_engine="aurora" flip. Only meaningful while<br/>db\_engine="rds". | `string` | `"off"` | no |
