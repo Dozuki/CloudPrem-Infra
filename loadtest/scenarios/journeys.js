@@ -44,8 +44,11 @@ export default function (data) {
     const id = pick(POOL.guides);
     // Guide URLs are /Guide/<title-slug>/<id> - the id is the LAST segment (any
     // slug 302s to the canonical page, which k6 follows and measures).
-    const res = http.get(`${BASE}/Guide/x/${id}`, { headers: pageHeaders(token), tags: { journey: 'guide' } });
-    check(res, { 'guide 2xx/3xx': (x) => x.status < 400 });
+    const res = http.get(`${BASE}/Guide/x/${id}`, { headers: pageHeaders(data), tags: { journey: 'guide' } });
+    // Assert a RENDERED guide, not just a non-error: an unauthenticated request
+    // 302s to /Login, which k6 follows to a 200, so a bare status check passes
+    // while measuring the login page. The canonical guide URL ends in the id.
+    check(res, { 'guide rendered': (x) => x.status === 200 && new RegExp(`/${id}$`).test(x.url) });
   } else if (r < 0.8) {
     const q = pick(SEARCH_TERMS);
     const res = http.get(`${BASE}/api/2.0/search/${encodeURIComponent(q)}?limit=20`,
