@@ -35,6 +35,17 @@ var kubeAuthRaceRE = regexp.MustCompile(`credentials configured in the provider 
 // still fail the run.
 var transientNetRE = regexp.MustCompile(`(?i)no such host|connection reset by peer|i/o timeout|TLS handshake timeout|request send failed|EOF$`)
 
+// vaultTokenExpiredRE matches the vault provider failing to validate its OWN token
+// (a 403 on auth/token/lookup-self). The renewer in vault.go is what should keep this
+// from ever happening; this is the second net, because the cost of being wrong is an
+// entire run - cycle 45 lost ~80 minutes of correct work to exactly this, with the
+// rebuild apply already in flight.
+//
+// Narrow on purpose. It matches only the provider's own token lookup, not "permission
+// denied" generally, so a genuine Vault POLICY problem still fails immediately instead
+// of being retried into a confusing timeout.
+var vaultTokenExpiredRE = regexp.MustCompile(`(?i)failed to lookup token`)
+
 type TGOptions struct {
 	WorkingDir   string
 	AccountID    string
@@ -102,6 +113,17 @@ func (o TGOptions) Apply() error {
 			time.Sleep(wait)
 			continue
 		}
+		// No backoff: a re-login either produced a usable token or it did not, and
+		// waiting does not change that. Only retry if the refresh actually succeeded,
+		// so a dead AWS session fails on this attempt instead of three more.
+		if attempt < maxAttempts && vaultTokenExpiredRE.MatchString(out) {
+			if refreshVaultToken() {
+				fmt.Fprintf(os.Stderr, "\n>> harness: Vault token had expired; re-logged in and retrying apply (attempt %d/%d)\n\n", attempt+1, maxAttempts)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "\n>> harness: Vault token expired and re-login failed — not retrying\n\n")
+			return err
+		}
 		if attempt < maxAttempts && transientNetRE.MatchString(out) {
 			wait := time.Duration(attempt*30) * time.Second
 			fmt.Fprintf(os.Stderr, "\n>> harness: transient network failure (request never reached AWS); retrying apply in %s (attempt %d/%d)\n\n", wait, attempt+1, maxAttempts)
@@ -140,19 +162,22 @@ func (o TGOptions) Destroy() error {
 	return o.destroyModule("physical")
 }
 
-// refreshVaultToken best-effort re-logs-in to Vault before the teardown and updates
-// VAULT_TOKEN in the process env. A long run can outlast the AWS-auth token's TTL,
-// so the token run.sh logged in with is stale by teardown — the logical destroy then
-// 403s on every vault data source (lookup-self against VAULT_ADDR). run.sh's
-// port-forward is still up, so we re-login the same way it did. Best-effort: if the
-// vault/aws CLIs or VAULT_ADDR are absent, keep the inherited token — the logical
-// destroy is best-effort anyway and the cleanup-orphans backstop re-auths too.
-func refreshVaultToken() {
+// refreshVaultToken best-effort re-logs-in to Vault and updates VAULT_TOKEN in the
+// process env, returning whether it actually got a token. A long run can outlast the
+// AWS-auth token's 1h TTL, and everything that reads Vault then 403s on lookup-self
+// against VAULT_ADDR. run.sh's port-forward is still up, so we re-login the same way it
+// did. Best-effort: if the vault/aws CLIs or VAULT_ADDR are absent, keep the inherited
+// token — the cleanup-orphans backstop re-auths too.
+//
+// Note this mints a DIFFERENT token, so it only helps processes started afterwards.
+// Steady-state renewal (vault.go) keeps the existing token alive instead; this is the
+// recovery path for when it is already too late for that.
+func refreshVaultToken() bool {
 	if os.Getenv("VAULT_ADDR") == "" {
-		return // no Vault tunnel in this run (e.g. azure / SKIP_VAULT_TUNNEL)
+		return false // no Vault tunnel in this run (e.g. azure / SKIP_VAULT_TUNNEL)
 	}
 	if _, err := exec.LookPath("vault"); err != nil {
-		return
+		return false
 	}
 	profile := os.Getenv("VAULT_AWS_PROFILE")
 	if profile == "" {
@@ -169,7 +194,7 @@ func refreshVaultToken() {
 		"export-credentials", "--format", "env-no-export").Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, ">> teardown: Vault re-login skipped (aws creds for %q: %v) — using inherited token\n", profile, err)
-		return
+		return false
 	}
 	loginEnv := os.Environ()
 	for _, line := range strings.Split(strings.TrimSpace(string(credsOut)), "\n") {
@@ -182,7 +207,7 @@ func refreshVaultToken() {
 	out, err := login.Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, ">> teardown: Vault re-login skipped (%v) — using inherited token; backstop re-auths if needed\n", err)
-		return
+		return false
 	}
 	var resp struct {
 		Auth struct {
@@ -190,10 +215,11 @@ func refreshVaultToken() {
 		} `json:"auth"`
 	}
 	if json.Unmarshal(out, &resp) != nil || resp.Auth.ClientToken == "" {
-		return
+		return false
 	}
 	_ = os.Setenv("VAULT_TOKEN", resp.Auth.ClientToken)
-	fmt.Fprintf(os.Stderr, ">> teardown: refreshed Vault token (re-login via aws role=%s) so the logical destroy uses a live token\n", role)
+	fmt.Fprintf(os.Stderr, ">> vault: refreshed token (re-login via aws role=%s)\n", role)
+	return true
 }
 
 // clearNLBProtection disables deletion protection on the stack's NLB before the

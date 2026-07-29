@@ -88,7 +88,10 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: 1.11.8
+          # Track the engine the fleet runs. This job regenerates the lock and fails on
+          # any diff, so if it runs a different OpenTofu than the stacks do, it is
+          # asserting something about a file the stacks will read differently.
+          tofu_version: 1.12.5
 
       - name: Complete the lock and assert nothing was missing
         working-directory: terraform/${{ matrix.module }}
