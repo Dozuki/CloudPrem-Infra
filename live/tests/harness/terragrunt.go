@@ -86,7 +86,13 @@ func (o TGOptions) Apply() error {
 	var err error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		var out string
-		out, err = o.execCapture("run", "--all", "apply", "--non-interactive", "-auto-approve")
+		// No -auto-approve: terragrunt appends it itself for `run --all apply`, and
+		// passing it unforwarded is a hard error on 1.x ("flag -auto-approve is not a
+		// Terragrunt flag ... use -- to forward it"). `run -- apply -auto-approve` also
+		// works but buys nothing here. The destroy path below keeps its -auto-approve
+		// because `destroy` is a shortcut command, which does accept it (both verified
+		// against a real 1.1.1 binary).
+		out, err = o.execCapture("run", "--all", "apply", "--non-interactive")
 		if err == nil {
 			return nil
 		}
