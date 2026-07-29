@@ -14,10 +14,15 @@ AWS_ACCOUNT="$4"
 AWS_PARTITION="$5"
 # AWS_PROFILE in $6
 
-AWS_PREFIX=""
-
+# Export rather than building an "AWS_PROFILE=x" command prefix. The shell recognises
+# assignment prefixes BEFORE parameter expansion, so a variable that expands to
+# "AWS_PROFILE=default" is treated as a command name, not an assignment:
+#   ./create-s3-batch.sh: line 30: AWS_PROFILE=default: command not found  (exit 127)
+# Spacelift never passes a profile, so this only bit runs that do - the DR rebuild and
+# the S3 migration, i.e. exactly the paths where the pre-existing objects are the whole
+# point. Found by the first recovery-rebuild drill.
 if [ "${6:-}" != "" ]; then
-  AWS_PREFIX="AWS_PROFILE=$6"
+  export AWS_PROFILE="$6"
 fi
 
 # IAM propagation slack. This is NOT what orders the job after its permissions: the job is
@@ -27,7 +32,7 @@ fi
 # The ordering is enforced by the depends_on in s3.tf; keep both.
 sleep 30
 
-$AWS_PREFIX aws s3control create-job \
+aws s3control create-job \
   --account-id "$AWS_ACCOUNT" \
   --operation '{"S3ReplicateObject":{}}' \
   --description "Source $AWS_SOURCE_BUCKET" \
