@@ -116,21 +116,35 @@ while IFS= read -r pfx; do
     envdir="$(dirname "$(dirname "$rel")")"    # standard/us-east-1/min
     region="$(printf '%s' "$envdir" | awk -F/ '{print $2}')"; region="${region:-$R}"
     env="$(printf '%s' "$envdir" | awk -F/ '{print $3}')"
-    [ -n "$env" ] && STACKS="$STACKS ${CUSTOMER}-${env}"
-    echo "  partition path: $envdir  (region=$region env=$env customer=$CUSTOMER)"
+    # Derive the customer from the stack's OWN state (eks_cluster_id output is
+    # "<customer>-<env>"). CUSTOMER is only the fallback: recovery-scenario configs
+    # run other customers (smokesrc/smokerec), and assuming 'smoke' once made the
+    # vault cleanup disable the WRONG mount and verify-clean vouch for the wrong
+    # prefix while real orphans sat in the account.
+    cust="$(aws s3 cp "s3://$BUCKET/$key" - --profile "$P" 2>/dev/null | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print((d.get("outputs", {}).get("eks_cluster_id", {}) or {}).get("value", ""))
+except Exception:
+    print("")' 2>/dev/null)"
+    cust="${cust%-"$env"}"
+    [ -n "$cust" ] || cust="$CUSTOMER"
+    [ -n "$env" ] && STACKS="$STACKS ${cust}-${env}"
+    echo "  partition path: $envdir  (region=$region env=$env customer=$cust)"
   else
     echo "  no physical state under this prefix — will release locks + purge state only"
-    envdir=""; region="$R"; env=""
+    envdir=""; region="$R"; env=""; cust="$CUSTOMER"
   fi
 
   # 1) Disable NLB deletion protection (<customer>-<env>).
   if [ -n "$env" ]; then
     arn="$(aws elbv2 describe-load-balancers --region "$region" --profile "$P" \
-          --query "LoadBalancers[?LoadBalancerName=='${CUSTOMER}-${env}'].LoadBalancerArn|[0]" --output text 2>/dev/null)"
+          --query "LoadBalancers[?LoadBalancerName=='${cust}-${env}'].LoadBalancerArn|[0]" --output text 2>/dev/null)"
     if [ -n "$arn" ] && [ "$arn" != "None" ]; then
       aws elbv2 modify-load-balancer-attributes --load-balancer-arn "$arn" \
         --attributes Key=deletion_protection.enabled,Value=false --region "$region" --profile "$P" >/dev/null 2>&1 \
-        && echo "  NLB deletion protection disabled (${CUSTOMER}-${env})"
+        && echo "  NLB deletion protection disabled (${cust}-${env})"
     fi
   fi
 
@@ -143,7 +157,7 @@ while IFS= read -r pfx; do
   # below wait it out. Idempotent: no cluster, no output.
   if [ -n "$env" ]; then
     for carn in $(aws kafka list-clusters --region "$region" --profile "$P" \
-          --query "ClusterInfoList[?starts_with(ClusterName,'${CUSTOMER}-${env}')].ClusterArn" --output text 2>/dev/null); do
+          --query "ClusterInfoList[?starts_with(ClusterName,'${cust}-${env}')].ClusterArn" --output text 2>/dev/null); do
       [ -z "$carn" ] || [ "$carn" = "None" ] && continue
       aws kafka delete-cluster --cluster-arn "$carn" --region "$region" --profile "$P" >/dev/null 2>&1 \
         && echo "  MSK cluster delete requested: $carn"
@@ -180,7 +194,7 @@ while IFS= read -r pfx; do
   # teardown working on stacks pinned to a ref that predates it.
   for _reg in "$R" "${DR_REGION:-us-west-2}"; do
     for _b in $(aws s3api list-buckets --profile "$P" \
-                  --query "Buckets[?starts_with(Name, '${CUSTOMER}-')].Name" --output text 2>/dev/null); do
+                  --query "Buckets[?starts_with(Name, '${cust}-')].Name" --output text 2>/dev/null); do
       aws s3api list-object-versions --bucket "$_b" --region "$_reg" --prefix "_harness/" \
           --profile "$P" --output json 2>/dev/null \
         | python3 -c "
@@ -218,7 +232,7 @@ print(json.dumps({'Objects':o}) if o else '', end='')
     else
       ( cd "$tgt/logical" 2>/dev/null && rm -rf .terragrunt-cache && \
         TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
-        TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+        TF_VAR_customer="$cust" TF_VAR_enable_dr=false \
           terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) \
         || echo "  logical destroy failed (continuing to physical so infra isn't stranded)" >&2
       # Physical destroy, retried. A single pass routinely fails on transient
@@ -235,7 +249,7 @@ print(json.dumps({'Objects':o}) if o else '', end='')
         ( cd "$tgt/physical"
           rm -rf .terragrunt-cache
           TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
-          TF_VAR_customer="$CUSTOMER" TF_VAR_enable_dr=false \
+          TF_VAR_customer="$cust" TF_VAR_enable_dr=false \
             terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) 2>&1 | tee "$_dlog"
         destroyed_ok=${PIPESTATUS[0]}
         [ "$destroyed_ok" -eq 0 ] && break
@@ -314,11 +328,14 @@ EOF
 # leaves them behind). Two families: the containerinsights groups the CloudWatch addon
 # creates, and /aws/lambda/<identifier>-* which Lambda creates on first invocation —
 # the latter outlived every teardown and was the last straggler on each run.
-for prefix in "/aws/containerinsights/${CUSTOMER}-" "/aws/lambda/${CUSTOMER}-" "dms-tasks-${CUSTOMER}-"; do
+CUSTOMERS="$(printf '%s\n' "$CUSTOMER" $(printf '%s\n' $STACKS | sed 's/-[^-]*$//') | awk 'NF' | sort -u)"
+for c in $CUSTOMERS; do
+for prefix in "/aws/containerinsights/${c}-" "/aws/lambda/${c}-" "dms-tasks-${c}-"; do
   for lg in $(aws logs describe-log-groups --region "$R" --profile "$P" \
         --query "logGroups[?starts_with(logGroupName,'${prefix}')].logGroupName" --output text 2>/dev/null); do
     aws logs delete-log-group --log-group-name "$lg" --region "$R" --profile "$P" 2>/dev/null && echo "  deleted log group: $lg"
   done
+done
 done
 
 # 6) Central Vault cleanup: disable each stack's k8s auth mount + delete its policy.
@@ -374,9 +391,29 @@ if [ -n "$STACKS" ] && [ "${SKIP_VAULT_CLEANUP:-0}" != 1 ]; then
   [ -n "$VPF" ] && kill "$VPF" 2>/dev/null || true
 fi
 
-# 7) Verify.
+# 6b) Deterministically-named LOGICAL-layer IAM roles. The logical destroy is
+# best-effort; when it fails, deleting the EKS cluster disposes of the in-cluster
+# resources but NOT the IAM roles logical created. flux-source-controller has a fixed
+# name, so the leftover collides with the next run's CreateRole (EntityAlreadyExists).
+for stack in $STACKS; do
+  role="${stack}-flux-source-controller"
+  if aws iam get-role --role-name "$role" --profile "$P" >/dev/null 2>&1; then
+    if [ "${DRY_RUN:-0}" = 1 ]; then echo "  DRY_RUN: would delete IAM role $role"; continue; fi
+    for pa in $(aws iam list-attached-role-policies --role-name "$role" --profile "$P"           --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null); do
+      aws iam detach-role-policy --role-name "$role" --policy-arn "$pa" --profile "$P" 2>/dev/null
+    done
+    for pi in $(aws iam list-role-policies --role-name "$role" --profile "$P"           --query 'PolicyNames[]' --output text 2>/dev/null); do
+      aws iam delete-role-policy --role-name "$role" --policy-name "$pi" --profile "$P" 2>/dev/null
+    done
+    aws iam delete-role --role-name "$role" --profile "$P" 2>/dev/null       && echo "  deleted orphan logical IAM role: $role"       || { echo "  WARNING: could not delete IAM role $role" >&2; fail=1; }
+  fi
+done
+
+# 7) Verify — once per distinct customer seen (plus the default).
 echo; echo "==================== verify-clean ===================="
-DR_REGION="$DR" AWS_PROFILE="$P" "$HARNESS_DIR/verify-clean.sh" "$CUSTOMER" || fail=1
+for c in ${CUSTOMERS:-$CUSTOMER}; do
+  DR_REGION="$DR" AWS_PROFILE="$P" "$HARNESS_DIR/verify-clean.sh" "$c" || fail=1
+done
 
 echo
 if [ "$fail" -eq 0 ]; then echo "CLEANUP COMPLETE — account is clean."; else
