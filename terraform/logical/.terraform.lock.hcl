@@ -36,7 +36,7 @@ provider "registry.opentofu.org/alekc/kubectl" {
 
 provider "registry.opentofu.org/hashicorp/aws" {
   version     = "6.56.0"
-  constraints = "~> 6.0, != 6.57.0"
+  constraints = "~> 6.0"
   hashes = [
     "h1:+NMCqCUCfCyaqO3+gUNIOG5BuEwRruMEkq9YWBB/TCc=",
     "h1:0kvfRRcQe7537L4ZAb799OMUVJadelfrgi+DPzFHHgM=",

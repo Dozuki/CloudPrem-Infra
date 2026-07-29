@@ -40,7 +40,7 @@ provider "registry.opentofu.org/hashicorp/archive" {
 
 provider "registry.opentofu.org/hashicorp/aws" {
   version     = "6.56.0"
-  constraints = ">= 3.29.0, >= 4.45.0, >= 5.81.0, >= 6.0.0, ~> 6.0, >= 6.28.0, >= 6.33.0, >= 6.52.0, != 6.57.0"
+  constraints = ">= 3.29.0, >= 4.45.0, >= 5.81.0, >= 6.0.0, ~> 6.0, >= 6.28.0, >= 6.33.0, >= 6.52.0"
   hashes = [
     "h1:+NMCqCUCfCyaqO3+gUNIOG5BuEwRruMEkq9YWBB/TCc=",
     "h1:0kvfRRcQe7537L4ZAb799OMUVJadelfrgi+DPzFHHgM=",
