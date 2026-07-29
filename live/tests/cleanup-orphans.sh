@@ -30,7 +30,8 @@ R="${AWS_REGION:-us-east-1}"
 DR="${DR_REGION:-us-west-2}"
 # Drop stale static creds so AWS_PROFILE (SSO) is authoritative.
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-export AWS_PROFILE="$P" TERRAGRUNT_TFPATH="${TERRAGRUNT_TFPATH:-tofu}"
+export AWS_PROFILE="$P" TG_TF_PATH="${TG_TF_PATH:-${TERRAGRUNT_TFPATH:-tofu}}"
+unset TERRAGRUNT_TFPATH
 
 ACCT="$(aws sts get-caller-identity --profile "$P" --query Account --output text 2>/dev/null)" || {
   echo "ERROR: no AWS identity (profile=$P). Run: aws sso login --profile $P" >&2; exit 1; }

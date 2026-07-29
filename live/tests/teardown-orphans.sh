@@ -16,7 +16,7 @@ export TG_AWS_ACCT_ID=076248559428
 export TG_AWS_PROFILE=default
 export TG_AWS_REGION=us-east-1
 export TG_STATE_PREFIX=""          # CRITICAL: hit the unprefixed orphaned state, not a harness run
-export TERRAGRUNT_TFPATH=tofu
+export TG_TF_PATH=tofu
 export AWS_PROFILE=default
 
 destroy() { # <env> <layer>

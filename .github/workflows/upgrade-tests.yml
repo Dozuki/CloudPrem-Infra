@@ -75,7 +75,7 @@ jobs:
       - name: Run upgrade harness (${{ matrix.config }})
         env:
           RUN_INTEGRATION: "1"
-          TERRAGRUNT_TFPATH: tofu # physical layer requires OpenTofu (master_password_wo)
+          TG_TF_PATH: tofu # physical layer requires OpenTofu (master_password_wo)
           DDVTEST_ACCOUNT_ID: ${{ vars.DDVTEST_ACCOUNT_ID }}
           RUN_ID: gha-${{ github.run_id }}
           CONFIGS: ${{ matrix.config }}

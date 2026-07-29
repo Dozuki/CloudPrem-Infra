@@ -37,7 +37,11 @@ echo ">> Logging all output to: $RUN_LOG"
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 export AWS_PROFILE="${AWS_PROFILE:-default}"
 # The physical layer requires OpenTofu (master_password_wo); drive terragrunt with tofu.
-export TERRAGRUNT_TFPATH="${TERRAGRUNT_TFPATH:-tofu}"
+# TG_TF_PATH is the post-0.78 name; TERRAGRUNT_TFPATH still works but warns on every
+# command and is slated for removal. Both accepted as input so an existing shell that
+# exports the old one keeps working.
+export TG_TF_PATH="${TG_TF_PATH:-${TERRAGRUNT_TFPATH:-tofu}}"
+unset TERRAGRUNT_TFPATH
 
 # --- SSO session runway check ------------------------------------------------
 # A run can outlive the AWS SSO session (an upgrade run is ~1h; the full matrix is
