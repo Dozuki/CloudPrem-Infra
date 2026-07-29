@@ -78,19 +78,71 @@ func AssertControlPlaneLogging(ctx context.Context, region, clusterName string) 
 		return fmt.Errorf("log group retention = %v, want 90", r)
 	}
 
-	// Audit events flowing in the last 30 min.
+	return assertAuditEventsFlowing(ctx, cw, logGroup)
+}
+
+// auditWaitBudget bounds how long we wait for the first audit events to reach
+// CloudWatch. A fresh EKS control plane does not deliver instantly, and this check runs
+// only ~15 minutes after the cluster exists.
+const auditWaitBudget = 5 * time.Minute
+
+// assertAuditEventsFlowing checks that kube-apiserver-audit events landed in the last 30
+// minutes.
+//
+// Two things make the obvious one-shot version wrong, and cycle 46 lost a 53-minute run
+// to them:
+//
+//   - An empty PAGE is not an empty RESULT. FilterLogEvents scans a bounded amount per
+//     call across every matching stream, so it can legitimately return zero events
+//     together with a nextToken. The previous code passed Limit=1, took the first page,
+//     and reported "no audit events" whenever that page happened to come back empty.
+//     Paging is not optional here - it is the difference between "none exist" and "none
+//     in the slice I looked at".
+//   - Delivery lag. The events show up a few minutes after the control plane starts, so
+//     a hard failure on the first look tests AWS's delivery latency, not the deploy.
+//
+// So: page to exhaustion, and if genuinely nothing is there yet, retry within a budget.
+func assertAuditEventsFlowing(ctx context.Context, cw *cloudwatchlogs.Client, logGroup string) error {
+	deadline := time.Now().Add(auditWaitBudget)
+	for attempt := 1; ; attempt++ {
+		found, err := anyAuditEvent(ctx, cw, logGroup)
+		if err != nil {
+			return err
+		}
+		if found {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no kube-apiserver-audit events in last 30m for %s (waited %s across %d attempts)",
+				logGroup, auditWaitBudget, attempt)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(30 * time.Second):
+		}
+	}
+}
+
+// anyAuditEvent pages FilterLogEvents to exhaustion, returning true at the first event.
+func anyAuditEvent(ctx context.Context, cw *cloudwatchlogs.Client, logGroup string) (bool, error) {
 	start := time.Now().Add(-30 * time.Minute).UnixMilli()
-	fl, err := cw.FilterLogEvents(ctx, &cloudwatchlogs.FilterLogEventsInput{
+	in := &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName:        &logGroup,
 		LogStreamNamePrefix: aws.String("kube-apiserver-audit"),
 		StartTime:           &start,
-		Limit:               aws.Int32(1),
-	})
-	if err != nil {
-		return err
 	}
-	if len(fl.Events) == 0 {
-		return fmt.Errorf("no kube-apiserver-audit events in last 30m for %s", logGroup)
+	for {
+		fl, err := cw.FilterLogEvents(ctx, in)
+		if err != nil {
+			return false, err
+		}
+		if len(fl.Events) > 0 {
+			return true, nil
+		}
+		if fl.NextToken == nil || *fl.NextToken == "" {
+			return false, nil
+		}
+		in.NextToken = fl.NextToken
 	}
-	return nil
 }
