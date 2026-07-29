@@ -224,7 +224,18 @@ print(json.dumps({'Objects':o}) if o else '', end='')
     echo "  destroy target: worktree $tgt (from marker)"
   elif [ -n "$key" ] && [ -d "$LIVE_ROOT/$envdir/physical" ]; then
     tgt="$LIVE_ROOT/$envdir"
-    echo "  WARNING: no worktree marker for $pfx — falling back to LIVE tree $tgt (may not match deployed code)" >&2
+    # Two very different situations reach here, and saying "no marker" for both trains
+    # everyone to skim past this line. A marker whose worktree is GONE means the run's
+    # own teardown already finished and removed it, so there is usually nothing left to
+    # destroy (the state-resource count below confirms it). A genuinely missing marker
+    # means the harness never recorded the deployed code, which is the case that leaks
+    # a whole stack. Note the live tree is NOT self-contained: terragrunt fails to load
+    # it (find_in_parent_folders), so this fallback mostly produces noise either way.
+    if [ -f "$marker" ]; then
+      echo "  NOTE: marker for $pfx points at a removed worktree ($(cat "$marker")) — its teardown already ran; trying LIVE tree $tgt" >&2
+    else
+      echo "  WARNING: no worktree marker for $pfx — falling back to LIVE tree $tgt (may not match deployed code)" >&2
+    fi
   fi
   if [ -n "$tgt" ]; then
     if [ "${DRY_RUN:-0}" = 1 ]; then
@@ -328,7 +339,15 @@ EOF
 # leaves them behind). Two families: the containerinsights groups the CloudWatch addon
 # creates, and /aws/lambda/<identifier>-* which Lambda creates on first invocation —
 # the latter outlived every teardown and was the last straggler on each run.
-CUSTOMERS="$(printf '%s\n' "$CUSTOMER" $(printf '%s\n' $STACKS | sed 's/-[^-]*$//') | awk 'NF' | sort -u)"
+# Every customer identity the matrix can deploy, not just the ones this run left state
+# for. When a run's state is already purged (a clean teardown, or a prefix purged as
+# empty) STACKS is empty and CUSTOMERS collapses to the default "smoke" - and because
+# verify-clean.sh appends a hyphen, a "smoke-" sweep does NOT match smokesrc-/smokerec-
+# and happily reports CLEAN with those still standing. That exact false-clean sent a
+# later run into EntityAlreadyExists on a leftover IAM role. Reading the matrix keeps
+# this correct as configs are added.
+MATRIX_CUSTOMERS="$(sed 's/#.*//' "$HARNESS_DIR/matrix.yaml" | awk -F'"' '/customer:/{print $2}' | awk 'NF' | sort -u)"
+CUSTOMERS="$(printf '%s\n' "$CUSTOMER" $MATRIX_CUSTOMERS $(printf '%s\n' $STACKS | sed 's/-[^-]*$//') | awk 'NF' | sort -u)"
 for c in $CUSTOMERS; do
 for prefix in "/aws/containerinsights/${c}-" "/aws/lambda/${c}-" "dms-tasks-${c}-"; do
   for lg in $(aws logs describe-log-groups --region "$R" --profile "$P" \
