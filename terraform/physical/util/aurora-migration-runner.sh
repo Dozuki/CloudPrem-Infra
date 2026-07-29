@@ -483,6 +483,9 @@ EOF
 mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag='$MARK'" 2>/dev/null || echo 0
 EOF
 ); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break
+    # re-check after the probe: a probe that started before the deadline but
+    # failed after it must not go on to start a resume
+    [ "$SECONDS" -lt "$MDEADLINE" ] || die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
     S=$(task_status)
     case "$S" in
       stopped)
