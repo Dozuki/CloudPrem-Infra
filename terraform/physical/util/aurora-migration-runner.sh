@@ -386,6 +386,28 @@ fence)
     aws dms stop-replication-task --replication-task-arn "$(bi_task_arn)" --region "$REGION" >/dev/null
     while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
   fi
+  # Re-entry detection: a previous fence attempt that died AFTER the Terraform
+  # fence applied (e.g. mid-epoch failure) leaves the source read_only=1. The
+  # marker step below writes to the source, so on a fenced source it would be
+  # refused by the very fence it created (error 1290, hit live on latam). On
+  # re-entry: reuse the previous attempt's marker (reads still work) and skip
+  # the sweep + marker write + interactive fence pause entirely - every proof
+  # downstream (negative test, coordinate, marker gate, drain, epoch) re-runs.
+  RO0=$(ssm_run <<'EOF'
+mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
+EOF
+)
+  RO0=$(echo "$RO0" | tr -d '[:space:]')
+  if [ "$RO0" = "1" ]; then
+    say "source is ALREADY fenced (read_only=1) - re-entering a prior fence attempt"
+    MARK=$(ssm_run <<'EOF'
+mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT tag FROM aurora_mig_ctl.marker ORDER BY id DESC LIMIT 1" 2>/dev/null
+EOF
+)
+    MARK=$(echo "$MARK" | tr -d '[:space:]' | grep . | head -1) || true
+    [ -n "$MARK" ] || die "re-entry: no marker found on the fenced source - cannot anchor the epoch; unfence and start over"
+    say "  reusing marker '$MARK' from the prior attempt"
+  else
   MARK="cutover-$(date -u +%s)"
   say "kill sweep (by connection id - app and runner share the master user) + marker '$MARK'"
   ssm_run <<EOF
@@ -423,6 +445,7 @@ EOF
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
 ); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "1" ] && break; sleep 30; done
+  fi
   say "post-fence kill sweep (anything that connected during the apply window;"
   say "read_only already blocks their writes, this just tidies sessions)"
   ssm_run <<'EOF'
@@ -443,10 +466,42 @@ EOF
   [ -n "$FINAL_FILE" ] && [ -n "$FINAL_POS" ] || die "could not capture the final binlog coordinate"
   say "final coordinate: file-seq=$FINAL_FILE pos=$FINAL_POS"
   say "gate: marker on Aurora"
-  while :; do N=$(ssm_run <<EOF
+  # On re-entry the main task may be stopped with the marker not yet replicated
+  # (a prior attempt that died between the fence apply and the drain proof) -
+  # CDC must run for the marker to cross. Resume ONLY from a clean "stopped"
+  # (start-replication-task on a transitional state throws
+  # InvalidResourceStateFault, and a task felled by the STOP_TASK error policy
+  # must never be blindly resumed). Wall-clock bounded via SECONDS so nested
+  # waits and slow SSM round-trips count against the deadline.
+  MDEADLINE=$((SECONDS + 900))
+  while :; do
+    # deadline gates STARTING new work: a blocking probe (ssm_run can run long)
+    # that begins before the deadline may finish after it, and a late success
+    # is still a success - but no new probe/resume ever starts past it.
+    [ "$SECONDS" -lt "$MDEADLINE" ] || die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
+    N=$(ssm_run <<EOF
 mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag='$MARK'" 2>/dev/null || echo 0
 EOF
-); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break; sleep 10; done
+); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break
+    # re-check after the probe: a probe that started before the deadline but
+    # failed after it must not go on to start a resume
+    [ "$SECONDS" -lt "$MDEADLINE" ] || die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
+    S=$(task_status)
+    case "$S" in
+      stopped)
+        say "  marker not on Aurora and the task is stopped - resuming CDC to replicate it"
+        MARN=$(task_arn)
+        # final gate immediately before the mutation: the describe calls above
+        # block too, and the resume commits us to up to 300s of waiting
+        [ "$SECONDS" -lt "$MDEADLINE" ] || die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
+        aws dms start-replication-task --replication-task-arn "$MARN" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+        wait_task_status running 300
+        ;;
+      running|starting|stopping|modifying) : ;; # in flight - poll again
+      *) die "task is '$S' while waiting for the marker to replicate - inspect it before continuing" ;;
+    esac
+    sleep 10
+  done
   # Drain proof - STOP FIRST, then assert the checkpoint. RecoveryCheckpoint is a
   # stopped-task safepoint: it advances to the true applied position only when the
   # task stops, NOT while it runs. The old code asserted checkpoint >= coordinate
@@ -460,8 +515,22 @@ EOF
   # a task that silently failed).
   FINAL_FILE=$((10#$FINAL_FILE))
   say "task stop (flushes RecoveryCheckpoint to the true applied position)"
-  aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
-  wait_task_status stopped 900
+  # tolerate re-entry states: already stopped (prior drain-proof stop), already
+  # stopping (don't double-issue stop - InvalidResourceStateFault), or starting
+  # (wait for running before a stop is accepted)
+  case "$(task_status)" in
+    stopped) : ;;
+    stopping) wait_task_status stopped 900 ;;
+    starting)
+      wait_task_status running 300
+      aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
+      wait_task_status stopped 900
+      ;;
+    *)
+      aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
+      wait_task_status stopped 900
+      ;;
+  esac
   say "gate: post-stop checkpoint at or past the final coordinate (the drain proof)"
   CKTRIES=0
   while :; do

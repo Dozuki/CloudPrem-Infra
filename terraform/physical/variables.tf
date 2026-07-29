@@ -492,9 +492,12 @@ variable "aurora_migration_state" {
 }
 
 variable "aurora_migration_dms_instance_type" {
+  # xlarge default: c5.large (4GB) OOM-crash-looped apac's full load AND
+  # OOM-killed latam's fence validation epoch mid-cutover (source fenced,
+  # customers waiting on the resize). The bigger box costs cents per soak day.
   description = "Replication instance class for the Aurora migration DMS rig."
   type        = string
-  default     = "dms.c5.large"
+  default     = "dms.c5.xlarge"
 }
 
 variable "aurora_migration_dms_storage" {
