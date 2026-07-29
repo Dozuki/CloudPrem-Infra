@@ -468,19 +468,27 @@ EOF
   say "gate: marker on Aurora"
   # On re-entry the main task may be stopped with the marker not yet replicated
   # (a prior attempt that died between the fence apply and the drain proof) -
-  # CDC must run for the marker to cross. Bounded: an unbounded gate here held
-  # a fence open indefinitely in review scenarios.
-  MWAIT=0
+  # CDC must run for the marker to cross. Resume ONLY from a clean "stopped"
+  # (start-replication-task on a transitional state throws
+  # InvalidResourceStateFault, and a task felled by the STOP_TASK error policy
+  # must never be blindly resumed). Wall-clock bounded via SECONDS so nested
+  # waits and slow SSM round-trips count against the deadline.
+  MDEADLINE=$((SECONDS + 900))
   while :; do N=$(ssm_run <<EOF
 mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag='$MARK'" 2>/dev/null || echo 0
 EOF
 ); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break
-    if [ "$(task_status)" != "running" ]; then
-      say "  marker not on Aurora and the task is not running - resuming CDC to replicate it"
-      aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
-      wait_task_status running 300
-    fi
-    MWAIT=$((MWAIT+10)); [ "$MWAIT" -gt 900 ] && die "marker did not reach Aurora in 15m - inspect the main task's CDC"
+    S=$(task_status)
+    case "$S" in
+      stopped)
+        say "  marker not on Aurora and the task is stopped - resuming CDC to replicate it"
+        aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+        wait_task_status running 300
+        ;;
+      running|starting|stopping|modifying) : ;; # in flight - poll again
+      *) die "task is '$S' while waiting for the marker to replicate - inspect it before continuing" ;;
+    esac
+    [ "$SECONDS" -ge "$MDEADLINE" ] && die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
     sleep 10
   done
   # Drain proof - STOP FIRST, then assert the checkpoint. RecoveryCheckpoint is a
@@ -496,11 +504,22 @@ EOF
   # a task that silently failed).
   FINAL_FILE=$((10#$FINAL_FILE))
   say "task stop (flushes RecoveryCheckpoint to the true applied position)"
-  # tolerate an already-stopped task (re-entry after a prior drain-proof stop)
-  if [ "$(task_status)" != "stopped" ]; then
-    aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
-    wait_task_status stopped 900
-  fi
+  # tolerate re-entry states: already stopped (prior drain-proof stop), already
+  # stopping (don't double-issue stop - InvalidResourceStateFault), or starting
+  # (wait for running before a stop is accepted)
+  case "$(task_status)" in
+    stopped) : ;;
+    stopping) wait_task_status stopped 900 ;;
+    starting)
+      wait_task_status running 300
+      aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
+      wait_task_status stopped 900
+      ;;
+    *)
+      aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
+      wait_task_status stopped 900
+      ;;
+  esac
   say "gate: post-stop checkpoint at or past the final coordinate (the drain proof)"
   CKTRIES=0
   while :; do
