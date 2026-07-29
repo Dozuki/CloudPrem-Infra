@@ -13,15 +13,18 @@
 
 locals {
   operations_owner = var.operations_owner != "" ? var.operations_owner : (var.managed_private_cloud ? "dozuki" : "customer")
+  # The page must name the REAL DR region; var.dr_region is "" wherever env.hcl omits
+  # it (see data.aws_region.dr in dr_aurora.tf).
+  dr_region_actual = local.aurora_dr_enabled ? data.aws_region.dr[0].region : var.dr_region
 
   # The page. Everything the on-call needs to act safely, in the alarm body itself -
   # the incident may have taken the wiki/dashboards with it. Kept under CloudWatch's
   # 1024-char description limit.
   dr_page = local.aurora_dr_enabled ? join("\n", [
-    "DR DEAD-MAN: ${local.identifier} (owner: ${local.operations_owner}). Aurora Global DB replication into ${var.dr_region} has stalled or stopped reporting for 15m - the primary region is down, or replication is broken.",
+    "DR DEAD-MAN: ${local.identifier} (owner: ${local.operations_owner}). Aurora Global DB replication into ${local.dr_region_actual} has stalled or stopped reporting for 15m - the primary region is down, or replication is broken.",
     "INDEPENDENTLY VERIFY FIRST. Promoting while the primary is alive causes split-brain with no merge path; a reachable primary takes a planned managed failover instead. cpi-dr enforces this and has no force flag.",
-    "1) diagnose (read-only): cpi-dr status --dr-region ${var.dr_region} --global-cluster ${try(aws_rds_global_cluster.aurora[0].id, local.identifier)}",
-    "2) if failover MIGHT be needed (reversible): cpi-dr prepare --dr-region ${var.dr_region} --global-cluster ${try(aws_rds_global_cluster.aurora[0].id, local.identifier)}",
+    "1) diagnose (read-only): cpi-dr status --dr-region ${local.dr_region_actual} --global-cluster ${try(aws_rds_global_cluster.aurora[0].id, local.identifier)}",
+    "2) if failover MIGHT be needed (reversible): cpi-dr prepare --dr-region ${local.dr_region_actual} --global-cluster ${try(aws_rds_global_cluster.aurora[0].id, local.identifier)}",
     "3) only when the primary is CONFIRMED gone: cpi-dr promote (then cpi-dr rebuild).",
     "Runbook: aurora-global-db-failover.",
   ]) : ""
