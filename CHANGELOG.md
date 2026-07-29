@@ -2,6 +2,16 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.1.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.1.1...v8.1.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* **deps:** commit provider lock files and adopt releases on a soak delay ([#364](https://github.com/Dozuki/CloudPrem-Infra/issues/364)) ([910f4b1](https://github.com/Dozuki/CloudPrem-Infra/commit/910f4b13342f1428a56ac55c445f8346db7ba7ce))
+* **deps:** move the 6.57.0 exclusion into renovate, out of required_providers ([1fd2b71](https://github.com/Dozuki/CloudPrem-Infra/commit/1fd2b7133deeb5f5570e94606410d969edc37c9a))
+* **live:** migrate skip and retryable_errors to the exclude and errors blocks ([3ae853e](https://github.com/Dozuki/CloudPrem-Infra/commit/3ae853ecc90be9ad6fde99217664f106d5ed157b))
+* **logical:** stop karpenter evicting helm-controller mid-upgrade ([#368](https://github.com/Dozuki/CloudPrem-Infra/issues/368)) ([1062ffc](https://github.com/Dozuki/CloudPrem-Infra/commit/1062ffc0e44af94367bce073820ace4f2d15c6f2))
+
 ## [8.1.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.1.0...v8.1.1) (2026-07-29)
 
 
