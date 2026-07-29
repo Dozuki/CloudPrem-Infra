@@ -57,9 +57,11 @@ const usage = `usage: cpi-dr <status|prepare|promote|rebuild> [flags]
 
   rebuild  --dr-region <r> --primary-region <r> --stack-name <s> --infra-version <v>
            --promoted-cluster <id> --s3-kms-key <arn> --bucket kind=name (x4: image,obj,pdf,doc)
-           [--snapshot-id <id>]
+           [--snapshot-id <id>] [--vault-endpoint-service <name>]
            P3: snapshot the promoted cluster (idempotent) and render the infra-live
-           env.hcl scaffold for the DR-region rebuild to stdout.
+           env.hcl scaffold for the DR-region rebuild to stdout. Pass
+           --vault-endpoint-service to be warned NOW if the DR region cannot reach
+           the Vault PrivateLink service (the rebuild's physical layer needs it).
 
 Credentials: your normal SSO session (or the cpi-dr-executor role). Never stored keys.`
 
@@ -84,6 +86,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		promotedID    = fs.String("promoted-cluster", "", "the promoted cluster identifier (rebuild)")
 		s3KMSKey      = fs.String("s3-kms-key", "", "dr_s3_kms_key_arn output (rebuild)")
 		snapshotID    = fs.String("snapshot-id", "", "cluster snapshot id to create/reuse (rebuild; default <stack-name>-dr-rebuild)")
+		vaultEndpoint = fs.String("vault-endpoint-service", "", "the lost stack's vault_endpoint_service_name (rebuild; checks the DR region can reach it)")
 	)
 	var buckets bucketFlags
 	fs.Var(&buckets, "bucket", "kind=name, repeat for image, obj, pdf, doc (dr_s3_bucket_names output)")
@@ -144,6 +147,14 @@ Next:
 		} {
 			if need(req.v, req.n) {
 				return 2
+			}
+		}
+		// Warn, do not fail: rendering the scaffold is harmless and the operator may
+		// want it in hand while someone else fixes the Vault service. But they must
+		// learn it here, not from a physical-layer apply failure after the PR lands.
+		if *vaultEndpoint != "" {
+			if verr := recovery.CheckEndpointServiceReachable(ctx, *drRegion, *vaultEndpoint); verr != nil {
+				fmt.Fprintf(stderr, "\nWARNING: %v\nThe rebuild's physical layer WILL fail until that is fixed.\n\n", verr)
 			}
 		}
 		snapID := recovery.SanitizeSnapshotID(*snapshotID)
