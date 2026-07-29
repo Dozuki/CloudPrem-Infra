@@ -4,18 +4,16 @@ terraform {
   required_providers {
     aws = {
       source = "hashicorp/aws"
-      # 6.57.0 is excluded, not capped: it ships a request-signing/endpoint regression
-      # that makes ordinary data-source reads fail across services - IAM ListRoles
-      # returning 302 UnknownError, KMS DescribeKey returning SerializationException,
-      # STS/EC2 rejecting requests as unparseable or wrongly signed. Nothing applies;
-      # the plan dies during refresh. Upstream: hashicorp/terraform-provider-aws#49170
-      # (2026-07-29), whose workaround is exactly this - stay off 6.57.0.
-      #
-      # We carry NO committed lockfiles (.gitignore excludes .terraform*), so every
-      # init resolves the newest allowed version. Without this exclusion the whole
-      # fleet, Spacelift included, picks up the broken release on its next run.
-      # != rather than < so 6.58.0 is taken automatically once it lands.
-      version = "~> 6.0, != 6.57.0"
+      # Plain range on purpose. The pin lives in .terraform.lock.hcl (committed since
+      # #364), which is what actually decides the version; a constraint here is only a
+      # bound. This briefly carried "!= 6.57.0" to dodge that release's request-signing
+      # regression (hashicorp/terraform-provider-aws#49170), but Renovate's hashicorp
+      # versioning does not implement "!=" - it logs "Unsupported hashicorp constraint"
+      # and then skips the dependency entirely, which would leave the AWS provider
+      # permanently unmanaged. That is a worse failure than the one it prevented, and
+      # the lock file already prevents that one. The bad release is excluded in
+      # renovate.json instead, where it is understood.
+      version = "~> 6.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"

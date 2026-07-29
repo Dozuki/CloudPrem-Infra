@@ -4,11 +4,10 @@ terraform {
   required_providers {
     aws = {
       source = "hashicorp/aws"
-      # See the physical layer's note: 6.57.0 breaks data-source reads across services
-      # (hashicorp/terraform-provider-aws#49170). Excluded rather than capped so the
-      # fix release is picked up automatically. Both layers must carry this - they
-      # init independently.
-      version = "~> 6.0, != 6.57.0"
+      # See the physical layer's note: the version is pinned by the committed
+      # .terraform.lock.hcl, and the bad 6.57.0 release is excluded in renovate.json
+      # rather than here, because "!=" makes Renovate skip the dependency outright.
+      version = "~> 6.0"
     }
     azurerm = {
       source  = "hashicorp/azurerm"

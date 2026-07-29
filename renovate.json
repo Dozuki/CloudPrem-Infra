@@ -28,6 +28,12 @@
       "commitMessagePrefix": "chore(providers):"
     },
     {
+      "description": "aws 6.57.0 (2026-07-29) has a request-signing regression that makes data-source reads fail across IAM/KMS/EC2/STS, so plans die during refresh - hashicorp/terraform-provider-aws#49170. This lives here rather than as '!= 6.57.0' in required_providers because Renovate's hashicorp versioning has no '!=' operator: it warns 'Unsupported hashicorp constraint' and then skips the dependency, leaving the AWS provider unmanaged forever. Delete this rule once a fixed release is out and adopted.",
+      "matchDatasources": ["terraform-provider"],
+      "matchPackageNames": ["hashicorp/aws"],
+      "allowedVersions": "!/^6\\.57\\.0$/"
+    },
+    {
       "description": "Terraform MODULE bumps change resource shape and can force replacements. The rds module is pinned deliberately - v6 dropped db_instance_password, see terraform/physical/CLAUDE.md. These need a human reading the plan, so never open them automatically.",
       "matchManagers": ["terraform"],
       "matchDepTypes": ["module"],
