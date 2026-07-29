@@ -490,7 +490,11 @@ EOF
     case "$S" in
       stopped)
         say "  marker not on Aurora and the task is stopped - resuming CDC to replicate it"
-        aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+        MARN=$(task_arn)
+        # final gate immediately before the mutation: the describe calls above
+        # block too, and the resume commits us to up to 300s of waiting
+        [ "$SECONDS" -lt "$MDEADLINE" ] || die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
+        aws dms start-replication-task --replication-task-arn "$MARN" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
         wait_task_status running 300
         ;;
       running|starting|stopping|modifying) : ;; # in flight - poll again
