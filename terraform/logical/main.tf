@@ -3,8 +3,12 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
+      source = "hashicorp/aws"
+      # See the physical layer's note: 6.57.0 breaks data-source reads across services
+      # (hashicorp/terraform-provider-aws#49170). Excluded rather than capped so the
+      # fix release is picked up automatically. Both layers must carry this - they
+      # init independently.
+      version = "~> 6.0, != 6.57.0"
     }
     azurerm = {
       source  = "hashicorp/azurerm"

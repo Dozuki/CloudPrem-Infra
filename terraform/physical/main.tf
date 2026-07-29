@@ -3,8 +3,19 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 6.0"
+      source = "hashicorp/aws"
+      # 6.57.0 is excluded, not capped: it ships a request-signing/endpoint regression
+      # that makes ordinary data-source reads fail across services - IAM ListRoles
+      # returning 302 UnknownError, KMS DescribeKey returning SerializationException,
+      # STS/EC2 rejecting requests as unparseable or wrongly signed. Nothing applies;
+      # the plan dies during refresh. Upstream: hashicorp/terraform-provider-aws#49170
+      # (2026-07-29), whose workaround is exactly this - stay off 6.57.0.
+      #
+      # We carry NO committed lockfiles (.gitignore excludes .terraform*), so every
+      # init resolves the newest allowed version. Without this exclusion the whole
+      # fleet, Spacelift included, picks up the broken release on its next run.
+      # != rather than < so 6.58.0 is taken automatically once it lands.
+      version = "~> 6.0, != 6.57.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
