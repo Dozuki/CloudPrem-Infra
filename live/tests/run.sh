@@ -225,6 +225,38 @@ for bin in $REQUIRED_BINS; do
   command -v "$bin" >/dev/null || { echo "missing required tool: $bin" >&2; exit 1; }
 done
 
+# Presence is not enough. Terragrunt removed the --terragrunt-* flags in 0.85.0 and
+# `run-all` in 0.84.0, with no deprecation grace period, and this harness now uses the
+# post-0.78 CLI exclusively. An older terragrunt on PATH fails with a bare "flag
+# provided but not defined" ~20 minutes into a run rather than up front. Nothing pins
+# the local binary (no tgenv/asdf config in the repo, and DEPLOYMENT.md just says
+# `brew install`), so assert it here.
+#
+# The floor is 0.78 (where `run --all` and the unprefixed flags landed), NOT the
+# version the fleet pins. Verified against real binaries: 0.99.4 accepts the new CLI
+# and already REJECTS --terragrunt-*, so anything >= 0.78 runs this harness. Gating on
+# the fleet pin instead would reject a working setup for no reason.
+TG_MIN_MAJOR=0
+TG_MIN_MINOR=78
+tg_raw="$(terragrunt --version 2>/dev/null | head -1)"
+tg_ver="$(printf '%s' "$tg_raw" | sed -nE 's/.*v?([0-9]+)\.([0-9]+)\.([0-9]+).*/\1 \2/p')"
+if [ -z "$tg_ver" ]; then
+  echo "WARNING: could not parse a terragrunt version from: $tg_raw" >&2
+else
+  tg_major="${tg_ver% *}"; tg_minor="${tg_ver#* }"
+  if [ "$tg_major" -lt "$TG_MIN_MAJOR" ] || { [ "$tg_major" -eq "$TG_MIN_MAJOR" ] && [ "$tg_minor" -lt "$TG_MIN_MINOR" ]; }; then
+    cat >&2 <<EOF
+ERROR: terragrunt ${tg_major}.${tg_minor}.x is too old for this harness (need >= ${TG_MIN_MAJOR}.${TG_MIN_MINOR}).
+  The harness uses the post-0.78 CLI (\`run --all\`, \`--non-interactive\`). An older
+  binary fails with a bare "flag provided but not defined" partway into a run.
+  Install a current one, e.g.:  tgenv install 1.1.1 && tgenv use 1.1.1
+  Note tgenv switches the ACTIVE version globally - do not switch while a run is in flight.
+EOF
+    exit 1
+  fi
+  echo ">> terragrunt ${tg_major}.${tg_minor}.x — OK"
+fi
+
 [ "$DO_VAULT" = 1 ] && setup_vault
 
 # Generate a throwaway self-signed cert and supply it as tls_cert/tls_key so the

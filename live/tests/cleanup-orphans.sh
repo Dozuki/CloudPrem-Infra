@@ -244,7 +244,7 @@ print(json.dumps({'Objects':o}) if o else '', end='')
       ( cd "$tgt/logical" 2>/dev/null && rm -rf .terragrunt-cache && \
         TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
         TF_VAR_customer="$cust" TF_VAR_enable_dr=false \
-          terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) \
+          terragrunt destroy --non-interactive -auto-approve -input=false ) \
         || echo "  logical destroy failed (continuing to physical so infra isn't stranded)" >&2
       # Physical destroy, retried. A single pass routinely fails on transient
       # DependencyViolation: a killed run can leave MSK/EKS/NAT still creating or
@@ -261,7 +261,7 @@ print(json.dumps({'Objects':o}) if o else '', end='')
           rm -rf .terragrunt-cache
           TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
           TF_VAR_customer="$cust" TF_VAR_enable_dr=false \
-            terragrunt destroy --terragrunt-non-interactive -auto-approve -input=false ) 2>&1 | tee "$_dlog"
+            terragrunt destroy --non-interactive -auto-approve -input=false ) 2>&1 | tee "$_dlog"
         destroyed_ok=${PIPESTATUS[0]}
         [ "$destroyed_ok" -eq 0 ] && break
         # Only retry things that can actually clear on their own. A config-resolution

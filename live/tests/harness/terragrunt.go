@@ -86,7 +86,7 @@ func (o TGOptions) Apply() error {
 	var err error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		var out string
-		out, err = o.execCapture("run-all", "apply", "--terragrunt-non-interactive", "-auto-approve")
+		out, err = o.execCapture("run", "--all", "apply", "--non-interactive", "-auto-approve")
 		if err == nil {
 			return nil
 		}
@@ -107,10 +107,10 @@ func (o TGOptions) Apply() error {
 	return err
 }
 
-// destroyModule destroys a single layer in its own directory (not run-all), so
+// destroyModule destroys a single layer in its own directory (not run --all), so
 // one layer's failure doesn't abort the others.
 func (o TGOptions) destroyModule(module string) error {
-	cmd := exec.Command("terragrunt", "destroy", "--terragrunt-non-interactive", "-auto-approve")
+	cmd := exec.Command("terragrunt", "destroy", "--non-interactive", "-auto-approve")
 	cmd.Dir = filepath.Join(o.WorkingDir, module)
 	cmd.Env = o.env()
 	cmd.Stdout = os.Stderr
@@ -118,7 +118,7 @@ func (o TGOptions) destroyModule(module string) error {
 	return cmd.Run()
 }
 
-// Destroy tears the stack down resiliently. `run-all destroy` aborts the whole
+// Destroy tears the stack down resiliently. `run --all destroy` aborts the whole
 // stack if any module fails — so a broken in-cluster helm release (common after a
 // failed upgrade apply) would strand the expensive physical infra (VPC/EKS/RDS),
 // forcing a manual teardown. Instead: destroy logical best-effort, then ALWAYS

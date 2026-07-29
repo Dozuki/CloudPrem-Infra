@@ -146,7 +146,7 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	}
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
 
-	step("PROVISION apply: %s (terragrunt run-all apply)", applyRef)
+	step("PROVISION apply: %s (terragrunt run --all apply)", applyRef)
 	if aerr := tg.Apply(); aerr != nil {
 		return fmt.Errorf("provision apply: %w", aerr)
 	}
