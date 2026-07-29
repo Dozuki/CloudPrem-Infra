@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dozuki/CloudPrem-Infra/live/tests/recovery"
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -179,13 +180,174 @@ func RunFresh(p RunParams) (err error) {
 	return nil
 }
 
+// RunRecovery drills the DECIDED recovery path end to end - the one every database or
+// region loss takes (failover-automation design, 2026-07-28): a source stack with DR is
+// deployed fresh and validated, its DR secondary is promoted and data-verified by the
+// drill, the promoted cluster is snapshotted, and then a NEW stack is stood up in the DR
+// REGION seeded from that snapshot plus the replicated *-dr-* buckets - the P3 rebuild,
+// executed for real. The rebuilt stack must come healthy AND still hold every heartbeat
+// the drill verified on the promoted cluster; only then is the recovery path proven, not
+// just the promotion.
+//
+// p names the SOURCE config (needs enable_dr + restore_drill); recoverConfigName names
+// the DR-region rebuild config (its env_path/region point at the DR region). Teardown of
+// both stacks and the snapshot always runs, recovery stack first (it adopts the source's
+// DR buckets via data sources, so the source teardown - which force_destroys them - must
+// come last).
+func RunRecovery(p RunParams, recoverConfigName string) (err error) {
+	cfg, err := p.Matrix.Config(p.ConfigName)
+	if err != nil {
+		return err
+	}
+	rcfg, err := p.Matrix.Config(recoverConfigName)
+	if err != nil {
+		return err
+	}
+	phaseMarks = nil
+	runStart = time.Now()
+	defer func() { printSummary(p, cfg, err) }()
+
+	pp, derr := phaseParamsFromRun(p)
+	if derr != nil {
+		return derr
+	}
+	ctx := context.Background()
+	startTime := p.StartTime
+	if startTime.IsZero() {
+		startTime = runStart
+	}
+	ttl := p.Matrix.Defaults.ReaperTTLHours
+	if ttl == 0 {
+		ttl = 24
+	}
+	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
+
+	// Source-stack teardown: registered FIRST so it runs LAST (the recovery stack
+	// adopts the source's DR buckets; destroying them first would strand it).
+	defer func() {
+		if terr := pp.Teardown(ctx, false, err != nil); terr != nil {
+			step("WARNING: source teardown failed: %v — stack may still be up; run ./cleanup-orphans.sh %s", terr, p.RunID)
+		}
+	}()
+	stop := installTeardownOnSignal(func() { _ = pp.Teardown(ctx, false, true) }, os.Exit)
+	defer stop()
+
+	// The source stack is an ordinary fresh deploy (scenario "fresh" keeps the
+	// greenfield schema check); only the REBUILD runs as scenario "recover", whose
+	// restored database must skip that check.
+	if err = pp.Provision(ctx, "fresh", "", p.ToRef, deleteAfter, p.Namespace); err != nil {
+		return err
+	}
+	if err = pp.Validate(ctx); err != nil {
+		return err
+	}
+
+	// The drill has promoted and data-verified the DR secondary; pick its results and
+	// the source's DR outputs (replica buckets + their KMS key) out of manifest + state.
+	rm, ok, merr := pp.Store.Load(ctx, pp.statePrefix(cfg))
+	if merr != nil || !ok {
+		return fmt.Errorf("recovery: load source manifest: %w (ok=%v)", merr, ok)
+	}
+	if rm.PromotedClusterID == "" || rm.DrillHeartbeats == 0 {
+		return fmt.Errorf("recovery: the source config must run the promotion drill (enable_dr + restore_drill) — no promoted cluster recorded")
+	}
+	wt, tg, _, werr := pp.prepareWorktree(rm.AppliedRef, false, cfg, rm.DeleteAfter)
+	if werr != nil {
+		return werr
+	}
+	outs, oerr := readOutputs(tg, pp.Region)
+	wt.removeUnlessFailed(p.RepoDir, &oerr)
+	if oerr != nil {
+		return fmt.Errorf("recovery: source outputs: %w", oerr)
+	}
+
+	snapshotID := "harness-recovery-" + strings.TrimSuffix(strings.ReplaceAll(p.RunID, "/", "-"), "-")
+	step("RECOVERY: snapshotting promoted cluster %s -> %s (%s)", rm.PromotedClusterID, snapshotID, p.DRRegion)
+	snapARN, serr := recovery.SnapshotCluster(ctx, p.DRRegion, rm.PromotedClusterID, snapshotID, 30*time.Minute)
+	if serr != nil {
+		return serr
+	}
+	defer func() {
+		if derr := recovery.DeleteClusterSnapshot(ctx, p.DRRegion, snapshotID); derr != nil {
+			step("WARNING: %v — delete it by hand", derr)
+		}
+	}()
+
+	envInputs, ierr := recovery.Inputs{
+		SnapshotARN: snapARN,
+		Buckets:     outs.DRBucketByKind,
+		S3KMSKeyARN: outs.DRS3KMSKeyARN,
+	}.EnvInputs()
+	if ierr != nil {
+		return ierr
+	}
+
+	// The rebuild: a second, independent stack in the DR region, driven through the
+	// exact same phases a fresh deploy uses - because the decided recovery IS a fresh
+	// deploy with three seeded inputs. Same manifest store; its own state prefix.
+	pp2 := pp
+	pp2.ConfigName = recoverConfigName
+	pp2.Region = rcfg.RegionOr(p.Matrix.Defaults.Region)
+	pp2.ExtraInputs = envInputs
+	defer func() {
+		if terr := pp2.Teardown(ctx, false, err != nil); terr != nil {
+			step("WARNING: recovery-stack teardown failed: %v — run ./cleanup-orphans.sh %s", terr, p.RunID)
+		}
+	}()
+
+	step("RECOVERY: rebuilding in %s from snapshot + %d adopted DR buckets", pp2.Region, len(outs.DRBucketByKind))
+	if err = pp2.Provision(ctx, "recover", "", p.ToRef, deleteAfter, p.Namespace); err != nil {
+		return fmt.Errorf("recovery rebuild: %w", err)
+	}
+	if err = pp2.Validate(ctx); err != nil {
+		return fmt.Errorf("recovery rebuild validation: %w", err)
+	}
+
+	// Data survival through the WHOLE path: primary -> replicated secondary ->
+	// promotion -> snapshot -> restore -> the rebuilt app's own database. The drill
+	// verified the heartbeats on the promoted cluster; the same count must now be
+	// readable through the rebuilt stack's app pod.
+	rm2, ok2, m2err := pp2.Store.Load(ctx, pp2.statePrefix(rcfg))
+	if m2err != nil || !ok2 {
+		return fmt.Errorf("recovery: load rebuild manifest: %w (ok=%v)", m2err, ok2)
+	}
+	wt2, tg2, _, w2err := pp2.prepareWorktree(rm2.AppliedRef, false, rcfg, rm2.DeleteAfter)
+	if w2err != nil {
+		return w2err
+	}
+	defer wt2.removeUnlessFailed(p.RepoDir, &err)
+	outs2, o2err := readOutputs(tg2, pp2.Region)
+	if o2err != nil {
+		return fmt.Errorf("recovery: rebuild outputs: %w", o2err)
+	}
+	kc2, kerr := validation.Kubeconfig(outs2.ClusterName, pp2.Region, p.Profile, filepath.Dir(tg2.WorkingDir))
+	if kerr != nil {
+		return kerr
+	}
+	// The heartbeats were written under the SOURCE stack's drill run id.
+	drillRunID := pp.statePrefix(cfg)
+	got, herr := validation.PrimaryHeartbeatCount(kc2, p.Namespace, drillRunID)
+	if herr != nil {
+		return fmt.Errorf("recovery: heartbeat read on the rebuilt stack: %w", herr)
+	}
+	if got != rm.DrillHeartbeats {
+		return fmt.Errorf("recovery: DATA LOSS through the rebuild - %d/%d heartbeats survived snapshot+restore", got, rm.DrillHeartbeats)
+	}
+	step("RECOVERY REBUILD VERIFIED ✓ — %s stack healthy in %s; %d/%d heartbeats survived promote->snapshot->restore; tearing down next",
+		recoverConfigName, pp2.Region, got, rm.DrillHeartbeats)
+	return nil
+}
+
 // runInfraValidators runs the capability-gated infra assertions shared by fresh and
 // upgrade runs: control-plane logging, DMS, DR (existence + a representative S3
 // replication-flow check), and the optional restore drill. Skips are logged, never
 // silent. It (re)probes logging from the live cluster, overriding caps.HasLogging.
 // verifyContinuity runs the continuity-sentinel verification (UPGRADE only — a fresh
 // deploy writes no baseline sentinel, so callers pass false).
-func runInfraValidators(ctx context.Context, p RunParams, region, kubeconfig string, caps Capabilities, outs validation.StackOutputs, verifyContinuity bool) error {
+// rm may be nil (callers without durable state); when set, the aurora drill's results
+// (promoted cluster id, verified heartbeat count) are recorded on it for later phases —
+// the recovery rebuild needs both and neither is discoverable after the drill.
+func runInfraValidators(ctx context.Context, p RunParams, region, kubeconfig string, caps Capabilities, outs validation.StackOutputs, verifyContinuity bool, rm *RunManifest) error {
 	caps.HasLogging = validation.LoggingEnabled(ctx, region, outs.ClusterName)
 	if caps.HasLogging {
 		if lerr := validation.AssertControlPlaneLogging(ctx, region, outs.ClusterName); lerr != nil {
@@ -255,7 +417,7 @@ func runInfraValidators(ctx context.Context, p RunParams, region, kubeconfig str
 			// post-promotion wreckage destroys cleanly.
 			step("DR drill: heartbeats -> promote %s in %s -> instance -> in-VPC data probe (~20m)",
 				outs.AuroraDRGlobalClusterID, p.DRRegion)
-			if dderr := validation.AuroraPromotionDrill(ctx, validation.DrillParams{
+			res, dderr := validation.AuroraPromotionDrill(ctx, validation.DrillParams{
 				Kubeconfig:      kubeconfig,
 				Namespace:       p.Namespace,
 				PrimaryRegion:   region,
@@ -263,7 +425,11 @@ func runInfraValidators(ctx context.Context, p RunParams, region, kubeconfig str
 				GlobalClusterID: outs.AuroraDRGlobalClusterID,
 				DBSecretARN:     outs.PrimaryDBSecretARN,
 				RunID:           p.RunID,
-			}); dderr != nil {
+			})
+			if rm != nil {
+				rm.PromotedClusterID, rm.DrillHeartbeats = res.PromotedClusterID, res.Heartbeats
+			}
+			if dderr != nil {
 				return fmt.Errorf("aurora promotion drill: %w", dderr)
 			}
 		default:
@@ -440,6 +606,7 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		GuideBucketByKind:       guideByKind,
 		DRBucketNames:           drBucketNames,
 		DRBucketByKind:          drByKind,
+		DRS3KMSKeyARN:           str(physical, "dr_s3_kms_key_arn"),
 		AuroraDRGlobalClusterID: str(physical, "aurora_dr_global_cluster_id"),
 		AuroraDRSecondaryHost:   str(physical, "aurora_dr_secondary_endpoint"),
 		DRBackupReplicationARN:  str(physical, "dr_rds_backup_replication_arn"),

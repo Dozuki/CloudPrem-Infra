@@ -278,14 +278,17 @@ if [ -n "${PHASE:-}" ]; then
   exit $?
 fi
 
-# Scenario selection: upgrade | fresh | both (default both). 'both' runs TestUpgrade
-# then TestFresh in one go-test process; a failure in EITHER makes go test exit non-zero.
+# Scenario selection: upgrade | fresh | both (default both) | recover. 'both' runs
+# TestUpgrade then TestFresh in one go-test process; a failure in EITHER makes go test
+# exit non-zero. 'recover' is the on-demand DR rebuild drill (two full stacks, ~4h) —
+# deliberately not part of 'both'.
 SCENARIO="${SCENARIO:-both}"
 case "$SCENARIO" in
   upgrade) _run='TestUpgrade' ;;
   fresh)   _run='TestFresh' ;;
   both)    _run='TestUpgrade|TestFresh' ;;
-  *) echo ">> ERROR: invalid SCENARIO='$SCENARIO' (want upgrade|fresh|both)" >&2; exit 2 ;;
+  recover) _run='TestRecover' ;;
+  *) echo ">> ERROR: invalid SCENARIO='$SCENARIO' (want upgrade|fresh|both|recover)" >&2; exit 2 ;;
 esac
 echo ">> Running scenario(s): ${SCENARIO}  (go test -run '${_run}')" >&2
 
@@ -299,6 +302,9 @@ echo ">> Running scenario(s): ${SCENARIO}  (go test -run '${_run}')" >&2
 TEST_BIN="$PWD/.bin/scenarios.test"
 mkdir -p "$PWD/.bin"
 go test -c -o "$TEST_BIN" ./scenarios/
-if ( cd scenarios && "$TEST_BIN" -test.run "$_run" -test.v -test.timeout 180m ); then TEST_RC=0; else TEST_RC=$?; fi
+# recover deploys + tears down TWO full stacks sequentially; give it more headroom.
+_timeout=180m
+[ "$SCENARIO" = "recover" ] && _timeout=360m
+if ( cd scenarios && "$TEST_BIN" -test.run "$_run" -test.v -test.timeout "$_timeout" ); then TEST_RC=0; else TEST_RC=$?; fi
 
 exit "$TEST_RC"

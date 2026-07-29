@@ -61,24 +61,34 @@ type DrillParams struct {
 	RunID           string
 }
 
+// DrillResult reports what the drill established, for phases that run AFTER it: the
+// promoted cluster's identity (no longer discoverable via the global cluster once
+// removed) and how many heartbeats were verified on it (the recovery rebuild judges its
+// own data survival against this).
+type DrillResult struct {
+	PromotedClusterID string
+	Heartbeats        int
+}
+
 // AuroraPromotionDrill proves DR recovery end to end in the PRODUCTION ordering: an
 // instance is provisioned on the still-attached secondary (prepare - reversible),
 // heartbeat rows are written to the PRIMARY, the secondary is promoted (the ~2s
 // irreversible act), and an ephemeral in-VPC Lambda reads the heartbeats back FROM THE
 // PROMOTED CLUSTER - data survival, not just mechanics. The instance is then removed and
 // the promoted cluster is left for the stack's own teardown.
-func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
+func AuroraPromotionDrill(ctx context.Context, dp DrillParams) (DrillResult, error) {
 	drRegion, globalClusterID, runID := dp.DRRegion, dp.GlobalClusterID, dp.RunID
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(drRegion))
 	if err != nil {
-		return err
+		return DrillResult{}, err
 	}
 	rc := rds.NewFromConfig(cfg)
 
 	clusterID, clusterArn, err := drSecondaryCluster(ctx, rc, drRegion, globalClusterID)
 	if err != nil {
-		return err
+		return DrillResult{}, err
 	}
+	result := DrillResult{PromotedClusterID: clusterID}
 
 	// PREPARE first, PROMOTE second - the production ordering (and the cpi-dr
 	// prepare/promote split): the instance is provisioned on the STILL-ATTACHED
@@ -95,7 +105,7 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 	// failover on that ref would take.
 	class, cerr2 := drillClassFor(ctx, rc, clusterID)
 	if cerr2 != nil {
-		return cerr2
+		return result, cerr2
 	}
 	instanceID := fmt.Sprintf("%s-drill-%s", clusterID, shortRunID(runID))
 	logStep("dr-drill: PREPARE - creating %s instance %s on the attached secondary (the slow part, ~5m)", class, instanceID)
@@ -106,7 +116,7 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 		DBInstanceClass:      aws.String(class),
 		Engine:               aws.String("aurora-mysql"),
 	}); err != nil {
-		return fmt.Errorf("dr-drill: CreateDBInstance (%s): %w", class, err)
+		return result, fmt.Errorf("dr-drill: CreateDBInstance (%s): %w", class, err)
 	}
 
 	// From here on the instance exists, so cleanup must run even when verification
@@ -185,6 +195,7 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 			return fmt.Errorf("dr-drill: DATA LOSS - promoted cluster has %d/%d heartbeats (newest %s)",
 				res.Count, primaryCount, res.MaxWroteAt)
 		}
+		result.Heartbeats = res.Count
 		logStep("dr-drill: RECOVERY + DATA VERIFIED — %d/%d heartbeats present on the promoted cluster (newest %s); RPO evidence: nothing written before promotion was lost",
 			res.Count, primaryCount, res.MaxWroteAt)
 		return nil
@@ -205,16 +216,16 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) error {
 		DBInstanceIdentifier: aws.String(instanceID),
 		SkipFinalSnapshot:    aws.Bool(true),
 	}); err != nil {
-		return combineErrs(verifyErr, fmt.Errorf("dr-drill: DeleteDBInstance %s FAILED - teardown will wedge on it, delete manually: %w", instanceID, err))
+		return result, combineErrs(verifyErr, fmt.Errorf("dr-drill: DeleteDBInstance %s FAILED - teardown will wedge on it, delete manually: %w", instanceID, err))
 	}
 	if err := waitInstanceGone(ctx, rc, instanceID, drillCleanupTimeout); err != nil {
-		return combineErrs(verifyErr, fmt.Errorf("dr-drill: instance %s not deleted in time - teardown may wedge on it: %w", instanceID, err))
+		return result, combineErrs(verifyErr, fmt.Errorf("dr-drill: instance %s not deleted in time - teardown may wedge on it: %w", instanceID, err))
 	}
 	if perr := <-probeDone; perr != nil {
-		return combineErrs(verifyErr, perr)
+		return result, combineErrs(verifyErr, perr)
 	}
 	logStep("dr-drill: instance + probe removed; promoted cluster %s left for the stack's own teardown (destroying it post-promotion is part of the test)", clusterID)
-	return verifyErr
+	return result, verifyErr
 }
 
 // drillClassFor picks the failover instance class the way a real failover would: the

@@ -24,7 +24,9 @@ type S3Store struct {
 	bucket string
 }
 
-func NewS3Store(client S3API, bucket string) *S3Store { return &S3Store{client: client, bucket: bucket} }
+func NewS3Store(client S3API, bucket string) *S3Store {
+	return &S3Store{client: client, bucket: bucket}
+}
 
 func (s *S3Store) key(statePrefix string) string { return statePrefix + ManifestObjectName }
 

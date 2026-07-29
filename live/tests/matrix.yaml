@@ -102,6 +102,50 @@ configs:
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
+  # Recovery scenario (TestRecover / RunRecovery): recover_source is the "lost" stack
+  # (DR on, drill on, BI off to keep the ~4h wall clock down); recover is the DR-REGION
+  # rebuild stood up from the promoted cluster's snapshot + the adopted *-dr-* buckets.
+  # The rebuild's seeded inputs (aurora_snapshot_identifier, s3_existing_buckets,
+  # s3_kms_key_id, enable_dr=false) are RUNTIME values injected by the harness via
+  # ExtraInputs, not listed here. Distinct customers: identifiers must not collide
+  # (IAM/cluster names are account-global) with each other or the smoke-* configs.
+  - name: recover_source
+    env: min
+    feature_flags:
+      enable_bi: false
+      db_engine: aurora
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      enable_dr: true
+      restore_drill: true         # consumed by the harness, NOT passed to terraform
+      protect_resources: false
+      alarm_email: "devops@dozuki.com"
+      customer: "smokesrc"
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
+  - name: recover
+    env: min
+    env_path: "live/standard/us-west-2"   # the DR region — this config IS the rebuild
+    region: "us-west-2"
+    feature_flags:
+      enable_bi: false
+      db_engine: aurora
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      enable_dr: false            # the rebuilt stack IS the surviving copy; failback re-enables DR later
+      protect_resources: false
+      alarm_email: "devops@dozuki.com"
+      customer: "smokerec"
+      enable_vault: true
+      # Same us-east-1 PrivateLink service: vault.tf supports cross-region endpoints.
+      # In a REAL us-east-1 loss the shared Vault is gone too — a known product-level
+      # gap this scenario documents rather than hides (the drill exercises the rebuild
+      # mechanics; Vault-region survivability is tracked in the failover design).
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
   - name: full
     env: full
     feature_flags:

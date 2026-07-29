@@ -27,6 +27,25 @@ type Config struct {
 	Name         string                 `yaml:"name"`
 	Env          string                 `yaml:"env"`
 	FeatureFlags map[string]interface{} `yaml:"feature_flags"`
+	// EnvPath / Region override the matrix defaults for configs that deploy outside
+	// the primary region - the recovery config stands its stack up in the DR region.
+	EnvPath string `yaml:"env_path"`
+	Region  string `yaml:"region"`
+}
+
+// EnvPathOr / RegionOr resolve a config's overrides against the matrix defaults.
+func (c Config) EnvPathOr(def string) string {
+	if c.EnvPath != "" {
+		return c.EnvPath
+	}
+	return def
+}
+
+func (c Config) RegionOr(def string) string {
+	if c.Region != "" {
+		return c.Region
+	}
+	return def
 }
 
 type Matrix struct {

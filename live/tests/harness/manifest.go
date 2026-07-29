@@ -15,7 +15,7 @@ const ManifestObjectName = "harness-manifest.json"
 // currently applied (drives teardown), and the pre-upgrade baseline helm revision
 // (gone once the upgrade applies, but needed by the upgrade proof).
 type RunManifest struct {
-	Scenario     string `json:"scenario"` // "upgrade" | "fresh"
+	Scenario     string `json:"scenario"` // "upgrade" | "fresh" | "recover"
 	ConfigName   string `json:"config_name"`
 	FromRef      string `json:"from_ref"` // empty for fresh
 	ToRef        string `json:"to_ref"`
@@ -28,6 +28,17 @@ type RunManifest struct {
 	DRRegion     string `json:"dr_region"`
 	RestoreDrill bool   `json:"restore_drill"`
 	EnableDR     bool   `json:"enable_dr"`
+
+	// Runtime terraform inputs merged into env.hcl on EVERY worktree render for this
+	// (run, config) - the recovery stack's snapshot ARN and adopted buckets live here.
+	// Persisted because teardown must re-render the exact env.hcl the apply used.
+	ExtraInputs map[string]interface{} `json:"extra_inputs,omitempty"`
+
+	// Aurora promotion-drill results, recorded so a later phase (the recovery rebuild)
+	// can snapshot the promoted cluster and judge data survival against what the drill
+	// verified - both are gone from live outputs once the drill has run.
+	PromotedClusterID string `json:"promoted_cluster_id,omitempty"`
+	DrillHeartbeats   int    `json:"drill_heartbeats,omitempty"`
 }
 
 // ManifestStore persists a RunManifest keyed by state prefix (e.g. "run1-min/").

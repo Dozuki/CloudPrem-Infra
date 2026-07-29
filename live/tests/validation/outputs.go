@@ -23,6 +23,7 @@ type StackOutputs struct {
 	// differently, so a validator that assumes one silently checks nothing on the other.
 	DRBucketNames  []string          // values extracted from dr_s3_bucket_names map
 	DRBucketByKind map[string]string // same map, keys preserved (image/obj/pdf/doc)
+	DRS3KMSKeyARN  string            // dr_s3_kms_key_arn — the key the replica buckets are encrypted with; the recovery rebuild adopts them and must be told this
 
 	// aurora (the default db_engine): DR is an Aurora Global Database with a headless
 	// secondary cluster in the DR region.

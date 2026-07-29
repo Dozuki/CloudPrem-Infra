@@ -43,6 +43,25 @@ func hclValue(v interface{}) string {
 			return fmt.Sprintf("%d", int64(t))
 		}
 		return strconv.FormatFloat(t, 'f', -1, 64)
+	case []interface{}:
+		// Structured inputs (e.g. s3_existing_buckets, a list of objects) render as
+		// real HCL, not stringified Go - the recovery scenario feeds these.
+		parts := make([]string, len(t))
+		for i, e := range t {
+			parts[i] = hclValue(e)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case map[string]interface{}:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = k + " = " + hclValue(t[k])
+		}
+		return "{ " + strings.Join(parts, ", ") + " }"
 	default:
 		return fmt.Sprintf("%q", fmt.Sprintf("%v", t))
 	}

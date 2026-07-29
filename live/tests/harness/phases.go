@@ -26,6 +26,11 @@ type PhaseParams struct {
 	AccountID  string
 	Profile    string
 	Region     string
+	// ExtraInputs are runtime terraform inputs merged into env.hcl on top of the
+	// matrix config (the recovery rebuild's snapshot ARN + adopted buckets). Honored
+	// on manifest CREATION and persisted there; later phases re-adopt the manifest's
+	// copy so every render — including teardown's — matches the apply.
+	ExtraInputs map[string]interface{}
 }
 
 func (p PhaseParams) statePrefix(cfg Config) string {
@@ -45,9 +50,13 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 	if gerr := generateLiveEnvs(wt.Dir); gerr != nil {
 		return nil, TGOptions{}, "", fmt.Errorf("generate live envs for %s: %w", ref, gerr)
 	}
-	envSub := filepath.Join(p.Matrix.Defaults.EnvPath, cfg.Env)
+	envSub := filepath.Join(cfg.EnvPathOr(p.Matrix.Defaults.EnvPath), cfg.Env)
 	envDir := filepath.Join(wt.Dir, envSub)
-	if werr := WriteEnvHCL(envDir, withDeleteAfter(p.Matrix.MergedInputs(cfg, ref), deleteAfter)); werr != nil {
+	inputs := withDeleteAfter(p.Matrix.MergedInputs(cfg, ref), deleteAfter)
+	for k, v := range p.ExtraInputs {
+		inputs[k] = v
+	}
+	if werr := WriteEnvHCL(envDir, inputs); werr != nil {
 		return nil, TGOptions{}, "", werr
 	}
 	// Record which worktree the state now corresponds to, so cleanup-orphans.sh can
@@ -106,6 +115,7 @@ func (p PhaseParams) loadOrInitManifest(ctx context.Context, cfg Config, scenari
 		FromRef: fromRef, ToRef: toRef, DeleteAfter: deleteAfter,
 		Region: p.Region, DRRegion: p.Matrix.Defaults.DRRegion,
 		RestoreDrill: cfg.HarnessFlag("restore_drill"), EnableDR: cfg.HarnessFlag("enable_dr"),
+		ExtraInputs: p.ExtraInputs,
 	}
 	return rm, p.Store.Save(ctx, p.statePrefix(cfg), rm)
 }
@@ -123,6 +133,7 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 		return err
 	}
 	rm.Namespace, rm.AccountID = namespace, p.AccountID
+	p.ExtraInputs = rm.ExtraInputs // a pre-existing manifest's inputs win (re-entrancy)
 
 	applyRef := toRef
 	initSub := true
@@ -185,6 +196,7 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 	if rm.Scenario == "fresh" {
 		return fmt.Errorf("upgrade phase invalid for fresh scenario (run %s)", p.statePrefix(cfg))
 	}
+	p.ExtraInputs = rm.ExtraInputs
 	wt, tg, _, err := p.prepareWorktree(rm.ToRef, false, cfg, rm.DeleteAfter)
 	if err != nil {
 		return err
@@ -215,6 +227,7 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	if !ok {
 		return fmt.Errorf("no manifest for %s — run provision first", p.statePrefix(cfg))
 	}
+	p.ExtraInputs = rm.ExtraInputs
 	wt, tg, _, err := p.prepareWorktree(rm.AppliedRef, false, cfg, rm.DeleteAfter)
 	if err != nil {
 		return err
@@ -261,15 +274,24 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		}
 	}
 
+	verifyContinuity := false
 	if rm.Scenario == "upgrade" {
 		wantChart, _ := p.Matrix.VersionVar(rm.ToRef, "chart_version").(string)
 		step("verifying upgrade proof (advanced from rev %d; chart %q)", rm.BaselineRev, wantChart)
 		if rerr := validation.AssertUpgraded(kc, rm.Namespace, "dozuki", rm.BaselineRev, wantChart); rerr != nil {
 			return fmt.Errorf("upgrade proof: %w", rerr)
 		}
-		return runInfraValidators(ctx, rp, p.Region, kc, caps, outs, true)
+		verifyContinuity = true
 	}
-	return runInfraValidators(ctx, rp, p.Region, kc, caps, outs, false)
+	// The drill records its results on rm even when it errors; persist them either way
+	// so a recovery phase (or a rescue by hand) knows what the drill left behind.
+	ierr := runInfraValidators(ctx, rp, p.Region, kc, caps, outs, verifyContinuity, rm)
+	if rm.PromotedClusterID != "" {
+		if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil && ierr == nil {
+			ierr = serr
+		}
+	}
+	return ierr
 }
 
 // Teardown destroys the run's stack against whichever ref the manifest records as
@@ -299,6 +321,7 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	if ref == "" {
 		ref = rm.ToRef
 	}
+	p.ExtraInputs = rm.ExtraInputs // teardown must render the exact env.hcl the apply used
 	wt, tg, _, err := p.prepareWorktree(ref, false, cfg, rm.DeleteAfter)
 	if err != nil {
 		return err

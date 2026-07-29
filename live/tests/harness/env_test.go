@@ -40,3 +40,18 @@ func TestRenderEnvHCL(t *testing.T) {
 		t.Errorf("env.hcl not written: %v", err)
 	}
 }
+
+// The recovery rebuild feeds structured inputs (a list of objects); they must render
+// as real HCL, not a stringified Go value.
+func TestRenderEnvHCLStructured(t *testing.T) {
+	hcl := RenderEnvHCL(map[string]interface{}{
+		"s3_existing_buckets": []interface{}{
+			map[string]interface{}{"type": "doc", "bucket_name": "x-doc-dr-1"},
+			map[string]interface{}{"type": "image", "bucket_name": "x-image-dr-1"},
+		},
+	})
+	want := `s3_existing_buckets = [{ bucket_name = "x-doc-dr-1", type = "doc" }, { bucket_name = "x-image-dr-1", type = "image" }]`
+	if !strings.Contains(hcl, want) {
+		t.Errorf("structured HCL wrong:\n%s\nwant substring:\n%s", hcl, want)
+	}
+}
