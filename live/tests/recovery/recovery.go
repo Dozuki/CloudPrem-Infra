@@ -99,6 +99,14 @@ func (i Inputs) EnvInputs() (map[string]interface{}, error) {
 // faithful preflight rather than an approximation of one. Same-region consumers
 // describe their own service and pass trivially.
 //
+// CROSS-REGION DISCOVERY NEEDS BOTH ServiceRegions AND ServiceNames. Passing only the
+// name returns InvalidServiceName for ANY out-of-region service, whether or not the
+// owner opted the consumer's region in - so a name-only check is a false negative that
+// can never clear. This was not theoretical: the first version of this function was
+// name-only and still reported "blocked" after the fix had applied and the service was
+// genuinely reachable. The region is parsed out of the service name the same way
+// vault.tf does it (com.amazonaws.vpce.<region>.vpce-svc-xxx).
+//
 // The first recovery-rebuild drill lost most of an hour to this: the DR region was
 // missing from the shared Vault service's supported_regions, and the rebuild died in
 // the physical layer partway through a recovery - the worst possible moment to learn
@@ -111,9 +119,11 @@ func CheckEndpointServiceReachable(ctx context.Context, consumerRegion, serviceN
 	if err != nil {
 		return err
 	}
-	_, err = ec2.NewFromConfig(cfg).DescribeVpcEndpointServices(ctx, &ec2.DescribeVpcEndpointServicesInput{
-		ServiceNames: []string{serviceName},
-	})
+	in := &ec2.DescribeVpcEndpointServicesInput{ServiceNames: []string{serviceName}}
+	if parts := strings.Split(serviceName, "."); len(parts) > 3 && parts[3] != consumerRegion {
+		in.ServiceRegions = []string{parts[3]}
+	}
+	_, err = ec2.NewFromConfig(cfg).DescribeVpcEndpointServices(ctx, in)
 	if err == nil {
 		return nil
 	}
