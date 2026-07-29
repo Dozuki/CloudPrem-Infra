@@ -51,31 +51,6 @@ variable "protect_resources" {
   default     = true
 }
 
-variable "rds_create_cmk" {
-  description = <<-EOT
-    Whether to create the Terraform-managed customer KMS key for the database, decoupled from
-    enable_dr.
-
-    Leave null (the default) to keep the historical behaviour, where the key was created only
-    when enable_dr was true. Existing stacks are therefore completely unaffected.
-
-    Set true to get CMK encryption on a stack that defers cross-region DR. Those are separable
-    concerns and conflating them is a trap, because the KMS key is immutable on RDS/Aurora:
-    a stack born on the AWS-managed key can only adopt a CMK later by REPLACING the database.
-    So a stack that will eventually want DR, but cannot enable it at create (for example a
-    migration cutover, which cannot carry an Aurora global cluster through an in-place major
-    version upgrade), must still create the key up front or it is locked out permanently.
-
-    Setting true also makes enabling DR later a no-op for the key: rds_use_tf_cmk is already
-    satisfied, so the ARN does not change and the database is not replaced.
-
-    Still subject to rds_adopt_dr_cmk and rds_kms_key_id: an explicitly pinned key always
-    wins, and rds_adopt_dr_cmk = false always opts out.
-  EOT
-  type        = bool
-  default     = null
-}
-
 variable "db_apply_immediately" {
   description = <<-EOT
     Whether database modifications apply immediately instead of waiting for the next
@@ -428,7 +403,24 @@ variable "dr_paging_endpoint" {
 }
 
 variable "rds_adopt_dr_cmk" {
-  description = "When true (the default DR-ready posture), the database is created with a Terraform-managed customer KMS key so it is encrypted under a CMK — the prerequisite for cross-region DR (RDS automated-backup replication; Aurora is CMK-encrypted but its cross-region replication is the deferred Global-Database Plan B). EXISTING stacks created with the AWS-managed key MUST pin this to false (or pin rds_kms_key_id to their already-adopted CMK): a KMS-key change replaces the database. The db-replace-guard PLAN policy blocks any such unintended replacement (it requires the allow-db-replace stack label), so this default is fail-safe."
+  description = <<-EOT
+    Whether the database is encrypted with a Terraform-managed customer KMS key. True is the
+    default and there is no longer any other gate on it: DR does not have to be enabled, and
+    there is no separate opt-in. A fresh stack gets a CMK.
+
+    The name is historical (the key was originally introduced for DR) and reads narrower than
+    what this actually controls, which is the database's encryption key. Read it as "adopt a
+    customer-managed key", not "only when DR is on".
+
+    Set false ONLY on a stack whose database already exists on the AWS-managed key. That is
+    what the flag is for: the KMS key is immutable on RDS and Aurora, so such a database can
+    adopt a CMK only by being REPLACED, and false is what holds it flat. Pinning
+    rds_kms_key_id to an already-adopted CMK has the same effect.
+
+    The db-replace-guard PLAN policy blocks an unintended replacement (its safe list is
+    added/changed/moved and it requires the allow-db-replace stack label otherwise), so
+    getting this wrong fails closed rather than losing data.
+  EOT
   type        = bool
   default     = true
 }

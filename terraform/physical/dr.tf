@@ -11,27 +11,35 @@ locals {
   # Source RDS instance ARN (the rds module exposes no ARN output, so construct it).
   dr_source_db_arn = "arn:${data.aws_partition.current.partition}:rds:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:db:${local.identifier}"
 
-  # Use a Terraform-created customer-managed key for the DB when the stack opts in and no
-  # explicit key was given. rds_adopt_dr_cmk defaults TRUE (CMK is the intended posture), so
-  # this is the path for fresh stacks. EXISTING stacks on the AWS-managed key must pin
+  # A Terraform-created customer-managed key is the DEFAULT for the database. There is no
+  # longer any second gate: rds_adopt_dr_cmk defaults true, so a fresh stack gets a CMK
+  # whether or not cross-region DR is on.
+  #
+  # It used to be gated on enable_dr (later overridable by rds_create_cmk), which conflated two
+  # separable things: which key encrypts the database, and whether DR is on. That conflation was
+  # a one-way door. The KMS key is immutable on RDS and Aurora, so a stack that deferred DR was
+  # silently born on the AWS-managed key and could then adopt a CMK only by being REPLACED —
+  # create time is the only cheap opportunity, and the old default threw it away. Encryption
+  # posture should not be a side effect of a DR decision, so the DR gate is gone and
+  # rds_create_cmk with it.
+  #
+  # EXISTING stacks whose database is already on the AWS-managed key must pin
   # rds_adopt_dr_cmk = false (or pin rds_kms_key_id to their adopted CMK) to keep the same key
   # ARN — otherwise this flips and the KMS-key change replaces the DB. The db-replace-guard
   # PLAN policy blocks that unless the stack carries the allow-db-replace label, so the
-  # aggressive default is fail-safe.
-  #
-  # The opt-in used to be enable_dr, which conflated two separable things: whether the
-  # database is encrypted under a CMK, and whether cross-region DR is on. A stack that wants
-  # CMK encryption but defers DR (a migration cutover cannot carry an Aurora global cluster
-  # through an in-place major upgrade) was forced onto the AWS-managed key, and that is a
-  # one-way door: the KMS key is immutable, so adopting a CMK later replaces the database.
-  # rds_create_cmk overrides the gate; null keeps the historical enable_dr behaviour exactly.
-  rds_use_tf_cmk  = coalesce(var.rds_create_cmk, var.enable_dr) && var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
+  # aggressive default fails closed.
+  rds_use_tf_cmk  = var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
   rds_kms_key_arn = local.rds_use_tf_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
 
   # RDS automated-backup cross-region replication is only possible when the DB
   # uses a customer-managed key (either our created CMK or an operator-pinned one).
-  # Aurora DR uses Global Database (Plan B), not automated-backup replication.
-  dr_rds_enabled = var.db_engine == "rds" && var.enable_dr && (local.rds_use_tf_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
+  # Aurora DR uses Global Database, not automated-backup replication.
+  #
+  # Gated on db_uses_aurora, NOT db_engine: mid-migration db_engine is still "rds" while the
+  # live database is already Aurora. Keying off db_engine there would point the replication at
+  # the fenced RDS source, cross-region-replicating backups of a retired database while the
+  # live Aurora had none.
+  dr_rds_enabled = !local.db_uses_aurora && var.enable_dr && (local.rds_use_tf_cmk || data.aws_kms_key.rds.key_manager == "CUSTOMER")
 }
 
 # Defense-in-depth guardrail. The real selection + blocklist enforcement happens
@@ -45,14 +53,20 @@ check "dr_region_valid" {
 
 # Non-blocking warning surfaced on every plan/apply when DR is on but the primary
 # database's cross-region backup replication is NOT active. The reason differs by
-# engine, so the message is engine-aware (the old text wrongly blamed the KMS key
-# even for Aurora): RDS replicates its automated backups only under a customer-
-# managed key; Aurora has no automated-backup replication at all — cross-region
-# Aurora DR is the deferred Global Database "Plan B". S3 content replicates either way.
+# engine, so the message is engine-aware: RDS replicates its automated backups only
+# under a customer-managed key; Aurora has no automated-backup replication at all and
+# uses Global Database instead. S3 content replicates either way.
+#
+# Three branches, selected by db_uses_aurora (the LIVE engine) rather than db_is_aurora
+# (the configured one). Mid-migration those disagree — db_engine stays "rds" while the app
+# is already on Aurora — and the old two-branch form then explained an Aurora database with
+# the RDS text, telling the operator to adopt a CMK on a database that was not the live one.
 check "dr_rds_replicable" {
   assert {
     condition = !var.enable_dr || local.dr_rds_enabled || local.aurora_dr_enabled
-    error_message = local.db_is_aurora ? (
+    error_message = local.aurora_migration_active && !local.db_is_aurora ? (
+      "DR is enabled and S3 content replicates cross-region, but the database does NOT while an Aurora migration is in flight: the live database is the Aurora cluster, and Aurora DR (Global Database) only attaches once the env finishes the migration with db_engine = \"aurora\". Expected during a migration. It also requires the Aurora cluster to be CMK-encrypted, which is set at create — see the database CMK remediation plan before assuming the retirement apply will produce a working global cluster."
+      ) : local.db_uses_aurora ? (
       "DR is enabled and S3 content replicates cross-region. The Aurora database replicates only when the global-database secondary is configured — ensure enable_dr is true and the admin layer injected a same-partition dr_region. (On GovCloud, confirm the engine version supports Global Database.)"
       ) : (
       "DR is enabled and S3 content replicates cross-region, but the RDS database does NOT: it is encrypted with an AWS-managed KMS key, so its automated backups are ineligible for cross-region replication. Adopt a customer-managed key — rds_adopt_dr_cmk = true (the default) for a fresh DB, or pin rds_kms_key_id to an existing CMK (a key change replaces the DB). See the DR cold-recovery runbook."
@@ -60,9 +74,12 @@ check "dr_rds_replicable" {
   }
 }
 
-# Customer-managed key for the PRIMARY database, created only when a new stack opts in.
-# Gives CMK encryption in its own right, and is the prerequisite for RDS automated-backup
-# cross-region replication. Never created for existing managed-key stacks.
+# Customer-managed key for the primary database — the RDS instance or the Aurora cluster
+# (aurora.tf reads local.rds_kms_key_arn too), and the BI database alongside them. Created by
+# DEFAULT now; only rds_adopt_dr_cmk = false or an explicit rds_kms_key_id opts out, which is
+# how databases already living on the AWS-managed key stay put. CMK encryption is worth having
+# on its own, and it is the prerequisite for RDS automated-backup cross-region replication and
+# for encrypting an Aurora global secondary in the DR region.
 resource "aws_kms_key" "rds_cmk" {
   count = local.rds_use_tf_cmk ? 1 : 0
 
