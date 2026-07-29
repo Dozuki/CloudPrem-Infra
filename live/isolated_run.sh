@@ -145,7 +145,7 @@ container_id=$(docker run -d \
   --name "${CONTAINER_NAME}" \
   -v "${WORKTREE_DIR}:/data" \
   -v ~/.aws:/root/.aws \
-  terraform-live-env:latest sh -c "${INITIAL_CMD} cd live/standard/${AWS_REGION}/${ENV} && terragrunt ${TERRAGRUNT_COMMAND} --terragrunt-non-interactive")
+  terraform-live-env:latest sh -c "${INITIAL_CMD} cd live/standard/${AWS_REGION}/${ENV} && terragrunt ${TERRAGRUNT_COMMAND} --non-interactive")
 
 # Fetch the logs from the container and write them to a log file
 docker logs -f "$container_id" > "$LOG_FILE" 2>&1 &

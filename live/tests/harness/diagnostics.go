@@ -60,7 +60,11 @@ func captureTG(o TGOptions, module, dir string) {
 		return
 	}
 	for name, args := range map[string][]string{
-		"state-list": {"state", "list"},
+		// `output` is one of terragrunt's shortcut commands, but `state` is not, and
+		// since v0.88.0 terragrunt no longer forwards unrecognised commands to tofu -
+		// it errors with "unknown command" instead. Non-shortcut subcommands have to
+		// go through `run --`.
+		"state-list": {"run", "--", "state", "list"},
 		"output":     {"output"},
 	} {
 		cmd := exec.Command("terragrunt", args...)

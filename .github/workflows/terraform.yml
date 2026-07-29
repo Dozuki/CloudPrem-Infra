@@ -38,7 +38,10 @@ jobs:
       if: matrix.tool == 'tofu'
       uses: opentofu/setup-opentofu@v1
       with:
-        tofu_version: "1.12.2"
+        # Match what the fleet runs (infra-live/_spacelift/stacks.tf). Validating on a
+        # different version than Spacelift applies with is how a module change passes
+        # CI and then fails on a real stack.
+        tofu_version: "1.12.5"
 
     - name: Setup Terraform
       if: matrix.tool == 'terraform'

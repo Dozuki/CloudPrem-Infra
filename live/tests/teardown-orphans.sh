@@ -22,7 +22,7 @@ export AWS_PROFILE=default
 destroy() { # <env> <layer>
   local env=$1 layer=$2
   echo; echo "==================== destroy $env/$layer ===================="
-  ( cd "$env/$layer" && terragrunt destroy --terragrunt-non-interactive -input=false )
+  ( cd "$env/$layer" && terragrunt destroy --non-interactive -input=false )
 }
 
 CONFIGS="${CONFIGS:-usac latam min}"

@@ -12,6 +12,11 @@ self-contained deploy kit and its runbook in [`azure-config/README.md`](./azure-
 # OpenTofu drives both layers locally — the physical layer requires >= 1.11.1, and
 # OpenTofu runs the logical layer too. Terragrunt orchestrates them.
 brew install opentofu terragrunt
+# Terragrunt matters here: the harness and these docs use the post-0.78 CLI
+# (`run --all`, `--non-interactive`). The old `--terragrunt-*` flags were REMOVED in
+# 0.85.0 with no grace period, so an old binary fails with "flag provided but not
+# defined". Check with `terragrunt --version`; if brew gives you something older,
+# `tgenv install 1.1.1 && tgenv use 1.1.1`.
 
 # Everything else
 brew install awscli helm kubectl hashicorp/tap/vault
@@ -22,8 +27,8 @@ export TERRAGRUNT_TFPATH=tofu
 
 | Tool | Version | Verify |
 |------|---------|--------|
-| OpenTofu | >= 1.11.1 | `tofu version` |
-| Terragrunt | 0.99.x | `terragrunt --version` |
+| OpenTofu | 1.12.5 (module floor `>= 1.11.1`) | `tofu version` |
+| Terragrunt | >= 1.0 (fleet runs 1.1.1) | `terragrunt --version` |
 | AWS CLI | 2.x | `aws --version` |
 | Helm | 3.x | `helm version` |
 | kubectl | 1.28+ | `kubectl version --client` |

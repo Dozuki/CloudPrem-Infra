@@ -31,7 +31,7 @@ cleanPrefixes() {
         # If you're having issues with stuck kubernetes auth configmaps (which happens sometimes on an un-clean delete)
         # uncomment this function invocation and re-run the script.
         #cleanK8Auth
-        SKIP_LOGICAL=true TG_STATE_PREFIX="test/$p/" terragrunt run-all destroy --terragrunt-non-interactive
+        SKIP_LOGICAL=true TG_STATE_PREFIX="test/$p/" terragrunt run --all destroy --non-interactive
     done
 }
 
