@@ -184,6 +184,29 @@ func appPod(kubeconfig, namespace string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// appPods returns every running app pod, so a caller that gets killed inside one
+// container can try another instead of retrying into the same one forever. appPod
+// deliberately always returns items[0], which is right for a read-only inspection but
+// useless as a retry target.
+func appPods(kubeconfig, namespace string) ([]string, error) {
+	out, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", namespace,
+		"get", "pods", "-l", appSelector, "--field-selector=status.phase=Running",
+		"-o", `jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}`).Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing app pods (%s) in %s: %w", appSelector, namespace, err)
+	}
+	var pods []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			pods = append(pods, l)
+		}
+	}
+	if len(pods) == 0 {
+		return nil, fmt.Errorf("no running app pod (%s) in %s", appSelector, namespace)
+	}
+	return pods, nil
+}
+
 func missingFrom(want, got []string) []string {
 	have := make(map[string]struct{}, len(got))
 	for _, g := range got {

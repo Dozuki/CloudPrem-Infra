@@ -24,7 +24,7 @@ import (
 // row proves replication happened at some point; a train of rows ending seconds before
 // promotion bounds how far behind the secondary could have been.
 func WriteDRHeartbeats(kubeconfig, namespace, runID string, rows int, interval time.Duration) (int, error) {
-	pod, err := appPod(kubeconfig, namespace)
+	pods, err := appPods(kubeconfig, namespace)
 	if err != nil {
 		return 0, fmt.Errorf("dr-sentinel: %w", err)
 	}
@@ -40,8 +40,27 @@ $mysqlcmd harness_dr -e "CREATE TABLE IF NOT EXISTS heartbeat (
   KEY run_id (run_id)
 )" || exit 94
 `
-	if out, err := execInAppPod(kubeconfig, namespace, pod, setup); err != nil {
-		return 0, fmt.Errorf("dr-sentinel: setup failed: %w (%s)", err, firstLine(out))
+	// Try each app replica until one runs the setup. The exec'd mysql client shares the
+	// app container's memory cgroup, and when that container is near its limit the kernel
+	// kills the newcomer - kubectl reports it as "command terminated with exit code 137"
+	// (SIGKILL), with no pod-level OOMKilled event because the container itself survives.
+	// A recovery run died exactly there, discarding the ~35 minutes of stack it had
+	// already built. Retrying the SAME pod would just be killed again, which is why this
+	// walks the replicas; the setup is idempotent (CREATE ... IF NOT EXISTS), so a
+	// partially-run attempt costs nothing. The pod that works is the one the heartbeat
+	// inserts then use.
+	var pod string
+	var setupErr error
+	for _, p := range pods {
+		out, err := execInAppPod(kubeconfig, namespace, p, setup)
+		if err == nil {
+			pod = p
+			break
+		}
+		setupErr = fmt.Errorf("dr-sentinel: setup failed in %s: %w (%s)", p, err, firstLine(out))
+	}
+	if pod == "" {
+		return 0, fmt.Errorf("%w — tried %d app pod(s)", setupErr, len(pods))
 	}
 
 	written := 0
