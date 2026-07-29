@@ -17,6 +17,18 @@ locals {
   aurora_dr_enabled      = local.db_is_aurora && var.enable_dr && local.aurora_dr_partition_ok
 }
 
+# The authoritative DR region: the aws.dr provider's own region. var.dr_region is NOT a
+# reliable source - the harness (and any stack whose env.hcl omits it) leaves it "",
+# because live/root.hcl only feeds TG_AWS_DR_REGION into the generated provider, never
+# into inputs. Everything cosmetic may fall back to var.dr_region; anything that USES
+# the value as a region (the secret replica) must read this instead. Found by the first
+# SCENARIO=recover run: CreateSecret failed with "Invalid replica region" on replica
+# region "".
+data "aws_region" "dr" {
+  count    = local.aurora_dr_enabled ? 1 : 0
+  provider = aws.dr
+}
+
 # DR-region AZs (aws.dr is the Terragrunt-generated DR provider).
 data "aws_availability_zones" "dr" {
   count    = local.aurora_dr_enabled ? 1 : 0

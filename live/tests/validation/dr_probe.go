@@ -75,11 +75,30 @@ type probeInfra struct {
 }
 
 // ProbePromotedCluster stands up the ephemeral Lambda next to the promoted cluster,
-// invokes it with the writer endpoint + credentials, and returns what it saw. The caller
-// must call the returned cleanup exactly once (it is safe to call after errors); cleanup
-// blocks until the probe's network footprint is actually gone, because teardown depends
-// on that.
-func ProbePromotedCluster(ctx context.Context, drRegion, clusterID, endpoint, user, password, runID string) (res DRProbeResult, cleanup func() error, err error) {
+// invokes it with the writer endpoint + credentials, and returns the heartbeat count it
+// saw (the drill's data proof). The caller must call the returned cleanup exactly once
+// (it is safe to call after errors); cleanup blocks until the probe's network footprint
+// is actually gone, because teardown depends on that.
+func ProbePromotedCluster(ctx context.Context, drRegion, clusterID, endpoint, user, password, runID string) (DRProbeResult, func() error, error) {
+	return probeInvoke(ctx, drRegion, clusterID, runID, map[string]string{
+		"host": endpoint, "user": user, "password": password, "run_id": runID,
+	})
+}
+
+// ProbeConnectivity is the CLI's post-promotion check on REAL stacks (which have no
+// harness schema): the same in-VPC Lambda, sent in ping mode - TLS + auth + SELECT 1
+// against the promoted writer. runID only namespaces the ephemeral resources.
+func ProbeConnectivity(ctx context.Context, drRegion, clusterID, endpoint, user, password, runID string) (func() error, error) {
+	res, cleanup, err := probeInvoke(ctx, drRegion, clusterID, runID, map[string]string{
+		"host": endpoint, "user": user, "password": password, "mode": "ping",
+	})
+	if err == nil && res.Count != 1 {
+		err = fmt.Errorf("dr-probe: ping returned %d, want 1", res.Count)
+	}
+	return cleanup, err
+}
+
+func probeInvoke(ctx context.Context, drRegion, clusterID, runID string, invokePayload map[string]string) (res DRProbeResult, cleanup func() error, err error) {
 	cleanup = func() error { return nil }
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(drRegion))
 	if err != nil {
@@ -199,9 +218,7 @@ func ProbePromotedCluster(ctx context.Context, drRegion, clusterID, endpoint, us
 		return res, cleanup, err
 	}
 
-	payload, _ := json.Marshal(map[string]string{
-		"host": endpoint, "user": user, "password": password, "run_id": runID,
-	})
+	payload, _ := json.Marshal(invokePayload)
 	inv, err := p.lambdac.Invoke(ctx, &lambda.InvokeInput{
 		FunctionName: aws.String(p.fnName),
 		Payload:      payload,

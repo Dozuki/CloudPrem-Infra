@@ -227,8 +227,12 @@ resource "aws_secretsmanager_secret" "primary_database_credentials" {
   # replica ARN is the primary's with the region swapped, which is what the failover
   # tooling constructs. DB users travel with the cluster storage, so the replicated
   # credentials are valid on the promoted secondary as-is.
+  #
+  # The region comes from the aws.dr PROVIDER (data.aws_region.dr), never var.dr_region:
+  # that variable is "" wherever env.hcl doesn't set it (the harness, notably), and an
+  # empty replica region fails CreateSecret with "Invalid replica region".
   dynamic "replica" {
-    for_each = local.aurora_dr_enabled ? [var.dr_region] : []
+    for_each = local.aurora_dr_enabled ? [data.aws_region.dr[0].region] : []
     content {
       region = replica.value
     }

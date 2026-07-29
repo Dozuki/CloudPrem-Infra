@@ -84,53 +84,31 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) (DrillResult, err
 	}
 	rc := rds.NewFromConfig(cfg)
 
-	clusterID, clusterArn, err := drSecondaryCluster(ctx, rc, drRegion, globalClusterID)
-	if err != nil {
-		return DrillResult{}, err
+	// PREPARE first, PROMOTE second - the production ordering, executed through the
+	// SAME shared functions the cpi-dr CLI runs (dr_failover.go), so the weekly drill
+	// rehearses the actual failover code, not a parallel reimplementation. Prepare
+	// discovers the secondary (refusing the writer), picks the class off the cluster
+	// (db.serverless once CPI #352 is in, provisioned fallback before it), and
+	// provisions the instance on the still-attached secondary.
+	prep, perr := PrepareDRInstance(ctx, drRegion, globalClusterID, "drill-"+shortRunID(runID))
+	if perr != nil && prep.InstanceID == "" {
+		return DrillResult{PromotedClusterID: prep.ClusterID}, perr // nothing created; no cleanup owed
 	}
-	result := DrillResult{PromotedClusterID: clusterID}
+	result := DrillResult{PromotedClusterID: prep.ClusterID}
+	instanceID := prep.InstanceID
 
-	// PREPARE first, PROMOTE second - the production ordering (and the cpi-dr
-	// prepare/promote split): the instance is provisioned on the STILL-ATTACHED
-	// secondary, overlapping the slow step with the diagnosis window, so the
-	// irreversible promotion is the ~2s final act. The drill originally promoted first
-	// and the design review called that out: a drill that doesn't match the runbook
-	// rehearses the wrong thing.
-	//
-	// Class selection mirrors what a real failover can actually do: db.serverless when
-	// the cluster carries a Serverless v2 scaling config (the fleet posture, and what
-	// the failover runbook prescribes - present once the stack includes CPI #352),
-	// provisioned fallback for refs that predate it. Deciding by inspecting the CLUSTER
-	// rather than pinning one class means the drill always exercises the same path a
-	// failover on that ref would take.
-	class, cerr2 := drillClassFor(ctx, rc, clusterID)
-	if cerr2 != nil {
-		return result, cerr2
-	}
-	instanceID := fmt.Sprintf("%s-drill-%s", clusterID, shortRunID(runID))
-	logStep("dr-drill: PREPARE - creating %s instance %s on the attached secondary (the slow part, ~5m)", class, instanceID)
-	instStart := time.Now()
-	if _, err := rc.CreateDBInstance(ctx, &rds.CreateDBInstanceInput{
-		DBInstanceIdentifier: aws.String(instanceID),
-		DBClusterIdentifier:  aws.String(clusterID),
-		DBInstanceClass:      aws.String(class),
-		Engine:               aws.String("aurora-mysql"),
-	}); err != nil {
-		return result, fmt.Errorf("dr-drill: CreateDBInstance (%s): %w", class, err)
-	}
-
-	// From here on the instance exists, so cleanup must run even when verification
-	// fails - a leftover instance Terraform never knew about makes the whole stack
-	// undestroyable. The error (if any) still wins over cleanup's outcome.
+	// From here on the instance may exist (even when prepare errored mid-wait), so
+	// cleanup must run even when verification fails - a leftover instance Terraform
+	// never knew about makes the whole stack undestroyable. The error (if any) still
+	// wins over cleanup's outcome.
 	var probeCleanup func() error
 	verifyErr := func() error {
-		if err := waitInstanceAvailable(ctx, rc, instanceID, drillInstanceTimeout); err != nil {
-			return fmt.Errorf("dr-drill: instance never became available: %w", err)
+		if perr != nil {
+			return perr
 		}
-		logStep("dr-drill: instance ready in %s (reader on the attached secondary; prepare is reversible and the promotion decision is still open)", time.Since(instStart).Round(time.Second))
 
 		// Sentinels immediately BEFORE promotion: a short train of timestamped rows on
-		// the primary. Writing them after the instance wait keeps the newest row seconds
+		// the primary. Writing them after prepare completes keeps the newest row seconds
 		// from the promotion, which is what makes the RPO evidence sharp. The count read
 		// back on the primary is the ground truth the probe's post-promotion count is
 		// judged against.
@@ -150,43 +128,19 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) (DrillResult, err
 		// margin, not a correctness requirement - the comparison below is the real check.
 		time.Sleep(15 * time.Second)
 
-		logStep("dr-drill: PROMOTE - %d heartbeats on primary; removing %s from global cluster %s", primaryCount, clusterID, globalClusterID)
-		started := time.Now()
-		if _, err := rc.RemoveFromGlobalCluster(ctx, &rds.RemoveFromGlobalClusterInput{
-			GlobalClusterIdentifier: aws.String(globalClusterID),
-			DbClusterIdentifier:     aws.String(clusterArn),
-		}); err != nil {
-			return fmt.Errorf("dr-drill: RemoveFromGlobalCluster: %w", err)
+		logStep("dr-drill: %d heartbeats on primary; promoting (the drill's deliberate decision - the CLI preflights this, the drill IS the rehearsal)", primaryCount)
+		promoted, proerr := PromoteSecondary(ctx, drRegion, globalClusterID, prep.ClusterID, instanceID)
+		if proerr != nil {
+			return proerr
 		}
-		if err := waitClusterAvailable(ctx, rc, clusterID, drillPromoteTimeout); err != nil {
-			return fmt.Errorf("dr-drill: promoted cluster never became available: %w", err)
-		}
-		// The pre-created instance transitions reader -> writer during promotion (it may
-		// bounce); writable means the member reports IsClusterWriter AND available.
-		if err := waitInstanceWriter(ctx, rc, clusterID, instanceID, drillPromoteTimeout); err != nil {
-			return fmt.Errorf("dr-drill: instance never became the writer after promotion: %w", err)
-		}
-		promoteTook := time.Since(started).Round(time.Second)
-		logStep("dr-drill: promotion complete in %s — prepared-failover DB RTO (decision→writable) = %s, instance pre-provisioned in %s", promoteTook, promoteTook, time.Since(instStart).Round(time.Second))
-
-		out, err := rc.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(clusterID)})
-		if err != nil || len(out.DBClusters) == 0 {
-			return fmt.Errorf("dr-drill: describe promoted cluster: %w", err)
-		}
-		c := out.DBClusters[0]
-		if c.GlobalClusterIdentifier != nil && *c.GlobalClusterIdentifier != "" {
-			return fmt.Errorf("dr-drill: cluster still reports global membership %q after promotion", *c.GlobalClusterIdentifier)
-		}
-		if c.Endpoint == nil || *c.Endpoint == "" {
-			return fmt.Errorf("dr-drill: promoted cluster has no writer endpoint")
-		}
-		logStep("dr-drill: standalone writer %s up (endpoint %s) — probing data content from inside the DR VPC", clusterID, *c.Endpoint)
+		logStep("dr-drill: prepared-failover DB RTO (decision→writable) = %s; prepare had taken %s", promoted.Duration, prep.Duration)
+		logStep("dr-drill: standalone writer %s up (endpoint %s) — probing data content from inside the DR VPC", prep.ClusterID, promoted.Endpoint)
 
 		user, password, err := DBCredentials(ctx, dp.PrimaryRegion, drRegion, dp.DBSecretARN)
 		if err != nil {
 			return err
 		}
-		res, cleanup, perr := ProbePromotedCluster(ctx, drRegion, clusterID, *c.Endpoint, user, password, runID)
+		res, cleanup, perr := ProbePromotedCluster(ctx, drRegion, prep.ClusterID, promoted.Endpoint, user, password, runID)
 		probeCleanup = cleanup
 		if perr != nil {
 			return perr
@@ -224,7 +178,7 @@ func AuroraPromotionDrill(ctx context.Context, dp DrillParams) (DrillResult, err
 	if perr := <-probeDone; perr != nil {
 		return result, combineErrs(verifyErr, perr)
 	}
-	logStep("dr-drill: instance + probe removed; promoted cluster %s left for the stack's own teardown (destroying it post-promotion is part of the test)", clusterID)
+	logStep("dr-drill: instance + probe removed; promoted cluster %s left for the stack's own teardown (destroying it post-promotion is part of the test)", prep.ClusterID)
 	return result, verifyErr
 }
 
