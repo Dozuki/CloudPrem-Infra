@@ -474,7 +474,12 @@ EOF
   # must never be blindly resumed). Wall-clock bounded via SECONDS so nested
   # waits and slow SSM round-trips count against the deadline.
   MDEADLINE=$((SECONDS + 900))
-  while :; do N=$(ssm_run <<EOF
+  while :; do
+    # deadline gates STARTING new work: a blocking probe (ssm_run can run long)
+    # that begins before the deadline may finish after it, and a late success
+    # is still a success - but no new probe/resume ever starts past it.
+    [ "$SECONDS" -lt "$MDEADLINE" ] || die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
+    N=$(ssm_run <<EOF
 mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT COUNT(*) FROM aurora_mig_ctl.marker WHERE tag='$MARK'" 2>/dev/null || echo 0
 EOF
 ); N=$(echo "$N" | tr -d '[:space:]'); say "  marker_on_aurora=$N"; [ "$N" = "1" ] && break
@@ -488,7 +493,6 @@ EOF
       running|starting|stopping|modifying) : ;; # in flight - poll again
       *) die "task is '$S' while waiting for the marker to replicate - inspect it before continuing" ;;
     esac
-    [ "$SECONDS" -ge "$MDEADLINE" ] && die "marker did not reach Aurora within the 15m deadline - inspect the main task's CDC"
     sleep 10
   done
   # Drain proof - STOP FIRST, then assert the checkpoint. RecoveryCheckpoint is a
