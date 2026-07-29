@@ -24,10 +24,58 @@ on:
       - master
     paths:
       - '**/.terraform.lock.hcl'
+  schedule:
+    # First of the month, for the staleness job below.
+    - cron: '0 13 1 * *'
+  workflow_dispatch:
 
 jobs:
+  staleness:
+    # Pinning trades one failure mode for another. Unpinned, a bad release reaches
+    # everything instantly. Pinned, the real risk is drifting quietly onto a provider
+    # so old that the eventual upgrade is a project rather than a PR - which is the
+    # position we have been in before and do not want again.
+    #
+    # Renovate is meant to prevent that by opening bumps continuously, but this check
+    # deliberately does NOT depend on Renovate: if the app is never installed, or is
+    # removed, or its PRs pile up unmerged, the drift is silent and nothing else would
+    # tell us. Being behind is fine and expected. Being YEARS behind is the failure.
+    name: 'Locked provider has not gone stale'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compare locked aws provider against upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Being a few months behind is the intended state with a 30-day soak plus
+          # unmerged-PR lag. Half a year means the pipeline has stopped working.
+          MAX_AGE_DAYS: '180'
+        shell: bash
+        run: |
+          set -euo pipefail
+          locked=$(awk '/provider "registry.opentofu.org\/hashicorp\/aws"/{f=1} f&&/version/{gsub(/[" ]/,"");sub(/version=/,"");print;exit}' terraform/physical/.terraform.lock.hcl)
+          echo "locked aws provider: $locked"
+          published=$(gh api "repos/hashicorp/terraform-provider-aws/releases/tags/v${locked}" --jq .published_at 2>/dev/null || echo "")
+          if [ -z "$published" ]; then
+            echo "::warning::could not resolve a release date for v${locked}; skipping the staleness check"
+            exit 0
+          fi
+          age=$(( ( $(date -u +%s) - $(date -u -d "$published" +%s) ) / 86400 ))
+          echo "v${locked} was published ${published} (${age} days ago)"
+          if [ "$age" -gt "$MAX_AGE_DAYS" ]; then
+            echo "::error::the locked aws provider is ${age} days old (limit ${MAX_AGE_DAYS}). Provider updates have stopped flowing - check that Renovate is installed and that its PRs are being merged, then bump with: cd terraform/physical && tofu init -upgrade -backend=false && tofu providers lock -platform=linux_amd64 -platform=darwin_arm64"
+            exit 1
+          fi
+          echo "within budget (${age}d <= ${MAX_AGE_DAYS}d)"
+
   platforms:
     name: 'Lock covers every platform we run on'
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
