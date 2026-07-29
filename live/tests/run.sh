@@ -44,7 +44,12 @@ export TERRAGRUNT_TFPATH="${TERRAGRUNT_TFPATH:-tofu}"
 # several hours). If the session expires mid-apply, terraform loses its creds and
 # leaves a half-built, hard-to-clean stack. Refuse to start unless the SSO session
 # token has enough runway. Override with SKIP_SSO_CHECK=1; tune REQUIRED_SSO_HOURS.
-REQUIRED_SSO_HOURS="${REQUIRED_SSO_HOURS:-3}"
+# recover deploys + tears down two full stacks sequentially; it needs a longer runway.
+if [ "${SCENARIO:-}" = "recover" ]; then
+  REQUIRED_SSO_HOURS="${REQUIRED_SSO_HOURS:-5}"
+else
+  REQUIRED_SSO_HOURS="${REQUIRED_SSO_HOURS:-3}"
+fi
 sso_seconds_left() { # <profile> -> seconds left on the SSO session token (-1 if unknown)
   command -v python3 >/dev/null 2>&1 || { echo -1; return; }
   python3 - "$1" <<'PY'
@@ -53,11 +58,18 @@ from datetime import datetime, timezone
 profile = sys.argv[1]
 cfg = configparser.ConfigParser()
 cfg.read(os.path.expanduser("~/.aws/config"))
-sect = "default" if profile == "default" else "profile %s" % profile
+# The default profile may live under either header ("[default]" is canonical, but
+# "[profile default]" is accepted by the CLI and exists in the wild - this exact
+# mismatch once sent the check to the wrong token).
+sects = [("default" if profile == "default" else "profile %s" % profile)]
+if profile == "default":
+    sects.append("profile default")
 session = start = None
-if cfg.has_section(sect):
-    session = cfg.get(sect, "sso_session", fallback=None)
-    start = cfg.get(sect, "sso_start_url", fallback=None)
+for sect in sects:
+    if cfg.has_section(sect):
+        session = cfg.get(sect, "sso_session", fallback=None)
+        start = cfg.get(sect, "sso_start_url", fallback=None)
+        break
 if session and not start and cfg.has_section("sso-session %s" % session):
     start = cfg.get("sso-session %s" % session, "sso_start_url", fallback=None)
 targets = set()
@@ -75,8 +87,12 @@ def newest(files):
         if e and d.get("accessToken"):
             best = e if best is None or e > best else best
     return best
-allf = glob.glob(os.path.expanduser("~/.aws/sso/cache/*.json"))
-best = newest([f for f in allf if f in targets]) or newest(allf)
+# ONLY the profile's own start-URL token counts. The old fallback ("newest token in
+# the cache") is how an expired commercial session hid behind a fresh gov token and a
+# 4h run launched with 17 minutes of real runway - dying mid-flight exactly as this
+# check exists to prevent. Unknown beats wrong: with no matching token, report
+# unknown and let the operator decide.
+best = newest([f for f in glob.glob(os.path.expanduser("~/.aws/sso/cache/*.json")) if f in targets])
 if not best:
     print(-1); sys.exit(0)
 try:
