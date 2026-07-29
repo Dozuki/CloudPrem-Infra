@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.1.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.1.0...v8.1.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* **physical:** exclude aws provider 6.57.0, it breaks every data-source read ([6f6c969](https://github.com/Dozuki/CloudPrem-Infra/commit/6f6c969f807b2c5f031ff772de68ac20141e31bd))
+
 ## [8.1.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.0.4...v8.1.0) (2026-07-29)
 
 
