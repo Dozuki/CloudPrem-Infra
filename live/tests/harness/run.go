@@ -103,6 +103,13 @@ func RunUpgrade(p RunParams) (err error) {
 	}
 	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
 
+	// Registered before the teardown defers so it stops LAST: the logical destroy reads
+	// Vault too, and this run applies logical twice, so the second one lands near the
+	// token's 1h TTL. See vault.go.
+	renewCtx, stopRenew := context.WithCancel(context.Background())
+	defer stopRenew()
+	StartVaultTokenRenewer(renewCtx)
+
 	// Teardown always runs (defer); the signal handler runs it on SIGINT/SIGTERM too.
 	// Do NOT discard the teardown error. Swallowing it hid a silent no-op teardown:
 	// the stack stayed up, diagnostics were never captured, and the run reported only
@@ -156,6 +163,12 @@ func RunFresh(p RunParams) (err error) {
 		ttl = 24
 	}
 	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
+
+	// Registered before the teardown defers so it stops LAST (the logical destroy reads
+	// Vault too). See vault.go.
+	renewCtx, stopRenew := context.WithCancel(context.Background())
+	defer stopRenew()
+	StartVaultTokenRenewer(renewCtx)
 
 	// Do NOT discard the teardown error. Swallowing it hid a silent no-op teardown:
 	// the stack stayed up, diagnostics were never captured, and the run reported only
@@ -232,6 +245,14 @@ func RunRecovery(p RunParams, recoverConfigName string) (err error) {
 		ttl = 24
 	}
 	deleteAfter := startTime.Add(time.Duration(ttl) * time.Hour).UTC().Format(time.RFC3339)
+
+	// Registered before the teardown defers so it stops LAST. This scenario is the one
+	// that made the renewer necessary: source stack, drill, snapshot and rebuild run in
+	// sequence, so the rebuild's logical apply ALWAYS lands past the token's 1h TTL.
+	// See vault.go.
+	renewCtx, stopRenew := context.WithCancel(context.Background())
+	defer stopRenew()
+	StartVaultTokenRenewer(renewCtx)
 
 	// Source-stack teardown: registered FIRST so it runs LAST (the recovery stack
 	// adopts the source's DR buckets; destroying them first would strand it).
