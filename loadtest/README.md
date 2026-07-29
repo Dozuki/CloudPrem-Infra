@@ -8,11 +8,17 @@ creds; runs the load generator as an in-cluster Kubernetes Job.
 - Admin credentials for the target stack (email + password).
 
 ## 1. Seed a dataset (once per env)
+Prefer `./run.sh --seed ...` (step 2 flags plus `--seed`): it runs the seed and writes
+`pool.json` for you. Seeding by hand needs the extraction too - seed.js PRINTS the pool on
+stdout as a `POOL_JSON:` line and writes no file, so a bare `k6 run` leaves you with no
+pool and step 2 refuses to start:
 ```bash
 K6_TARGET="https://<stack-fqdn>" ADMIN_EMAIL=... ADMIN_PASSWORD=... \
   SEED_GUIDES=300 SEED_COURSES=30 SEED_USERS=50 \
-  k6 run seed/seed.js     # writes loadtest/pool.json (created IDs)
+  k6 run --log-format=raw seed/seed.js \
+  | awk -F'POOL_JSON:' '/POOL_JSON:/{print $2}' | tail -1 > pool.json
 ```
+Do not pipe the run through `head`/`tail` on its own - that drops the POOL_JSON line.
 
 ## 2. Run a load test (in-cluster Job)
 ```bash
