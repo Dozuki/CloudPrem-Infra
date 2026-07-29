@@ -24,6 +24,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 )
 
@@ -86,6 +87,41 @@ func (i Inputs) EnvInputs() (map[string]interface{}, error) {
 		"s3_kms_key_id":              i.S3KMSKeyARN,
 		"enable_dr":                  false,
 	}, nil
+}
+
+// CheckEndpointServiceReachable answers, in one API call, the question the rebuild
+// otherwise answers 45 minutes into a terraform apply: can a stack in this region
+// create an endpoint to that PrivateLink service?
+//
+// A VPC endpoint service is regional and only accepts consumers from the regions its
+// owner listed in supported_regions. Describing it from the consumer's region fails
+// with the SAME InvalidServiceName that CreateVpcEndpoint fails with, so this is a
+// faithful preflight rather than an approximation of one. Same-region consumers
+// describe their own service and pass trivially.
+//
+// The first recovery-rebuild drill lost most of an hour to this: the DR region was
+// missing from the shared Vault service's supported_regions, and the rebuild died in
+// the physical layer partway through a recovery - the worst possible moment to learn
+// it. An empty serviceName skips the check (nothing to reach).
+func CheckEndpointServiceReachable(ctx context.Context, consumerRegion, serviceName string) error {
+	if serviceName == "" {
+		return nil
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(consumerRegion))
+	if err != nil {
+		return err
+	}
+	_, err = ec2.NewFromConfig(cfg).DescribeVpcEndpointServices(ctx, &ec2.DescribeVpcEndpointServicesInput{
+		ServiceNames: []string{serviceName},
+	})
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("recovery: endpoint service %s is not reachable from %s, so the rebuild's physical layer "+
+		"cannot create its VPC endpoint there (%w).\n"+
+		"If this is the Vault PrivateLink service, add %q to supported_regions on the owning "+
+		"vault-privatelink-service stack and let it apply, then retry",
+		serviceName, consumerRegion, err, consumerRegion)
 }
 
 // SanitizeSnapshotID maps an arbitrary derived string (run id, stack name) onto RDS

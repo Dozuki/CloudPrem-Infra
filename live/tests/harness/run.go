@@ -207,6 +207,17 @@ func RunRecovery(p RunParams, recoverConfigName string) (err error) {
 	runStart = time.Now()
 	defer func() { printSummary(p, cfg, err) }()
 
+	// Preflight the ONE cross-region dependency the rebuild cannot work around, before
+	// spending ~90 minutes standing up a source stack that would only be torn down. The
+	// rebuild region reaches the shared Vault over PrivateLink, and that only works if
+	// the service advertises the region.
+	rebuildRegion := rcfg.RegionOr(p.Matrix.Defaults.Region)
+	if svc, ok := rcfg.FeatureFlags["vault_endpoint_service_name"].(string); ok {
+		if err = recovery.CheckEndpointServiceReachable(context.Background(), rebuildRegion, svc); err != nil {
+			return err
+		}
+	}
+
 	pp, derr := phaseParamsFromRun(p)
 	if derr != nil {
 		return derr

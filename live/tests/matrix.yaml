@@ -139,7 +139,11 @@ configs:
       alarm_email: "devops@dozuki.com"
       customer: "smokerec"
       enable_vault: true
-      # Same us-east-1 PrivateLink service: vault.tf supports cross-region endpoints.
+      # Same us-east-1 PrivateLink service, reached cross-region. vault.tf handles the
+      # CONSUMER half (it sets service_region when the name's region differs), but the
+      # PRODUCER half must opt in: this region has to appear in the service's
+      # supported_regions or CreateVpcEndpoint returns InvalidServiceName. The first
+      # drill died there; RunRecovery now preflights it before provisioning anything.
       # In a REAL us-east-1 loss the shared Vault is gone too — a known product-level
       # gap this scenario documents rather than hides (the drill exercises the rebuild
       # mechanics; Vault-region survivability is tracked in the failover design).
