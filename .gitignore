@@ -1,5 +1,10 @@
 *.tfstate*
 .terraform*
+# The dependency lock file is the exception: it MUST be committed. Without it every
+# init resolves the newest version the constraints allow, so a bad provider release
+# reaches the whole fleet, Spacelift included, the moment it publishes (aws 6.57.0,
+# 2026-07-29). Tracked = provider upgrades arrive as a reviewable diff instead.
+!.terraform.lock.hcl
 tfplan
 terraform.tfstate.d/
 **/.terragrunt*
