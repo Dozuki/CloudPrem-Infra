@@ -1,5 +1,15 @@
 terraform {
-  required_version = ">= 1.7.0"
+  # OpenTofu >= 1.9, where provider for_each landed. This layer depends on it: the
+  # in-module azurerm provider is instantiated with ZERO instances on AWS deploys, which
+  # is the only thing stopping azurerm v4 from authenticating eagerly on workers that have
+  # no Azure CLI (count=0 on the resources does NOT prevent that). The old >= 1.7.0 floor
+  # predated that and would let an engine through that cannot init this module at all.
+  #
+  # required_version cannot say "OpenTofu specifically" - Terraform 1.9 also satisfies
+  # this and would then fail later on the for_each itself. The floor is here to reject
+  # clearly-too-old engines early, not to pick the engine; that is the stack's tool
+  # setting (OPEN_TOFU in infra-live).
+  required_version = ">= 1.9.0"
 
   required_providers {
     aws = {
