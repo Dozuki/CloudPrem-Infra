@@ -20,6 +20,21 @@ import (
 // re-apply after a short wait succeeds — the entry is just slow to propagate.
 var kubeAuthRaceRE = regexp.MustCompile(`credentials configured in the provider block are not accepted by the API server`)
 
+// transientNetRE matches network faults that say nothing about the infrastructure being
+// wrong - the request never reached AWS, or the answer never came back. A recovery run
+// died on `lookup iam.amazonaws.com: no such host` 47 seconds into the rebuild apply,
+// throwing away ~90 minutes of source stack, drill and snapshot. macOS's resolver
+// returns "no such host" (not a timeout) when it is overwhelmed, and a terragrunt apply
+// fans out enough concurrent provider processes to do that; a plain dig burst against
+// the same resolvers came back clean immediately afterwards.
+//
+// Safe to retry because apply is idempotent - it is the same reasoning the EKS
+// access-entry retry above rests on. Deliberately narrow: only failures where the
+// request demonstrably did not land. An AWS API error that came back WITH a response
+// (AccessDenied, InvalidParameterValue, a 4xx of any kind) is a real failure and must
+// still fail the run.
+var transientNetRE = regexp.MustCompile(`(?i)no such host|connection reset by peer|i/o timeout|TLS handshake timeout|request send failed|EOF$`)
+
 type TGOptions struct {
 	WorkingDir   string
 	AccountID    string
@@ -78,6 +93,12 @@ func (o TGOptions) Apply() error {
 		if attempt < maxAttempts && kubeAuthRaceRE.MatchString(out) {
 			wait := time.Duration(attempt*30) * time.Second
 			fmt.Fprintf(os.Stderr, "\n>> harness: EKS access-entry propagation race; retrying apply in %s (attempt %d/%d)\n\n", wait, attempt+1, maxAttempts)
+			time.Sleep(wait)
+			continue
+		}
+		if attempt < maxAttempts && transientNetRE.MatchString(out) {
+			wait := time.Duration(attempt*30) * time.Second
+			fmt.Fprintf(os.Stderr, "\n>> harness: transient network failure (request never reached AWS); retrying apply in %s (attempt %d/%d)\n\n", wait, attempt+1, maxAttempts)
 			time.Sleep(wait)
 			continue
 		}
