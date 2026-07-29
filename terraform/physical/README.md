@@ -58,10 +58,12 @@
 | ---- | ---- |
 | [aws_cloudwatch_event_rule.dms_task_state_changed_rule](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_target.dms_task_state_changed_target](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
+| [aws_cloudwatch_log_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_cloudwatch_metric_alarm.aurora_acu](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.aurora_connections](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.aurora_cpu](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.aurora_memory](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
+| [aws_cloudwatch_metric_alarm.dr_replication_deadman](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.dr_s3_replication_failed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.dr_s3_replication_latency](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.rds_storage_space_alarm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
@@ -168,7 +170,10 @@
 | [aws_security_group_rule.nlb_to_envoy_http_shifted](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_https_shifted](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_sns_topic.dr_paging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic) | resource |
 | [aws_sns_topic_subscription.dms_restart_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
+| [aws_sns_topic_subscription.dr_paging_email](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
+| [aws_sns_topic_subscription.dr_paging_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_sns_topic_subscription.email_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_sns_topic_subscription.sns_to_slack_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_ssm_association.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_association) | resource |
@@ -216,6 +221,7 @@
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_rds_orderable_db_instance.default](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/rds_orderable_db_instance) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
+| [aws_region.dr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_route53_zone.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route53_zone) | data source |
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/s3_bucket) | data source |
 | [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
@@ -253,6 +259,7 @@
 | <a name="input_delete_after"></a> [delete\_after](#input\_delete\_after) | Optional RFC3339 timestamp. When set, every resource is tagged deleteAfter=<value> so the ResourceReaper janitor can purge it after that time if teardown fails. Empty = no tag (normal deploys). | `string` | `""` | no |
 | <a name="input_dms_allocated_storage"></a> [dms\_allocated\_storage](#input\_dms\_allocated\_storage) | How many GB to allocate for the DMS replication instance | `string` | `100` | no |
 | <a name="input_dms_instance_type"></a> [dms\_instance\_type](#input\_dms\_instance\_type) | The instance type for the DMS replication instance | `string` | `"dms.r5.large"` | no |
+| <a name="input_dr_paging_endpoint"></a> [dr\_paging\_endpoint](#input\_dr\_paging\_endpoint) | HTTPS endpoint of an ACKNOWLEDGED paging integration (PagerDuty/Opsgenie SNS inbound URL) for the DR dead-man page. Empty falls back to an email subscription on alarm\_email - which is notification, not paging: nobody is woken up and nothing escalates, so DR detection is not operationally enabled (a check warns on every plan until this is set). | `string` | `""` | no |
 | <a name="input_dr_region"></a> [dr\_region](#input\_dr\_region) | The DR region (concrete value). Normally injected by the Spacelift admin layer via TG\_AWS\_DR\_REGION; may be set explicitly to override. Never auto-derived in workload TF. | `string` | `""` | no |
 | <a name="input_dr_vpc_cidr"></a> [dr\_vpc\_cidr](#input\_dr\_vpc\_cidr) | CIDR for the minimal DR-region VPC that hosts the headless Aurora global-database secondary (private subnets only; no NAT/IGW). Must not overlap the primary VPC. Only used when the Aurora DR secondary is created (aurora engine + enable\_dr). | `string` | `"10.99.0.0/20"` | no |
 | <a name="input_eks_enabled_log_types"></a> [eks\_enabled\_log\_types](#input\_eks\_enabled\_log\_types) | EKS control-plane log types to stream to CloudWatch Logs. Defaults to all 5 (audit, api, authenticator, controllerManager, scheduler) for compliance (SOC2 / Vanta require audit logs at minimum). Set to [] to disable cluster logging entirely (not recommended). | `list(string)` | <pre>[<br/>  "api",<br/>  "audit",<br/>  "authenticator",<br/>  "controllerManager",<br/>  "scheduler"<br/>]</pre> | no |
@@ -264,6 +271,7 @@
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
+| <a name="input_operations_owner"></a> [operations\_owner](#input\_operations\_owner) | Which on-call owns this stack's DR page: 'dozuki' (Dozuki 24/7 on-call, the MPC posture) or 'customer' (the customer's named on-call runs the failover, Dozuki advisory). Empty derives it from managed\_private\_cloud. Stamped into the page so the receiver knows whether they are the actor or the advisor. | `string` | `""` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
 | <a name="input_rds_adopt_dr_cmk"></a> [rds\_adopt\_dr\_cmk](#input\_rds\_adopt\_dr\_cmk) | When true (the default DR-ready posture), the database is created with a Terraform-managed customer KMS key so it is encrypted under a CMK — the prerequisite for cross-region DR (RDS automated-backup replication; Aurora is CMK-encrypted but its cross-region replication is the deferred Global-Database Plan B). EXISTING stacks created with the AWS-managed key MUST pin this to false (or pin rds\_kms\_key\_id to their already-adopted CMK): a KMS-key change replaces the database. The db-replace-guard PLAN policy blocks any such unintended replacement (it requires the allow-db-replace stack label), so this default is fail-safe. | `bool` | `true` | no |
 | <a name="input_rds_allocated_storage"></a> [rds\_allocated\_storage](#input\_rds\_allocated\_storage) | The initial size of the database (Gb) | `number` | `100` | no |

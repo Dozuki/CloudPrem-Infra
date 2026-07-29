@@ -405,6 +405,28 @@ variable "dr_vpc_cidr" {
   default     = "10.99.0.0/20"
 }
 
+variable "operations_owner" {
+  description = "Which on-call owns this stack's DR page: 'dozuki' (Dozuki 24/7 on-call, the MPC posture) or 'customer' (the customer's named on-call runs the failover, Dozuki advisory). Empty derives it from managed_private_cloud. Stamped into the page so the receiver knows whether they are the actor or the advisor."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["", "dozuki", "customer"], var.operations_owner)
+    error_message = "operations_owner must be \"dozuki\", \"customer\", or empty (derive from managed_private_cloud)."
+  }
+}
+
+variable "dr_paging_endpoint" {
+  description = "HTTPS endpoint of an ACKNOWLEDGED paging integration (PagerDuty/Opsgenie SNS inbound URL) for the DR dead-man page. Empty falls back to an email subscription on alarm_email - which is notification, not paging: nobody is woken up and nothing escalates, so DR detection is not operationally enabled (a check warns on every plan until this is set)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.dr_paging_endpoint == "" || startswith(var.dr_paging_endpoint, "https://")
+    error_message = "dr_paging_endpoint must be an https:// URL (or empty)."
+  }
+}
+
 variable "rds_adopt_dr_cmk" {
   description = "When true (the default DR-ready posture), the database is created with a Terraform-managed customer KMS key so it is encrypted under a CMK — the prerequisite for cross-region DR (RDS automated-backup replication; Aurora is CMK-encrypted but its cross-region replication is the deferred Global-Database Plan B). EXISTING stacks created with the AWS-managed key MUST pin this to false (or pin rds_kms_key_id to their already-adopted CMK): a KMS-key change replaces the database. The db-replace-guard PLAN policy blocks any such unintended replacement (it requires the allow-db-replace stack label), so this default is fail-safe."
   type        = bool
