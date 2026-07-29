@@ -55,5 +55,16 @@ def lambda_handler(event, context):
         detail_message = message_json['detail'].get('detailMessage', 'N/A')
         task_arn = get_task_arn(message_json)
 
+        # Restart is only safe for the BI task: reload-target on it rebuilds the
+        # writable replica, which is the intended recovery. On any other task
+        # (the aurora migration task in particular) reload-target re-runs a full
+        # load into a target the migration runner has already staged past the
+        # load phase, destroying it. The rule intentionally forwards migration
+        # task events for PAGING; this allowlist keeps them alert-only.
+        allowed = [a for a in os.environ.get("RESTARTABLE_TASK_ARNS", "").split(",") if a]
+        if task_arn not in allowed:
+            print(f"Task {task_arn} not in restart allowlist {allowed} - alert-only, no restart.")
+            return
+
         if "ERROR" in detail_message:
             restart_task(task_arn)

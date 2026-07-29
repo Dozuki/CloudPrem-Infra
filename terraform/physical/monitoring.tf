@@ -505,6 +505,18 @@ resource "aws_lambda_function" "dms_restart" {
 
   source_code_hash = data.archive_file.dms_restart_lambda[0].output_base64sha256
 
+  # Restart allowlist: the BI task only. The state-change rule also forwards
+  # aurora migration task events (they must PAGE - a soak-phase STOP_TASK stop
+  # sitting unnoticed past binlog retention kills the migration), but the
+  # lambda's reload-target restart is destructive to a staged migration: it
+  # re-runs a full load into a target the runner has already loaded, with the
+  # FK-off Initstmt long removed (live-fired on m3-emea 2026-07-29 after a
+  # validation-sweep OOM). The migration runner owns that task's lifecycle.
+  environment {
+    variables = {
+      RESTARTABLE_TASK_ARNS = join(",", [for t in aws_dms_replication_task.this : t.replication_task_arn])
+    }
+  }
 }
 
 resource "aws_sns_topic_subscription" "dms_restart_subscription" {
