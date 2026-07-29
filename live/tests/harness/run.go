@@ -261,7 +261,9 @@ func RunRecovery(p RunParams, recoverConfigName string) (err error) {
 		return fmt.Errorf("recovery: source outputs: %w", oerr)
 	}
 
-	snapshotID := "harness-recovery-" + strings.TrimSuffix(strings.ReplaceAll(p.RunID, "/", "-"), "-")
+	// Sanitized: the run id carries the source config name (recover_source), and RDS
+	// rejects underscores in snapshot identifiers - cycle 36 died here.
+	snapshotID := recovery.SanitizeSnapshotID("harness-recovery-" + p.RunID)
 	step("RECOVERY: snapshotting promoted cluster %s -> %s (%s)", rm.PromotedClusterID, snapshotID, p.DRRegion)
 	snapARN, serr := recovery.SnapshotCluster(ctx, p.DRRegion, rm.PromotedClusterID, snapshotID, 30*time.Minute)
 	if serr != nil {

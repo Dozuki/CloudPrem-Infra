@@ -88,6 +88,36 @@ func (i Inputs) EnvInputs() (map[string]interface{}, error) {
 	}, nil
 }
 
+// SanitizeSnapshotID maps an arbitrary derived string (run id, stack name) onto RDS
+// cluster-snapshot identifier rules: 1-63 chars, letters/digits/hyphens only, starts
+// with a letter, no trailing hyphen, no "--". Cycle 36 failed CreateDBClusterSnapshot
+// instantly because the harness run id carried the config name recover_source and the
+// underscore is illegal - sanitize at every point a snapshot id is derived.
+func SanitizeSnapshotID(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	out := b.String()
+	for strings.Contains(out, "--") {
+		out = strings.ReplaceAll(out, "--", "-")
+	}
+	out = strings.Trim(out, "-")
+	if out == "" {
+		out = "s"
+	} else if out[0] >= '0' && out[0] <= '9' {
+		out = "s-" + out
+	}
+	if len(out) > 63 {
+		out = strings.TrimRight(out[:63], "-")
+	}
+	return out
+}
+
 // SnapshotCluster takes a manual cluster snapshot of the promoted cluster and waits
 // for it to become available. Idempotent: if the snapshot id already exists (a prior
 // attempt died mid-wait), the existing snapshot is awaited instead of erroring.

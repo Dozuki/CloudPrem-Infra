@@ -146,9 +146,9 @@ Next:
 				return 2
 			}
 		}
-		snapID := *snapshotID
-		if snapID == "" {
-			snapID = *stackName + "-dr-rebuild"
+		snapID := recovery.SanitizeSnapshotID(*snapshotID)
+		if *snapshotID == "" {
+			snapID = recovery.SanitizeSnapshotID(*stackName + "-dr-rebuild")
 		}
 		fmt.Fprintf(stderr, "snapshotting %s -> %s in %s (idempotent; this is the slow part)\n", *promotedID, snapID, *drRegion)
 		snapARN, err := recovery.SnapshotCluster(ctx, *drRegion, *promotedID, snapID, 60*time.Minute)
