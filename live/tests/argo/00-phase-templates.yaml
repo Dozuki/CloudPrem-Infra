@@ -138,6 +138,10 @@ spec:
             value: '{{workflow.parameters.assume-role-arn}}'
           - name: VAULT_ADDR
             value: '{{workflow.parameters.vault-addr}}'
+          # The entrypoint default is admin (a laptop identity). The pod's identity is
+          # registered under the deployer Vault role (vault-config deployer_iam_role_arns).
+          - name: VAULT_AWS_ROLE
+            value: deployer
           - name: DR_REGION
             value: '{{workflow.parameters.dr-region}}'
           - name: DDVTEST_ACCOUNT_ID
