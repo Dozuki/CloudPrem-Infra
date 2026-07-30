@@ -72,7 +72,7 @@ module "aurora" {
   create_security_group = false
 
   storage_encrypted = true
-  kms_key_id        = local.rds_kms_key_arn
+  kms_key_id        = local.aurora_kms_key_arn
 
   snapshot_identifier = var.aurora_snapshot_identifier != "" ? var.aurora_snapshot_identifier : null
 
