@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.3.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.2...v8.3.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* **dr:** stop the rds snapshot guard denying aurora a CMK ([#384](https://github.com/Dozuki/CloudPrem-Infra/issues/384)) ([8a3019c](https://github.com/Dozuki/CloudPrem-Infra/commit/8a3019cd5416668c32d0cbe954ef6744773a1530))
+* **eks:** tag the iam policies and pod identity associations ([#382](https://github.com/Dozuki/CloudPrem-Infra/issues/382)) ([92188f8](https://github.com/Dozuki/CloudPrem-Infra/commit/92188f8cd27cfc4b420617ed983f8f9e761c747e))
+
 ## [8.3.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.1...v8.3.2) (2026-07-30)
 
 
