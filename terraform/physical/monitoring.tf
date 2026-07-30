@@ -19,8 +19,16 @@ data "aws_iam_policy_document" "lambda_permissions" {
   statement {
     actions = [
       "iam:ListAccountAliases",
+      # Serverless replications and provisioned tasks are separate API surfaces with
+      # separate IAM actions, and this lambda now handles both: the BI replication is a
+      # replication-config, the aurora migration is still a task. Granting only the task
+      # actions made every serverless restart fail AccessDenied - and because the lambda
+      # is fired by an event rather than an apply, that failure is invisible until you go
+      # looking for the restart that never happened.
       "dms:DescribeReplicationTasks",
-      "dms:StartReplicationTask"
+      "dms:StartReplicationTask",
+      "dms:DescribeReplications",
+      "dms:StartReplication"
     ]
     resources = ["*"]
   }

@@ -128,8 +128,18 @@ resource "aws_dms_endpoint" "target" {
 # DMS Serverless. One resource replaces the replication instance + replication task, and it
 # autoscales between min and max DCU (1 DCU = 2 GB RAM) instead of billing a fixed instance.
 #
-# start_replication also retires the chart's dms-start job for this replication: the start is
-# an attribute here, so Terraform owns it rather than a Job racing the apply.
+# start_replication retires the logical layer's dms-start Job (deleted in terraform/logical/bi.tf
+# by this change, not the chart - it was never in the chart): the start is an attribute here, so
+# Terraform owns it, and serverless runs its own Testing Connection phase, which is the other
+# thing that Job existed to do.
+#
+# CAUTION on the rds -> aurora switch. start_replication is also honoured on UPDATE: after the
+# apply modifies target_endpoint_arn, the provider calls its startReplication helper, which
+# picks "start-replication" only when the replication is ready and "resume-processing"
+# otherwise - never "reload-target". So the apply that repoints BI at the new empty Aurora
+# cluster will restart CDC against it by itself, and the replication will report Running while
+# the target holds no historical rows at all. reload-target afterwards repairs it, but a
+# "Running" status is NOT evidence the switch worked. Verify TablesLoaded, not status.
 #
 # Sizing is deliberately NOT derived from the old instance class. The provisioned boxes were
 # sized for peak full-load headroom and then sat idle; min_capacity_units is what matters for
