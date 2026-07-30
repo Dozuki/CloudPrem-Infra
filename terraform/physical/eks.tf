@@ -48,6 +48,8 @@ data "aws_iam_policy_document" "cluster_access" {
 resource "aws_iam_policy" "cluster_access" {
   name   = "${local.identifier}-${data.aws_region.current.region}-cluster-access"
   policy = data.aws_iam_policy_document.cluster_access.json
+
+  tags = local.tags
 }
 
 data "aws_iam_policy_document" "eks_worker_kms" {
@@ -204,6 +206,8 @@ resource "aws_iam_policy" "assume_cross_account_role" {
       }
     ]
   })
+
+  tags = local.tags
 }
 
 #tfsec:ignore:aws-vpc-no-public-egress-sgr
@@ -339,6 +343,8 @@ resource "aws_eks_pod_identity_association" "app_default" {
   namespace       = "dozuki"
   service_account = "default"
   role_arn        = aws_iam_role.app_pod_identity.arn
+
+  tags = local.tags
 }
 
 # App deployments use the migration-wait SA (for kubectl RBAC in init
@@ -348,6 +354,8 @@ resource "aws_eks_pod_identity_association" "app_migration_wait" {
   namespace       = "dozuki"
   service_account = "dozuki-migration-wait"
   role_arn        = aws_iam_role.app_pod_identity.arn
+
+  tags = local.tags
 }
 
 # Pod Identity: cert-manager cross-account Route53
@@ -383,6 +391,8 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
   namespace       = "cert-manager"
   service_account = "cert-manager"
   role_arn        = aws_iam_role.cert_manager_pod_identity.arn
+
+  tags = local.tags
 }
 
 # Container Insights: CloudWatch agent (amazon-cloudwatch-observability addon).
