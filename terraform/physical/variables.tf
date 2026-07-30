@@ -304,6 +304,11 @@ variable "bi_db_engine" {
 
     Switching an existing stack REPLACES the BI database. It is a rebuildable DMS target - a
     full load repopulates it - so the flip is safe to schedule, just not to do by accident.
+    Separately, and regardless of this variable: the FIRST apply that picks up the DMS
+    Serverless release replaces the provisioned replication task with a replication config,
+    and that destroy has no stop provisioner behind it any more. AWS will not delete a
+    running task, so stop it first (util/dms-stop.sh) or the upgrade apply fails.
+
     Terraform cannot sequence it on its own: DMS refuses to modify an endpoint while the
     replication is running, so it has to be stopped first, and the new empty cluster then
     needs reload-target to repopulate. Order is: stop-replication and wait for Stopped, apply

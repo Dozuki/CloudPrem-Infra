@@ -155,12 +155,21 @@ resource "aws_dms_endpoint" "target" {
 # restart lambda recognises the deprovisioned state and declines to attempt an impossible
 # restart, so the alert stands on its own rather than being masked by a lambda error.
 #
-# Do NOT re-add a destroy-time stop provisioner here. AWS refuses to delete a replication that
-# is not STOPPED or FAILED, which is exactly why the old task carried a null_resource calling
-# dms-stop.sh (see hashicorp/terraform-provider-aws#2083 - aws_dms_replication_task never
-# stopped itself). This resource does: its Delete calls stopReplication first, which no-ops if
-# the replication is already stopped/created/failed and otherwise stops and waits, and only
-# then deletes. The shell script was working around a gap that no longer exists.
+# Steady state needs no destroy-time stop provisioner: this resource's Delete calls
+# stopReplication first, which no-ops when already stopped/created/failed and otherwise stops
+# and waits, then deletes.
+#
+# THE UPGRADE APPLY IS DIFFERENT, and it is the one that bites. On an existing DMS-enabled
+# stack the resource being destroyed is the OLD aws_dms_replication_task, which never stopped
+# itself (hashicorp/terraform-provider-aws#2083) - that is why it carried a null_resource
+# calling dms-stop.sh. Deleting that resource block deletes its destroy provisioner with it,
+# so nothing stops the running task and AWS refuses to delete it: the upgrade apply fails,
+# possibly after this config has already started loading the same target.
+#
+# So the BI replication MUST be stopped by hand before the first apply that picks this up:
+#   util/dms-stop.sh <task-arn> <region> <profile>
+# kept in the tree for exactly that. This applies to ANY stack upgrading to this release, not
+# only ones switching bi_db_engine to "aurora".
 resource "aws_dms_replication_config" "this" {
   count = local.dms_enabled ? 1 : 0
 

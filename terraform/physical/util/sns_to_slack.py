@@ -44,11 +44,36 @@ def get_account_alias():
 
 
 def get_task_name(task_arn):
+    """Resolve a DMS ARN to its human identifier.
+
+    The BI replication is DMS Serverless (a replication-config); the aurora migration is
+    still a provisioned task. describe_replication_tasks does not know about a
+    replication-config, so calling it with one returns nothing and the old [0] index raised
+    IndexError - which killed this lambda BEFORE it posted, meaning DMS failure and
+    deprovision alerts silently stopped reaching Slack. Falls back to the ARN's last segment
+    rather than raising, because a nameless alert still beats no alert.
+    """
     dms_client = boto3.client("dms", region_name=os.environ["AWS_REGION"])
-    response = dms_client.describe_replication_tasks(
-        Filters=[{"Name": "replication-task-arn", "Values": [task_arn]}]
-    )
-    return response["ReplicationTasks"][0]["ReplicationTaskIdentifier"]
+
+    try:
+        if ":replication-config:" in task_arn:
+            response = dms_client.describe_replication_configs(
+                Filters=[{"Name": "replication-config-arn", "Values": [task_arn]}]
+            )
+            configs = response.get("ReplicationConfigs") or []
+            if configs:
+                return configs[0]["ReplicationConfigIdentifier"]
+        else:
+            response = dms_client.describe_replication_tasks(
+                Filters=[{"Name": "replication-task-arn", "Values": [task_arn]}]
+            )
+            tasks = response.get("ReplicationTasks") or []
+            if tasks:
+                return tasks[0]["ReplicationTaskIdentifier"]
+    except Exception as exc:  # noqa: BLE001 - never let naming break the alert
+        print(f"could not resolve DMS name for {task_arn}: {exc}")
+
+    return task_arn.rsplit(":", 1)[-1] or task_arn
 
 
 def lambda_handler(event, context):
