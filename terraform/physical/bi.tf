@@ -186,13 +186,16 @@ module "rds_replica_database" {
   engine         = "mysql"
   engine_version = "8.0"
 
-  port                        = 3306
-  instance_class              = data.aws_rds_orderable_db_instance.default.instance_class
-  max_allocated_storage       = var.rds_max_allocated_storage
-  storage_type                = "gp3"
-  replicate_source_db         = module.primary_database[0].db_instance_id
-  storage_encrypted           = true
-  kms_key_id                  = data.aws_kms_key.rds.arn
+  port                  = 3306
+  instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
+  max_allocated_storage = var.rds_max_allocated_storage
+  storage_type          = "gp3"
+  replicate_source_db   = module.primary_database[0].db_instance_id
+  storage_encrypted     = true
+  # local.rds_kms_key_arn, not data.aws_kms_key.rds.arn: a same-region read replica inherits
+  # the source's key regardless, so naming a different one was at best ignored. This tracks
+  # the source once the primary is on a CMK.
+  kms_key_id                  = local.rds_kms_key_arn
   apply_immediately           = local.db_apply_immediately
   publicly_accessible         = false
   allow_major_version_upgrade = true
@@ -289,9 +292,15 @@ module "dms_replica_database" {
   max_allocated_storage = var.rds_max_allocated_storage
   storage_type          = "gp3"
   storage_encrypted     = true
-  kms_key_id            = data.aws_kms_key.rds.arn
-  apply_immediately     = local.db_apply_immediately
-  publicly_accessible   = var.bi_public_access
+  # Follow the primary's key. This used to hardcode data.aws_kms_key.rds.arn, which meant the
+  # BI database stayed on the AWS-managed key even on a stack whose primary correctly adopted a
+  # CMK — and with bi_public_access this is the most exposed database in the stack. Changing it
+  # forces a replacement whenever the primary moves to a CMK; the BI database is a rebuildable
+  # DMS target, but the replace is still blocked by db-replace-guard, so do it deliberately
+  # (out-of-band delete, then let Terraform create) alongside the primary's key swap.
+  kms_key_id          = local.rds_kms_key_arn
+  apply_immediately   = local.db_apply_immediately
+  publicly_accessible = var.bi_public_access
 
   username               = "dozuki"
   random_password_length = 40
