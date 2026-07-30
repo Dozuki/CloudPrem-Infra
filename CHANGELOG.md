@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.3.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.1...v8.3.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **dr:** stop telling operators aurora DR needs a CMK ([#381](https://github.com/Dozuki/CloudPrem-Infra/issues/381)) ([87249d7](https://github.com/Dozuki/CloudPrem-Infra/commit/87249d794b7ec59fc5ddcb06100f5f0ac6f13690))
+* **physical:** rotate the S3 key and tag the resources that were missing tags ([#379](https://github.com/Dozuki/CloudPrem-Infra/issues/379)) ([e103782](https://github.com/Dozuki/CloudPrem-Infra/commit/e10378201fbcfe2bc534157c1d5cc0d8d976fd88))
+
 ## [8.3.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.0...v8.3.1) (2026-07-30)
 
 
