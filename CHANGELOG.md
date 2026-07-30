@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.3.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.2.0...v8.3.0) (2026-07-30)
+
+
+### Features
+
+* **logical:** wire the memcached proxy tier through, default off ([#373](https://github.com/Dozuki/CloudPrem-Infra/issues/373)) ([3038799](https://github.com/Dozuki/CloudPrem-Infra/commit/30387997e942c97aee5b0630405892600d63f9ca))
+
 ## [8.2.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.1.2...v8.2.0) (2026-07-30)
 
 
