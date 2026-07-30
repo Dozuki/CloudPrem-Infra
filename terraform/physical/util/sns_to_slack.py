@@ -32,9 +32,32 @@ post messages to the designated Slack channel."""
 import json
 import os
 import urllib.request
+from datetime import datetime
 import boto3
 
 SLACK_WEBHOOK_URL = os.environ['SLACK_WEBHOOK_URL']
+
+# How close a state change must be to the alarm's last config create/update to count
+# as alarm settling rather than a real recovery. Wide on purpose: some metrics (DR
+# replication, agent-fed ContainerInsights) take hours after an apply to emit their
+# first datapoint, and the cost of a too-wide window is one suppressed healthy-state
+# post shortly after someone edited that same alarm.
+SETTLE_WINDOW_SECONDS = 24 * 3600
+
+
+def alarm_recently_configured(message_json):
+    """True when the state change happened within the settle window of the alarm's
+    config being created or updated. Any missing or unparseable timestamp returns
+    False so the caller posts the message - never classify on bad data.
+    """
+    fmt = "%Y-%m-%dT%H:%M:%S.%f%z"
+    try:
+        state_change = datetime.strptime(message_json["StateChangeTime"], fmt)
+        configured = datetime.strptime(
+            message_json["AlarmConfigurationUpdatedTimestamp"], fmt)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return abs((state_change - configured).total_seconds()) <= SETTLE_WINDOW_SECONDS
 
 
 def get_account_alias():
@@ -95,11 +118,16 @@ def lambda_handler(event, context):
         # A freshly created alarm goes INSUFFICIENT_DATA -> OK as its first datapoints
         # arrive. That is alarm birth, not a recovery: an apply that adds a batch of
         # alarms floods the channel with healthy-state posts that read like an incident.
-        # Only this exact transition is dropped - ALARM -> OK still closes real incidents,
-        # INSUFFICIENT_DATA -> ALARM still pages (missing=breaching alarms enter that
-        # way), and a payload without OldStateValue posts as before.
-        if old_state_value == "INSUFFICIENT_DATA" and new_state_value == "OK":
-            print(f"skipping INSUFFICIENT_DATA -> OK for {alarm_name}")
+        # The transition alone is not enough to drop, though - an established alarm in
+        # ALARM whose metric stops arriving also exits via INSUFFICIENT_DATA -> OK, and
+        # that post is the only closure the channel gets. The config-updated timestamp
+        # separates the two: only suppress when the alarm was created or edited within
+        # the settle window. ALARM -> OK still closes real incidents, anything entering
+        # ALARM still pages (missing=breaching alarms arrive via INSUFFICIENT_DATA ->
+        # ALARM), and a payload missing OldStateValue or timestamps posts as before.
+        if (old_state_value == "INSUFFICIENT_DATA" and new_state_value == "OK"
+                and alarm_recently_configured(message_json)):
+            print(f"skipping INSUFFICIENT_DATA -> OK for {alarm_name} (alarm settling)")
             return
 
         if new_state_value == "ALARM":
