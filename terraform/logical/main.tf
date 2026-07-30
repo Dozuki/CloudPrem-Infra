@@ -240,15 +240,12 @@ locals {
   dashboards_admin_username = "admin"
   dashboards_admin_password = var.enable_dashboards ? random_password.dashboards_admin[0].result : ""
 
-  # Ops ingress (public Grafana/Alertmanager behind HTTP basic auth): always on, so
-  # unlike dashboards_* above it isn't gated by enable_dashboards/enable_bi. Seeded
-  # into Vault/Key Vault as "ops-auth" (vault.tf / keyvault.tf) for the chart's
-  # ExternalSecret to read.
+  # Azure retains a Key Vault-local ops login. Vault-backed stacks no longer
+  # generate per-environment credentials here; their chart reads the shared
+  # secret/dozuki/global/ops -> basicAuth value owned by vault-config.
   ops_user           = "ops"
-  ops_admin_password = random_password.ops_admin.result
-  # {SHA}<base64 sha1 digest>, matching `htpasswd -s` — see data.external.ops_htpasswd_hash
-  # in vault.tf for why this needs to shell out instead of a native function.
-  ops_htpasswd = "${local.ops_user}:{SHA}${data.external.ops_htpasswd_hash.result.hash}"
+  ops_admin_password = var.cloud == "azure" ? random_password.ops_admin[0].result : ""
+  ops_htpasswd       = var.cloud == "azure" ? "${local.ops_user}:{SHA}${data.external.ops_htpasswd_hash[0].result.hash}" : ""
 }
 
 check "vault_address_configured" {

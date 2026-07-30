@@ -2,6 +2,39 @@
 # secrets stored in the customer Key Vault, consumed by ESO (azurekv).
 # db credentials are seeded by the physical layer as "database-credentials".
 
+# Azure cannot consume the commercial/Gov Vault global ops path, so retain its
+# existing Key Vault-local credential until it has an equivalent shared source.
+resource "random_password" "ops_admin" {
+  count = var.cloud == "azure" ? 1 : 0
+
+  length  = 24
+  special = false
+}
+
+# Envoy's BasicAuth filter accepts only htpasswd {SHA}. This is Azure-only:
+# Vault-backed stacks consume secret/dozuki/global/ops -> basicAuth directly.
+data "external" "ops_htpasswd_hash" {
+  count = var.cloud == "azure" ? 1 : 0
+
+  program = ["bash", "-c", <<-EOT
+    set -euo pipefail
+    password=$(jq -r .password)
+    hex=$(printf '%s' "$password" | sha1sum | cut -d' ' -f1)
+    hash=$(printf "$(printf '%s' "$hex" | sed 's/../\\x&/g')" | base64)
+    jq -n --arg hash "$hash" '{hash: $hash}'
+  EOT
+  ]
+
+  query = {
+    password = random_password.ops_admin[0].result
+  }
+}
+
+moved {
+  from = random_password.ops_admin
+  to   = random_password.ops_admin[0]
+}
+
 locals {
   azure_kv_secrets = var.cloud == "azure" ? merge({
     # Must be local.memcached_host (the service FQDN), matching the AWS path in vault.tf: ESO
@@ -27,8 +60,8 @@ locals {
       managedPassword = var.rustici_managed_password
     })
     # Ops ingress (public Grafana/Alertmanager basic auth): always on, unlike the
-    # grafana entry below which is gated by enable_dashboards. AWS twin in vault.tf's
-    # vault_kv_secret_v2.ops_auth.
+    # grafana entry below which is gated by enable_dashboards. AWS stacks instead
+    # consume the fleet-global secret/dozuki/global/ops credential.
     ops-auth = jsonencode({
       htpasswd = local.ops_htpasswd
       username = local.ops_user
