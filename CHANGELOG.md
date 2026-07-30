@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.3.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.0...v8.3.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* **logical:** reuse global ops basic auth ([#377](https://github.com/Dozuki/CloudPrem-Infra/issues/377)) ([fd2beca](https://github.com/Dozuki/CloudPrem-Infra/commit/fd2beca72c73d97f53e1a9b039cc6c0c88c47358))
+
 ## [8.3.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.2.0...v8.3.0) (2026-07-30)
 
 
