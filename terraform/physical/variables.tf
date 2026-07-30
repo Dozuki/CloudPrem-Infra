@@ -284,23 +284,35 @@ variable "rds_engine_version" {
 
 variable "bi_db_engine" {
   description = <<-EOT
-    Engine for the BI database that DMS replicates into: "aurora" (Aurora MySQL Serverless v2,
-    the default for new stacks) or "rds" (provisioned RDS MySQL, the legacy path).
+    Engine for the BI database that DMS replicates into: "aurora" (Aurora MySQL Serverless v2)
+    or "rds" (provisioned RDS MySQL, the legacy path).
 
-    Aurora is the default for two reasons. The BI database was pinned to MySQL "8.0" with no
-    way to change it, so every stack got one even when its primary was Aurora 8.4 - and 8.0
-    left standard support on 2026-07-31, so those instances bill RDS Extended Support
+    Aurora is what new stacks should use, for two reasons. The BI database was pinned to MySQL
+    "8.0" with no way to change it, so every stack got one even when its primary was Aurora 8.4
+    - and 8.0 left standard support on 2026-07-31, so those instances bill RDS Extended Support
     indefinitely. And BI is idle most of the time: Serverless v2 scales down to
     bi_aurora_min_acu between queries, where a provisioned instance bills flat.
 
-    EXISTING stacks with a BI database must pin "rds" to keep it. Switching engines REPLACES
-    the database, and db-replace-guard blocks that without the allow-db-replace label. The BI
-    database is a rebuildable DMS target - a full load repopulates it - so the flip is safe to
-    schedule, just not to do by accident. Cheapest moment is alongside that env's primary KMS
-    key swap, since both replace the same instance.
+    The DEFAULT is nonetheless "rds", and deliberately so. Every stack that has a BI database
+    today is on the provisioned path and none of them pin this variable, so defaulting to
+    "aurora" would flip all six the moment they bumped infra_version - turning a routine module
+    bump into a database replacement nobody asked for in that run. db-replace-guard would catch
+    it (the plan fails rather than the data going away), but a fleet of failing plans is not a
+    good default either. New stacks get Aurora from _templates/env.hcl instead, which is where
+    a new-stack default belongs; the code default only decides what happens to stacks that
+    predate the variable, and for those the right answer is "keep what you have".
+
+    Switching an existing stack REPLACES the BI database. It is a rebuildable DMS target - a
+    full load repopulates it - so the flip is safe to schedule, just not to do by accident.
+    Terraform cannot sequence it on its own: DMS refuses ModifyEndpoint while the task is
+    running, so the task has to be stopped first, and the new empty cluster then needs
+    reload-target to repopulate. Order is: stop the task (util/dms-stop.sh) and wait for
+    Stopped, apply with the allow-db-replace label, then reload-target and confirm the full
+    load. Cheapest moment is alongside that env's primary KMS key swap, since both replace a
+    database in the same window.
   EOT
   type        = string
-  default     = "aurora"
+  default     = "rds"
 
   validation {
     condition     = contains(["rds", "aurora"], var.bi_db_engine)

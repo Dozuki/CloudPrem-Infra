@@ -126,9 +126,10 @@ resource "aws_dms_endpoint" "target" {
   port                        = 3306
   kms_key_arn                 = aws_kms_key.bi[0].arn
 
-  # Engine-agnostic (main.tf): the BI target is an Aurora Serverless cluster by default and a
-  # provisioned instance on the legacy path. engine_name stays "mysql" - DMS treats Aurora MySQL
-  # as a wire-compatible MySQL target.
+  # Engine-agnostic (main.tf): the BI target is a provisioned instance on the default path and an
+  # Aurora Serverless cluster when bi_db_engine = "aurora". engine_name stays "mysql" either way
+  # - DMS treats Aurora MySQL as a wire-compatible MySQL target. Changing any of these three
+  # requires the task to be Stopped first; DMS rejects ModifyEndpoint on a running task.
   username    = local.bi_db_username
   password    = local.bi_db_password
   server_name = local.bi_db_host
@@ -283,7 +284,8 @@ resource "aws_db_parameter_group" "bi_replica" {
 }
 
 # ---------------------------------------------------------------------------
-# BI database, Aurora MySQL Serverless v2 (bi_db_engine = "aurora", the default)
+# BI database, Aurora MySQL Serverless v2 (bi_db_engine = "aurora", set by _templates/env.hcl
+# for new stacks; the code default stays "rds" so existing stacks are untouched)
 #
 # Replaces the provisioned MySQL 8.0 instance below. Two reasons: the old one was pinned to
 # "8.0" with no input to change it, so every stack got an 8.0 BI database even when its primary
@@ -312,11 +314,15 @@ module "bi_aurora" {
 
   count = local.bi_uses_aurora ? 1 : 0
 
-  name            = "${local.identifier}-bi"
-  engine          = "aurora-mysql"
-  engine_mode     = "provisioned"
-  engine_version  = var.aurora_engine_version
-  master_username = local.db_username
+  name           = "${local.identifier}-bi"
+  engine         = "aurora-mysql"
+  engine_mode    = "provisioned"
+  engine_version = var.aurora_engine_version
+  # Shares aurora_engine_version with the primary cluster, so it has to be able to follow the
+  # same 8.0 -> 8.4 move. AWS rejects a cross-major ModifyDBCluster without this, which would
+  # wedge every apply on a stack that bumps the version.
+  allow_major_version_upgrade = true
+  master_username             = local.db_username
 
   manage_master_user_password = false
   master_password_wo          = random_password.bi_aurora[0].result
@@ -357,6 +363,11 @@ module "bi_aurora" {
     family = local.aurora_param_family
     parameters = [
       { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
+      # DMS full-loads MySQL-compatible targets with LOAD DATA LOCAL INFILE, which the server
+      # refuses unless local_infile is on. Unconditional here, unlike the primary cluster where
+      # it is a migration-only relaxation: this cluster is a DMS target for its whole life, and
+      # a full load is how it gets rebuilt. Without it the task fails on the first table.
+      { name = "local_infile", value = "1", apply_method = "immediate" },
     ]
   }
 
@@ -383,8 +394,8 @@ module "dms_replica_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "5.6.0"
 
-  # Legacy provisioned path. Only when the stack pins bi_db_engine = "rds"; new stacks get the
-  # Aurora Serverless cluster above.
+  # Legacy provisioned path, and still what bi_db_engine defaults to, so every stack that has a
+  # BI database today keeps it here until it deliberately moves to the Aurora cluster above.
   count = local.dms_enabled && !local.bi_uses_aurora ? 1 : 0
 
   identifier = "${local.identifier}-dms-replica"
