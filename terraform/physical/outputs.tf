@@ -46,13 +46,26 @@ output "dms_task_arn" {
   value       = try(aws_dms_replication_config.this[0].arn, "")
 }
 output "dms_replication_generation" {
-  description = "Short hash of the replication-config attributes whose change makes the provider stop the replication (endpoints, mappings, settings, DCUs). The logical dms-start Job folds this into its name, so the modify that leaves the replication stopped also forces a fresh Job to start it again; with a static name the Completed Job never re-ran and the replication stayed stopped against the 48h deprovision clock."
+  description = "Short hash of the replication-config attributes whose change makes the provider stop the replication: the endpoint ARNs, the mappings and settings, and every compute_config field (subnet group, security groups, KMS key, multi-AZ, both DCU bounds). The logical dms-start Job folds this into its name, so the modify that leaves the replication stopped also forces a fresh Job to start it again; with a static name the Completed Job never re-ran and the replication stayed stopped against the 48h deprovision clock."
+  # resourceReplicationConfigUpdate (provider v6.56.0) stops the replication on ANY change to
+  # this resource, not just the DCU bounds, so the whole compute_config belongs here. A
+  # bi_access_cidrs edit that replaces the BI security group is the easy one to miss: it stops
+  # the replication and, without these fields, leaves the generation unmoved and no Job to
+  # start it again.
+  #
+  # Endpoint ATTRIBUTES stay out on purpose - only the ARNs are here. A repoint (the rds ->
+  # aurora BI switch, a cutover) modifies the endpoint in place, and a Job minted by that
+  # would issue resume-processing against a target that needs reload-target. See bi.tf.
   value = try(substr(sha256(join(":", [
     aws_dms_replication_config.this[0].arn,
     aws_dms_replication_config.this[0].source_endpoint_arn,
     aws_dms_replication_config.this[0].target_endpoint_arn,
     sha256(aws_dms_replication_config.this[0].table_mappings),
     sha256(aws_dms_replication_config.this[0].replication_settings),
+    aws_dms_replication_config.this[0].compute_config[0].replication_subnet_group_id,
+    join(",", sort(tolist(aws_dms_replication_config.this[0].compute_config[0].vpc_security_group_ids))),
+    aws_dms_replication_config.this[0].compute_config[0].kms_key_id,
+    tostring(aws_dms_replication_config.this[0].compute_config[0].multi_az),
     tostring(var.bi_dms_min_dcu),
     tostring(var.bi_dms_max_dcu),
   ])), 0, 8), "")
