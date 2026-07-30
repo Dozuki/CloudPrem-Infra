@@ -186,6 +186,8 @@ resource "aws_kms_key" "eks" {
   description             = "EKS Secret Encryption Key"
   enable_key_rotation     = true
   deletion_window_in_days = var.protect_resources ? 30 : 7
+
+  tags = local.tags
 }
 
 resource "aws_iam_policy" "assume_cross_account_role" {
