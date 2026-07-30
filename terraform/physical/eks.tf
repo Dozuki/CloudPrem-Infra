@@ -82,6 +82,8 @@ data "aws_iam_policy_document" "eks_worker" {
       "s3:GetObjectAcl",
       "s3:ListBucket",
       "s3:CopyObject",
+      "s3:DeleteObject",
+      "s3:DeleteObjectVersion",
       "s3:DeleteObjectTagging",
       "s3:ReplicateTags",
       "s3:PutObjectVersionTagging",
