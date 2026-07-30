@@ -141,6 +141,13 @@ resource "aws_dms_endpoint" "target" {
 # this resource, not a start call. The restart lambda handles failures long before that, and
 # there is a dedicated alarm on the deprovision event in monitoring.tf, because that is the
 # one state the lambda cannot rescue.
+#
+# Do NOT re-add a destroy-time stop provisioner here. AWS refuses to delete a replication that
+# is not STOPPED or FAILED, which is exactly why the old task carried a null_resource calling
+# dms-stop.sh (see hashicorp/terraform-provider-aws#2083 - aws_dms_replication_task never
+# stopped itself). This resource does: its Delete calls stopReplication first, which no-ops if
+# the replication is already stopped/created/failed and otherwise stops and waits, and only
+# then deletes. The shell script was working around a gap that no longer exists.
 resource "aws_dms_replication_config" "this" {
   count = local.dms_enabled ? 1 : 0
 
