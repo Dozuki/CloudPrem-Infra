@@ -121,6 +121,9 @@ No modules.
 | [vault_policy.stack](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_ecr_authorization_token.chart](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ecr_authorization_token) | data source |
+| [aws_ecr_image.app_pin](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ecr_image) | data source |
+| [aws_ecr_image.chart_pin](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ecr_image) | data source |
+| [aws_ecr_image.nextjs_pin](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ecr_image) | data source |
 | [aws_eks_cluster.main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/eks_cluster) | data source |
 | [aws_iam_policy_document.flux_source_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_kms_key.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
@@ -216,6 +219,7 @@ No modules.
 | <a name="input_tls_cert"></a> [tls\_cert](#input\_tls\_cert) | Base64-encoded PEM TLS certificate (full chain) for the gateway. When set, cert-manager/ACME is bypassed. On AWS Terraform seeds it into Vault (secret/<customer>/<env>/tls) and ESO owns tls-secret; on azure/onprem the chart renders tls-secret. Empty = cert-manager/ACME (AWS) or azure\_tls\_mode (azure). Certs are public data and can live in env.hcl; keep tls\_key a masked stack TF\_VAR. | `string` | `""` | no |
 | <a name="input_tls_key"></a> [tls\_key](#input\_tls\_key) | Base64-encoded PEM TLS private key matching tls\_cert. Required when tls\_cert is set. Set as a masked Spacelift TF\_VAR on the env's logical stack, not in git. | `string` | `""` | no |
 | <a name="input_vault_address"></a> [vault\_address](#input\_vault\_address) | Vault server address accessible from within the cluster (PrivateLink). | `string` | n/a | yes |
+| <a name="input_verify_artifact_pins"></a> [verify\_artifact\_pins](#input\_verify\_artifact\_pins) | Fail the plan when a pinned artifact (image\_tag, nextjs\_tag, chart\_version) does not exist in the env's ECR registry. Escape hatch for registries that revoke cross-account DescribeImages; see artifact-pins.tf. | `bool` | `true` | no |
 | <a name="input_webnextjs_env"></a> [webnextjs\_env](#input\_webnextjs\_env) | Extra container env vars for the web-nextjs pods, merged into the chart's webNextjs.env map. Per-env service URLs live here (CREATOR\_PRO\_SERVICE\_API\_URL, MARKETPLACE\_SERVICE\_API\_URL, ...); an empty map renders nothing. The chart's SERVER\_SIDE\_MONOLITH\_API\_URL default is preserved by the merge. | `map(string)` | `{}` | no |
 | <a name="input_zendesk_jwt_signing_key"></a> [zendesk\_jwt\_signing\_key](#input\_zendesk\_jwt\_signing\_key) | Zendesk JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'zendesk' secret, which chart >= 1.13.0 reads unconditionally. | `string` | `""` | no |
 

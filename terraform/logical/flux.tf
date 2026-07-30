@@ -497,12 +497,24 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       chartRef         = { kind = "OCIRepository", name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
       install          = { disableWait = false, timeout = "4h30m", remediation = { retries = 0 } }
       # crds=CreateReplace so chart CRD changes actually apply on upgrade - helm-controller skips CRD updates by default.
-      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 0, remediateLastFailure = false } }
-      # driftDetection in warn mode surfaces cluster drift (events + metrics) WITHOUT auto-correcting it, so nothing gets
-      # reverted under us. Jobs are ignored (empty-string JSON pointer = the whole object) so a completed migration/db-create
-      # Job never registers as drift and never gets recreated/rerun - the reason drift detection was omitted before.
+      # upgrade retries=2: with retries=0 ONE failed upgrade (an eviction, a
+      # not-yet-mirrored image, a transient webhook) stalls the release until a
+      # human does the requestedAt+forceAt dance (seen live 2026-07-30). Two
+      # retries let it self-heal once the cause clears; remediateLastFailure
+      # stays false so a failure never auto-rolls-back over a completed
+      # migration. Install keeps retries=0: install remediation uninstalls
+      # first, which is not a loop we want running unattended.
+      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 2, remediateLastFailure = false } }
+      # driftDetection=enabled corrects cluster drift back to the chart's desired state. Promoted from warn after a fleet
+      # sweep (2026-07-30) found drift on exactly one env, and it was stale old-chart state helm's 3-way merge could never
+      # fix: failed upgrade attempts record the new manifest without fully applying it, so the next successful upgrade sees
+      # "no delta" and live objects keep pre-upgrade specs forever (one env's BTP rate limits and a missing HTTPRoute
+      # timeout). Correction is the only mechanism that heals that class. Hand-patches on live objects now get reverted on
+      # the next reconcile - fold wanted changes into values instead. Jobs are ignored (empty-string JSON pointer = the
+      # whole object) so a completed migration/db-create Job never registers as drift and never gets recreated/rerun - the
+      # reason drift detection was omitted before.
       driftDetection = {
-        mode = "warn"
+        mode = "enabled"
         ignore = [
           # Completed migration/db-create Jobs must never register as drift.
           { paths = [""], target = { kind = "Job" } },

@@ -456,6 +456,12 @@ variable "chart_version" {
   default     = "1.7.1"
 }
 
+variable "verify_artifact_pins" {
+  description = "Fail the plan when a pinned artifact (image_tag, nextjs_tag, chart_version) does not exist in the env's ECR registry. Escape hatch for registries that revoke cross-account DescribeImages; see artifact-pins.tf."
+  type        = bool
+  default     = true
+}
+
 variable "ghcr_pull_username" {
   description = "GitHub username for pulling MPC images from GHCR (Azure only)."
   type        = string
