@@ -65,6 +65,8 @@ resource "aws_kms_key" "bi" {
   description             = "BI KMS key for replication credentials"
   enable_key_rotation     = true
   deletion_window_in_days = var.protect_resources ? 30 : 7
+
+  tags = local.tags
 }
 
 resource "aws_dms_replication_instance" "this" {

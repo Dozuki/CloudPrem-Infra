@@ -68,12 +68,20 @@ locals {
   // If you add a tag, it must never be blank.
   tags = merge(
     {
-      Terraform   = "true"
-      Project     = "Dozuki"
+      Terraform = "true"
+      # Service names the WORKLOAD, and this module is the managed private cloud product.
+      # Not "cloudprem" - that term is deprecated. Not "<customer>-<env>" either: Customer and
+      # Environment already carry that, and StackPath pins the exact unit, so a composite here
+      # would be pure duplication. What Service uniquely buys is separating the MPC fleet from
+      # shared infrastructure (vault) and from internal tooling (resource-reaper, airgap-hauler,
+      # spacelift-private-worker, ...), which have no customer or environment at all.
       Service     = "mpc"
       Customer    = coalesce(var.customer, "dozuki")
-      Identifier  = coalesce(var.customer, "Dozuki")
       Environment = var.environment
+      # Project and Identifier removed. Project was the constant "Dozuki" on every resource in
+      # every account, so it grouped nothing; Identifier was a verbatim duplicate of Customer.
+      # The tagging policy always had Project collapsing into Service. The keys stay ACTIVE as
+      # cost allocation tags org-wide (other accounts may group on them), we just stop emitting.
     },
     var.delete_after != "" ? { deleteAfter = var.delete_after } : {},
   )

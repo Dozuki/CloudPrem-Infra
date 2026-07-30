@@ -101,13 +101,21 @@ data "aws_iam_policy_document" "s3_kms_key_policy" {
   }
 }
 
-#tfsec:ignore:aws-kms-auto-rotate-keys
 resource "aws_kms_key" "s3" {
   count = local.use_provided_s3_kms ? 0 : 1
 
-  description             = "KMS key to encrypt S3 bucket contents"
+  description = "KMS key to encrypt S3 bucket contents"
+  # Rotation was suppressed with #tfsec:ignore:aws-kms-auto-rotate-keys rather than reasoned
+  # about, and this was the only KMS key in the module without it. Enabling it is safe on an
+  # existing key: AWS KMS retains ALL previous key material for the life of the key, and on
+  # decrypt it automatically selects the version that encrypted the ciphertext. Nothing is
+  # re-encrypted, the key id and ARN do not change, and AWS documents the rotation as
+  # transparent to server-side encryption in AWS services. Default period is 365 days,
+  # counted from when rotation is enabled. (Security Hub KMS.4.)
+  enable_key_rotation     = true
   deletion_window_in_days = var.protect_resources ? 30 : 7
   policy                  = data.aws_iam_policy_document.s3_kms_key_policy.json
+  tags                    = local.tags
 }
 resource "aws_kms_alias" "s3" {
   count = local.use_provided_s3_kms ? 0 : 1

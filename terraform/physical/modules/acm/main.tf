@@ -16,9 +16,10 @@ locals {
 
   # Tags for all resources. If you add a tag, it must never be blank.
   tags = {
-    Terraform   = "true"
-    Project     = "Dozuki"
-    Identifier  = coalesce(var.identifier, "Dozuki")
+    Terraform = "true"
+    # Matches the physical root: Service names the workload; Project (constant) and Identifier
+    # (duplicate of Customer) are dropped.
+    Service     = "mpc"
     Environment = var.environment
   }
 }

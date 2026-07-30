@@ -31,6 +31,8 @@ resource "aws_iam_policy" "lambda_permissions" {
 
   name   = "${local.identifier}-${data.aws_region.current.region}-lambda-alias"
   policy = data.aws_iam_policy_document.lambda_permissions[0].json
+
+  tags = local.tags
 }
 
 resource "aws_iam_role" "lambda_execution" {
@@ -38,6 +40,8 @@ resource "aws_iam_role" "lambda_execution" {
 
   name               = "${local.identifier}-${data.aws_region.current.region}-lambda-execution"
   assume_role_policy = data.aws_iam_policy_document.lambda_execution[0].json
+
+  tags = local.tags
 }
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
@@ -299,6 +303,8 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_space_alarm" {
       }
     }
   }
+
+  tags = local.tags
 }
 
 module "rds_connections_alarm" {
@@ -409,6 +415,8 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
       local.aurora_migration_dms ? [aws_dms_replication_task.aurora_migration[0].replication_task_arn] : []
     ))
   })
+
+  tags = local.tags
 }
 
 resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
@@ -456,6 +464,8 @@ resource "aws_lambda_function" "sns_to_slack" {
       AWS_ACCOUNT_ID    = data.aws_caller_identity.current.account_id
     }
   }
+
+  tags = local.tags
 }
 
 resource "aws_sns_topic_subscription" "sns_to_slack_subscription" {
@@ -517,6 +527,8 @@ resource "aws_lambda_function" "dms_restart" {
       RESTARTABLE_TASK_ARNS = join(",", [for t in aws_dms_replication_task.this : t.replication_task_arn])
     }
   }
+
+  tags = local.tags
 }
 
 resource "aws_sns_topic_subscription" "dms_restart_subscription" {
@@ -562,6 +574,8 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
 
   alarm_actions = [module.sns.topic_arn]
   ok_actions    = [module.sns.topic_arn]
+
+  tags = local.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
@@ -586,6 +600,8 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
 
   alarm_actions = [module.sns.topic_arn]
   ok_actions    = [module.sns.topic_arn]
+
+  tags = local.tags
 }
 
 # --- Aurora CloudWatch alarms (count-gated on aurora engine) --- #

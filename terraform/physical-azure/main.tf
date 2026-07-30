@@ -42,11 +42,10 @@ locals {
   identifier_compact = replace(local.identifier, "-", "")
 
   tags = {
-    Terraform   = "true"
-    Project     = "mpc"
+    Terraform = "true"
+    # Project held the same value as Service, and Identifier duplicated Customer; both dropped.
     Service     = "mpc"
     Customer    = coalesce(var.customer, "dozuki")
-    Identifier  = local.identifier
     Environment = var.environment
   }
 
