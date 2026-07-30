@@ -555,11 +555,10 @@ variable "flux_slack_webhook_url" {
   sensitive   = true
 }
 
-variable "alertmanager_slack_silence_password" {
-  description = "Shared password used by the standalone Slack interaction handler to create Alertmanager silences. When set on AWS, Terraform publishes only its htpasswd hash to the environment's Vault ops-auth secret and enables the interactive button."
-  type        = string
-  default     = ""
-  sensitive   = true
+variable "alertmanager_slack_interactivity_enabled" {
+  description = "Enable the Slack Silence 2h action after the standalone signature-verified handler is deployed. The handler and Alertmanager reuse the fleet-global ops BasicAuth credential."
+  type        = bool
+  default     = false
 }
 
 # ---------------------------------------------------------------------------

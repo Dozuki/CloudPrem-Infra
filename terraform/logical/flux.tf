@@ -160,13 +160,11 @@ locals {
         slack = {
           enabled = var.cloud == "aws"
           # The shared Slack app sends Silence 2h button callbacks to the
-          # standalone interaction handler. Its dedicated credential can only
-          # POST the exact silence API route; the Alertmanager UI retains the
-          # per-environment ops login.
-          # Keep the action off until Terraform has distributed the shared
-          # password to both the standalone handler and this environment's Vault path.
+          # standalone interaction handler, which reuses the fleet-global ops
+          # login. Keep the button off until that signature-verified handler is
+          # deployed and configured in Slack.
           interactivity = {
-            enabled = var.cloud == "aws" && var.alertmanager_slack_silence_password != ""
+            enabled = var.cloud == "aws" && var.alertmanager_slack_interactivity_enabled
           }
         }
       }
