@@ -22,10 +22,10 @@ spec:
   # DDVtest's ceiling of 10. Held for the life of the child, so it covers provision through
   # teardown rather than releasing between phases and letting another run slip in.
   synchronization:
-    semaphore:
-      configMapKeyRef:
-        name: harness-semaphore
-        key: concurrent-stacks
+    semaphores:
+      - configMapKeyRef:
+          name: harness-semaphore
+          key: concurrent-stacks
   arguments:
     parameters:
       - name: config
