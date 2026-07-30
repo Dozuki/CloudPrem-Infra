@@ -246,33 +246,35 @@ variable "rds_backup_retention_period" {
 }
 
 variable "rds_engine_family" {
-  description = "Parameter-group family for the provisioned RDS primary. Legacy path only and pinned to the 8.0 family for the same reason as rds_engine_version: those instances are Aurora-migration rollback anchors headed for deletion, not for a major upgrade. Aurora derives its own family from aurora_engine_version."
+  description = "Parameter-group family for the provisioned RDS primary and the legacy BI instance. Tracks rds_engine_version's major.minor; 8.4 by default now that 8.0 is past end of standard support. Existing 8.0 stacks pin \"8.0\". Aurora derives its own family from aurora_engine_version."
   type        = string
-  default     = "8.0"
+  default     = "8.4"
 
   validation {
-    condition     = contains(["5.7", "8.0"], var.rds_engine_family)
-    error_message = "Only 5.7 or 8.0 are allowed mysql engine family"
+    condition     = contains(["5.7", "8.0", "8.4"], var.rds_engine_family)
+    error_message = "Only 5.7, 8.0 or 8.4 are allowed mysql engine families"
   }
 }
 variable "rds_engine_version" {
   description = <<-EOT
     MySQL engine version for the PROVISIONED RDS primary (db_engine = "rds") and its read
-    replica. Legacy path only: db_engine defaults to "aurora", so a new stack never creates
-    one of these.
+    replica. Legacy path: db_engine defaults to "aurora", so a new stack never creates one.
 
-    Deliberately still an 8.0 version, and deliberately NOT bumped to 8.4. RDS for MySQL 8.0
-    left standard support on 2026-07-31, so instances on it are auto-enrolled in RDS Extended
-    Support and billed per vCPU-hour. The fix for the remaining ones is RETIREMENT, not an
-    upgrade: they are all Aurora-migration rollback anchors. Changing this default would plan a
-    MAJOR in-place upgrade on every live RDS primary at once (no env pins it), which is a large
-    disruptive operation on production databases that are about to be deleted anyway.
+    Defaults to an 8.4 version. RDS for MySQL 8.0 left standard support on 2026-07-31, so
+    anything still on it is auto-enrolled in RDS Extended Support and billed per vCPU-hour -
+    the codebase should not be handing that to a new stack by default.
 
-    New capacity avoids Extended Support by being Aurora (8.4) instead - see db_engine for the
-    primary and bi_db_engine for the BI database.
+    EXISTING rds stacks must pin their current 8.0 family, and every one of them does. A major
+    version change plans an in-place upgrade, which is NOT how the remaining 8.0 instances get
+    fixed: they are either Aurora-migration rollback anchors headed for deletion, or live
+    primaries whose route to 8.4 is the Aurora migration itself. Neither wants a major upgrade
+    triggered by a module default.
+
+    Prefer the bare family ("8.4") over an exact minor where you can: AWS resolves it to the
+    latest matching minor, so auto_minor_version_upgrade drift never shows up as a diff.
   EOT
   type        = string
-  default     = "8.0.43"
+  default     = "8.4"
 
   validation {
     condition     = startswith(var.rds_engine_version, "5") || startswith(var.rds_engine_version, "8")
