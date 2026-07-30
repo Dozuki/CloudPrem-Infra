@@ -60,8 +60,55 @@ rds_endpoint() { aws rds describe-db-instances --db-instance-identifier "$SRC_ID
 aurora_endpoint() { aws rds describe-db-clusters --db-cluster-identifier "$CLUSTER_ID" --region "$REGION" --query 'DBClusters[0].Endpoint' --output text; }
 task_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text; }
 task_status() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none; }
-bi_task_arn() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null; }
-bi_task_status() { aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none; }
+# The BI replication is DMS Serverless (a replication-config); the migration task above is
+# still provisioned. Two different API surfaces, so probe once and branch. Getting this wrong
+# is silent rather than loud: describe-replication-tasks simply does not return a
+# replication-config, so bi_task_status would report "none", the fence would skip stopping BI
+# without saying so, and bi-epoch would try to reload a task that does not exist.
+BI_KIND=""
+bi_kind() {
+  if [ -z "$BI_KIND" ]; then
+    if aws dms describe-replication-configs --region "$REGION" \
+         --filters "Name=replication-config-id,Values=$ID" \
+         --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text >/dev/null 2>&1; then
+      BI_KIND=serverless
+    else
+      BI_KIND=task
+    fi
+  fi
+  printf '%s' "$BI_KIND"
+}
+bi_task_arn() {
+  if [ "$(bi_kind)" = serverless ]; then
+    aws dms describe-replication-configs --region "$REGION" --filters "Name=replication-config-id,Values=$ID" --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text 2>/dev/null
+  else
+    aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null
+  fi
+}
+bi_task_status() {
+  if [ "$(bi_kind)" = serverless ]; then
+    aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$(bi_task_arn)" --query 'Replications[0].Status' --output text 2>/dev/null || echo none
+  else
+    aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none
+  fi
+}
+bi_stop() {
+  if [ "$(bi_kind)" = serverless ]; then
+    aws dms stop-replication --replication-config-arn "$(bi_task_arn)" --region "$REGION" >/dev/null
+  else
+    aws dms stop-replication-task --replication-task-arn "$(bi_task_arn)" --region "$REGION" >/dev/null
+  fi
+}
+# $1 = resume-processing | reload-target. Serverless keeps both, and reload-target means the
+# same thing on either. Note a serverless replication left stopped for 48h is deprovisioned
+# and cannot be resumed at all, so do not park BI stopped between fence and bi-epoch.
+bi_start() {
+  if [ "$(bi_kind)" = serverless ]; then
+    aws dms start-replication --replication-config-arn "$(bi_task_arn)" --start-replication-type "$1" --region "$REGION" >/dev/null
+  else
+    aws dms start-replication-task --replication-task-arn "$(bi_task_arn)" --start-replication-task-type "$1" --region "$REGION" >/dev/null
+  fi
+}
 # NOTE: the projection query has NO `| [0]`. A `| [0]` inside --query is a
 # pipe-expression the AWS CLI evaluates PER PAGE of paginated list-secrets
 # results, so a page without a match emits "None" and the match on a later page
@@ -383,7 +430,7 @@ fence)
   # (DMS rejects endpoint modification on a running task).
   if [ "$(bi_task_status)" = "running" ]; then
     say "stopping the BI DMS task ahead of the endpoint repoint"
-    aws dms stop-replication-task --replication-task-arn "$(bi_task_arn)" --region "$REGION" >/dev/null
+    bi_stop
     while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
   fi
   # Re-entry detection: a previous fence attempt that died AFTER the Terraform
@@ -751,16 +798,16 @@ EOF
   fi
   if [ "$(bi_task_status)" = "stopped" ]; then
     say "resuming the BI task against the (still RDS) source"
-    aws dms start-replication-task --replication-task-arn "$(bi_task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+    bi_start resume-processing
   fi
   say "ABORTED cleanly: source writable, Aurora untouched by the app, CDC re-established. Scale writers back up."
   ;;
 
 bi-epoch)
   ST=$(bi_task_status)
-  [ "$ST" = "stopped" ] || { [ "$ST" = "running" ] && { aws dms stop-replication-task --replication-task-arn "$(bi_task_arn)" --region "$REGION" >/dev/null; while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done; }; }
+  [ "$ST" = "stopped" ] || { [ "$ST" = "running" ] && { bi_stop; while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done; }; }
   say "reloading the BI target from the (now Aurora) source"
-  aws dms start-replication-task --replication-task-arn "$(bi_task_arn)" --start-replication-task-type reload-target --region "$REGION" >/dev/null
+  bi_start reload-target
   say "BI task reloading (its source endpoint followed the flipped db host at the cutover apply)"
   ;;
 
