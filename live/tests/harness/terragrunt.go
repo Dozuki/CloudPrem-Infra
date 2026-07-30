@@ -137,13 +137,44 @@ func (o TGOptions) Apply() error {
 
 // destroyModule destroys a single layer in its own directory (not run --all), so
 // one layer's failure doesn't abort the others.
+//
+// Retries the same transient faults Apply does, for the same reason: destroy is
+// idempotent, and a request that never reached AWS says nothing about the stack. This
+// was missing at first and it was expensive. Cycle 48's recovery-stack physical destroy
+// died 9 seconds in on `lookup iam.amazonaws.com: no such host`, which left the stack
+// up - and because the recovery stack holds the S3 replication config on the SOURCE
+// stack's DR buckets, the source teardown then could not delete their versioning
+// ("InvalidBucketState: A replication configuration is present"). One transient DNS
+// blip therefore stranded BOTH stacks and 49 resources. Apply had this retry; destroy,
+// which is the half that actually costs money when it fails, did not.
 func (o TGOptions) destroyModule(module string) error {
-	cmd := exec.Command("terragrunt", "destroy", "--non-interactive", "-auto-approve")
-	cmd.Dir = filepath.Join(o.WorkingDir, module)
-	cmd.Env = o.env()
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	const maxAttempts = 4
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		cmd := exec.Command("terragrunt", "destroy", "--non-interactive", "-auto-approve")
+		cmd.Dir = filepath.Join(o.WorkingDir, module)
+		cmd.Env = o.env()
+		var buf bytes.Buffer
+		cmd.Stdout = io.MultiWriter(os.Stderr, &buf)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
+		err = cmd.Run()
+		if err == nil {
+			return nil
+		}
+		out := buf.String()
+		if attempt < maxAttempts && vaultTokenExpiredRE.MatchString(out) && refreshVaultToken() {
+			fmt.Fprintf(os.Stderr, "\n>> teardown: Vault token had expired; re-logged in and retrying %s destroy (attempt %d/%d)\n\n", module, attempt+1, maxAttempts)
+			continue
+		}
+		if attempt < maxAttempts && transientNetRE.MatchString(out) {
+			wait := time.Duration(attempt*30) * time.Second
+			fmt.Fprintf(os.Stderr, "\n>> teardown: transient network failure (request never reached AWS); retrying %s destroy in %s (attempt %d/%d)\n\n", module, wait, attempt+1, maxAttempts)
+			time.Sleep(wait)
+			continue
+		}
+		return err
+	}
+	return err
 }
 
 // Destroy tears the stack down resiliently. `run --all destroy` aborts the whole
