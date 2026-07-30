@@ -253,12 +253,33 @@ else
 ERROR: terragrunt ${tg_major}.${tg_minor}.x is too old for this harness (need >= ${TG_MIN_MAJOR}.${TG_MIN_MINOR}).
   The harness uses the post-0.78 CLI (\`run --all\`, \`--non-interactive\`). An older
   binary fails with a bare "flag provided but not defined" partway into a run.
-  Install a current one, e.g.:  tgenv install 1.1.1 && tgenv use 1.1.1
+  Install the version the fleet pins:  tgenv install 0.99.4 && tgenv use 0.99.4
   Note tgenv switches the ACTIVE version globally - do not switch while a run is in flight.
 EOF
     exit 1
   fi
   echo ">> terragrunt ${tg_major}.${tg_minor}.x — OK"
+fi
+
+# The engine version is NOT gated, only reported - but report it loudly, because a run on
+# a different OpenTofu than Spacelift uses is evidence about a toolchain nobody deploys.
+# One run got most of the way through on 1.12.2 while the fleet sat on 1.11.8, and nothing
+# in the output said so. Not fatal: local experiments on a newer engine are legitimate, and
+# a hard gate here would also strand anyone mid-upgrade. Keep these in step with
+# infra-live/_spacelift/stacks.tf (terraform_version / terragrunt_version) - that file is
+# the source of truth, this is a mirror.
+FLEET_TOFU_VERSION="1.11.8"
+FLEET_TG_VERSION="0.99.4"
+tofu_raw="$("$TG_TF_PATH" version 2>/dev/null | head -1)"
+tofu_ver="$(printf '%s' "$tofu_raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+if [ "$tofu_ver" = "$FLEET_TOFU_VERSION" ]; then
+  echo ">> OpenTofu ${tofu_ver} — matches the fleet pin"
+else
+  echo ">> WARNING: OpenTofu ${tofu_ver:-unknown} != fleet pin ${FLEET_TOFU_VERSION}. This run tests an" >&2
+  echo ">>          engine Spacelift does not use.  tofuenv install ${FLEET_TOFU_VERSION} && tofuenv use ${FLEET_TOFU_VERSION}" >&2
+fi
+if [ -n "${tg_ver:-}" ] && [ "$(printf '%s' "$tg_raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" != "$FLEET_TG_VERSION" ]; then
+  echo ">> WARNING: terragrunt is not the fleet pin ${FLEET_TG_VERSION} (1.x double-assumes iam_role; infra-live #158)." >&2
 fi
 
 [ "$DO_VAULT" = 1 ] && setup_vault
