@@ -92,9 +92,13 @@ bi_task_arn() {
     aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null
   fi
 }
+BI_ARN=""
+bi_arn_cached() { [ -n "$BI_ARN" ] || BI_ARN=$(bi_task_arn); printf '%s' "$BI_ARN"; }
 bi_task_status() {
   if [ "$(bi_kind)" = serverless ]; then
-    aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$(bi_task_arn)" --query 'Replications[0].Status' --output text 2>/dev/null || echo none
+    # Cached ARN: this is called every 10s in the stop/reload wait loops, and resolving the
+    # config ARN inside the filter each time doubled the API calls per iteration for no gain.
+    aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$(bi_arn_cached)" --query 'Replications[0].Status' --output text 2>/dev/null || echo none
   else
     aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none
   fi

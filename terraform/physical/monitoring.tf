@@ -27,7 +27,6 @@ data "aws_iam_policy_document" "lambda_permissions" {
       # looking for the restart that never happened.
       "dms:DescribeReplicationTasks",
       "dms:StartReplicationTask",
-      "dms:DescribeReplications",
       "dms:StartReplication",
       # get_task_name resolves a replication-config ARN to its identifier through this. Without
       # it the call returns AccessDenied, which that function deliberately swallows so an alert

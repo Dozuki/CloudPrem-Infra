@@ -4,11 +4,16 @@
 #
 # Usage: ./dms-stop.sh <DMS_TASK_ARN> <AWS_REGION> <AWS_PROFILE>
 #
-# No longer wired to a destroy-time provisioner: the BI replication is DMS Serverless and
-# that resource stops itself before delete. This is now an OPERATOR tool, and it has one
-# job that still matters - stopping the OLD provisioned replication task before the apply
-# that replaces it with a serverless config. That destroy has no provisioner behind it any
-# more, and AWS will not delete a running task, so the upgrade apply fails without this.
+# No longer wired to a destroy-time provisioner, and no longer required for anything. The
+# provider stops a replication task before deleting it (v6.56.0
+# resourceReplicationTaskDelete -> stopReplicationTask, which waits for stopped), so the
+# apply that replaces the old task with a serverless config succeeds on its own. This was a
+# workaround for provider issue #2083 and the provider has absorbed it.
+#
+# Kept as an OPTIONAL operator tool. Its remaining use is ordering: nothing sequences the
+# old task's destroy against the new replication config's create, so pre-stopping avoids a
+# brief window where both write the same target. Note the unconditional sleep 300 below -
+# fine for a deliberate pre-step, which is why this is not on any automatic path.
 
 TRIGGER="$1"
 AWS_REGION="$2"

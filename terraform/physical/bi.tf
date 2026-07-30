@@ -159,17 +159,20 @@ resource "aws_dms_endpoint" "target" {
 # stopReplication first, which no-ops when already stopped/created/failed and otherwise stops
 # and waits, then deletes.
 #
-# THE UPGRADE APPLY IS DIFFERENT, and it is the one that bites. On an existing DMS-enabled
-# stack the resource being destroyed is the OLD aws_dms_replication_task, which never stopped
-# itself (hashicorp/terraform-provider-aws#2083) - that is why it carried a null_resource
-# calling dms-stop.sh. Deleting that resource block deletes its destroy provisioner with it,
-# so nothing stops the running task and AWS refuses to delete it: the upgrade apply fails,
-# possibly after this config has already started loading the same target.
+# The upgrade apply needs no manual pre-step, contrary to what these comments said at first.
+# On an existing DMS-enabled stack the resource destroyed is the OLD
+# aws_dms_replication_task, and the locked provider (v6.56.0) stops it for us:
+# resourceReplicationTaskDelete calls stopReplicationTask, which no-ops when the task is not
+# running and otherwise issues StopReplicationTask and WAITS for stopped, before deleting.
+# dms-stop.sh and its null_resource were a workaround for provider issue #2083; the provider
+# has since absorbed it, so removing them costs nothing.
 #
-# So the BI replication MUST be stopped by hand before the first apply that picks this up:
-#   util/dms-stop.sh <task-arn> <region> <profile>
-# kept in the tree for exactly that. This applies to ANY stack upgrading to this release, not
-# only ones switching bi_db_engine to "aurora".
+# What a manual pre-stop does still buy is ordering. Terraform has no dependency edge between
+# the old task's destroy and this config's create, so the serverless replication can begin its
+# full load while the old task is still stopping - briefly two replications writing the same
+# target. BI is rebuildable and the full load wins, so this is untidy rather than harmful, but
+# pre-stopping with util/dms-stop.sh (kept as an optional operator tool) is how you get the
+# clean sequence if you want it.
 resource "aws_dms_replication_config" "this" {
   count = local.dms_enabled ? 1 : 0
 
