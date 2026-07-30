@@ -561,3 +561,56 @@ variable "alertmanager_slack_silence_password" {
   default     = ""
   sensitive   = true
 }
+
+# ---------------------------------------------------------------------------
+# memcached proxy tier (chart >= 2.1.0). All default OFF - the rendered values
+# are unchanged from before these existed until an env opts in.
+#
+# What it buys: the app builds its memcached connection PER REQUEST and
+# Cache::giveUpOnMemcache() THROWS when the connect fails, which on a web
+# request is a 500. So today every memcached pod restart is a small outage. A
+# proxy tier stays up across backend restarts, so the connect always succeeds
+# and a dead backend degrades to cache misses instead.
+#
+# What it does NOT buy: failover. Keys are hashed to one backend and ownership
+# never moves. See the chart's values.yaml for why failover was removed (it
+# resurrected logged-out sessions on failback).
+#
+# ROLL OUT AS THREE SEPARATE RELEASES, in this order. The chart refuses to
+# render if you skip one, but it can only check the VALUES, not whether the
+# rollout finished - so wait for each to settle:
+#   A. memcached_proxy_deploy   = true   backends + proxy come up unused.
+#   B. memcached_ascii_protocol = true   consumers switch to text protocol.
+#                                        The proxy is TEXT-ONLY and binary
+#                                        requests HANG rather than erroring.
+#   C. memcached_proxy_enabled  = true   Service selector flips to the proxy.
+# ---------------------------------------------------------------------------
+
+variable "memcached_ascii_protocol" {
+  description = "Switch the app's cache client to the ASCII/text protocol (renders isMcRouterEnabled into memcached.json). Safe on its own against plain memcached, and REQUIRED before memcached_proxy_enabled because the built-in proxy is text-only. Phase B."
+  type        = bool
+  default     = false
+}
+
+variable "memcached_proxy_deploy" {
+  description = "Bring up the memcached backends StatefulSet and the proxy tier alongside the existing single memcached, taking no traffic. Phase A."
+  type        = bool
+  default     = false
+}
+
+variable "memcached_proxy_enabled" {
+  description = "Flip the dozuki-memcached Service selector to the proxy tier and remove the single memcached Deployment. Requires memcached_proxy_deploy and memcached_ascii_protocol. Phase C."
+  type        = bool
+  default     = false
+}
+
+variable "memcached_proxy_backend_replicas" {
+  description = "Number of memcached cache backends behind the proxy. One by default: a second backend buys capacity, not availability, and CHANGING THIS ON A LIVE ENV IS NOT SAFE - the pool hashes with JumpHash, so the count is part of every key's identity and a change moves ownership mid-rollout. Resharding requires a deliberate cold-cache procedure; see the chart's values.yaml."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.memcached_proxy_backend_replicas >= 1
+    error_message = "memcached_proxy_backend_replicas must be at least 1: zero renders an empty pool and every key resolves to nothing."
+  }
+}

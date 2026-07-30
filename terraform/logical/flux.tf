@@ -126,7 +126,19 @@ locals {
       }
     }
 
-    memcached = { host = local.memcached_host, enabled = true }
+    # proxy.* is always emitted, even when off. The chart derives nil-safe locals
+    # from this map, and an env whose stored values predate it would otherwise
+    # render nothing for the key at all.
+    memcached = {
+      host          = local.memcached_host
+      enabled       = true
+      asciiProtocol = var.memcached_ascii_protocol
+      proxy = {
+        deploy          = var.memcached_proxy_deploy
+        enabled         = var.memcached_proxy_enabled
+        backendReplicas = var.memcached_proxy_backend_replicas
+      }
+    }
 
     vault = { enabled = var.cloud == "aws", address = var.vault_address }
 
