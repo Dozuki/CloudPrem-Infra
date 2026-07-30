@@ -42,6 +42,29 @@ locals {
   rds_use_tf_cmk  = var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds" && !local.rds_snapshot_restored_instance
   rds_kms_key_arn = local.rds_use_tf_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
 
+  # Aurora gets its own key selection, WITHOUT the snapshot exclusion above, and the split
+  # matters more than it looks. The exclusion is about a limitation of
+  # RestoreDBInstanceFromDBSnapshot; Aurora does not share it. But db_engine stays "rds" for
+  # the whole DMS migration by design (the app is still served by the RDS primary until the
+  # cutover apply), so a stack mid-migration satisfies rds_snapshot_restored_instance while
+  # aurora.tf is creating a brand-new EMPTY cluster that DMS will load. Feeding that cluster
+  # rds_kms_key_arn denied it a CMK for a reason that has nothing to do with it, and since the
+  # key is immutable at create the only way back is a snapshot-restore swap later.
+  #
+  # That is not hypothetical: it is why all four migrated 3M clusters sit on the AWS-managed
+  # key. Reading rds_adopt_dr_cmk = false on those envs suggested they had opted out, but this
+  # local would have overridden them to the managed key even set true.
+  #
+  # Safe for a snapshot-restored Aurora too, which is the case the exclusion was written for:
+  # RestoreDBClusterFromSnapshot accepts KmsKeyId and re-encrypts, and that asymmetry is
+  # exactly what the fleet's key-swap runbook depends on.
+  # aurora_present is in the condition so the key is created only when there is actually an
+  # Aurora cluster to encrypt. Without it, any stack with rds_adopt_dr_cmk = true but no Aurora
+  # (qa today) would mint a CMK on its next apply that nothing consumes, and it also keeps the
+  # aws_kms_key.rds_cmk[0] reference below safe when the count is zero.
+  aurora_use_tf_cmk  = var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds" && local.aurora_present
+  aurora_kms_key_arn = local.aurora_use_tf_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
+
   # RDS automated-backup cross-region replication is only possible when the DB
   # uses a customer-managed key (either our created CMK or an operator-pinned one).
   # Aurora DR uses Global Database, not automated-backup replication.
@@ -114,7 +137,9 @@ check "dr_rds_replicable" {
 # on its own, and it is the prerequisite for RDS automated-backup cross-region replication and
 # for encrypting an Aurora global secondary in the DR region.
 resource "aws_kms_key" "rds_cmk" {
-  count = local.rds_use_tf_cmk ? 1 : 0
+  # Either path can be the one that wants it: a fresh Aurora cluster mid-migration needs the
+  # key even when the RDS snapshot exclusion is holding rds_use_tf_cmk false.
+  count = local.rds_use_tf_cmk || local.aurora_use_tf_cmk ? 1 : 0
 
   description             = "${local.identifier} database encryption (customer-managed; DR-replicable)"
   enable_key_rotation     = true
