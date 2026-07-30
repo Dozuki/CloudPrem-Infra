@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.2.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.1.2...v8.2.0) (2026-07-30)
+
+
+### Features
+
+* **logical:** enable Alertmanager Slack notifications ([#370](https://github.com/Dozuki/CloudPrem-Infra/issues/370)) ([b1f12b7](https://github.com/Dozuki/CloudPrem-Infra/commit/b1f12b7049269fa96344b08b0a9527b0603d5448))
+* **physical:** make a customer-managed database key the default ([#371](https://github.com/Dozuki/CloudPrem-Infra/issues/371)) ([2b46ee6](https://github.com/Dozuki/CloudPrem-Infra/commit/2b46ee694dc67432da2f796d805a698febdd4d96))
+
 ## [8.1.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.1.1...v8.1.2) (2026-07-29)
 
 
