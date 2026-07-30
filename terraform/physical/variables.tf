@@ -314,9 +314,23 @@ variable "bi_db_engine" {
 
     Terraform cannot sequence it on its own: DMS refuses to modify an endpoint while the
     replication is running, so it has to be stopped first, and the new empty cluster then
-    needs reload-target to repopulate. Order is: stop-replication and wait for Stopped, apply
-    with the allow-db-replace label, then start-replication with reload-target and confirm the
-    full load. reload-target is NOT optional and the replication will not look broken without
+    needs reload-target to repopulate. Order is: stop-replication and wait for Stopped, clear
+    deletion protection on the outgoing RDS BI instance, apply with the allow-db-replace
+    label, then start-replication with reload-target and confirm the full load.
+
+    The deletion-protection step is not optional. The instance is created with
+    deletion_protection = var.protect_resources, the switch takes its count to 0, and RDS
+    refuses DeleteDBInstance on a protected instance - so without the pre-step the apply dies
+    mid-way, after the Aurora cluster exists and with the replication already stopped against
+    the 48h clock. Terraform cannot clear the flag itself: the same apply removes the
+    instance from config, so the changed attribute is never applied before the delete. Run it
+    out-of-band (a destroy does not diff against state, the drift is harmless):
+      aws rds modify-db-instance --db-instance-identifier <id>-dms-replica \
+        --no-deletion-protection --apply-immediately
+    Do NOT flip protect_resources stack-wide instead; that drops protection on the primary
+    and flips skip_final_snapshot everywhere.
+
+    reload-target is NOT optional and the replication will not look broken without
     it: the apply leaves the replication stopped, the logical layer's dms-start Job then
     resumes CDC against the new empty cluster, and the replication reports Running while
     holding no historical data. Check TablesLoaded against the previous table count, not the
