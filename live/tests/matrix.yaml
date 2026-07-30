@@ -99,7 +99,21 @@ configs:
       rds_multi_az: true
       enable_dr: true
       rds_adopt_dr_cmk: true     # RDS-only (DR backup replication); ignored on aurora
-      bi_dms_enabled: false
+      # This config used to build no BI database at all: rds_replica_database needs
+      # db_engine == "rds" and everything else needs dms_enabled, so enable_bi on its own
+      # bought a KMS key and a secret. These two flags make it the Aurora BI path -
+      # DMS Serverless replicating into an Aurora Serverless v2 cluster - which is what new
+      # stacks get and what nothing in the harness exercised. `full` keeps bi_db_engine at
+      # the "rds" default, so the provisioned path every existing stack is still on stays
+      # covered too.
+      #
+      # In the UPGRADE scenario the baseline ref predates bi_db_engine, so the baseline
+      # builds the provisioned pair (replication task + RDS replica) and the upgrade
+      # performs the real migration: task -> replication config, RDS replica -> Aurora.
+      # That works unattended only because protect_resources is false here; a stack with
+      # deletion protection on needs the out-of-band pre-step in the bi_db_engine docs.
+      bi_dms_enabled: true
+      bi_db_engine: aurora
       alarm_email: "devops@dozuki.com"
       # Same wiring min_default and full carry. WriteEnvHCL REPLACES env.hcl outright
       # rather than merging into the .skel, so anything omitted here silently falls back
@@ -171,6 +185,8 @@ configs:
       enable_dr: true
       rds_adopt_dr_cmk: true
       bi_dms_enabled: true
+      # bi_db_engine intentionally left at its "rds" default: this is the provisioned BI
+      # path the existing fleet runs. bi_ha covers the Aurora one.
       restore_drill: true         # consumed by the harness, NOT passed to terraform
       istio_mesh_state: "strict"
       alarm_email: "devops@dozuki.com"

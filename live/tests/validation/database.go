@@ -26,10 +26,25 @@ import (
 // So wait for a verdict rather than photographing a transition: poll until the task
 // reaches a state that answers the question, and fail immediately on the states that will
 // not improve instead of burning the whole budget to reach the same conclusion.
+// Serverless gets a much larger budget than the 15m a provisioned task needs. Nothing starts
+// a replication config until the logical layer's dms-start Job does, that Job first waits for
+// the app deployment to become available (gated behind db-migrations on a fresh stack), and
+// only then does DMS provision capacity and run its own Testing Connection phase. Greenfield
+// runs have taken ~40 minutes end to end, all of it healthy, which the 15m budget scored as a
+// stuck replication. The number is still only a backstop for something that never progresses.
 const (
-	dmsWaitTimeout = 15 * time.Minute
-	dmsPollEvery   = 15 * time.Second
+	dmsWaitTimeout           = 15 * time.Minute
+	dmsServerlessWaitTimeout = 60 * time.Minute
+	dmsPollEvery             = 15 * time.Second
 )
+
+// dmsTimeoutFor picks the budget off the ARN shape, same discriminator describeDMSTask uses.
+func dmsTimeoutFor(taskARN string) time.Duration {
+	if strings.Contains(taskARN, ":replication-config:") {
+		return dmsServerlessWaitTimeout
+	}
+	return dmsWaitTimeout
+}
 
 // dmsTerminalBad are the states no amount of waiting recovers from. "stopped" is
 // deliberately NOT here: a full-load-only task passes through it legitimately, so treating
@@ -59,8 +74,9 @@ func AssertDMSRunning(ctx context.Context, region, taskARN string) error {
 	}
 	c := databasemigrationservice.NewFromConfig(cfg)
 
+	budget := dmsTimeoutFor(taskARN)
 	started := time.Now()
-	deadline := started.Add(dmsWaitTimeout)
+	deadline := started.Add(budget)
 	last := ""
 
 	for {
@@ -94,7 +110,7 @@ func AssertDMSRunning(ctx context.Context, region, taskARN string) error {
 
 		if time.Now().After(deadline) {
 			return fmt.Errorf("DMS task %s stuck at status=%q after %s, want running/load-complete",
-				taskARN, status, dmsWaitTimeout)
+				taskARN, status, budget)
 		}
 		select {
 		case <-ctx.Done():
