@@ -65,43 +65,87 @@ task_status() { aws dms describe-replication-tasks --region "$REGION" --filters 
 # is silent rather than loud: describe-replication-tasks simply does not return a
 # replication-config, so bi_task_status would report "none", the fence would skip stopping BI
 # without saying so, and bi-epoch would try to reload a task that does not exist.
+#
+# Both probes below FAIL CLOSED. An earlier version swallowed the describe with
+# `2>/dev/null || true` and let the fall-through arm mean "task", so a denied or throttled call
+# - the empty string - classified as a provisioned task. That is the worst possible default
+# during the fence: bi_task_status would then query describe-replication-tasks, get "None" on
+# a serverless stack, and the fence would skip stopping a LIVE replication before repointing
+# its source endpoint. The trigger is not hypothetical: a runner role that predates the
+# serverless permissions (dms:DescribeReplicationConfigs, dms:DescribeReplications) misreads
+# every stack, every run, silently. BI_KIND is cached, so one bad call would poison the run.
+#
+# So: serverless requires a replication-config ARN, task requires a replication-task ARN, and
+# anything else - error, unreachable API, or both absent - either dies or is reported as
+# "none". Classification is never inferred from an absence.
 BI_KIND=""
 bi_kind() {
   if [ -z "$BI_KIND" ]; then
-    # Match on the ARN's CONTENT, not just the exit code. Today this call raises
-    # ResourceNotFoundFault (exit 254) when nothing matches, so an exit-code test happens to
-    # work - but several DMS describes return an empty list instead, in which case --query
-    # prints "None" and exits 0, and an exit-code test would misread a legacy provisioned BI
-    # task as serverless. That failure is silent and expensive: fence would skip stopping BI
-    # and bi-epoch would hand "None" to the serverless API mid-cutover. Requiring the string
-    # to look like a replication-config ARN is correct under either behaviour.
-    _bi_cfg=$(aws dms describe-replication-configs --region "$REGION" \
+    local out rc
+    out=$(aws dms describe-replication-configs --region "$REGION" \
       --filters "Name=replication-config-id,Values=$ID" \
-      --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text 2>/dev/null || true)
-    case "$_bi_cfg" in
+      --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text 2>&1) && rc=0 || rc=$?
+    case "$out" in
       *:replication-config:*) BI_KIND=serverless ;;
-      *) BI_KIND=task ;;
+      *)
+        # Only two shapes are allowed to mean "not serverless": a successful call that returned
+        # nothing (empty list, --query prints "None", exit 0) and an explicit not-found fault
+        # (exit 254 - what this filter raises today). Every other failure is an unknown, and an
+        # unknown must not become a classification.
+        if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | grep -q 'ResourceNotFoundFault'; then
+          die "cannot determine the BI replication kind: describe-replication-configs failed (exit $rc): $(printf '%s' "$out" | tr '\n' ' ')"
+        fi
+        # Positively confirm a provisioned task rather than assuming one.
+        local tout trc
+        tout=$(aws dms describe-replication-tasks --region "$REGION" \
+          --filters "Name=replication-task-id,Values=$ID" \
+          --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>&1) && trc=0 || trc=$?
+        case "$tout" in
+          *:rep:*|*:replication-task:*) BI_KIND=task ;;
+          *)
+            if [ "$trc" -ne 0 ] && ! printf '%s' "$tout" | grep -q 'ResourceNotFoundFault'; then
+              die "cannot determine the BI replication kind: describe-replication-tasks failed (exit $trc): $(printf '%s' "$tout" | tr '\n' ' ')"
+            fi
+            # Neither exists. Legitimate on a stack with BI switched off; callers branch on it.
+            BI_KIND=none
+            ;;
+        esac
+        ;;
     esac
   fi
   printf '%s' "$BI_KIND"
 }
 bi_task_arn() {
-  if [ "$(bi_kind)" = serverless ]; then
-    aws dms describe-replication-configs --region "$REGION" --filters "Name=replication-config-id,Values=$ID" --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text 2>/dev/null
-  else
-    aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text 2>/dev/null
-  fi
+  case "$(bi_kind)" in
+    serverless) aws dms describe-replication-configs --region "$REGION" --filters "Name=replication-config-id,Values=$ID" --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text ;;
+    task) aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].ReplicationTaskArn' --output text ;;
+    *) die "no BI replication (config or task) exists for $ID" ;;
+  esac
 }
 BI_ARN=""
 bi_arn_cached() { [ -n "$BI_ARN" ] || BI_ARN=$(bi_task_arn); printf '%s' "$BI_ARN"; }
+# Emits one of: a real DMS status, "not-started" (serverless config that has never run, so
+# describe-replications returns an empty list), or "none" (no BI at all). Dies on API error -
+# see the fail-closed note above; a status this cannot read is not a status of "not running".
 bi_task_status() {
-  if [ "$(bi_kind)" = serverless ]; then
-    # Cached ARN: this is called every 10s in the stop/reload wait loops, and resolving the
-    # config ARN inside the filter each time doubled the API calls per iteration for no gain.
-    aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$(bi_arn_cached)" --query 'Replications[0].Status' --output text 2>/dev/null || echo none
-  else
-    aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].Status' --output text 2>/dev/null || echo none
+  local out rc
+  case "$(bi_kind)" in
+    serverless)
+      # Cached ARN: this is called every 10s in the stop/reload wait loops, and resolving the
+      # config ARN inside the filter each time doubled the API calls per iteration for no gain.
+      out=$(aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$(bi_arn_cached)" --query 'Replications[0].Status' --output text 2>&1) && rc=0 || rc=$?
+      ;;
+    task)
+      out=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$ID" --query 'ReplicationTasks[0].Status' --output text 2>&1) && rc=0 || rc=$?
+      ;;
+    *) printf 'none'; return 0 ;;
+  esac
+  if [ "$rc" -ne 0 ]; then
+    printf '%s' "$out" | grep -q 'ResourceNotFoundFault' && { printf 'not-started'; return 0; }
+    die "cannot read the BI replication status (exit $rc): $(printf '%s' "$out" | tr '\n' ' ')"
   fi
+  [ "$out" = "None" ] && { printf 'not-started'; return 0; }
+  printf '%s' "$out"
 }
 bi_stop() {
   if [ "$(bi_kind)" = serverless ]; then
@@ -439,11 +483,21 @@ fence)
   # pair, zero signal-validity risk.
   # BI task must stop BEFORE the cutover apply mutates its source endpoint
   # (DMS rejects endpoint modification on a running task).
-  if [ "$(bi_task_status)" = "running" ]; then
-    say "stopping the BI DMS task ahead of the endpoint repoint"
-    bi_stop
-    while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
-  fi
+  # Enumerate both ways rather than testing for "running": an unrecognised status must stop the
+  # fence, not fall through as "nothing to stop". Getting this wrong repoints the endpoint under
+  # a live replication.
+  BIST=$(bi_task_status)
+  case "$BIST" in
+    running | starting | initializing | modifying)
+      say "stopping the BI replication ($BIST) ahead of the endpoint repoint"
+      bi_stop
+      while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
+      ;;
+    stopped | failed | created | not-started | deprovisioning | deprovisioned | none)
+      say "BI replication needs no stop (status=$BIST)"
+      ;;
+    *) die "unrecognised BI replication status '$BIST' - refusing to fence with a replication in an unknown state" ;;
+  esac
   # Re-entry detection: a previous fence attempt that died AFTER the Terraform
   # fence applied (e.g. mid-epoch failure) leaves the source read_only=1. The
   # marker step below writes to the source, so on a fenced source it would be
@@ -815,8 +869,23 @@ EOF
   ;;
 
 bi-epoch)
+  # reload-target needs the replication not running. Enumerated rather than written as a
+  # `stopped || running &&` chain: that form also exited non-zero (and so, under set -e, died
+  # with no message) for every other status, and it silently accepted "none".
   ST=$(bi_task_status)
-  [ "$ST" = "stopped" ] || { [ "$ST" = "running" ] && { bi_stop; while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done; }; }
+  case "$ST" in
+    running | starting | initializing | modifying)
+      say "stopping the BI replication ($ST) before the reload"
+      bi_stop
+      while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
+      ;;
+    stopped | failed | created | not-started) ;;
+    none) die "no BI replication exists for $ID - nothing to re-epoch" ;;
+    deprovisioning | deprovisioned)
+      die "the BI serverless replication is $ST (stopped or failed for 48h) - it cannot be resumed; recreate it with a physical apply, then re-run bi-epoch"
+      ;;
+    *) die "unrecognised BI replication status '$ST' - refusing to reload" ;;
+  esac
   say "reloading the BI target from the (now Aurora) source"
   bi_start reload-target
   say "BI task reloading (its source endpoint followed the flipped db host at the cutover apply)"
