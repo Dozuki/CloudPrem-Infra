@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.3.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.3...v8.3.4) (2026-07-30)
+
+
+### Bug Fixes
+
+* **physical:** app pods could never delete guide PDFs, grant s3:DeleteObject ([2a7b5a7](https://github.com/Dozuki/CloudPrem-Infra/commit/2a7b5a732435d8346a85435b0a824e6879ca16cc))
+
 ## [8.3.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.2...v8.3.3) (2026-07-30)
 
 
