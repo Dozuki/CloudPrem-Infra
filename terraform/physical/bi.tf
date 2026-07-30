@@ -364,9 +364,12 @@ module "bi_aurora" {
     parameters = [
       { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
       # DMS full-loads MySQL-compatible targets with LOAD DATA LOCAL INFILE, which the server
-      # refuses unless local_infile is on. Unconditional here, unlike the primary cluster where
-      # it is a migration-only relaxation: this cluster is a DMS target for its whole life, and
-      # a full load is how it gets rebuilt. Without it the task fails on the first table.
+      # refuses unless local_infile is on. Aurora MySQL already defaults it to 1, so this is a
+      # pin rather than a fix - verified against aurora-mysql8.4: the parameter is settable at
+      # cluster level, and writing 1 is dropped as a no-op precisely because 1 is the system
+      # default (writing 0 does stick). Kept explicit because this cluster is a DMS target for
+      # its whole life and a full load is how it gets rebuilt, so a group that someone had
+      # turned off would break the rebuild silently and at the worst possible moment.
       { name = "local_infile", value = "1", apply_method = "immediate" },
     ]
   }
