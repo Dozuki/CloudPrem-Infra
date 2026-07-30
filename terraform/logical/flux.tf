@@ -164,7 +164,7 @@ locals {
           # POST the exact silence API route; the Alertmanager UI retains the
           # per-environment ops login.
           # Keep the action off until Terraform has distributed the shared
-          # password to both Resource Reaper and this environment's Vault path.
+          # password to both the standalone handler and this environment's Vault path.
           interactivity = {
             enabled = var.cloud == "aws" && var.alertmanager_slack_silence_password != ""
           }
