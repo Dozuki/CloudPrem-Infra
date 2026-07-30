@@ -87,18 +87,40 @@ resource "kubernetes_job_v1" "dms_start" {
               echo "BI replication kind: $KIND"
 
               if [ "$KIND" = serverless ]; then
+                # Settle the transient states rather than deferring to a reconcile that does not
+                # exist. modifying and stopping both resolve within a couple of minutes, but a
+                # Completed Job is never re-run and its name only changes on a physical apply, so
+                # "a later reconcile will act" meant nobody ever acted: the replication sat
+                # stopped against the 48h deprovision clock. Wait the transition out, up to ten
+                # minutes, then dispatch on whatever it settled into.
+                #
                 # An empty Replications list means the config has never run. --query then prints
                 # "None"; treat that like a never-started replication and start it.
-                STATUS=$(aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$ARN" --query 'Replications[0].Status' --output text)
-                [ "$STATUS" = "None" ] && STATUS=not-started
+                SETTLE=0
+                while :; do
+                  STATUS=$(aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$ARN" --query 'Replications[0].Status' --output text)
+                  [ "$STATUS" = "None" ] && STATUS=not-started
+                  case "$STATUS" in
+                    modifying|stopping) ;;
+                    *) break ;;
+                  esac
+                  SETTLE=$((SETTLE+1))
+                  if [ "$SETTLE" -ge 30 ]; then
+                    echo "replication stuck in '$STATUS' after 10m - not starting it. A serverless replication left stopped or failed for 48 HOURS is deprovisioned and cannot be resumed at all; recovery is recreating it from physical. Investigate now." >&2
+                    exit 1
+                  fi
+                  echo "replication is $STATUS - waiting for it to settle ($SETTLE/30)"
+                  sleep 20
+                done
                 echo "DMS serverless replication status: $STATUS"
                 case "$STATUS" in
                   running|starting|initializing) echo "already running - nothing to do"; exit 0 ;;
-                  modifying|stopping|deprovisioning) echo "transient state '$STATUS' - a later reconcile will act"; exit 0 ;;
-                  deprovisioned)
+                  deprovisioning|deprovisioned)
                     # Stopped or failed for 48h. Not resumable at all; recreating the config is
                     # the only recovery, which is a physical apply, not something this can fix.
-                    echo "replication is deprovisioned - recreate it from physical, then re-run this Job" >&2; exit 1 ;;
+                    # deprovisioning is fatal for the same reason deprovisioned is - AWS is
+                    # already reclaiming the capacity and there is no start call that stops it.
+                    echo "replication is $STATUS - the 48h stopped/failed clock ran out, so it cannot be resumed. Recreate the replication config from physical, then re-run this Job." >&2; exit 1 ;;
                   not-started|created|failed)
                     # Never loaded (or died trying), so a full load is what is wanted.
                     aws dms start-replication --replication-config-arn "$ARN" --start-replication-type start-replication --region "$REGION" ;;
