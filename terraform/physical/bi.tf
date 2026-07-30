@@ -128,18 +128,37 @@ resource "aws_dms_endpoint" "target" {
 # DMS Serverless. One resource replaces the replication instance + replication task, and it
 # autoscales between min and max DCU (1 DCU = 2 GB RAM) instead of billing a fixed instance.
 #
-# start_replication retires the logical layer's dms-start Job (deleted in terraform/logical/bi.tf
-# by this change, not the chart - it was never in the chart): the start is an attribute here, so
-# Terraform owns it, and serverless runs its own Testing Connection phase, which is the other
-# thing that Job existed to do.
+# start_replication is FALSE, and the logical layer's dms-start Job keeps owning the start. It
+# was set true here first, which reads better - the start becomes an attribute Terraform owns,
+# and serverless runs its own Testing Connection phase, which was one of the two things that
+# Job did. It also wedges a greenfield install, permanently:
 #
-# CAUTION on the rds -> aurora switch. start_replication is also honoured on UPDATE: after the
-# apply modifies target_endpoint_arn, the provider calls its startReplication helper, which
-# picks "start-replication" only when the replication is ready and "resume-processing"
-# otherwise - never "reload-target". So the apply that repoints BI at the new empty Aurora
-# cluster will restart CDC against it by itself, and the replication will report Running while
-# the target holds no historical rows at all. reload-target afterwards repairs it, but a
-# "Running" status is NOT evidence the switch worked. Verify TablesLoaded, not status.
+#   The selection rules in static/dms_mapping.json match the `sites` and `%_guide` SCHEMAS.
+#   Those are created by the logical layer's db-migrations Job, which runs after physical. On a
+#   fresh stack this resource is therefore created against a source where nothing it selects
+#   exists, DMS refuses initialization ("No tables were found at task initialization"), and the
+#   provider - which waits for the replication to reach running - fails the physical apply. A
+#   failed physical apply means logical never runs, so the schemas that would let the
+#   replication start can never be created. Nothing recovers it on its own: the restart lambda
+#   only fires on state-change events, and the 48h deprovision clock below starts ticking
+#   meanwhile. Recoverable only by hand.
+#
+# Existing stacks never see this (their schemas exist), which is why the rehearsals passed. That
+# is exactly the ordering dependency the Job was written for - its own comments say it waits for
+# the app deployment to EXIST before starting anything - so the Job is kept and taught about
+# serverless rather than deleted.
+#
+# The cost of false here is that a modify leaves the replication stopped: the provider's update
+# path stops the replication before ModifyReplicationConfig and only restarts it when
+# start_replication is true. Logical autodeploys after physical, so the Job restarts it in the
+# same merge; the exposure is the gap between the two applies, which matters only against the
+# 48h deprovision clock. Do not leave a physical apply un-followed by a logical one.
+#
+# CAUTION on the rds -> aurora switch, which is a modify: the switch stops the replication,
+# repoints target_endpoint_arn at the new EMPTY Aurora cluster, and leaves it stopped. The Job
+# then resumes CDC against it (resume-processing), so the replication reports Running while the
+# target holds no historical rows at all. reload-target afterwards repairs it. A "Running"
+# status is NOT evidence the switch worked - verify TablesLoaded, not status.
 #
 # Sizing is deliberately NOT derived from the old instance class. The provisioned boxes were
 # sized for peak full-load headroom and then sat idle; min_capacity_units is what matters for
@@ -182,7 +201,8 @@ resource "aws_dms_replication_config" "this" {
   target_endpoint_arn           = aws_dms_endpoint.target[0].endpoint_arn
   table_mappings                = file("static/dms_mapping.json")
   replication_settings          = file("static/dms_config.json")
-  start_replication             = true
+  # See the greenfield note above before flipping this to true.
+  start_replication = false
 
   compute_config {
     replication_subnet_group_id = aws_dms_replication_subnet_group.this[0].id
@@ -387,19 +407,44 @@ module "bi_aurora" {
   # this key is not a one-way door.
   kms_key_id = local.rds_kms_key_arn
 
+  # Log exports match the primary aurora cluster, not the provisioned BI instances. Those two
+  # only get local.rds_instance_log_exports because an instance cannot export the audit log
+  # without the MARIADB_AUDIT_PLUGIN option group (rds.tf), and the comment there defers audit
+  # coverage to "aurora covers audit" - a cluster here is exactly that case, so it takes the
+  # full var.rds_log_exports. Without these three lines a stack switching BI to Aurora would
+  # silently drop the query and audit trail its RDS BI database had, and land its logs in
+  # auto-created never-expire groups.
+  enabled_cloudwatch_logs_exports        = var.rds_log_exports
+  create_cloudwatch_log_group            = true
+  cloudwatch_log_group_retention_in_days = 365
+
   cluster_parameter_group = {
     family = local.aurora_param_family
-    parameters = [
-      { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
-      # DMS full-loads MySQL-compatible targets with LOAD DATA LOCAL INFILE, which the server
-      # refuses unless local_infile is on. Aurora MySQL already defaults it to 1, so this is a
-      # pin rather than a fix - verified against aurora-mysql8.4: the parameter is settable at
-      # cluster level, and writing 1 is dropped as a no-op precisely because 1 is the system
-      # default (writing 0 does stick). Kept explicit because this cluster is a DMS target for
-      # its whole life and a full load is how it gets rebuilt, so a group that someone had
-      # turned off would break the rebuild silently and at the worst possible moment.
-      { name = "local_infile", value = "1", apply_method = "immediate" },
-    ]
+    parameters = concat(
+      [
+        { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
+        # DMS full-loads MySQL-compatible targets with LOAD DATA LOCAL INFILE, which the server
+        # refuses unless local_infile is on. Aurora MySQL already defaults it to 1, so this is a
+        # pin rather than a fix - verified against aurora-mysql8.4: the parameter is settable at
+        # cluster level, and writing 1 is dropped as a no-op precisely because 1 is the system
+        # default (writing 0 does stick). Kept explicit because this cluster is a DMS target for
+        # its whole life and a full load is how it gets rebuilt, so a group that someone had
+        # turned off would break the rebuild silently and at the worst possible moment.
+        { name = "local_infile", value = "1", apply_method = "immediate" },
+      ],
+      # Exports only ship what the engine writes, so the export list above is inert without
+      # these. Same set and same conditions as the primary cluster in aurora.tf.
+      contains(var.rds_log_exports, "audit") ? [
+        { name = "server_audit_logging", value = "1", apply_method = "immediate" },
+        { name = "server_audit_events", value = "CONNECT,QUERY_DCL,QUERY_DDL", apply_method = "immediate" },
+      ] : [],
+      contains(var.rds_log_exports, "slowquery") ? [
+        { name = "slow_query_log", value = "1", apply_method = "immediate" },
+      ] : [],
+      contains(var.rds_log_exports, "general") ? [
+        { name = "general_log", value = "1", apply_method = "immediate" },
+      ] : [],
+    )
   }
 
   db_parameter_group = {
