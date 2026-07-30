@@ -110,6 +110,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ---------------------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION} AS providers
 COPY --from=tools /out/tofu /usr/local/bin/tofu
+# git: the OpenTofu registry resolves registry module sources to git URLs pinned at the
+# tag's commit SHA, so `tofu init` shells out to git even for registry modules. Without
+# it the physical warm fails wholesale and only logical's providers land in the cache.
+RUN apk add --no-cache git
 ENV TF_PLUGIN_CACHE_DIR=/opt/tofu-plugin-cache \
     TF_IN_AUTOMATION=1 \
     CHECKPOINT_DISABLE=1
