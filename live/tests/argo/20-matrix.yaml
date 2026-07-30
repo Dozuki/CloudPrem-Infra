@@ -1,0 +1,129 @@
+# The orchestrator: what cron, a PR trigger, or a human submits.
+#
+# It fans out over configs and submits one CHILD WORKFLOW each, rather than looping configs
+# inside a single workflow. That costs a little machinery (a resource template and the RBAC
+# below) and buys the thing the whole migration is for: each config gets its own UI, its own
+# retry budget, its own resume scope and its own teardown exit handler, so "re-run just
+# `full`" is resubmitting one child and the other configs are untouched.
+#
+# Submit:
+#   argo submit -n argo --from workflowtemplate/harness-matrix \
+#     -p configs='["min_default"]' -p to-ref=<sha>
+---
+# The workflow service account can run pods but cannot create Workflows; the argo-workflows
+# chart's workflow RBAC does not cover that. Without this the fan-out fails with a
+# forbidden error on the first child.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: harness-submit-children
+  namespace: argo
+rules:
+  - apiGroups: ['argoproj.io']
+    resources: ['workflows']
+    # get/list/watch are what the resource template polls with to decide the child's
+    # outcome; without them it can create a child and then never learn it finished.
+    verbs: ['create', 'get', 'list', 'watch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harness-submit-children
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: harness-submit-children
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow
+    namespace: argo
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: harness-matrix
+  namespace: argo
+spec:
+  entrypoint: matrix
+  serviceAccountName: argo-workflow
+  arguments:
+    parameters:
+      # A JSON array, because withParam consumes JSON. A PR run usually wants just
+      # ["min_default"]; the nightly wants the full set.
+      - name: configs
+        value: '["min_default","bi_ha","full"]'
+      - name: scenario
+        value: upgrade
+      - name: from-ref
+        value: 'auto:latest-1'
+      # On a PR this is the head SHA: the staged release is what wants testing.
+      - name: to-ref
+        value: 'auto:latest'
+      # Which ref the harness itself runs FROM, as opposed to the refs under test.
+      - name: repo-ref
+        value: master
+      - name: keep-on-failure
+        value: 'false'
+
+  # No semaphore here on purpose. The orchestrator holds no stack, so gating it would
+  # serialise submission while the real contention is on the children, which each take the
+  # harness-semaphore themselves. Gating both would deadlock a matrix larger than the
+  # semaphore.
+  ttlStrategy:
+    secondsAfterSuccess: 86400
+    secondsAfterFailure: 259200
+
+  templates:
+    - name: matrix
+      steps:
+        - - name: scenario
+            template: submit-child
+            # Every config in parallel. The children queue on the semaphore, so this does
+            # not overshoot the VPC quota; it just means the queue is Argo's problem
+            # rather than a human's.
+            withParam: '{{workflow.parameters.configs}}'
+            arguments:
+              parameters:
+                - name: config
+                  value: '{{item}}'
+
+    - name: submit-child
+      inputs:
+        parameters:
+          - name: config
+      resource:
+        action: create
+        # Deliberately NOT setting an owner reference. Owner refs would cascade-delete the
+        # children when this orchestrator hits its TTL, taking their history and pod logs
+        # with it. The children carry their own ttlStrategy from harness-scenario, so they
+        # age out on their own schedule and stay inspectable after the parent is gone.
+        setOwnerReference: false
+        successCondition: status.phase == Succeeded
+        failureCondition: status.phase in (Failed, Error)
+        manifest: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Workflow
+          metadata:
+            generateName: harness-{{inputs.parameters.config}}-
+            labels:
+              harness/config: '{{inputs.parameters.config}}'
+              harness/scenario: '{{workflow.parameters.scenario}}'
+              harness/parent: '{{workflow.name}}'
+          spec:
+            workflowTemplateRef:
+              name: harness-scenario
+            arguments:
+              parameters:
+                - name: config
+                  value: '{{inputs.parameters.config}}'
+                - name: scenario
+                  value: '{{workflow.parameters.scenario}}'
+                - name: from-ref
+                  value: '{{workflow.parameters.from-ref}}'
+                - name: to-ref
+                  value: '{{workflow.parameters.to-ref}}'
+                - name: repo-ref
+                  value: '{{workflow.parameters.repo-ref}}'
+                - name: keep-on-failure
+                  value: '{{workflow.parameters.keep-on-failure}}'

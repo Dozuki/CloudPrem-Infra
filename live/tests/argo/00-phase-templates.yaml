@@ -1,0 +1,154 @@
+# Phase library: the reusable building block every entry point calls.
+#
+# Everything about a phase derives from --run-id + --config, so each is independently
+# re-runnable: a phase that dies is retried and reconstructs its state from the run
+# manifest in S3 plus the live TF outputs, rather than from anything a parent process held
+# in memory. That re-entrancy is the whole reason the harness was split into subcommands.
+#
+# Apply with:
+#   kubectl --context argo-ops -n argo apply -f live/tests/argo/
+#
+# The ConfigMap below is the single place to edit run-wide settings; the entry-point
+# templates read it with valueFrom.configMapKeyRef rather than duplicating literals.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harness-config
+  namespace: argo
+data:
+  # Pin by DIGEST once published. The ECR repo allows mutable tags so `latest` can move,
+  # and a moving tag must never swap the runtime under a workflow already running. The
+  # "Harness image" workflow prints the digest to paste here.
+  image: '069174876992.dkr.ecr.us-east-1.amazonaws.com/mpc-test-harness:latest'
+  ddvtest_account_id: '076248559428'
+  # Already exists (infra-tf modules/cloudprem-test-harness). Its trust policy needs the
+  # Argo workflow role added before any of this can assume it.
+  assume_role_arn: 'arn:aws:iam::076248559428:role/cloudprem-upgrade-tests'
+  region: 'us-east-1'
+  dr_region: 'us-west-2'
+  # PrivateLink endpoint in the Argo VPC: no port-forward, unlike a laptop run.
+  vault_addr: 'http://vault.internal.dozuki.com:8200'
+  state_bucket: 'dozuki-terraform-state-us-east-1-076248559428'
+---
+# DDVtest has a hard ceiling of 10 VPCs per region and each test stack is about one VPC
+# (recovery is two). A nightly matrix plus a couple of PR runs will exhaust it mid-apply,
+# which surfaces as a confusing quota error deep inside a terragrunt run.
+#
+# One semaphore shared by every entry point, so the cron and PR paths cannot collectively
+# overshoot. Raise this only alongside the quota.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harness-semaphore
+  namespace: argo
+data:
+  concurrent-stacks: '2'
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: harness-phase
+  namespace: argo
+spec:
+  templates:
+    # One template for all four subcommands: same container, different argv.
+    - name: run
+      inputs:
+        parameters:
+          - name: phase
+          - name: run-id
+          - name: config
+          - name: extra-args
+            value: ''
+          - name: repo-ref
+            value: master
+          # Phases have very different shapes: provision builds a cluster, validate polls
+          # assertions. A single deadline would either strangle provision or let validate
+          # hang for an hour.
+          - name: deadline
+            value: '3600'
+          # Only meaningful for teardown; see the flag assembly below.
+          - name: keep-on-failure
+            value: 'false'
+          - name: workflow-status
+            value: ''
+      activeDeadlineSeconds: '{{inputs.parameters.deadline}}'
+      retryStrategy:
+        limit: '2'
+        # OnError, deliberately NOT OnFailure. OnError covers the pod dying: eviction, OOM,
+        # spot reclaim, node replacement, all of which re-entrancy makes safe to repeat. A
+        # non-zero exit from the harness is a real verdict (a failed assertion, a rejected
+        # apply); retrying it would burn another hour and report the same thing.
+        retryPolicy: OnError
+        backoff:
+          duration: '30s'
+          factor: '2'
+          maxDuration: '5m'
+      container:
+        image: '{{workflow.parameters.image}}'
+        # bash -c rather than an args list because extra-args carries multiple flags and an
+        # args entry is one argv element: '--scenario upgrade --from-ref x' would reach the
+        # CLI as a single unparseable token.
+        command: ['/bin/bash', '-c']
+        args:
+          - |
+            set -euo pipefail
+            FLAGS="{{inputs.parameters.extra-args}}"
+
+            # Teardown's two conditional flags are assembled here rather than with an Argo
+            # expression tag, so the logic is readable in a pod log and does not depend on
+            # expr semantics.
+            if [ "{{inputs.parameters.phase}}" = teardown ]; then
+              if [ "${KEEP_ON_FAILURE}" = true ]; then
+                FLAGS="${FLAGS} --keep-on-failure"
+              fi
+              # Empty when a phase is run directly rather than as an exit handler.
+              if [ -n "${WORKFLOW_STATUS}" ] && [ "${WORKFLOW_STATUS}" != Succeeded ]; then
+                FLAGS="${FLAGS} --failed"
+              fi
+            fi
+
+            # shellcheck disable=SC2086  # FLAGS must word-split into separate arguments.
+            exec /usr/local/bin/docker-entrypoint.sh "{{inputs.parameters.phase}}" \
+              --run-id "{{inputs.parameters.run-id}}" \
+              --config "{{inputs.parameters.config}}" \
+              --profile ddvtest \
+              --account-id "{{workflow.parameters.ddvtest-account-id}}" \
+              --region "{{workflow.parameters.region}}" \
+              --state-bucket "{{workflow.parameters.state-bucket}}" \
+              --repo-dir /workspace/repo \
+              ${FLAGS}
+        env:
+          - name: KEEP_ON_FAILURE
+            value: '{{inputs.parameters.keep-on-failure}}'
+          - name: WORKFLOW_STATUS
+            value: '{{inputs.parameters.workflow-status}}'
+          - name: HARNESS_REPO_DIR
+            value: /workspace/repo
+          - name: HARNESS_REPO_REF
+            value: '{{inputs.parameters.repo-ref}}'
+          - name: HARNESS_RUN_LABEL
+            value: '{{inputs.parameters.run-id}}'
+          - name: HARNESS_ASSUME_ROLE_ARN
+            value: '{{workflow.parameters.assume-role-arn}}'
+          - name: VAULT_ADDR
+            value: '{{workflow.parameters.vault-addr}}'
+          - name: DR_REGION
+            value: '{{workflow.parameters.dr-region}}'
+          - name: DDVTEST_ACCOUNT_ID
+            value: '{{workflow.parameters.ddvtest-account-id}}'
+          - name: APP_NAMESPACE
+            value: dozuki
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          # The work is almost entirely waiting on AWS APIs, so this is sized for the tofu
+          # process and the provider plugins it forks, not for throughput. Requests stay
+          # low so Auto Mode can pack phases; the limit is headroom for a large plan.
+          requests:
+            cpu: '500m'
+            memory: '1Gi'
+          limits:
+            memory: '4Gi'

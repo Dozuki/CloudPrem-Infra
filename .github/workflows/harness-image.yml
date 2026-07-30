@@ -1,0 +1,136 @@
+name: 'Harness image'
+
+# Builds and publishes the harness runtime image (live/tests/Dockerfile) to the ECR repo
+# in dozukicloud (069174876992), which workflow pods on the Argo ops cluster pull.
+#
+# Digest, not tag, is the contract. The repository allows mutable tags so `latest` can
+# move, so this job prints the digest and the WorkflowTemplates pin that: a moving tag must
+# never be able to swap the runtime under a workflow that is already running.
+#
+# The expensive layer is the provider cache warm (~12 providers resolved from both layers'
+# lockfiles). It only rebuilds when the lockfiles or terraform/ change, so the registry
+# cache below usually makes a rebuild a few minutes rather than ten.
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'live/tests/Dockerfile'
+      - 'live/tests/Dockerfile.dockerignore'
+      - 'live/tests/docker-entrypoint.sh'
+      - 'live/tests/go.mod'
+      - 'live/tests/go.sum'
+      - 'live/tests/cmd/**'
+      - 'live/tests/harness/**'
+      - 'live/tests/validation/**'
+      - 'live/tests/recovery/**'
+      - 'live/tests/scenarios/**'
+      # The warm cache is built from these; a provider bump should reach the image.
+      - 'terraform/physical/.terraform.lock.hcl'
+      - 'terraform/logical/.terraform.lock.hcl'
+      - '.github/workflows/harness-image.yml'
+  # Build a PR's image without publishing it, so a Dockerfile change is proven before merge.
+  pull_request:
+    paths:
+      - 'live/tests/Dockerfile'
+      - 'live/tests/docker-entrypoint.sh'
+      - '.github/workflows/harness-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # Only the publishing path needs to mint an OIDC token. GitHub does not issue one
+      # to fork PRs regardless, and the AWS steps below are gated on `publish` anyway.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # A PR build proves the Dockerfile still builds and warms the cache for the merge,
+      # without publishing from an unmerged branch. The OIDC trust is scoped to
+      # refs/heads/master, so a PR could not push even if this gate were wrong.
+      #
+      # image_ref falls back to a local name: with no HARNESS_IMAGE_REPO set, an
+      # interpolated tag would be a bare ":<sha>", which is not a valid reference and
+      # fails the build even when push is false.
+      - name: Resolve build mode
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IMAGE_REPO: ${{ vars.HARNESS_IMAGE_REPO }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ] || [ -z "$IMAGE_REPO" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "image_ref=mpc-test-harness-local" >> "$GITHUB_OUTPUT"
+            if [ -z "$IMAGE_REPO" ] && [ "$EVENT_NAME" != "pull_request" ]; then
+              echo "::warning::HARNESS_IMAGE_REPO is unset; building without publishing. Set it from the mpc-harness-image stack outputs."
+            fi
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "image_ref=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.mode.outputs.publish == 'true'
+        with:
+          role-to-assume: ${{ vars.HARNESS_IMAGE_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Log in to ECR
+        if: steps.mode.outputs.publish == 'true'
+        env:
+          IMAGE_REF: ${{ steps.mode.outputs.image_ref }}
+        run: |
+          set -euo pipefail
+          registry="${IMAGE_REF%%/*}"
+          aws ecr get-login-password --region us-east-1 \
+            | docker login --username AWS --password-stdin "$registry"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: live/tests/Dockerfile
+          # linux/amd64 explicitly: EKS cannot pull an arm64 image, and provenance/sbom
+          # attestations turn the result into a manifest list some runtimes mishandle.
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          push: ${{ steps.mode.outputs.publish == 'true' }}
+          tags: |
+            ${{ steps.mode.outputs.image_ref }}:${{ github.sha }}
+            ${{ steps.mode.outputs.image_ref }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report the digest to pin
+        if: steps.mode.outputs.publish == 'true'
+        env:
+          IMAGE_REF: ${{ steps.mode.outputs.image_ref }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Harness image published"
+            echo
+            echo "Pin this digest in the WorkflowTemplates:"
+            echo
+            echo '```'
+            echo "${IMAGE_REF}@${DIGEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
