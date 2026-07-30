@@ -64,6 +64,18 @@ configs:
       highly_available_nat_gateway: false
       protect_resources: false
       enable_dr: false               # Plan 2: DR off; Plan 3 turns it on
+      # Pinned because this is the UPGRADE scenario and its baseline is provisioned from an
+      # older ref. The database CMK used to be gated on enable_dr, so a baseline built with
+      # DR off landed on alias/aws/rds; the CMK is now unconditional, and the KMS key is
+      # immutable on Aurora, so leaving this unset would change kms_key_id between baseline
+      # and upgrade and REPLACE the cluster. With protect_resources: false there is no
+      # deletion protection and no Spacelift db-replace-guard here, so nothing would stop it -
+      # the run would quietly stop testing an in-place upgrade.
+      #
+      # false is also what every pre-existing production stack pins, so this mirrors the real
+      # upgrade path rather than inventing one. Coverage for the NEW default comes from the
+      # `recover` config, which provisions fresh with DR off and takes the CMK.
+      rds_adopt_dr_cmk: false
       alarm_email: "devops@dozuki.com"
       # Vault is mandatory in the physical/logical layers (no disable flag).
       # Mirror the _mcp/dev (DDVtest 076248559428) env: shared standard Vault
