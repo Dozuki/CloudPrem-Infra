@@ -67,23 +67,11 @@ resource "aws_kms_key" "bi" {
   deletion_window_in_days = var.protect_resources ? 30 : 7
 }
 
-resource "aws_dms_replication_instance" "this" {
-  count = local.dms_enabled ? 1 : 0
-
-  replication_instance_id    = local.identifier
-  replication_instance_class = var.dms_instance_type
-  allocated_storage          = var.dms_allocated_storage
-  kms_key_arn                = aws_kms_key.bi[0].arn
-  auto_minor_version_upgrade = true
-
-  publicly_accessible         = false
-  replication_subnet_group_id = aws_dms_replication_subnet_group.this[0].id
-
-  vpc_security_group_ids = [module.bi_database_sg.security_group_id]
-
-  tags = local.tags
-
-}
+# The provisioned replication instance that used to live here is gone; the serverless
+# replication below replaces it AND the replication task. Measured on the 3M fleet before
+# switching: these replications sit under 5% CPU for 92-100% of hours (usac excepted), so a
+# provisioned instance was billing 24/7 for capacity that was idle almost all of it. The
+# subnet group, KMS key, certificate and both endpoints are unchanged and shared.
 
 resource "aws_dms_certificate" "this" {
   count = local.dms_enabled ? 1 : 0
@@ -137,40 +125,48 @@ resource "aws_dms_endpoint" "target" {
   tags = local.tags
 }
 
-resource "aws_dms_replication_task" "this" {
+# DMS Serverless. One resource replaces the replication instance + replication task, and it
+# autoscales between min and max DCU (1 DCU = 2 GB RAM) instead of billing a fixed instance.
+#
+# start_replication also retires the chart's dms-start job for this replication: the start is
+# an attribute here, so Terraform owns it rather than a Job racing the apply.
+#
+# Sizing is deliberately NOT derived from the old instance class. The provisioned boxes were
+# sized for peak full-load headroom and then sat idle; min_capacity_units is what matters for
+# steady-state cost, and max_capacity_units only bills when a burst actually uses it. AWS's
+# own guidance is to set max generously and let autoscaling decide.
+#
+# One sharp edge that has no provisioned equivalent: a serverless replication left stopped or
+# failed for 48 HOURS is deprovisioned and can no longer be resumed - recovery is recreating
+# this resource, not a start call. The restart lambda handles failures long before that, and
+# there is a dedicated alarm on the deprovision event in monitoring.tf, because that is the
+# one state the lambda cannot rescue.
+resource "aws_dms_replication_config" "this" {
   count = local.dms_enabled ? 1 : 0
 
-  replication_task_id       = local.identifier
-  migration_type            = "full-load-and-cdc"
-  replication_instance_arn  = aws_dms_replication_instance.this[0].replication_instance_arn
-  table_mappings            = file("static/dms_mapping.json")
-  replication_task_settings = file("static/dms_config.json")
+  replication_config_identifier = local.identifier
+  replication_type              = "full-load-and-cdc"
+  source_endpoint_arn           = aws_dms_endpoint.source[0].endpoint_arn
+  target_endpoint_arn           = aws_dms_endpoint.target[0].endpoint_arn
+  table_mappings                = file("static/dms_mapping.json")
+  replication_settings          = file("static/dms_config.json")
+  start_replication             = true
 
-  source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn
-  target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn
+  compute_config {
+    replication_subnet_group_id = aws_dms_replication_subnet_group.this[0].id
+    vpc_security_group_ids      = [module.bi_database_sg.security_group_id]
+    kms_key_id                  = aws_kms_key.bi[0].arn
+    min_capacity_units          = var.bi_dms_min_dcu
+    max_capacity_units          = var.bi_dms_max_dcu
+    multi_az                    = false
+  }
 
   tags = local.tags
 
   lifecycle {
-    ignore_changes = [replication_task_settings]
-  }
-}
-
-# AWS provider issue to replace this https://github.com/hashicorp/terraform-provider-aws/issues/2083
-resource "null_resource" "replication_control" {
-  count = local.dms_enabled ? 1 : 0
-
-  triggers = {
-    dms_task_arn        = aws_dms_replication_task.this[0].replication_task_arn,
-    source_endpoint_arn = aws_dms_endpoint.source[0].endpoint_arn,
-    target_endpoint_arn = aws_dms_endpoint.target[0].endpoint_arn,
-    aws_region          = data.aws_region.current.region,
-    aws_profile         = var.aws_profile
-  }
-
-  provisioner "local-exec" {
-    when    = destroy
-    command = "/usr/bin/env bash ./util/dms-stop.sh ${self.triggers["dms_task_arn"]} ${self.triggers["aws_region"]} ${self.triggers["aws_profile"]}"
+    # Same reasoning as the old task: DMS rewrites settings it did not get verbatim, which
+    # would otherwise be a permanent diff.
+    ignore_changes = [replication_settings]
   }
 }
 

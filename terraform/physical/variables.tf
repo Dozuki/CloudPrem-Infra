@@ -304,12 +304,13 @@ variable "bi_db_engine" {
 
     Switching an existing stack REPLACES the BI database. It is a rebuildable DMS target - a
     full load repopulates it - so the flip is safe to schedule, just not to do by accident.
-    Terraform cannot sequence it on its own: DMS refuses ModifyEndpoint while the task is
-    running, so the task has to be stopped first, and the new empty cluster then needs
-    reload-target to repopulate. Order is: stop the task (util/dms-stop.sh) and wait for
-    Stopped, apply with the allow-db-replace label, then reload-target and confirm the full
-    load. Cheapest moment is alongside that env's primary KMS key swap, since both replace a
-    database in the same window.
+    Terraform cannot sequence it on its own: DMS refuses to modify an endpoint while the
+    replication is running, so it has to be stopped first, and the new empty cluster then
+    needs reload-target to repopulate. Order is: stop-replication and wait for Stopped, apply
+    with the allow-db-replace label, then start-replication with reload-target and confirm the
+    full load. Do not leave it stopped for 48 hours - a serverless replication is deprovisioned
+    at that point and cannot be resumed, only recreated. Cheapest moment is alongside that
+    env's primary KMS key swap, since both replace a database in the same window.
   EOT
   type        = string
   default     = "rds"
@@ -318,6 +319,31 @@ variable "bi_db_engine" {
     condition     = contains(["rds", "aurora"], var.bi_db_engine)
     error_message = "bi_db_engine must be 'rds' or 'aurora'."
   }
+}
+
+variable "bi_dms_min_dcu" {
+  description = <<-EOT
+    Minimum DMS capacity units the BI serverless replication scales down to (1 DCU = 2 GB RAM).
+    This is the floor that bills continuously while the replication runs, so it is the number
+    that decides steady-state cost - max only bills when a burst uses it.
+
+    2 by default. The 3M BI replications measured under 5% CPU for 92-100% of hours, so the
+    floor carries the ongoing CDC and full loads scale up from there. Raise it for a busy
+    source: too low a floor means DMS is still provisioning when a spike arrives, and a
+    sustained CapacityUtilization at max can fail the replication outright.
+  EOT
+  type        = number
+  default     = 2
+}
+
+variable "bi_dms_max_dcu" {
+  description = <<-EOT
+    Maximum DMS capacity units the BI serverless replication can scale up to. Sized for the
+    full load, which is far heavier than steady-state CDC. You only pay for capacity actually
+    used, so AWS guidance is to set this generously rather than tightly.
+  EOT
+  type        = number
+  default     = 32
 }
 
 variable "bi_aurora_min_acu" {
@@ -367,18 +393,6 @@ variable "bi_access_cidrs" {
   description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. If left empty it will default to your VPC CIDR"
   type        = list(string)
   default     = []
-}
-
-variable "dms_instance_type" {
-  description = "The instance type for the DMS replication instance"
-  type        = string
-  default     = "dms.r5.large"
-}
-
-variable "dms_allocated_storage" {
-  description = "How many GB to allocate for the DMS replication instance"
-  type        = string
-  default     = 100
 }
 
 # --- END Storage Configuration --- #

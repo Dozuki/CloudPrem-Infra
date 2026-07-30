@@ -391,7 +391,7 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
   count = var.enable_bi || local.aurora_migration_dms ? 1 : 0
 
   name        = "${local.identifier}-dms-task-changed-rule"
-  description = "Capture change state of DMS replication tasks"
+  description = "Capture change state of DMS replications (BI serverless) and tasks (aurora migration)"
 
   # Scoped to THIS env's task ARNs: DMS state-change events are account+region
   # wide, so an unscoped pattern forwards every other env's task events too -
@@ -401,11 +401,13 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
     "source" : [
       "aws.dms"
     ],
-    "detail-type" : [
-      "DMS Replication Task State Change"
-    ],
+    # detail-type is deliberately NOT pinned. The BI replication is serverless (a
+    # Replication, not a ReplicationTask) and the aurora migration is still a task, so the two
+    # emit different detail-types. Matching on source + this env's resource ARNs catches both
+    # and cannot silently stop matching if AWS words the serverless detail-type differently
+    # than we assumed - a rule that never fires is indistinguishable from a healthy one.
     "resources" : compact(concat(
-      [for t in aws_dms_replication_task.this : t.replication_task_arn],
+      [for r in aws_dms_replication_config.this : r.arn],
       local.aurora_migration_dms ? [aws_dms_replication_task.aurora_migration[0].replication_task_arn] : []
     ))
   })
@@ -514,7 +516,7 @@ resource "aws_lambda_function" "dms_restart" {
   # validation-sweep OOM). The migration runner owns that task's lifecycle.
   environment {
     variables = {
-      RESTARTABLE_TASK_ARNS = join(",", [for t in aws_dms_replication_task.this : t.replication_task_arn])
+      RESTARTABLE_TASK_ARNS = join(",", [for r in aws_dms_replication_config.this : r.arn])
     }
   }
 }

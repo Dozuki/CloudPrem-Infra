@@ -42,8 +42,8 @@ output "vpc_id" {
   value       = local.vpc_id
 }
 output "dms_task_arn" {
-  description = "DMS Replication Task ARN for BI"
-  value       = try(aws_dms_replication_task.this[0].replication_task_arn, "")
+  description = "DMS replication ARN for BI. Now a serverless replication config, not a task; the output name is kept so consumers do not have to change."
+  value       = try(aws_dms_replication_config.this[0].arn, "")
 }
 output "bi_database_credential_secret" {
   description = "If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database."

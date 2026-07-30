@@ -1,8 +1,17 @@
 """
 AWS DMS Restart Lambda Function
 
-Purpose: This AWS Lambda function is designed to monitor AWS Data Migration Service (DMS) tasks. Upon detecting an
-error in a task, it automatically triggers a restart to ensure continuity.
+Purpose: This AWS Lambda function is designed to monitor AWS Data Migration Service (DMS) replications. Upon
+detecting an error, it automatically triggers a restart to ensure continuity.
+
+The BI replication is DMS Serverless (a Replication, identified by a replication config ARN). The aurora
+migration is still a provisioned ReplicationTask. Both arrive on the same SNS topic, so this handler picks
+the right API off the ARN shape rather than assuming one or the other.
+
+Serverless adds a deadline that provisioned tasks do not have: a replication left stopped or failed for 48
+hours is deprovisioned and can no longer be resumed at all - recovery becomes a Terraform apply. That is why
+restarting promptly matters more here than it did for tasks, and why the deprovision event is separately
+alarmed.
 
 Main Functionality:
 1. Extracts the DMS task ARN from the incoming event message.
@@ -11,7 +20,7 @@ Main Functionality:
 
 Functions:
 - get_task_arn(message_json): Extracts the DMS task ARN from the message.
-- restart_task(task_arn): Restarts the specified DMS task using the 'reload-target' type.
+- restart_replication(arn): Restarts the specified DMS replication (serverless) or task using 'reload-target'.
 - lambda_handler(event, context): Entry point for the Lambda function, processing the event and taking action.
 
 Environment Variables:
@@ -30,32 +39,42 @@ import boto3
 
 
 def get_task_arn(message_json):
-    # Extract the task ARN from the message
+    # Extract the replication (or task) ARN from the message
     return message_json['resources'][0] if message_json['resources'] else None
 
 
-def restart_task(task_arn):
+def restart_replication(arn):
     dms_client = boto3.client("dms", region_name=os.environ["AWS_REGION"])
 
-    if task_arn:
-        # start the task fresh
-        dms_client.start_replication_task(
-            ReplicationTaskArn=task_arn,
-            StartReplicationTaskType='reload-target'
+    if not arn:
+        print("No ARN provided.")
+        return
+
+    # ARN shape is the discriminator: serverless replications are
+    # arn:aws:dms:<region>:<acct>:replication-config:<id>, tasks are :task:<id>.
+    # reload-target means the same thing on both - reload every table, then resume CDC - so
+    # the recovery semantics are unchanged by the move to serverless.
+    if ":replication-config:" in arn:
+        dms_client.start_replication(
+            ReplicationConfigArn=arn,
+            StartReplicationType='reload-target'
         )
     else:
-        print("No Task ARN provided.")
+        dms_client.start_replication_task(
+            ReplicationTaskArn=arn,
+            StartReplicationTaskType='reload-target'
+        )
 
 
 def lambda_handler(event, context):
     message_json = json.loads(event['Records'][0]['Sns']['Message'])
 
     if 'detail-type' in message_json:
-        # Process DMS Replication Task State Change message
+        # Process a DMS Replication (serverless) or Replication Task state-change message
         detail_message = message_json['detail'].get('detailMessage', 'N/A')
         task_arn = get_task_arn(message_json)
 
-        # Restart is only safe for the BI task: reload-target on it rebuilds the
+        # Restart is only safe for the BI replication: reload-target on it rebuilds the
         # writable replica, which is the intended recovery. On any other task
         # (the aurora migration task in particular) reload-target re-runs a full
         # load into a target the migration runner has already staged past the
@@ -67,4 +86,4 @@ def lambda_handler(event, context):
             return
 
         if "ERROR" in detail_message:
-            restart_task(task_arn)
+            restart_replication(task_arn)
