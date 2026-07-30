@@ -12,9 +12,9 @@ import (
 )
 
 // A freshly started DMS task does not reach "running" instantly. It is created, sits at
-// "ready", and only goes "starting" -> "running" once something has kicked it (serverless
-// starts itself via start_replication; the old dms-start Job is gone) and
-// DMS has provisioned it onto the replication instance. Sampling the status once, right
+// "ready", and only goes "starting" -> "running" once the dms-start job has kicked it and
+// DMS has provisioned it. A serverless replication is the same shape of wait: it sits at
+// "created" until the same Job starts it, then initializes. Sampling the status once, right
 // after provisioning, is a race the harness loses whenever that handoff takes a few
 // seconds longer than usual — observed as
 //

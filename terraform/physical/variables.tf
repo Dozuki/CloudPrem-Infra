@@ -317,9 +317,10 @@ variable "bi_db_engine" {
     needs reload-target to repopulate. Order is: stop-replication and wait for Stopped, apply
     with the allow-db-replace label, then start-replication with reload-target and confirm the
     full load. reload-target is NOT optional and the replication will not look broken without
-    it: start_replication is honoured on update, so the apply itself restarts CDC against the
-    new empty cluster with resume-processing and the replication reports Running while holding
-    no historical data. Check TablesLoaded against the previous table count, not the status. Do not leave it stopped for 48 hours - a serverless replication is deprovisioned
+    it: the apply leaves the replication stopped, the logical layer's dms-start Job then
+    resumes CDC against the new empty cluster, and the replication reports Running while
+    holding no historical data. Check TablesLoaded against the previous table count, not the
+    status. Do not leave it stopped for 48 hours - a serverless replication is deprovisioned
     at that point and cannot be resumed, only recreated. Cheapest moment is alongside that
     env's primary KMS key swap, since both replace a database in the same window.
   EOT

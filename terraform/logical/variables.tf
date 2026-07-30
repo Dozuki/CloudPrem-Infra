@@ -298,6 +298,17 @@ variable "s3_replicate_buckets" {
   default     = false
 }
 
+variable "dms_task_arn" {
+  description = "If BI is enabled, the ARN of the BI replication. A DMS Serverless replication CONFIG on current physical layers, a provisioned replication TASK on older ones; the dms-start Job branches on the ARN's shape. Name kept as-is so consumers do not have to change."
+  type        = string
+  default     = ""
+}
+
+variable "dms_enabled" {
+  description = "If BI is enabled, whether or not to use DMS for conditional replication if true or a basic RDS read replica if false."
+  type        = bool
+  default     = false
+}
 
 variable "vault_address" {
   description = "Vault server address accessible from within the cluster (PrivateLink)."

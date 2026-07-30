@@ -150,7 +150,16 @@ data "aws_iam_policy_document" "eks_worker" {
       # test both endpoints and poll for the result before starting.
       "dms:DescribeConnections",
       "dms:TestConnection",
-      "dms:StartReplicationTask"
+      "dms:StartReplicationTask",
+      # The serverless equivalents. BI is a replication CONFIG now (physical/bi.tf), which is
+      # a different API surface: describe-replication-tasks does not return it and
+      # start-replication-task cannot start it. The Job branches on the ARN shape and needs
+      # both sets, because a stack mid-swap can still be on the provisioned task.
+      # Without these it fails on AccessDenied, and with wait_for_completion = false that
+      # failure does not reach the run - which is how the old CLI-too-old bug hid for years.
+      "dms:DescribeReplicationConfigs",
+      "dms:DescribeReplications",
+      "dms:StartReplication"
     ]
 
     resources = ["*"]
