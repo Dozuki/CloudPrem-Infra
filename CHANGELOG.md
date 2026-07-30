@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.4.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.4...v8.4.0) (2026-07-30)
+
+
+### Features
+
+* **bi:** BI database on Aurora Serverless v2, and default the RDS engine to 8.4 ([#376](https://github.com/Dozuki/CloudPrem-Infra/issues/376)) ([c9186cf](https://github.com/Dozuki/CloudPrem-Infra/commit/c9186cf025c9d96af593a6693e1bcc90d88691fd))
+
 ## [8.3.4](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.3...v8.3.4) (2026-07-30)
 
 
