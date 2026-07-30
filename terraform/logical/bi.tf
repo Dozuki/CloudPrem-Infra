@@ -22,7 +22,14 @@ resource "kubernetes_job_v1" "dms_start" {
   depends_on = [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding]
 
   metadata {
-    name      = "dms-start"
+    # Fold physical's replication generation into the name (same #4a pattern as
+    # grafana_db_create below). A static name meant the Completed Job never re-ran, so
+    # any ModifyReplicationConfig - a DCU change, a mappings change, the rds -> aurora
+    # repoint - left the replication stopped by the provider with nothing to start it
+    # again, against the 48h deprovision clock. The generation changes exactly when the
+    # provider stops the replication, so the same merge's logical apply makes a fresh
+    # Job. Empty generation (old physical layers) keeps the static name - no diff.
+    name      = var.dms_replication_generation == "" ? "dms-start" : "dms-start-${var.dms_replication_generation}"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
   spec {

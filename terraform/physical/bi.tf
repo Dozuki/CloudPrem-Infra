@@ -150,9 +150,11 @@ resource "aws_dms_endpoint" "target" {
 #
 # The cost of false here is that a modify leaves the replication stopped: the provider's update
 # path stops the replication before ModifyReplicationConfig and only restarts it when
-# start_replication is true. Logical autodeploys after physical, so the Job restarts it in the
-# same merge; the exposure is the gap between the two applies, which matters only against the
-# 48h deprovision clock. Do not leave a physical apply un-followed by a logical one.
+# start_replication is true. Logical autodeploys after physical and the dms-start Job carries
+# the dms_replication_generation output in its NAME, so the same modify that stops the
+# replication also forces a fresh Job that starts it again; the exposure is the gap between
+# the two applies, which matters only against the 48h deprovision clock. Do not leave a
+# physical apply un-followed by a logical one.
 #
 # CAUTION on the rds -> aurora switch, which is a modify: the switch stops the replication,
 # repoints target_endpoint_arn at the new EMPTY Aurora cluster, and leaves it stopped. The Job

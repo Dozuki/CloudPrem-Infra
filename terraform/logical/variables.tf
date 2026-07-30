@@ -310,6 +310,12 @@ variable "dms_enabled" {
   default     = false
 }
 
+variable "dms_replication_generation" {
+  description = "Physical's hash of the replication-config attributes whose change stops the replication. Folded into the dms-start Job name so the modify that stops it also re-runs the starter. Empty (old physical layers) keeps the static Job name."
+  type        = string
+  default     = ""
+}
+
 variable "vault_address" {
   description = "Vault server address accessible from within the cluster (PrivateLink)."
   type        = string

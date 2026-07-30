@@ -45,6 +45,18 @@ output "dms_task_arn" {
   description = "DMS replication ARN for BI. Now a serverless replication config, not a task; the output name is kept so consumers do not have to change."
   value       = try(aws_dms_replication_config.this[0].arn, "")
 }
+output "dms_replication_generation" {
+  description = "Short hash of the replication-config attributes whose change makes the provider stop the replication (endpoints, mappings, settings, DCUs). The logical dms-start Job folds this into its name, so the modify that leaves the replication stopped also forces a fresh Job to start it again; with a static name the Completed Job never re-ran and the replication stayed stopped against the 48h deprovision clock."
+  value = try(substr(sha256(join(":", [
+    aws_dms_replication_config.this[0].arn,
+    aws_dms_replication_config.this[0].source_endpoint_arn,
+    aws_dms_replication_config.this[0].target_endpoint_arn,
+    sha256(aws_dms_replication_config.this[0].table_mappings),
+    sha256(aws_dms_replication_config.this[0].replication_settings),
+    tostring(var.bi_dms_min_dcu),
+    tostring(var.bi_dms_max_dcu),
+  ])), 0, 8), "")
+}
 output "bi_database_credential_secret" {
   description = "If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database."
   value       = try(aws_secretsmanager_secret.replica_database_credentials[0].arn, "")
