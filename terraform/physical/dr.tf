@@ -57,14 +57,25 @@ check "dr_region_valid" {
 # under a customer-managed key; Aurora has no automated-backup replication at all and
 # uses Global Database instead. S3 content replicates either way.
 #
-# Three branches, selected by db_uses_aurora (the LIVE engine) rather than db_is_aurora
-# (the configured one). Mid-migration those disagree — db_engine stays "rds" while the app
-# is already on Aurora — and the old two-branch form then explained an Aurora database with
-# the RDS text, telling the operator to adopt a CMK on a database that was not the live one.
+# Three branches, all selected by db_uses_aurora (the LIVE engine) rather than db_is_aurora
+# (the configured one). Mid-migration those disagree — db_engine stays "rds" while the app is
+# already on Aurora — and the old two-branch form then explained an Aurora database with the
+# RDS text, telling the operator to adopt a CMK on a database that was not the live one.
+#
+# The migration branch is db_uses_aurora && !db_is_aurora, i.e. cutover/cleanup only. NOT
+# aurora_migration_active, which is also true at "provision" — there the Aurora cluster exists
+# but is DMS-only and the live database is still the RDS instance, so that stack wants the RDS
+# CMK advice and gets it by falling through to the third branch.
+#
+# The steady-state Aurora branch is currently DEAD, and deliberately so: aurora_dr_enabled is
+# db_is_aurora && enable_dr && aurora_dr_partition_ok, and that last term is a hardcoded true
+# (dr_aurora.tf), so with db_engine = "aurora" the assert can never fail. Keep the branch —
+# it becomes live the moment aurora_dr_partition_ok turns into a real check, which is exactly
+# the case where an operator would need that text.
 check "dr_rds_replicable" {
   assert {
     condition = !var.enable_dr || local.dr_rds_enabled || local.aurora_dr_enabled
-    error_message = local.aurora_migration_active && !local.db_is_aurora ? (
+    error_message = local.db_uses_aurora && !local.db_is_aurora ? (
       "DR is enabled and S3 content replicates cross-region, but the database does NOT while an Aurora migration is in flight: the live database is the Aurora cluster, and Aurora DR (Global Database) only attaches once the env finishes the migration with db_engine = \"aurora\". Expected during a migration. It also requires the Aurora cluster to be CMK-encrypted, which is set at create — see the database CMK remediation plan before assuming the retirement apply will produce a working global cluster."
       ) : local.db_uses_aurora ? (
       "DR is enabled and S3 content replicates cross-region. The Aurora database replicates only when the global-database secondary is configured — ensure enable_dr is true and the admin layer injected a same-partition dr_region. (On GovCloud, confirm the engine version supports Global Database.)"
