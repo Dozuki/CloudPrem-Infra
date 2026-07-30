@@ -16,9 +16,7 @@ dependency "physical" {
     guide_pdfs_bucket             = "dummy-pdfs-bucket"
     s3_kms_key_id                 = "dummy-kms-arn"
     s3_replicate_buckets          = "false"
-    dms_task_arn                  = "dummy-dms-arn"
     bi_database_credential_secret = "dummy-secret"
-    dms_enabled                   = "false"
     eks_oidc_issuer_url           = "https://oidc.eks.us-east-1.amazonaws.com/id/DUMMY"
     private_subnet_ids            = ["subnet-dummy-a", "subnet-dummy-b", "subnet-dummy-c"]
     vault_endpoint_dns            = "vault.internal.dozuki.com"
@@ -29,7 +27,7 @@ dependency "physical" {
 }
 
 inputs = {
-  vpc_id    = dependency.physical.outputs.vpc_id
+  vpc_id = dependency.physical.outputs.vpc_id
 
 
   eks_cluster_id              = dependency.physical.outputs.eks_cluster_id
@@ -45,8 +43,6 @@ inputs = {
   s3_pdfs_bucket                = dependency.physical.outputs.guide_pdfs_bucket
   s3_kms_key_id                 = dependency.physical.outputs.s3_kms_key_id
   s3_replicate_buckets          = dependency.physical.outputs.s3_replicate_buckets
-  dms_task_arn                  = dependency.physical.outputs.dms_task_arn
-  dms_enabled                   = dependency.physical.outputs.dms_enabled
   vault_address                 = "http://${dependency.physical.outputs.vault_endpoint_dns}:8200"
   nlb_https_target_group_arn    = dependency.physical.outputs.nlb_https_target_group_arn
   nlb_http_target_group_arn     = dependency.physical.outputs.nlb_http_target_group_arn

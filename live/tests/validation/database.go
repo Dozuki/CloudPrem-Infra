@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -11,7 +12,8 @@ import (
 )
 
 // A freshly started DMS task does not reach "running" instantly. It is created, sits at
-// "ready", and only goes "starting" -> "running" once the dms-start job has kicked it and
+// "ready", and only goes "starting" -> "running" once something has kicked it (serverless
+// starts itself via start_replication; the old dms-start Job is gone) and
 // DMS has provisioned it onto the replication instance. Sampling the status once, right
 // after provisioning, is a race the harness loses whenever that handoff takes a few
 // seconds longer than usual — observed as
@@ -102,7 +104,15 @@ func AssertDMSRunning(ctx context.Context, region, taskARN string) error {
 	}
 }
 
+// describeDMSTask resolves the status of whatever the physical layer's dms_task_arn output
+// points at. Since the BI replication moved to DMS Serverless that is a replication-config
+// ARN, which DescribeReplicationTasks does not know about and will never match - it would
+// report "not found" and fail the run. The aurora migration is still a provisioned task, so
+// both shapes have to work; the ARN discriminates, same as the restart lambda does.
 func describeDMSTask(ctx context.Context, c *databasemigrationservice.Client, taskARN string) (status, failure string, found bool, err error) {
+	if strings.Contains(taskARN, ":replication-config:") {
+		return describeDMSReplication(ctx, c, taskARN)
+	}
 	out, err := c.DescribeReplicationTasks(ctx, &databasemigrationservice.DescribeReplicationTasksInput{})
 	if err != nil {
 		return "", "", false, err
@@ -116,6 +126,29 @@ func describeDMSTask(ctx context.Context, c *databasemigrationservice.Client, ta
 		}
 		if t.LastFailureMessage != nil {
 			failure = *t.LastFailureMessage
+		}
+		return status, failure, true, nil
+	}
+	return "", "", false, nil
+}
+
+// describeDMSReplication is the serverless counterpart. Status strings overlap with the
+// provisioned ones the callers already switch on ("running", "failed", ...), so only the
+// lookup differs; failure detail arrives as a list rather than a single field.
+func describeDMSReplication(ctx context.Context, c *databasemigrationservice.Client, configARN string) (status, failure string, found bool, err error) {
+	out, err := c.DescribeReplications(ctx, &databasemigrationservice.DescribeReplicationsInput{})
+	if err != nil {
+		return "", "", false, err
+	}
+	for _, r := range out.Replications {
+		if r.ReplicationConfigArn == nil || *r.ReplicationConfigArn != configARN {
+			continue
+		}
+		if r.Status != nil {
+			status = *r.Status
+		}
+		if len(r.FailureMessages) > 0 {
+			failure = strings.Join(r.FailureMessages, "; ")
 		}
 		return status, failure, true, nil
 	}
