@@ -1,6 +1,17 @@
+# Resolves var.rds_engine_version to a concrete minor. DescribeOrderableDBInstanceOptions
+# rejects a bare family ("8.4") with "Engine version is not a valid full version", and this
+# data source has no count, so an unresolved prefix would fail the plan on every stack,
+# aurora ones included. latest=true is what makes a partial version legal here; a full pin
+# passes through unchanged.
+data "aws_rds_engine_version" "orderable" {
+  engine  = "mysql"
+  version = var.rds_engine_version
+  latest  = true
+}
+
 data "aws_rds_orderable_db_instance" "default" {
   engine         = "mysql"
-  engine_version = var.rds_engine_version
+  engine_version = data.aws_rds_engine_version.orderable.version_actual
 
   supports_enhanced_monitoring = true
   supports_storage_autoscaling = true

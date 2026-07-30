@@ -246,24 +246,147 @@ variable "rds_backup_retention_period" {
 }
 
 variable "rds_engine_family" {
-  description = "To support legacy systems on mysql5.7 we allow setting the engine version here. Only 5.7 or 8.0 are allowed."
+  description = "Parameter-group family for the provisioned RDS primary and the legacy BI instance. Tracks rds_engine_version's major.minor; 8.4 by default now that 8.0 is past end of standard support. An existing 8.0 stack either pins \"8.0\" or migrates to Aurora before it takes this release. Aurora derives its own family from aurora_engine_version."
   type        = string
-  default     = "8.0"
+  default     = "8.4"
 
   validation {
-    condition     = contains(["5.7", "8.0"], var.rds_engine_family)
-    error_message = "Only 5.7 or 8.0 are allowed mysql engine family"
+    condition     = contains(["5.7", "8.0", "8.4"], var.rds_engine_family)
+    error_message = "Only 5.7, 8.0 or 8.4 are allowed mysql engine families"
   }
 }
 variable "rds_engine_version" {
-  description = "To support legacy systems on mysql5.7 we allow setting the engine version here. Only 5.7 or 8.0 are allowed."
+  description = <<-EOT
+    MySQL engine version for the PROVISIONED RDS primary (db_engine = "rds") and its read
+    replica. Legacy path: db_engine defaults to "aurora", so a new stack never creates one.
+
+    Defaults to an 8.4 version. RDS for MySQL 8.0 left standard support on 2026-07-31, so
+    anything still on it is auto-enrolled in RDS Extended Support and billed per vCPU-hour -
+    the codebase should not be handing that to a new stack by default.
+
+    Not every existing 8.0 stack pins it, so do not assume this default is inert. A major
+    version change plans an in-place upgrade, which is NOT how the remaining 8.0 instances get
+    fixed: they are either Aurora-migration rollback anchors headed for deletion, or live
+    primaries whose route to 8.4 is the Aurora migration itself. Neither wants a major upgrade
+    triggered by a module default. The rule for an unpinned 8.0 stack is therefore to migrate
+    it to Aurora before it takes this release; pin "8.0" only to hold one in place meanwhile.
+
+    Prefer the bare family ("8.4") over an exact minor where you can: AWS resolves it to the
+    latest matching minor, so auto_minor_version_upgrade drift never shows up as a diff.
+  EOT
   type        = string
-  default     = "8.0.43"
+  default     = "8.4"
 
   validation {
     condition     = startswith(var.rds_engine_version, "5") || startswith(var.rds_engine_version, "8")
-    error_message = "Only 5.7 or 8.0 are allowed mysql engine versions"
+    error_message = "Only 5.7 or 8.x are allowed mysql engine versions"
   }
+}
+
+variable "bi_db_engine" {
+  description = <<-EOT
+    Engine for the BI database that DMS replicates into: "aurora" (Aurora MySQL Serverless v2)
+    or "rds" (provisioned RDS MySQL, the legacy path).
+
+    Aurora is what new stacks should use, for two reasons. The BI database was pinned to MySQL
+    "8.0" with no way to change it, so every stack got one even when its primary was Aurora 8.4
+    - and 8.0 left standard support on 2026-07-31, so those instances bill RDS Extended Support
+    indefinitely. And BI is idle most of the time: Serverless v2 scales down to
+    bi_aurora_min_acu between queries, where a provisioned instance bills flat.
+
+    The DEFAULT is nonetheless "rds", and deliberately so. Every stack that has a BI database
+    today is on the provisioned path and none of them pin this variable, so defaulting to
+    "aurora" would flip all six the moment they bumped infra_version - turning a routine module
+    bump into a database replacement nobody asked for in that run. db-replace-guard would catch
+    it (the plan fails rather than the data going away), but a fleet of failing plans is not a
+    good default either. New stacks get Aurora from _templates/env.hcl instead, which is where
+    a new-stack default belongs; the code default only decides what happens to stacks that
+    predate the variable, and for those the right answer is "keep what you have".
+
+    Switching an existing stack REPLACES the BI database. It is a rebuildable DMS target - a
+    full load repopulates it - so the flip is safe to schedule, just not to do by accident.
+    Separately, and regardless of this variable: the first apply that picks up the DMS
+    Serverless release replaces the provisioned replication task with a replication config.
+    No manual pre-step is required - the provider stops the old task before deleting it. The
+    only wrinkle is ordering: nothing sequences the old task's destroy against the new
+    config's create, so the full load can start while the old task is still stopping. BI is
+    rebuildable and the load wins, so it is untidy rather than harmful; pre-stopping with
+    util/dms-stop.sh avoids the overlap if you want a clean sequence.
+
+    Terraform cannot sequence it on its own: DMS refuses to modify an endpoint while the
+    replication is running, so it has to be stopped first, and the new empty cluster then
+    needs reload-target to repopulate. Order is: stop-replication and wait for Stopped, clear
+    deletion protection on the outgoing RDS BI instance, apply with the allow-db-replace
+    label, then start-replication with reload-target and confirm the full load.
+
+    The deletion-protection step is not optional. The instance is created with
+    deletion_protection = var.protect_resources, the switch takes its count to 0, and RDS
+    refuses DeleteDBInstance on a protected instance - so without the pre-step the apply dies
+    mid-way, after the Aurora cluster exists and with the replication already stopped against
+    the 48h clock. Terraform cannot clear the flag itself: the same apply removes the
+    instance from config, so the changed attribute is never applied before the delete. Run it
+    out-of-band (a destroy does not diff against state, the drift is harmless):
+      aws rds modify-db-instance --db-instance-identifier <id>-dms-replica \
+        --no-deletion-protection --apply-immediately
+    Do NOT flip protect_resources stack-wide instead; that drops protection on the primary
+    and flips skip_final_snapshot everywhere.
+
+    The restart is the operator's job, not the layer's. The switch modifies the target
+    ENDPOINT in place (server_name/username/password are not ForceNew), so the endpoint ARN
+    and the replication config are both unchanged, the dms_replication_generation hash does
+    not move, and no fresh dms-start Job is created to pick the replication back up. Anything
+    that does restart it without reload-target makes it worse: resume-processing takes CDC
+    from the last checkpoint against an empty cluster, and the replication then reports
+    Running while holding no historical data. Check TablesLoaded against the previous table
+    count, not the status. Do not leave it stopped for 48 hours - a serverless replication is
+    deprovisioned at that point and cannot be resumed, only recreated. Cheapest moment is
+    alongside that env's primary KMS key swap, since both replace a database in the same
+    window.
+  EOT
+  type        = string
+  default     = "rds"
+
+  validation {
+    condition     = contains(["rds", "aurora"], var.bi_db_engine)
+    error_message = "bi_db_engine must be 'rds' or 'aurora'."
+  }
+}
+
+variable "bi_dms_min_dcu" {
+  description = <<-EOT
+    Minimum DMS capacity units the BI serverless replication scales down to (1 DCU = 2 GB RAM).
+    This is the floor that bills continuously while the replication runs, so it is the number
+    that decides steady-state cost - max only bills when a burst uses it.
+
+    2 by default. The 3M BI replications measured under 5% CPU for 92-100% of hours, so the
+    floor carries the ongoing CDC and full loads scale up from there. Raise it for a busy
+    source: too low a floor means DMS is still provisioning when a spike arrives, and a
+    sustained CapacityUtilization at max can fail the replication outright.
+  EOT
+  type        = number
+  default     = 2
+}
+
+variable "bi_dms_max_dcu" {
+  description = <<-EOT
+    Maximum DMS capacity units the BI serverless replication can scale up to. Sized for the
+    full load, which is far heavier than steady-state CDC. You only pay for capacity actually
+    used, so AWS guidance is to set this generously rather than tightly.
+  EOT
+  type        = number
+  default     = 32
+}
+
+variable "bi_aurora_min_acu" {
+  description = "Minimum Aurora Serverless v2 capacity for the BI database. 0.5 by default: BI is queried in bursts and idles between them, which is the whole reason for moving it off a provisioned instance. Ignored unless bi_db_engine = \"aurora\"."
+  type        = number
+  default     = 0.5
+}
+
+variable "bi_aurora_max_acu" {
+  description = "Maximum Aurora Serverless v2 capacity for the BI database. Sized for the DMS full load, which is heavier than steady-state BI querying. Ignored unless bi_db_engine = \"aurora\"."
+  type        = number
+  default     = 16
 }
 
 
@@ -301,18 +424,6 @@ variable "bi_access_cidrs" {
   description = "If BI and public access is enabled, these CIDRs will be permitted through the firewall to access it. If VPN is enabled, these are the CIDRs that are allowed to connect to the VPN server. If left empty it will default to your VPC CIDR"
   type        = list(string)
   default     = []
-}
-
-variable "dms_instance_type" {
-  description = "The instance type for the DMS replication instance"
-  type        = string
-  default     = "dms.r5.large"
-}
-
-variable "dms_allocated_storage" {
-  description = "How many GB to allocate for the DMS replication instance"
-  type        = string
-  default     = 100
 }
 
 # --- END Storage Configuration --- #

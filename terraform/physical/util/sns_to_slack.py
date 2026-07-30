@@ -44,11 +44,36 @@ def get_account_alias():
 
 
 def get_task_name(task_arn):
+    """Resolve a DMS ARN to its human identifier.
+
+    The BI replication is DMS Serverless (a replication-config); the aurora migration is
+    still a provisioned task. describe_replication_tasks does not know about a
+    replication-config, so calling it with one returns nothing and the old [0] index raised
+    IndexError - which killed this lambda BEFORE it posted, meaning DMS failure and
+    deprovision alerts silently stopped reaching Slack. Falls back to the ARN's last segment
+    rather than raising, because a nameless alert still beats no alert.
+    """
     dms_client = boto3.client("dms", region_name=os.environ["AWS_REGION"])
-    response = dms_client.describe_replication_tasks(
-        Filters=[{"Name": "replication-task-arn", "Values": [task_arn]}]
-    )
-    return response["ReplicationTasks"][0]["ReplicationTaskIdentifier"]
+
+    try:
+        if ":replication-config:" in task_arn:
+            response = dms_client.describe_replication_configs(
+                Filters=[{"Name": "replication-config-arn", "Values": [task_arn]}]
+            )
+            configs = response.get("ReplicationConfigs") or []
+            if configs:
+                return configs[0]["ReplicationConfigIdentifier"]
+        else:
+            response = dms_client.describe_replication_tasks(
+                Filters=[{"Name": "replication-task-arn", "Values": [task_arn]}]
+            )
+            tasks = response.get("ReplicationTasks") or []
+            if tasks:
+                return tasks[0]["ReplicationTaskIdentifier"]
+    except Exception as exc:  # noqa: BLE001 - never let naming break the alert
+        print(f"could not resolve DMS name for {task_arn}: {exc}")
+
+    return task_arn.rsplit(":", 1)[-1] or task_arn
 
 
 def lambda_handler(event, context):
@@ -79,13 +104,33 @@ def lambda_handler(event, context):
         detail_message = message_json['detail'].get('detailMessage', 'N/A')
         resource_arn = message_json['resources'][0] if message_json['resources'] else 'N/A'
         replication_task_name = get_task_name(resource_arn)
-        # Link to THIS region's console (was hardcoded us-east-1).
-        replication_task_link = f"https://console.aws.amazon.com/dms/v2/home?region={region}#taskDetails/{replication_task_name}"
+        # Link to THIS region's console (was hardcoded us-east-1). Serverless replications are
+        # not replication tasks and do not exist under #taskDetails, so a config ARN needs the
+        # serverless route or the alert links to a page that cannot show the incident.
+        if ":replication-config:" in resource_arn:
+            replication_task_link = (
+                f"https://console.aws.amazon.com/dms/v2/home?region={region}"
+                f"#serverlessReplicationDetails/{replication_task_name}"
+            )
+        else:
+            replication_task_link = (
+                f"https://console.aws.amazon.com/dms/v2/home?region={region}"
+                f"#taskDetails/{replication_task_name}"
+            )
 
         # Page the channel only on failures. A plain "Replication task stopped"
         # is routine (operator stops, the migration's automatic
         # post-full-load stop, fence-time stops) and must not @channel.
-        if "ERROR" in detail_message or "FATAL" in detail_message or "fail" in detail_message.lower():
+        #
+        # Deprovision is the exception that carries none of those tokens. A serverless
+        # replication stopped or failed for 48h is deprovisioned, which is the one BI state
+        # nothing recovers from - the restart lambda declines it and the fix is a terraform
+        # apply that recreates the config. Matched on both the detail message and the
+        # detail-type, and it catches "deprovisioning" too: that is the transition into the
+        # unrecoverable state, not a routine stop, so it is worth the page.
+        haystack = f"{detail_message} {detail_type}".lower()
+        if ("ERROR" in detail_message or "FATAL" in detail_message
+                or "fail" in haystack or "deprovision" in haystack):
             header = "*DMS Alarm! <!channel>*"
         else:
             header = "*DMS Notification*"

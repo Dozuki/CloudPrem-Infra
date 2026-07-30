@@ -119,14 +119,45 @@ locals {
   // If false we will use an RDS Read Replica and let RDS manage the replication for us.
   dms_enabled = var.enable_bi ? (var.bi_dms_enabled || var.bi_public_access) : false
 
-  # BI source DB module (rds/dms paths only); null on the aurora private-BI path.
-  bi_db = var.enable_bi ? (local.dms_enabled ? module.dms_replica_database[0] : (var.db_engine == "rds" ? module.rds_replica_database[0] : null)) : null
+  # The DMS-target BI database runs on Aurora Serverless v2 unless the stack pins the legacy
+  # provisioned-RDS path. Only meaningful when DMS is in play; the read-replica and
+  # aurora-private-BI paths are unaffected.
+  bi_uses_aurora = local.dms_enabled && var.bi_db_engine == "aurora"
 
-  # BI connection facts. aurora private BI = cluster reader endpoint + master creds.
-  bi_host = var.enable_bi ? (
+  # BI connection facts, engine-agnostic. Three shapes collapse here:
+  #   dms + aurora  -> the BI Aurora cluster's writer endpoint and its own master creds
+  #   dms + rds     -> the provisioned DMS-target instance (legacy)
+  #   no dms        -> an RDS read replica, or on aurora the primary's reader endpoint
+  # Consumed by the DMS target endpoint and the BI credentials secret, so both follow whichever
+  # engine is active without either having to know which.
+  bi_db_host = var.enable_bi ? (
+    local.bi_uses_aurora ? module.bi_aurora[0].cluster_endpoint :
     local.dms_enabled ? module.dms_replica_database[0].db_instance_address :
     (var.db_engine == "rds" ? module.rds_replica_database[0].db_instance_address : local.db_reader_endpoint)
   ) : ""
+
+  bi_db_port = local.bi_uses_aurora ? module.bi_aurora[0].cluster_port : (
+    local.dms_enabled ? module.dms_replica_database[0].db_instance_port : local.db_port
+  )
+
+  bi_db_username = local.bi_uses_aurora ? local.db_username : (
+    local.dms_enabled ? module.dms_replica_database[0].db_instance_username : local.db_username
+  )
+
+  bi_db_password = local.bi_uses_aurora ? random_password.bi_aurora[0].result : (
+    local.dms_enabled ? module.dms_replica_database[0].db_instance_password : local.db_password
+  )
+
+  bi_db_identifier = local.bi_uses_aurora ? module.bi_aurora[0].cluster_id : (
+    local.dms_enabled ? module.dms_replica_database[0].db_instance_id : local.db_identifier
+  )
+
+  bi_db_resource_id = local.bi_uses_aurora ? module.bi_aurora[0].cluster_resource_id : (
+    local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
+  )
+
+  # Kept for compatibility with existing references to the old name.
+  bi_host = local.bi_db_host
 
   // Static map of all supported database instance types and their memory allocation, used for Memory Usage alarm.
   // (Neither RDS nor CloudWatch provides a metric or a queryable resource for instance memory size)

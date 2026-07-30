@@ -298,12 +298,10 @@ variable "s3_replicate_buckets" {
   default     = false
 }
 
-# This needs to have no type due to terraform's weird handling of string lists. If you set a type it will convert it to
-# a format we can't feed into helm
-# tflint-ignore: terraform_typed_variables
 variable "dms_task_arn" {
+  description = "If BI is enabled, the ARN of the BI replication. A DMS Serverless replication CONFIG on current physical layers, a provisioned replication TASK on older ones; the dms-start Job branches on the ARN's shape. Name kept as-is so consumers do not have to change."
   type        = string
-  description = "If BI is enabled, the DMS replication task arn."
+  default     = ""
 }
 
 variable "dms_enabled" {
@@ -311,6 +309,13 @@ variable "dms_enabled" {
   type        = bool
   default     = false
 }
+
+variable "dms_replication_generation" {
+  description = "Physical's hash of the replication-config attributes whose change stops the replication. Folded into the dms-start Job name so the modify that stops it also re-runs the starter. Empty (old physical layers) keeps the static Job name."
+  type        = string
+  default     = ""
+}
+
 variable "vault_address" {
   description = "Vault server address accessible from within the cluster (PrivateLink)."
   type        = string

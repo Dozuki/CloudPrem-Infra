@@ -1,10 +1,41 @@
+# This Job starts the BI replication once the app is up, and it stays here rather than moving
+# into physical as `start_replication = true` on aws_dms_replication_config, which was tried
+# first. The reason is ordering, and it is the same reason the Job's original author put the
+# deployment wait at the top of the script: the DMS selection rules match the `sites` and
+# `%_guide` schemas, and those do not exist until the db-migrations Job in THIS layer has run.
+# Physical runs before that, so a start issued from physical on a fresh install waits for a
+# replication that DMS refuses to initialize ("No tables were found at task initialization"),
+# fails the physical apply, and thereby prevents the logical apply that would have created the
+# schemas. Chicken-and-egg, hand-recovery only. Starting from here, after migrations, cannot
+# hit it. Physical still OWNS the replication; it just does not start it.
+#
+# Everything task-shaped in here is now ARN-shape-dispatched, because a replication CONFIG
+# (serverless) and a replication TASK (provisioned, legacy) are different API surfaces:
+# describe-replication-tasks does not return a config, and start-replication-task cannot start
+# one. Same dispatch as physical/util/dms_restart.py and the migration runner.
+#
+# Serverless also drops the test-connection dance: there is no replication instance to test
+# against, and provisioning runs its own Testing Connection phase.
 resource "kubernetes_job_v1" "dms_start" {
   count = var.dms_enabled ? 1 : 0
 
   depends_on = [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding]
 
   metadata {
-    name      = "dms-start"
+    # Fold physical's replication generation into the name (same #4a pattern as
+    # grafana_db_create below). A static name meant the Completed Job never re-ran, so
+    # any ModifyReplicationConfig - a DCU change, a mappings change, a compute_config
+    # change such as a new security group - left the replication stopped by the provider
+    # with nothing to start it again, against the 48h deprovision clock. The generation
+    # changes exactly when the provider stops the replication, so the same merge's logical
+    # apply makes a fresh Job. Empty generation (old physical layers) keeps the static
+    # name - no diff.
+    #
+    # The rds -> aurora BI switch is NOT one of those: it modifies the target endpoint in
+    # place, the endpoint ARN and the replication config are unchanged, so the generation
+    # is invariant and no Job is minted. That restart is the operator's, deliberately -
+    # see the reload-target note below.
+    name      = var.dms_replication_generation == "" ? "dms-start" : "dms-start-${var.dms_replication_generation}"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
   spec {
@@ -26,7 +57,9 @@ resource "kubernetes_job_v1" "dms_start" {
           #
           # alpine/k8s carries both kubectl and aws (botocore 1.35, well past the
           # ~1.33 that added Pod Identity support) and is pinned, which also retires
-          # the ":latest" supply-chain TODO this line used to carry.
+          # the ":latest" supply-chain TODO this line used to carry. That botocore is
+          # also new enough for the serverless calls below (start-replication landed
+          # in botocore 1.29).
           image = "alpine/k8s:1.31.0"
           command = [
             "/bin/sh",
@@ -35,11 +68,8 @@ resource "kubernetes_job_v1" "dms_start" {
             # `kubectl wait deploy/...` hard-failed with NotFound in that window and
             # burned the Job's retries, so DMS never started (all 5 cutover envs had
             # to be started by hand). Wait for the deployment to EXIST first, then be
-            # available. Then start the replication task idempotently — only if it is
-            # not already running/starting, since start-replication-task errors on a
-            # running task. (Edge case not handled: a source-endpoint connection gone
-            # stale after a DB replace needs a test-connection first — see the cutover
-            # runbook; rare, and outside this job's inputs.)
+            # available. Then start the replication idempotently — only if it is not
+            # already running/starting, since start errors on a running replication.
             <<-EOT
               set -e
               for i in $(seq 1 60); do
@@ -49,6 +79,68 @@ resource "kubernetes_job_v1" "dms_start" {
               kubectl wait deploy/dozuki-app-deployment --for=condition=available --timeout=1200s
               ARN='${var.dms_task_arn}'
               REGION='${data.aws_region.current[0].region}'
+              case "$ARN" in
+                *:replication-config:*) KIND=serverless ;;
+                *:rep:*|*:replication-task:*) KIND=task ;;
+                *) echo "unrecognised DMS ARN shape: '$ARN'" >&2; exit 1 ;;
+              esac
+              echo "BI replication kind: $KIND"
+
+              if [ "$KIND" = serverless ]; then
+                # Settle the transient states rather than deferring to a reconcile that does not
+                # exist. modifying and stopping both resolve within a couple of minutes, but a
+                # Completed Job is never re-run and its name only changes on a physical apply, so
+                # "a later reconcile will act" meant nobody ever acted: the replication sat
+                # stopped against the 48h deprovision clock. Wait the transition out, up to ten
+                # minutes, then dispatch on whatever it settled into.
+                #
+                # An empty Replications list means the config has never run. --query then prints
+                # "None"; treat that like a never-started replication and start it.
+                SETTLE=0
+                while :; do
+                  STATUS=$(aws dms describe-replications --region "$REGION" --filters "Name=replication-config-arn,Values=$ARN" --query 'Replications[0].Status' --output text)
+                  [ "$STATUS" = "None" ] && STATUS=not-started
+                  case "$STATUS" in
+                    modifying|stopping) ;;
+                    *) break ;;
+                  esac
+                  SETTLE=$((SETTLE+1))
+                  if [ "$SETTLE" -ge 30 ]; then
+                    echo "replication stuck in '$STATUS' after 10m - not starting it. A serverless replication left stopped or failed for 48 HOURS is deprovisioned and cannot be resumed at all; recovery is recreating it from physical. Investigate now." >&2
+                    exit 1
+                  fi
+                  echo "replication is $STATUS - waiting for it to settle ($SETTLE/30)"
+                  sleep 20
+                done
+                echo "DMS serverless replication status: $STATUS"
+                case "$STATUS" in
+                  running|starting|initializing) echo "already running - nothing to do"; exit 0 ;;
+                  deprovisioning|deprovisioned)
+                    # Stopped or failed for 48h. Not resumable at all; recreating the config is
+                    # the only recovery, which is a physical apply, not something this can fix.
+                    # deprovisioning is fatal for the same reason deprovisioned is - AWS is
+                    # already reclaiming the capacity and there is no start call that stops it.
+                    echo "replication is $STATUS - the 48h stopped/failed clock ran out, so it cannot be resumed. Recreate the replication config from physical, then re-run this Job." >&2; exit 1 ;;
+                  not-started|created|failed)
+                    # Never loaded (or died trying), so a full load is what is wanted.
+                    aws dms start-replication --replication-config-arn "$ARN" --start-replication-type start-replication --region "$REGION" ;;
+                  stopped)
+                    # Full load already happened; pick CDC from the last checkpoint rather than
+                    # redoing it. That is wrong for exactly one case: a target endpoint that has
+                    # just been repointed at a NEW empty database (the rds -> aurora BI switch,
+                    # or a cutover), where resuming CDC reports Running against a cluster with no
+                    # historical rows. This Job cannot tell a repoint from an ordinary stop, so
+                    # it never gets the chance to: an endpoint change moves neither the endpoint
+                    # ARN nor the replication config, so the generation in this Job's name does
+                    # not change and no Job is created for it. reload-target after a repoint is
+                    # the operator's call, and the migration runner's bi-epoch phase is where it
+                    # is made.
+                    aws dms start-replication --replication-config-arn "$ARN" --start-replication-type resume-processing --region "$REGION" ;;
+                  *) echo "unexpected serverless status '$STATUS'" >&2; exit 1 ;;
+                esac
+                exit 0
+              fi
+
               STATUS=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-arn,Values=$ARN" --query 'ReplicationTasks[0].Status' --output text)
               echo "DMS replication task status: $STATUS"
               case "$STATUS" in
@@ -65,7 +157,8 @@ resource "kubernetes_job_v1" "dms_start" {
                   # them - so this is the normal path, not the rare post-DB-replace edge
                   # case the old comment assumed. Test both endpoints and wait for
                   # success before starting. test-connection is idempotent; an
-                  # already-successful endpoint returns successful again.
+                  # already-successful endpoint returns successful again. (Serverless has
+                  # no equivalent: no replication instance to test against.)
                   RI=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-arn,Values=$ARN" --query 'ReplicationTasks[0].ReplicationInstanceArn' --output text)
                   for EP in $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-arn,Values=$ARN" --query 'ReplicationTasks[0].[SourceEndpointArn,TargetEndpointArn]' --output text); do
                     ST=$(aws dms describe-connections --region "$REGION" --filters "Name=endpoint-arn,Values=$EP" "Name=replication-instance-arn,Values=$RI" --query 'Connections[0].Status' --output text 2>/dev/null)
