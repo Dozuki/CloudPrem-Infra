@@ -267,6 +267,18 @@ EOF
 }
 
 # =============================================================================
+# Resolve the BI probes ONCE, in the parent shell, before dispatching. Inside
+# a $( ) substitution a die() only exits the subshell: the caller reads an
+# empty string, bi_task_status falls through to "none", and the fence skips
+# stopping a LIVE replication - the exact fail-open these probes exist to
+# prevent. Resolved here, a probe failure (say, a runner role without the
+# serverless describe permissions) kills the run before any phase acts, and
+# every later $(bi_kind) / $(bi_arn_cached) is a pure cache read, which is
+# what the caching was for. The cost is that phases which never touch BI also
+# need the DMS describe permissions; that is the fail-closed trade.
+bi_kind >/dev/null
+[ "$(bi_kind)" = none ] || bi_arn_cached >/dev/null
+
 case "$PHASE" in
 
 status)
