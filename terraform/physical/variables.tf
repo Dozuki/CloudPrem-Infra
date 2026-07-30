@@ -246,7 +246,7 @@ variable "rds_backup_retention_period" {
 }
 
 variable "rds_engine_family" {
-  description = "Parameter-group family for the provisioned RDS primary and the legacy BI instance. Tracks rds_engine_version's major.minor; 8.4 by default now that 8.0 is past end of standard support. Existing 8.0 stacks pin \"8.0\". Aurora derives its own family from aurora_engine_version."
+  description = "Parameter-group family for the provisioned RDS primary and the legacy BI instance. Tracks rds_engine_version's major.minor; 8.4 by default now that 8.0 is past end of standard support. An existing 8.0 stack either pins \"8.0\" or migrates to Aurora before it takes this release. Aurora derives its own family from aurora_engine_version."
   type        = string
   default     = "8.4"
 
@@ -264,11 +264,12 @@ variable "rds_engine_version" {
     anything still on it is auto-enrolled in RDS Extended Support and billed per vCPU-hour -
     the codebase should not be handing that to a new stack by default.
 
-    EXISTING rds stacks must pin their current 8.0 family, and every one of them does. A major
+    Not every existing 8.0 stack pins it, so do not assume this default is inert. A major
     version change plans an in-place upgrade, which is NOT how the remaining 8.0 instances get
     fixed: they are either Aurora-migration rollback anchors headed for deletion, or live
     primaries whose route to 8.4 is the Aurora migration itself. Neither wants a major upgrade
-    triggered by a module default.
+    triggered by a module default. The rule for an unpinned 8.0 stack is therefore to migrate
+    it to Aurora before it takes this release; pin "8.0" only to hold one in place meanwhile.
 
     Prefer the bare family ("8.4") over an exact minor where you can: AWS resolves it to the
     latest matching minor, so auto_minor_version_upgrade drift never shows up as a diff.
@@ -330,13 +331,17 @@ variable "bi_db_engine" {
     Do NOT flip protect_resources stack-wide instead; that drops protection on the primary
     and flips skip_final_snapshot everywhere.
 
-    reload-target is NOT optional and the replication will not look broken without
-    it: the apply leaves the replication stopped, the logical layer's dms-start Job then
-    resumes CDC against the new empty cluster, and the replication reports Running while
-    holding no historical data. Check TablesLoaded against the previous table count, not the
-    status. Do not leave it stopped for 48 hours - a serverless replication is deprovisioned
-    at that point and cannot be resumed, only recreated. Cheapest moment is alongside that
-    env's primary KMS key swap, since both replace a database in the same window.
+    The restart is the operator's job, not the layer's. The switch modifies the target
+    ENDPOINT in place (server_name/username/password are not ForceNew), so the endpoint ARN
+    and the replication config are both unchanged, the dms_replication_generation hash does
+    not move, and no fresh dms-start Job is created to pick the replication back up. Anything
+    that does restart it without reload-target makes it worse: resume-processing takes CDC
+    from the last checkpoint against an empty cluster, and the replication then reports
+    Running while holding no historical data. Check TablesLoaded against the previous table
+    count, not the status. Do not leave it stopped for 48 hours - a serverless replication is
+    deprovisioned at that point and cannot be resumed, only recreated. Cheapest moment is
+    alongside that env's primary KMS key swap, since both replace a database in the same
+    window.
   EOT
   type        = string
   default     = "rds"

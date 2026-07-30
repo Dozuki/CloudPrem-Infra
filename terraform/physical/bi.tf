@@ -156,11 +156,20 @@ resource "aws_dms_endpoint" "target" {
 # the two applies, which matters only against the 48h deprovision clock. Do not leave a
 # physical apply un-followed by a logical one.
 #
-# CAUTION on the rds -> aurora switch, which is a modify: the switch stops the replication,
-# repoints target_endpoint_arn at the new EMPTY Aurora cluster, and leaves it stopped. The Job
-# then resumes CDC against it (resume-processing), so the replication reports Running while the
-# target holds no historical rows at all. reload-target afterwards repairs it. A "Running"
-# status is NOT evidence the switch worked - verify TablesLoaded, not status.
+# CAUTION on the rds -> aurora switch: it does NOT go through that path, and nothing automatic
+# restarts the replication after it. The switch repoints aws_dms_endpoint.target at the new
+# EMPTY Aurora cluster, and server_name/username/password are modify-in-place attributes, so
+# the endpoint ARN never changes and this resource sees no diff at all. Two consequences. DMS
+# rejects ModifyEndpoint while the replication runs, so the operator stops it first (the order
+# is in the bi_db_engine variable description). And the generation hash is invariant across the
+# switch, so no fresh dms-start Job appears - the operator owns the restart too, and it has to
+# be reload-target. resume-processing would pick CDC up against an empty cluster and report
+# Running with no historical rows at all. A "Running" status is NOT evidence the switch worked -
+# verify TablesLoaded, not status.
+#
+# Endpoint attributes are deliberately kept OUT of the generation hash for that reason. A Job
+# minted by an endpoint change would issue resume-processing, since it cannot tell a repoint
+# from an ordinary stop, which is exactly the wrong call at a cutover.
 #
 # Sizing is deliberately NOT derived from the old instance class. The provisioned boxes were
 # sized for peak full-load headroom and then sat idle; min_capacity_units is what matters for

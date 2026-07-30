@@ -24,11 +24,17 @@ resource "kubernetes_job_v1" "dms_start" {
   metadata {
     # Fold physical's replication generation into the name (same #4a pattern as
     # grafana_db_create below). A static name meant the Completed Job never re-ran, so
-    # any ModifyReplicationConfig - a DCU change, a mappings change, the rds -> aurora
-    # repoint - left the replication stopped by the provider with nothing to start it
-    # again, against the 48h deprovision clock. The generation changes exactly when the
-    # provider stops the replication, so the same merge's logical apply makes a fresh
-    # Job. Empty generation (old physical layers) keeps the static name - no diff.
+    # any ModifyReplicationConfig - a DCU change, a mappings change, a compute_config
+    # change such as a new security group - left the replication stopped by the provider
+    # with nothing to start it again, against the 48h deprovision clock. The generation
+    # changes exactly when the provider stops the replication, so the same merge's logical
+    # apply makes a fresh Job. Empty generation (old physical layers) keeps the static
+    # name - no diff.
+    #
+    # The rds -> aurora BI switch is NOT one of those: it modifies the target endpoint in
+    # place, the endpoint ARN and the replication config are unchanged, so the generation
+    # is invariant and no Job is minted. That restart is the operator's, deliberately -
+    # see the reload-target note below.
     name      = var.dms_replication_generation == "" ? "dms-start" : "dms-start-${var.dms_replication_generation}"
     namespace = kubernetes_namespace_v1.app.metadata[0].name
   }
@@ -98,11 +104,15 @@ resource "kubernetes_job_v1" "dms_start" {
                     aws dms start-replication --replication-config-arn "$ARN" --start-replication-type start-replication --region "$REGION" ;;
                   stopped)
                     # Full load already happened; pick CDC from the last checkpoint rather than
-                    # redoing it. NOTE: after physical repoints BI at a NEW empty target (the
-                    # rds -> aurora switch) this resumes CDC against an empty cluster and reports
-                    # Running with no historical rows. That case wants reload-target, which the
-                    # migration runner's bi-epoch phase does deliberately - it is not this Job's
-                    # call to make, since it cannot tell a repoint from an ordinary stop.
+                    # redoing it. That is wrong for exactly one case: a target endpoint that has
+                    # just been repointed at a NEW empty database (the rds -> aurora BI switch,
+                    # or a cutover), where resuming CDC reports Running against a cluster with no
+                    # historical rows. This Job cannot tell a repoint from an ordinary stop, so
+                    # it never gets the chance to: an endpoint change moves neither the endpoint
+                    # ARN nor the replication config, so the generation in this Job's name does
+                    # not change and no Job is created for it. reload-target after a repoint is
+                    # the operator's call, and the migration runner's bi-epoch phase is where it
+                    # is made.
                     aws dms start-replication --replication-config-arn "$ARN" --start-replication-type resume-processing --region "$REGION" ;;
                   *) echo "unexpected serverless status '$STATUS'" >&2; exit 1 ;;
                 esac
