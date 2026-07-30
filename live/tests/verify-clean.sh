@@ -20,7 +20,11 @@ P="${AWS_PROFILE:-default}"
 PRIMARY="${AWS_REGION:-us-east-1}"
 DR="${DR_REGION:-us-west-2}"
 ACCT="$(aws sts get-caller-identity --profile "$P" --query Account --output text 2>/dev/null)"
+# Both buckets: the recover scenario deploys its rebuild stack INTO the DR region, so
+# that stack's state lives in the DR region's bucket. Checking only the primary let five
+# DR-region prefixes accumulate unnoticed across cycles while this reported CLEAN.
 STATE_BUCKET="dozuki-terraform-state-${PRIMARY}-${ACCT}"
+DR_STATE_BUCKET="dozuki-terraform-state-${DR}-${ACCT}"
 
 [ -z "$ACCT" ] && { echo "ERROR: no AWS identity (profile=$P)" >&2; exit 2; }
 
@@ -63,7 +67,16 @@ report "s3"           "$(aws s3api list-buckets --profile "$P" --query "Buckets[
 
 echo "--- terraform state ---"
 # Orphaned per-run harness state prefixes (RunUpgrade uses local-<ts>-<cfg>/...).
-report "state-prefix" "$(aws s3 ls "s3://$STATE_BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE local-/{print $2}' | tr -d '/')"
+_state_prefixes() { # <bucket> — prints "prefix (bucket-region)" so a leak names where it lives
+  local b="$1"
+  aws s3 ls "s3://$b/" --profile "$P" 2>/dev/null | awk -v b="$b" '/PRE local-/{gsub(/\//,"",$2); print $2 " (" b ")"}'
+}
+_all_state="$(_state_prefixes "$STATE_BUCKET")"
+if [ "$DR_STATE_BUCKET" != "$STATE_BUCKET" ]; then
+  _all_state="$_all_state
+$(_state_prefixes "$DR_STATE_BUCKET")"
+fi
+report "state-prefix" "$(printf '%s\n' "$_all_state" | awk 'NF')"
 
 echo "======================================================"
 if [ "$leaks" -eq 0 ]; then

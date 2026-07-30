@@ -35,7 +35,16 @@ unset TERRAGRUNT_TFPATH
 
 ACCT="$(aws sts get-caller-identity --profile "$P" --query Account --output text 2>/dev/null)" || {
   echo "ERROR: no AWS identity (profile=$P). Run: aws sso login --profile $P" >&2; exit 1; }
-BUCKET="dozuki-terraform-state-${R}-${ACCT}"
+# State lives in the bucket of the region the stack was deployed to, so the recover
+# scenario writes its REBUILD stack's state to the DR region's bucket while the source
+# stack's stays in the primary. Scanning only the primary made that rebuild stack
+# invisible here: cleanup found just the source, whose destroy is BLOCKED by the rebuild
+# stack (it owns the S3 replication config on the source's DR buckets), so the backstop
+# retried a doomed destroy while a live EKS + Aurora sat unseen in us-west-2.
+PRIMARY_BUCKET="dozuki-terraform-state-${R}-${ACCT}"
+DR_BUCKET="dozuki-terraform-state-${DR}-${ACCT}"
+if [ "$DR_BUCKET" = "$PRIMARY_BUCKET" ]; then STATE_BUCKETS="$PRIMARY_BUCKET"; else STATE_BUCKETS="$PRIMARY_BUCKET $DR_BUCKET"; fi
+BUCKET="$PRIMARY_BUCKET"   # kept for messages that predate the multi-bucket scan
 LOCK_TABLE="dozuki-terraform-lock"
 
 # Number of managed CLOUD resource instances a run's state still tracks, summed over its
@@ -55,10 +64,10 @@ LOCK_TABLE="dozuki-terraform-lock"
 # still manage something" — this decides whether state is safe to delete, so an unreadable
 # file has to fail closed.
 managed_resource_count() {
-  local prefix="$1" total=0 n k
-  for k in $(aws s3 ls "s3://$BUCKET/$prefix/" --recursive --profile "$P" 2>/dev/null \
+  local bkt="$1" prefix="$2" total=0 n k
+  for k in $(aws s3 ls "s3://$bkt/$prefix/" --recursive --profile "$P" 2>/dev/null \
              | awk '$4 ~ /terraform\.tfstate$/ {print $4}'); do
-    n=$(aws s3 cp "s3://$BUCKET/$k" - --profile "$P" 2>/dev/null | python3 -c '
+    n=$(aws s3 cp "s3://$bkt/$k" - --profile "$P" 2>/dev/null | python3 -c '
 import json, sys
 CLOUD = ("aws_", "azurerm_")
 try:
@@ -76,6 +85,44 @@ print(sum(1 for r in d.get("resources", [])
   echo "$total"
 }
 
+# The recovery scenario's rebuild stack is configured with RUNTIME terraform inputs
+# (snapshot ARN, adopted DR buckets, the Vault PrivateLink service name). They are not in
+# env.hcl and not derivable from live outputs, so a destroy without them dies at variable
+# validation - "No value for required variable vault_endpoint_service_name" - and the
+# stack cannot be torn down by this script at all. That is exactly what stranded a live
+# EKS + Aurora in us-west-2 until the values were dug out of the state file by hand.
+#
+# The harness persists them in the run manifest as extra_inputs. The manifest is written
+# by the PRIMARY-region store even when the stack's state lives in the DR bucket, so look
+# in every state bucket for it and use the first one that has it.
+# Applies manifest_tfvars output to the current shell. Deliberately a function with an
+# explicit empty guard: `eval "$(printf '' | sed 's/^/export /')"` evaluates to a BARE
+# `export`, which prints the entire environment - tokens included - into the run log.
+apply_manifest_tfvars() {
+  [ -n "${MANIFEST_TFVARS:-}" ] || return 0
+  eval "$(printf '%s\n' "$MANIFEST_TFVARS" | sed 's/^/export /')"
+}
+
+manifest_tfvars() { # <prefix> — prints TF_VAR_<k>=<v> lines, one per extra input
+  local prefix="$1" b json
+  for b in $STATE_BUCKETS; do
+    json="$(aws s3 cp "s3://$b/$prefix/harness-manifest.json" - --profile "$P" 2>/dev/null)" || continue
+    [ -z "$json" ] && continue
+    printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for k, v in (d.get("extra_inputs") or {}).items():
+    # HCL-ish scalars pass straight through; anything structured goes as compact JSON,
+    # which is what terraform expects for list/map/object vars via TF_VAR_.
+    print("TF_VAR_%s=%s" % (k, v if isinstance(v, str) else json.dumps(v, separators=(",", ":"))))
+' && return 0
+  done
+  return 0
+}
+
 # Target prefixes, filtered to those that START WITH an arg — so a full prefix matches
 # itself, and a RUN_ID like "local-<ts>-" matches all of that run's per-config prefixes
 # (and nothing else).
@@ -85,33 +132,40 @@ print(sum(1 for r in d.get("resources", [])
 # any prefix: run.sh lets RUN_ID be overridden, and a custom RUN_ID used to match nothing
 # here — the destroy silently no-op'd and the whole run leaked (EKS, Aurora, VPCs) while
 # still reporting that cleanup had run.
-if [ "$#" -gt 0 ]; then
-  ALL_PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE /{gsub(/\//,"",$2); print $2}')"
-else
-  ALL_PREFIXES="$(aws s3 ls "s3://$BUCKET/" --profile "$P" 2>/dev/null | awk '/PRE local-/{gsub(/\//,"",$2); print $2}')"
-fi
+ALL_PREFIXES=""
+for _b in $STATE_BUCKETS; do
+  if [ "$#" -gt 0 ]; then
+    _p="$(aws s3 ls "s3://$_b/" --profile "$P" 2>/dev/null | awk '/PRE /{gsub(/\//,"",$2); print $2}')"
+  else
+    _p="$(aws s3 ls "s3://$_b/" --profile "$P" 2>/dev/null | awk '/PRE local-/{gsub(/\//,"",$2); print $2}')"
+  fi
+  # bucket<TAB>prefix, so the loop destroys each stack against the bucket holding its state
+  ALL_PREFIXES="$ALL_PREFIXES
+$(printf '%s\n' "$_p" | awk -v b="$_b" 'NF{print b "\t" $0}')"
+done
+ALL_PREFIXES="$(printf '%s\n' "$ALL_PREFIXES" | awk 'NF')"
 if [ "$#" -gt 0 ]; then
   PREFIXES=""
   for arg in "$@"; do
     arg="${arg%/}"
     PREFIXES="$PREFIXES
-$(printf '%s\n' "$ALL_PREFIXES" | awk -v a="$arg" 'index($0,a)==1')"
+$(printf '%s\n' "$ALL_PREFIXES" | awk -F'\t' -v a="$arg" 'index($2,a)==1')"
   done
   PREFIXES="$(printf '%s\n' "$PREFIXES" | awk 'NF' | sort -u)"
 else
   PREFIXES="$ALL_PREFIXES"
 fi
-if [ -z "$PREFIXES" ]; then echo ">> No matching orphaned state prefixes found in s3://$BUCKET/ (searched: ${*:-local-*})."; fi
+if [ -z "$PREFIXES" ]; then echo ">> No matching orphaned state prefixes found in $STATE_BUCKETS (searched: ${*:-local-*})."; fi
 
 fail=0
 STACKS=""   # collected <customer>-<env> stacks, for central-Vault cleanup after teardown
 # Loop in the parent shell (process substitution, not a pipe) so set/exit behave.
-while IFS= read -r pfx; do
+while IFS="$(printf '\t')" read -r bkt pfx; do
   [ -z "$pfx" ] && continue
   echo; echo "==================== orphan: $pfx ===================="
 
   # Derive partition/region/env from the physical state key path.
-  key="$(aws s3 ls "s3://$BUCKET/$pfx/" --recursive --profile "$P" 2>/dev/null | awk '/physical\/terraform.tfstate$/{print $4; exit}')"
+  key="$(aws s3 ls "s3://$bkt/$pfx/" --recursive --profile "$P" 2>/dev/null | awk '/physical\/terraform.tfstate$/{print $4; exit}')"
   if [ -n "$key" ]; then
     rel="${key#"$pfx"/}"                       # standard/us-east-1/min/physical/terraform.tfstate
     envdir="$(dirname "$(dirname "$rel")")"    # standard/us-east-1/min
@@ -122,7 +176,7 @@ while IFS= read -r pfx; do
     # run other customers (smokesrc/smokerec), and assuming 'smoke' once made the
     # vault cleanup disable the WRONG mount and verify-clean vouch for the wrong
     # prefix while real orphans sat in the account.
-    cust="$(aws s3 cp "s3://$BUCKET/$key" - --profile "$P" 2>/dev/null | python3 -c '
+    cust="$(aws s3 cp "s3://$bkt/$key" - --profile "$P" 2>/dev/null | python3 -c '
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -238,11 +292,17 @@ print(json.dumps({'Objects':o}) if o else '', end='')
       echo "  WARNING: no worktree marker for $pfx — falling back to LIVE tree $tgt (may not match deployed code)" >&2
     fi
   fi
+  # Runtime inputs the rebuild stack needs to even parse its variables.
+  MANIFEST_TFVARS="$(manifest_tfvars "$pfx")"
+  if [ -n "$MANIFEST_TFVARS" ]; then
+    echo "  manifest extra_inputs: $(printf '%s\n' "$MANIFEST_TFVARS" | awk -F= '{printf "%s ", $1}')"
+  fi
   if [ -n "$tgt" ]; then
     if [ "${DRY_RUN:-0}" = 1 ]; then
       echo "  DRY_RUN: would destroy logical (best-effort) then physical in $tgt"; destroyed_ok=0
     else
       ( cd "$tgt/logical" 2>/dev/null && rm -rf .terragrunt-cache && \
+        apply_manifest_tfvars && \
         TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
         TF_VAR_customer="$cust" TF_VAR_enable_dr=false \
           terragrunt destroy --non-interactive -auto-approve -input=false ) \
@@ -260,6 +320,7 @@ print(json.dumps({'Objects':o}) if o else '', end='')
       for attempt in $(seq 1 "$DESTROY_ATTEMPTS"); do
         ( cd "$tgt/physical"
           rm -rf .terragrunt-cache
+          apply_manifest_tfvars
           TG_AWS_ACCT_ID="$ACCT" TG_AWS_PROFILE="$P" TG_AWS_REGION="$region" TG_STATE_PREFIX="$pfx/" \
           TF_VAR_customer="$cust" TF_VAR_enable_dr=false \
             terragrunt destroy --non-interactive -auto-approve -input=false ) 2>&1 | tee "$_dlog"
@@ -300,10 +361,10 @@ print(json.dumps({'Objects':o}) if o else '', end='')
   if [ "${DRY_RUN:-0}" = 1 ]; then
     echo "  DRY_RUN: would purge state prefix $pfx (only if the real destroy succeeded)"
   elif [ "$destroyed_ok" -eq 0 ] || [ -z "$key" ]; then
-    aws s3 rm "s3://$BUCKET/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
-  elif [ "$(managed_resource_count "$pfx")" = 0 ]; then
+    aws s3 rm "s3://$bkt/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
+  elif [ "$(managed_resource_count "$bkt" "$pfx")" = 0 ]; then
     echo "  destroy could not run, but the state manages 0 resources (data sources only) — purging dead prefix: $pfx" >&2
-    aws s3 rm "s3://$BUCKET/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
+    aws s3 rm "s3://$bkt/$pfx/" --recursive --profile "$P" >/dev/null 2>&1 && echo "  purged state prefix: $pfx"
   else
     echo "  destroy did NOT fully succeed — state prefix kept for retry: $pfx" >&2
     fail=1
@@ -314,7 +375,9 @@ print(json.dumps({'Objects':o}) if o else '', end='')
   #     they orphan as `available`. Also sweep orphaned launch templates. Detached/
   #     unused only; reports every deletion (no silent caps).
   if [ -n "$env" ]; then
-    stack="${CUSTOMER}-${env}"
+    # cust, not CUSTOMER: recovery-scenario stacks run smokesrc/smokerec, so the default
+    # would sweep smoke-min-* and silently leave the real stack's volumes behind.
+    stack="${cust}-${env}"
     for vol in $(aws ec2 describe-volumes --region "$region" --profile "$P" \
           --filters "Name=tag:Name,Values=${stack}-dynamic-pvc-*" "Name=status,Values=available" \
           --query 'Volumes[].VolumeId' --output text 2>/dev/null | tr '\t' '\n'); do

@@ -86,8 +86,14 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 }
 
 // stateBucket mirrors live/root.hcl remote_state:
-// ${TG_BUCKET_PREFIX}dozuki-terraform-state-<region>-<account>. The manifest lands
-// in the SAME bucket as TF state, under the run's state prefix.
+// ${TG_BUCKET_PREFIX}dozuki-terraform-state-<region>-<account>.
+//
+// The manifest usually lands in the same bucket as the TF state, but NOT always: the
+// store is built once from the matrix's default region, while each unit's state follows
+// the region that unit deploys to. The recovery scenario's rebuild stack therefore keeps
+// its manifest in the PRIMARY bucket while its state lives in the DR one. Anything
+// looking for a run's manifest must check both buckets rather than infer it from where
+// the state is.
 func stateBucket(accountID, region string) string {
 	return os.Getenv("TG_BUCKET_PREFIX") + "dozuki-terraform-state-" + region + "-" + accountID
 }
