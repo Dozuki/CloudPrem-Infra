@@ -28,7 +28,18 @@ locals {
   # ARN — otherwise this flips and the KMS-key change replaces the DB. The db-replace-guard
   # PLAN policy blocks that unless the stack carries the allow-db-replace label, so the
   # aggressive default fails closed.
-  rds_use_tf_cmk  = var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds"
+  # An RDS INSTANCE restored from a snapshot is excluded, because RDS will not honour the key.
+  # RestoreDBClusterFromSnapshot (Aurora) takes a KmsKeyId and re-encrypts, but
+  # RestoreDBInstanceFromDBSnapshot has no storage-key parameter at all — the restored instance
+  # keeps the snapshot's key, and re-encrypting means copy-snapshot under the new key FIRST and
+  # then restoring. So creating a CMK here would not converge: the instance comes up on the
+  # snapshot's key while kms_key_id says otherwise, and because the key is immutable every
+  # later plan demands another replacement. Such a stack must pin rds_kms_key_id to the
+  # snapshot's actual key instead. Aurora is deliberately NOT excluded — it re-encrypts fine,
+  # which is what makes the fleet's snapshot-restore key swap possible at all.
+  rds_snapshot_restored_instance = var.db_engine == "rds" && var.rds_snapshot_identifier != ""
+
+  rds_use_tf_cmk  = var.rds_adopt_dr_cmk && var.rds_kms_key_id == "alias/aws/rds" && !local.rds_snapshot_restored_instance
   rds_kms_key_arn = local.rds_use_tf_cmk ? aws_kms_key.rds_cmk[0].arn : data.aws_kms_key.rds.arn
 
   # RDS automated-backup cross-region replication is only possible when the DB
@@ -48,6 +59,17 @@ check "dr_region_valid" {
   assert {
     condition     = !var.enable_dr || (var.dr_region != "" && var.dr_region != data.aws_region.current.region)
     error_message = "enable_dr is true but dr_region is empty or equals the primary region (${data.aws_region.current.region}). The admin layer must inject TG_AWS_DR_REGION, or set dr_region explicitly."
+  }
+}
+
+# The snapshot-restore exclusion above is silent otherwise: the stack falls back to
+# data.aws_kms_key.rds, which is alias/aws/rds unless pinned, and that is very likely NOT the
+# snapshot's key. Nothing breaks (RDS ignores the key on restore), but the operator should know
+# the config does not describe reality and that DR needs an explicit pin.
+check "rds_snapshot_key_pinned" {
+  assert {
+    condition     = !local.rds_snapshot_restored_instance || var.rds_kms_key_id != "alias/aws/rds"
+    error_message = "db_engine is \"rds\" and rds_snapshot_identifier is set, but rds_kms_key_id is unpinned. RestoreDBInstanceFromDBSnapshot cannot choose a storage key, so the instance will come up on the SNAPSHOT's key regardless of this config, and no customer-managed key is created (a created CMK would never converge). Pin rds_kms_key_id to the snapshot's actual key so the config matches reality — and so DR can tell whether that key is customer-managed. To move such a database onto a new CMK, copy the snapshot under the new key first, then restore from the copy."
   }
 }
 
