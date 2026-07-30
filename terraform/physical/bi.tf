@@ -126,9 +126,12 @@ resource "aws_dms_endpoint" "target" {
   port                        = 3306
   kms_key_arn                 = aws_kms_key.bi[0].arn
 
-  username    = module.dms_replica_database[0].db_instance_username
-  password    = module.dms_replica_database[0].db_instance_password
-  server_name = module.dms_replica_database[0].db_instance_address
+  # Engine-agnostic (main.tf): the BI target is an Aurora Serverless cluster by default and a
+  # provisioned instance on the legacy path. engine_name stays "mysql" - DMS treats Aurora MySQL
+  # as a wire-compatible MySQL target.
+  username    = local.bi_db_username
+  password    = local.bi_db_password
+  server_name = local.bi_db_host
 
   tags = local.tags
 }
@@ -183,8 +186,13 @@ module "rds_replica_database" {
 
   identifier = "${local.identifier}-rds-replica"
 
-  engine         = "mysql"
-  engine_version = "8.0"
+  engine = "mysql"
+  # var.rds_engine_family, i.e. the "8.0" PREFIX form, not an exact version. AWS resolves a
+  # prefix to the latest matching minor, which is what lets auto_minor_version_upgrade move
+  # these instances without Terraform fighting it. An exact pin here would be actively
+  # dangerous: the default is 8.0.43 while live instances have drifted to 8.0.46, so it would
+  # plan a DOWNGRADE that AWS rejects and every apply would fail.
+  engine_version = var.rds_engine_family
 
   port                  = 3306
   instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
@@ -274,17 +282,119 @@ resource "aws_db_parameter_group" "bi_replica" {
   }
 }
 
+# ---------------------------------------------------------------------------
+# BI database, Aurora MySQL Serverless v2 (bi_db_engine = "aurora", the default)
+#
+# Replaces the provisioned MySQL 8.0 instance below. Two reasons: the old one was pinned to
+# "8.0" with no input to change it, so every stack got an 8.0 BI database even when its primary
+# was Aurora 8.4 - and RDS for MySQL 8.0 left standard support on 2026-07-31, so those bill RDS
+# Extended Support per vCPU-hour from then on. Aurora MySQL 8.4 has standard support into 2029.
+# And BI is bursty: Serverless v2 idles down to bi_aurora_min_acu (0.5 by default) between
+# queries where a provisioned instance bills flat around the clock.
+#
+# This is a DMS TARGET, not a replica of anything - DMS full-loads into it - so it is
+# rebuildable and safe to replace on a schedule. It is still an intentional replacement:
+# db-replace-guard blocks the aws_db_instance destroy without the allow-db-replace label.
+#
+# Note what does NOT carry over: Aurora has no allocated_storage, so rds_allocated_storage /
+# rds_max_allocated_storage / dms_allocated_storage do not apply here (storage grows on demand),
+# and multi_az is expressed by adding instances rather than a flag. The DMS-vs-multi-AZ problem
+# the legacy path worked around does not arise, because this cluster has a single writer.
+resource "random_password" "bi_aurora" {
+  count   = local.bi_uses_aurora ? 1 : 0
+  length  = 40
+  special = false
+}
+
+module "bi_aurora" {
+  source  = "terraform-aws-modules/rds-aurora/aws"
+  version = "10.2.0"
+
+  count = local.bi_uses_aurora ? 1 : 0
+
+  name            = "${local.identifier}-bi"
+  engine          = "aurora-mysql"
+  engine_mode     = "provisioned"
+  engine_version  = var.aurora_engine_version
+  master_username = local.db_username
+
+  manage_master_user_password = false
+  master_password_wo          = random_password.bi_aurora[0].result
+  master_password_wo_version  = 1
+
+  serverlessv2_scaling_configuration = {
+    min_capacity = var.bi_aurora_min_acu
+    max_capacity = var.bi_aurora_max_acu
+  }
+
+  # Single writer. publicly_accessible is an INSTANCE attribute on Aurora, not a cluster one,
+  # so bi_public_access has to be set here rather than alongside the cluster settings. The
+  # subnet group uses local.bi_subnet_ids, the same public-capable set the legacy instance used,
+  # so a public BI endpoint keeps working.
+  instances = {
+    writer = {
+      instance_class      = "db.serverless"
+      publicly_accessible = var.bi_public_access
+    }
+  }
+
+  # Reuse the BI security group (public CIDR allowlist + in-VPC access) rather than letting the
+  # module invent one in the default VPC, which is how the primary aurora cluster fails.
+  create_security_group  = false
+  vpc_security_group_ids = [module.bi_database_sg.security_group_id]
+
+  subnets                = local.bi_subnet_ids
+  create_db_subnet_group = true
+
+  storage_encrypted = true
+  # Same key as the primary, for the same reason the legacy instance now follows it: this
+  # database holds a full copy of production data and is the most exposed one in the stack when
+  # bi_public_access is on. Aurora also re-encrypts on snapshot restore, so unlike the RDS path
+  # this key is not a one-way door.
+  kms_key_id = local.rds_kms_key_arn
+
+  cluster_parameter_group = {
+    family = local.aurora_param_family
+    parameters = [
+      { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
+    ]
+  }
+
+  db_parameter_group = {
+    family = local.aurora_param_family
+    parameters = [
+      { name = "group_concat_max_len", value = "33554432", apply_method = "pending-reboot" },
+    ]
+  }
+
+  apply_immediately            = local.db_apply_immediately
+  deletion_protection          = var.protect_resources
+  skip_final_snapshot          = !var.protect_resources
+  copy_tags_to_snapshot        = true
+  backup_retention_period      = var.rds_backup_retention_period
+  preferred_backup_window      = "17:00-19:00"
+  preferred_maintenance_window = "sun:19:00-sun:23:00"
+
+  tags = local.tags
+}
+
 #tfsec:ignore:general-secrets-sensitive-in-variable
 module "dms_replica_database" {
   source  = "terraform-aws-modules/rds/aws"
   version = "5.6.0"
 
-  count = local.dms_enabled ? 1 : 0
+  # Legacy provisioned path. Only when the stack pins bi_db_engine = "rds"; new stacks get the
+  # Aurora Serverless cluster above.
+  count = local.dms_enabled && !local.bi_uses_aurora ? 1 : 0
 
   identifier = "${local.identifier}-dms-replica"
 
-  engine         = "mysql"
-  engine_version = "8.0"
+  engine = "mysql"
+  # Prefix form, same reasoning as the read replica above: exact-pinning this would plan a
+  # downgrade on live instances that auto-minor-upgrade has already moved past the default.
+  # This path is NOT where the 8.0 end-of-standard-support problem gets fixed - it is legacy by
+  # definition now, and the fix is bi_db_engine = "aurora" (8.4), not a version bump here.
+  engine_version = var.rds_engine_family
 
   port                  = 3306
   instance_class        = data.aws_rds_orderable_db_instance.default.instance_class
@@ -358,12 +468,12 @@ resource "aws_secretsmanager_secret_version" "replica_database_credentials" {
 
   secret_id = aws_secretsmanager_secret.replica_database_credentials[0].id
   secret_string = jsonencode({
-    dbInstanceIdentifier = local.dms_enabled ? module.dms_replica_database[0].db_instance_id : local.db_identifier
-    resourceId           = local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
-    host                 = local.bi_host
-    port                 = local.dms_enabled ? module.dms_replica_database[0].db_instance_port : local.db_port
+    dbInstanceIdentifier = local.bi_db_identifier
+    resourceId           = local.bi_db_resource_id
+    host                 = local.bi_db_host
+    port                 = local.bi_db_port
     engine               = "mysql"
-    username             = local.dms_enabled ? module.dms_replica_database[0].db_instance_username : local.db_username
-    password             = local.dms_enabled ? module.dms_replica_database[0].db_instance_password : local.db_password
+    username             = local.bi_db_username
+    password             = local.bi_db_password
   })
 }

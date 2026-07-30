@@ -246,7 +246,7 @@ variable "rds_backup_retention_period" {
 }
 
 variable "rds_engine_family" {
-  description = "To support legacy systems on mysql5.7 we allow setting the engine version here. Only 5.7 or 8.0 are allowed."
+  description = "Parameter-group family for the provisioned RDS primary. Legacy path only and pinned to the 8.0 family for the same reason as rds_engine_version: those instances are Aurora-migration rollback anchors headed for deletion, not for a major upgrade. Aurora derives its own family from aurora_engine_version."
   type        = string
   default     = "8.0"
 
@@ -256,14 +256,66 @@ variable "rds_engine_family" {
   }
 }
 variable "rds_engine_version" {
-  description = "To support legacy systems on mysql5.7 we allow setting the engine version here. Only 5.7 or 8.0 are allowed."
+  description = <<-EOT
+    MySQL engine version for the PROVISIONED RDS primary (db_engine = "rds") and its read
+    replica. Legacy path only: db_engine defaults to "aurora", so a new stack never creates
+    one of these.
+
+    Deliberately still an 8.0 version, and deliberately NOT bumped to 8.4. RDS for MySQL 8.0
+    left standard support on 2026-07-31, so instances on it are auto-enrolled in RDS Extended
+    Support and billed per vCPU-hour. The fix for the remaining ones is RETIREMENT, not an
+    upgrade: they are all Aurora-migration rollback anchors. Changing this default would plan a
+    MAJOR in-place upgrade on every live RDS primary at once (no env pins it), which is a large
+    disruptive operation on production databases that are about to be deleted anyway.
+
+    New capacity avoids Extended Support by being Aurora (8.4) instead - see db_engine for the
+    primary and bi_db_engine for the BI database.
+  EOT
   type        = string
   default     = "8.0.43"
 
   validation {
     condition     = startswith(var.rds_engine_version, "5") || startswith(var.rds_engine_version, "8")
-    error_message = "Only 5.7 or 8.0 are allowed mysql engine versions"
+    error_message = "Only 5.7 or 8.x are allowed mysql engine versions"
   }
+}
+
+variable "bi_db_engine" {
+  description = <<-EOT
+    Engine for the BI database that DMS replicates into: "aurora" (Aurora MySQL Serverless v2,
+    the default for new stacks) or "rds" (provisioned RDS MySQL, the legacy path).
+
+    Aurora is the default for two reasons. The BI database was pinned to MySQL "8.0" with no
+    way to change it, so every stack got one even when its primary was Aurora 8.4 - and 8.0
+    left standard support on 2026-07-31, so those instances bill RDS Extended Support
+    indefinitely. And BI is idle most of the time: Serverless v2 scales down to
+    bi_aurora_min_acu between queries, where a provisioned instance bills flat.
+
+    EXISTING stacks with a BI database must pin "rds" to keep it. Switching engines REPLACES
+    the database, and db-replace-guard blocks that without the allow-db-replace label. The BI
+    database is a rebuildable DMS target - a full load repopulates it - so the flip is safe to
+    schedule, just not to do by accident. Cheapest moment is alongside that env's primary KMS
+    key swap, since both replace the same instance.
+  EOT
+  type        = string
+  default     = "aurora"
+
+  validation {
+    condition     = contains(["rds", "aurora"], var.bi_db_engine)
+    error_message = "bi_db_engine must be 'rds' or 'aurora'."
+  }
+}
+
+variable "bi_aurora_min_acu" {
+  description = "Minimum Aurora Serverless v2 capacity for the BI database. 0.5 by default: BI is queried in bursts and idles between them, which is the whole reason for moving it off a provisioned instance. Ignored unless bi_db_engine = \"aurora\"."
+  type        = number
+  default     = 0.5
+}
+
+variable "bi_aurora_max_acu" {
+  description = "Maximum Aurora Serverless v2 capacity for the BI database. Sized for the DMS full load, which is heavier than steady-state BI querying. Ignored unless bi_db_engine = \"aurora\"."
+  type        = number
+  default     = 16
 }
 
 
