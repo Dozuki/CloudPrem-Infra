@@ -85,5 +85,21 @@ def lambda_handler(event, context):
             print(f"Task {task_arn} not in restart allowlist {allowed} - alert-only, no restart.")
             return
 
-        if "ERROR" in detail_message:
+        # A deprovisioned serverless replication cannot be restarted at all - AWS reclaims the
+        # capacity after 48h stopped/failed and start-replication returns an error. Attempting
+        # it anyway would fail this lambda and bury the real problem in a lambda error instead
+        # of the state-change alert that already went to Slack. Recovery is a Terraform apply.
+        if "deprovision" in detail_message.lower():
+            print(f"{task_arn} is deprovisioned - NOT restartable, needs a terraform apply to "
+                  f"recreate the replication config. Alert already sent via the state-change rule.")
+            return
+
+        # Failure wording differs between the two resource types and neither is a substring of
+        # the other. A provisioned ReplicationTask reports messages containing "ERROR"; a
+        # serverless Replication reports "DMS replication has failed." with no such token, so
+        # matching on "ERROR" alone would silently never restart the BI replication - the
+        # failure mode being that everything looks configured and nothing ever fires.
+        failed = "ERROR" in detail_message or "has failed" in detail_message.lower()
+
+        if failed:
             restart_replication(task_arn)
