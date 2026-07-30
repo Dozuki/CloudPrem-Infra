@@ -29,3 +29,7 @@ azure-config/ghcr.env
 terraform/physical-azure/backend_override.tf
 terraform/logical/backend_override.tf
 terraform/logical/aws_stub_override.tf
+
+# python bytecode (would otherwise land in the lambda archive and churn source_code_hash)
+__pycache__/
+*.pyc
