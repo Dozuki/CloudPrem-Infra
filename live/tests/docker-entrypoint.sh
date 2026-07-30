@@ -84,6 +84,16 @@ if [ -z "${TF_VAR_tls_cert:-}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Vault FIRST, before the DDVtest profile exists.
+#
+# Two different AWS identities are in play and mixing them breaks both. Vault AWS-auth
+# must see the POD's own identity (the Argo workflow role, registered as a Vault role),
+# while terragrunt must act as the assumed DDVtest role. run.sh keeps them apart with a
+# subshell; here the ordering does it - the login runs while the pod's native Pod Identity
+# credentials are still the only ones configured.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Vault. Every terragrunt apply and destroy reads Vault, so a missing token fails ~20
 # minutes in rather than up front.
 #
@@ -112,6 +122,38 @@ if [ -n "${VAULT_ADDR:-}" ] && [ -z "${VAULT_TOKEN:-}" ] && [ "${SKIP_VAULT_LOGI
   log "Vault: token acquired"
 elif [ -n "${VAULT_TOKEN:-}" ]; then
   log "Vault: using the token supplied in the environment"
+fi
+
+# ---------------------------------------------------------------------------
+# Cross-account identity for the test stack.
+#
+# The pod's own role lives in the management account; the throwaway stack it builds lives
+# in DDVtest. Rather than teaching the harness to chain roles, describe the chain to the
+# SDK once: a named profile whose credential_source is the Pod Identity endpoint that EKS
+# already injected. Every tool then assumes the DDVtest role with no code change - the
+# aws CLI, the aws provider under tofu, and the harness's own
+# `aws configure export-credentials --profile` path, which exists for exactly this.
+#
+# Set HARNESS_ASSUME_ROLE_ARN and pass `--profile ddvtest` to the phase.
+# ---------------------------------------------------------------------------
+if [ -n "${HARNESS_ASSUME_ROLE_ARN:-}" ]; then
+  _profile="${HARNESS_ASSUME_PROFILE:-ddvtest}"
+  mkdir -p "${HOME:-/root}/.aws"
+  # credential_source=EcsContainer reads AWS_CONTAINER_CREDENTIALS_FULL_URI, which is what
+  # EKS Pod Identity injects. It is mutually exclusive with source_profile, and the SDK
+  # rejects the pair, so this is deliberately the only key here.
+  cat >"${HOME:-/root}/.aws/config" <<EOF
+[profile ${_profile}]
+role_arn = ${HARNESS_ASSUME_ROLE_ARN}
+credential_source = EcsContainer
+role_session_name = harness-${HARNESS_RUN_LABEL:-phase}
+EOF
+  log "AWS: profile ${_profile} chains into ${HARNESS_ASSUME_ROLE_ARN}"
+  if ! aws --profile "${_profile}" sts get-caller-identity >/dev/null 2>&1; then
+    log "ERROR: cannot assume ${HARNESS_ASSUME_ROLE_ARN} - check the role's trust policy admits this pod's role"
+    exit 1
+  fi
+  log "AWS: assumed $(aws --profile "${_profile}" sts get-caller-identity --query Arn --output text)"
 fi
 
 # ---------------------------------------------------------------------------

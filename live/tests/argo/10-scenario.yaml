@@ -1,0 +1,202 @@
+# Per-config child workflow: the isolation layer.
+#
+# One of these runs one config end to end. Submitting one per config rather than looping
+# inside a single workflow is what makes "re-run just `full`" a first-class operation: each
+# child has its own UI, its own retry budget, its own resume scope, and its own teardown
+# exit handler. A config that fails does not touch the others.
+#
+# The teardown is an exit handler, not a final step, because a final step does not run when
+# an earlier step fails - which is exactly when teardown matters most. This is the
+# equivalent of run.sh's EXIT trap, except it is not tied to the process that created the
+# stack: teardown reads the run manifest from S3, so any pod (this one, a retry, or the
+# Phase 4 janitor) can clean up a given run.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: harness-scenario
+  namespace: argo
+spec:
+  entrypoint: scenario
+  serviceAccountName: argo-workflow
+  # The stack, not the pod, is the scarce resource: one test stack is about one VPC against
+  # DDVtest's ceiling of 10. Held for the life of the child, so it covers provision through
+  # teardown rather than releasing between phases and letting another run slip in.
+  synchronization:
+    semaphore:
+      configMapKeyRef:
+        name: harness-semaphore
+        key: concurrent-stacks
+  arguments:
+    parameters:
+      - name: config
+      # Defaults to the workflow's own name: unique per submission, and stable across a
+      # retry or resume of the SAME workflow, which is exactly what the S3 state prefix
+      # ${run-id}-${config} needs to stay re-entrant.
+      - name: run-id
+        value: '{{workflow.name}}'
+      - name: scenario
+        value: upgrade
+      - name: from-ref
+        value: 'auto:latest-1'
+      - name: to-ref
+        value: 'auto:latest'
+      - name: repo-ref
+        value: master
+      # Leaves a failed stack standing for live debugging. Costs money until someone tears
+      # it down by hand, so it is off by default and the reaper's deleteAfter tag is the
+      # backstop.
+      - name: keep-on-failure
+        value: 'false'
+      - name: image
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: image
+      - name: ddvtest-account-id
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: ddvtest_account_id
+      - name: assume-role-arn
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: assume_role_arn
+      - name: region
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: region
+      - name: dr-region
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: dr_region
+      - name: vault-addr
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: vault_addr
+      - name: state-bucket
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: state_bucket
+
+  # A run is 1-2 hours and the recovery path is longer. This is a backstop against a hung
+  # run holding the semaphore forever, not a target.
+  activeDeadlineSeconds: 21600
+
+  # Keep failures around for a few days to inspect; successes are noise once the artifacts
+  # are in S3.
+  ttlStrategy:
+    secondsAfterSuccess: 86400
+    secondsAfterFailure: 259200
+
+  onExit: teardown
+
+  # The repo clone is the one thing worth sharing between phases: a full clone with tags,
+  # which the harness needs because it builds a git worktree per ref. With this volume the
+  # first phase clones and the rest do an incremental fetch. It also carries the generated
+  # live/ envs and the worktrees themselves, which teardown needs to destroy against the
+  # code that was actually applied.
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            # The clone plus two worktrees plus generated envs. Provider plugins do NOT
+            # land here: they symlink into the image's baked cache.
+            storage: 10Gi
+
+  templates:
+    - name: scenario
+      steps:
+        - - name: provision
+            templateRef:
+              name: harness-phase
+              template: run
+            arguments:
+              parameters:
+                - name: phase
+                  value: provision
+                - name: run-id
+                  value: '{{workflow.parameters.run-id}}'
+                - name: config
+                  value: '{{workflow.parameters.config}}'
+                - name: repo-ref
+                  value: '{{workflow.parameters.repo-ref}}'
+                - name: deadline
+                  value: '5400'
+                - name: extra-args
+                  value: >-
+                    --scenario {{workflow.parameters.scenario}}
+                    --from-ref {{workflow.parameters.from-ref}}
+                    --to-ref {{workflow.parameters.to-ref}}
+
+        # Skipped for the fresh scenario, which has no baseline to upgrade from.
+        - - name: upgrade
+            when: '{{workflow.parameters.scenario}} == upgrade'
+            templateRef:
+              name: harness-phase
+              template: run
+            arguments:
+              parameters:
+                - name: phase
+                  value: upgrade
+                - name: run-id
+                  value: '{{workflow.parameters.run-id}}'
+                - name: config
+                  value: '{{workflow.parameters.config}}'
+                - name: repo-ref
+                  value: '{{workflow.parameters.repo-ref}}'
+                - name: deadline
+                  value: '5400'
+
+        - - name: validate
+            templateRef:
+              name: harness-phase
+              template: run
+            arguments:
+              parameters:
+                - name: phase
+                  value: validate
+                - name: run-id
+                  value: '{{workflow.parameters.run-id}}'
+                - name: config
+                  value: '{{workflow.parameters.config}}'
+                - name: repo-ref
+                  value: '{{workflow.parameters.repo-ref}}'
+                - name: deadline
+                  value: '2700'
+
+    - name: teardown
+      steps:
+        - - name: destroy
+            templateRef:
+              name: harness-phase
+              template: run
+            arguments:
+              parameters:
+                - name: phase
+                  value: teardown
+                - name: run-id
+                  value: '{{workflow.parameters.run-id}}'
+                - name: config
+                  value: '{{workflow.parameters.config}}'
+                - name: repo-ref
+                  value: '{{workflow.parameters.repo-ref}}'
+                # Destroy is the slowest phase on a bad day: RDS deletion, ENI detachment
+                # and NAT teardown all serialise, and the harness retries transient faults
+                # internally.
+                - name: deadline
+                  value: '5400'
+                - name: keep-on-failure
+                  value: '{{workflow.parameters.keep-on-failure}}'
+                # The exit handler's view of how the run ended. The phase template turns a
+                # non-Succeeded status into --failed, which is what triggers the full
+                # diagnostics dump before the stack goes away.
+                - name: workflow-status
+                  value: '{{workflow.status}}'
