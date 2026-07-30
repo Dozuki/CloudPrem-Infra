@@ -135,6 +135,12 @@ func describeDMSTask(ctx context.Context, c *databasemigrationservice.Client, ta
 // describeDMSReplication is the serverless counterpart. Status strings overlap with the
 // provisioned ones the callers already switch on ("running", "failed", ...), so only the
 // lookup differs; failure detail arrives as a list rather than a single field.
+//
+// A config that has never been started has NO Replication row at all (the config is created
+// with start_replication=false and only the logical dms-start Job starts it, after
+// db-migrations). That is a normal pre-start state, not an absence: report it as "created"
+// with found=true so the caller's poll loop waits it out. found=false is reserved for a
+// config ARN DescribeReplicationConfigs does not know either.
 func describeDMSReplication(ctx context.Context, c *databasemigrationservice.Client, configARN string) (status, failure string, found bool, err error) {
 	out, err := c.DescribeReplications(ctx, &databasemigrationservice.DescribeReplicationsInput{})
 	if err != nil {
@@ -151,6 +157,15 @@ func describeDMSReplication(ctx context.Context, c *databasemigrationservice.Cli
 			failure = strings.Join(r.FailureMessages, "; ")
 		}
 		return status, failure, true, nil
+	}
+	cfgs, err := c.DescribeReplicationConfigs(ctx, &databasemigrationservice.DescribeReplicationConfigsInput{})
+	if err != nil {
+		return "", "", false, err
+	}
+	for _, rc := range cfgs.ReplicationConfigs {
+		if rc.ReplicationConfigArn != nil && *rc.ReplicationConfigArn == configARN {
+			return "created", "", true, nil
+		}
 	}
 	return "", "", false, nil
 }
