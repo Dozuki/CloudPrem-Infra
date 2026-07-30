@@ -164,6 +164,25 @@ bi_start() {
     aws dms start-replication-task --replication-task-arn "$(bi_task_arn)" --start-replication-task-type "$1" --region "$REGION" >/dev/null
   fi
 }
+# Bounded BI stop wait, same shape as wait_task_status. The callers used to spin on
+# `while [ "$(bi_task_status)" != "stopped" ]` with no bound and no failure states, so a BI
+# replication that failed on the way down hung the fence forever with the source already
+# read-only and customers waiting - and, on serverless, against the 48h deprovision clock.
+bi_wait_stopped() { # $1=timeout seconds
+  local waited=0 s
+  while :; do
+    s=$(bi_task_status)
+    [ "$s" = stopped ] && return 0
+    case "$s" in
+      failed) die "the BI replication entered 'failed' while stopping - it will not reach 'stopped'. Investigate before continuing; a serverless replication left failed for 48h is deprovisioned and cannot be resumed." ;;
+      deprovisioning | deprovisioned) die "the BI replication is $s (stopped or failed for 48h) - it cannot be resumed; recreate it with a physical apply" ;;
+      none) die "the BI replication disappeared while stopping" ;;
+    esac
+    [ "$waited" -ge "$1" ] && die "the BI replication did not stop in ${1}s (status=$s)"
+    sleep 10
+    waited=$((waited + 10))
+  done
+}
 # NOTE: the projection query has NO `| [0]`. A `| [0]` inside --query is a
 # pipe-expression the AWS CLI evaluates PER PAGE of paginated list-secrets
 # results, so a page without a match emits "None" and the match on a later page
@@ -503,7 +522,7 @@ fence)
     running | starting | initializing | modifying)
       say "stopping the BI replication ($BIST) ahead of the endpoint repoint"
       bi_stop
-      while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
+      bi_wait_stopped 900
       ;;
     stopped | failed | created | not-started | deprovisioning | deprovisioned | none)
       say "BI replication needs no stop (status=$BIST)"
@@ -889,7 +908,7 @@ bi-epoch)
     running | starting | initializing | modifying)
       say "stopping the BI replication ($ST) before the reload"
       bi_stop
-      while [ "$(bi_task_status)" != "stopped" ]; do sleep 10; done
+      bi_wait_stopped 900
       ;;
     stopped | failed | created | not-started) ;;
     none) die "no BI replication exists for $ID - nothing to re-epoch" ;;
