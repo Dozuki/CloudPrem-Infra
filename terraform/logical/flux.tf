@@ -343,13 +343,15 @@ resource "helm_release" "flux" {
     imageReflectionController = { create = false }
     kustomizeController       = { create = false }
     notificationController    = { create = var.flux_slack_webhook_url != "" }
-    # do-not-disrupt on helm-controller ONLY. Karpenter consolidation was evicting
-    # it mid-upgrade, which kills the reconciliation context and fails the release:
+    # do-not-disrupt on helm-controller ONLY. Karpenter VOLUNTARY DISRUPTION was
+    # evicting it mid-upgrade, which kills the reconciliation context and fails the
+    # release:
     #
     #   17:25:41  helm upgrade running, "checking resources for changes: 220"
     #   17:28:13  Evicted pod: Underutilized   (helm-controller)
     #             -> Helm upgrade failed ... : context canceled
-    #   17:28:48  new pod took leadership, retried, succeeded
+    #             ~8s later a new pod took leadership
+    #   17:28:48  retried, succeeded
     #
     # Flux retries so it self-heals, but the retry is not free: the same eviction
     # during the pre-upgrade migration hook interrupts a running database
@@ -357,10 +359,23 @@ resource "helm_release" "flux" {
     # that needs manual recovery. Already observed once as "pre-upgrade hooks
     # failed: context canceled".
     #
+    # What this annotation does and does not cover, because the difference matters:
+    #   consolidation (the "Underutilized" above) - fully excluded.
+    #   drift          - only DELAYED. EKS Auto Mode stamps a 24h
+    #                    terminationGracePeriod onto every NodeClaim (verified: it
+    #                    is present even where the NodePool spec leaves it unset),
+    #                    so drift eventually forces through.
+    #   expiry         - same, bounded by that grace against a 336h expireAfter.
+    #   spot interruption, node repair, manual deletion - NOT covered at all;
+    #                    those are forceful. helm-controller currently lands on the
+    #                    spot-preferred pool, so a migration is still not immune to
+    #                    losing its node. Migrations need to be resumable; this
+    #                    annotation only removes the self-inflicted case.
+    #
     # Deliberately not applied to source-controller or notification-controller.
     # Their work is short and idempotent - a re-fetch or a re-send - so eviction
-    # costs nothing there, and every annotated pod is another node consolidation
-    # cannot reclaim. helm-controller is the only one holding a long,
+    # there has a low, retryable cost, and every annotated pod is another node
+    # consolidation cannot reclaim. helm-controller is the only one holding a long,
     # non-idempotent operation.
     #
     # The value must stay a QUOTED string: Kubernetes annotation values are
