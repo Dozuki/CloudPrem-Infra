@@ -10,8 +10,9 @@ the right API off the ARN shape rather than assuming one or the other.
 
 Serverless adds a deadline that provisioned tasks do not have: a replication left stopped or failed for 48
 hours is deprovisioned and can no longer be resumed at all - recovery becomes a Terraform apply. That is why
-restarting promptly matters more here than it did for tasks, and why the deprovision event is separately
-alarmed.
+restarting promptly matters more here than it did for tasks. There is no separate CloudWatch alarm on the
+deprovision event: the alert path is the state-change rule feeding sns_to_slack.py, which pages the channel
+on any deprovision wording.
 
 Main Functionality:
 1. Extracts the DMS task ARN from the incoming event message.

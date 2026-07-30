@@ -121,7 +121,16 @@ def lambda_handler(event, context):
         # Page the channel only on failures. A plain "Replication task stopped"
         # is routine (operator stops, the migration's automatic
         # post-full-load stop, fence-time stops) and must not @channel.
-        if "ERROR" in detail_message or "FATAL" in detail_message or "fail" in detail_message.lower():
+        #
+        # Deprovision is the exception that carries none of those tokens. A serverless
+        # replication stopped or failed for 48h is deprovisioned, which is the one BI state
+        # nothing recovers from - the restart lambda declines it and the fix is a terraform
+        # apply that recreates the config. Matched on both the detail message and the
+        # detail-type, and it catches "deprovisioning" too: that is the transition into the
+        # unrecoverable state, not a routine stop, so it is worth the page.
+        haystack = f"{detail_message} {detail_type}".lower()
+        if ("ERROR" in detail_message or "FATAL" in detail_message
+                or "fail" in haystack or "deprovision" in haystack):
             header = "*DMS Alarm! <!channel>*"
         else:
             header = "*DMS Notification*"
