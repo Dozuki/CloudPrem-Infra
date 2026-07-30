@@ -104,8 +104,19 @@ def lambda_handler(event, context):
         detail_message = message_json['detail'].get('detailMessage', 'N/A')
         resource_arn = message_json['resources'][0] if message_json['resources'] else 'N/A'
         replication_task_name = get_task_name(resource_arn)
-        # Link to THIS region's console (was hardcoded us-east-1).
-        replication_task_link = f"https://console.aws.amazon.com/dms/v2/home?region={region}#taskDetails/{replication_task_name}"
+        # Link to THIS region's console (was hardcoded us-east-1). Serverless replications are
+        # not replication tasks and do not exist under #taskDetails, so a config ARN needs the
+        # serverless route or the alert links to a page that cannot show the incident.
+        if ":replication-config:" in resource_arn:
+            replication_task_link = (
+                f"https://console.aws.amazon.com/dms/v2/home?region={region}"
+                f"#serverlessReplicationDetails/{replication_task_name}"
+            )
+        else:
+            replication_task_link = (
+                f"https://console.aws.amazon.com/dms/v2/home?region={region}"
+                f"#taskDetails/{replication_task_name}"
+            )
 
         # Page the channel only on failures. A plain "Replication task stopped"
         # is routine (operator stops, the migration's automatic

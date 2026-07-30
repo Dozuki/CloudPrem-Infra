@@ -68,13 +68,20 @@ task_status() { aws dms describe-replication-tasks --region "$REGION" --filters 
 BI_KIND=""
 bi_kind() {
   if [ -z "$BI_KIND" ]; then
-    if aws dms describe-replication-configs --region "$REGION" \
-         --filters "Name=replication-config-id,Values=$ID" \
-         --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text >/dev/null 2>&1; then
-      BI_KIND=serverless
-    else
-      BI_KIND=task
-    fi
+    # Match on the ARN's CONTENT, not just the exit code. Today this call raises
+    # ResourceNotFoundFault (exit 254) when nothing matches, so an exit-code test happens to
+    # work - but several DMS describes return an empty list instead, in which case --query
+    # prints "None" and exits 0, and an exit-code test would misread a legacy provisioned BI
+    # task as serverless. That failure is silent and expensive: fence would skip stopping BI
+    # and bi-epoch would hand "None" to the serverless API mid-cutover. Requiring the string
+    # to look like a replication-config ARN is correct under either behaviour.
+    _bi_cfg=$(aws dms describe-replication-configs --region "$REGION" \
+      --filters "Name=replication-config-id,Values=$ID" \
+      --query 'ReplicationConfigs[0].ReplicationConfigArn' --output text 2>/dev/null || true)
+    case "$_bi_cfg" in
+      *:replication-config:*) BI_KIND=serverless ;;
+      *) BI_KIND=task ;;
+    esac
   fi
   printf '%s' "$BI_KIND"
 }

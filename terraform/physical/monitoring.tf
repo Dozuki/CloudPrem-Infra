@@ -28,7 +28,12 @@ data "aws_iam_policy_document" "lambda_permissions" {
       "dms:DescribeReplicationTasks",
       "dms:StartReplicationTask",
       "dms:DescribeReplications",
-      "dms:StartReplication"
+      "dms:StartReplication",
+      # get_task_name resolves a replication-config ARN to its identifier through this. Without
+      # it the call returns AccessDenied, which that function deliberately swallows so an alert
+      # still goes out - meaning the only symptom is every serverless alert naming an opaque
+      # ARN instead of the replication, with nothing in the logs anyone reads.
+      "dms:DescribeReplicationConfigs"
     ]
     resources = ["*"]
   }
