@@ -88,8 +88,19 @@ def lambda_handler(event, context):
         # Process CloudWatch Alarm message
         alarm_name = message_json.get('AlarmName', 'N/A')
         alarm_description = message_json.get('AlarmDescription', 'N/A')
+        old_state_value = message_json.get('OldStateValue')
         new_state_value = message_json.get('NewStateValue', 'N/A')
         new_state_reason = message_json.get('NewStateReason', 'N/A')
+
+        # A freshly created alarm goes INSUFFICIENT_DATA -> OK as its first datapoints
+        # arrive. That is alarm birth, not a recovery: an apply that adds a batch of
+        # alarms floods the channel with healthy-state posts that read like an incident.
+        # Only this exact transition is dropped - ALARM -> OK still closes real incidents,
+        # INSUFFICIENT_DATA -> ALARM still pages (missing=breaching alarms enter that
+        # way), and a payload without OldStateValue posts as before.
+        if old_state_value == "INSUFFICIENT_DATA" and new_state_value == "OK":
+            print(f"skipping INSUFFICIENT_DATA -> OK for {alarm_name}")
+            return
 
         if new_state_value == "ALARM":
             header = "*CloudWatch Alarm! <!channel>*"
