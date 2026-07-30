@@ -137,7 +137,28 @@ locals {
       environment = var.azure_environment
     }
 
-    monitoring = { enabled = true }
+    monitoring = {
+      enabled = true
+      # AWS/Gov stacks already expose the fleet-wide incoming webhook at
+      # secret/dozuki/global/slack -> webhookUrl. The chart's ExternalSecret
+      # projects it directly for Alertmanager; no third webhook value is copied
+      # through Terraform or Helm. Azure has no Vault path, so stays disabled
+      # until the same value is deliberately mirrored into Key Vault.
+      alertmanager = {
+        slack = {
+          enabled = var.cloud == "aws"
+          # The shared Slack app sends Silence 2h button callbacks to the
+          # standalone interaction handler. Its dedicated credential can only
+          # POST the exact silence API route; the Alertmanager UI retains the
+          # per-environment ops login.
+          # Keep the action off until Terraform has distributed the shared
+          # password to both Resource Reaper and this environment's Vault path.
+          interactivity = {
+            enabled = var.cloud == "aws" && var.alertmanager_slack_silence_password != ""
+          }
+        }
+      }
+    }
 
     # metrics-server ships in the chart (default on) as the single source of truth across
     # onprem+cloud; the EKS addon was retired (#297). args=[] drops the chart's onprem-oriented
