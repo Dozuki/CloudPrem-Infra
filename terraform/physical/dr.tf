@@ -98,7 +98,7 @@ check "dr_rds_replicable" {
   assert {
     condition = !var.enable_dr || local.dr_rds_enabled || local.aurora_dr_enabled
     error_message = local.db_uses_aurora && !local.db_is_aurora ? (
-      "DR is enabled and S3 content replicates cross-region, but the database does NOT while an Aurora migration is in flight: the live database is the Aurora cluster, and Aurora DR (Global Database) only attaches once the env finishes the migration with db_engine = \"aurora\". Expected during a migration. It also requires the Aurora cluster to be CMK-encrypted, which is set at create — see the database CMK remediation plan before assuming the retirement apply will produce a working global cluster."
+      "DR is enabled and S3 content replicates cross-region, but the database does NOT while an Aurora migration is in flight: the live database is the Aurora cluster, and Aurora DR (Global Database) only attaches once the env finishes the migration with db_engine = \"aurora\". Expected during a migration."
       ) : local.db_uses_aurora ? (
       "DR is enabled and S3 content replicates cross-region. The Aurora database replicates only when the global-database secondary is configured — ensure enable_dr is true and the admin layer injected a same-partition dr_region. (On GovCloud, confirm the engine version supports Global Database.)"
       ) : (
