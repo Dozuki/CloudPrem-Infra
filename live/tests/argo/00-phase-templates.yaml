@@ -16,6 +16,10 @@ kind: ConfigMap
 metadata:
   name: harness-config
   namespace: argo
+  labels:
+    # Required for workflows to read these keys via parameter valueFrom.configMapKeyRef;
+    # without it the controller refuses with "ConfigMap does not exist".
+    workflows.argoproj.io/configmap-type: Parameter
 data:
   # Pinned by DIGEST, not tag. The ECR repo allows mutable tags so `latest` can move, and
   # a moving tag must never swap the runtime under a workflow already running. The
