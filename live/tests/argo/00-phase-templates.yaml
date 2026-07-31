@@ -152,11 +152,14 @@ spec:
           - name: workspace
             mountPath: /workspace
         resources:
-          # The work is almost entirely waiting on AWS APIs, so this is sized for the tofu
-          # process and the provider plugins it forks, not for throughput. Requests stay
-          # low so Auto Mode can pack phases; the limit is headroom for a large plan.
+          # Sized for the tofu process and the provider plugins it forks. The original
+          # 1Gi request let Auto Mode pack a whole logical-layer run (kubernetes provider
+          # + hundreds of CRD schemas) next to the Argo control plane on one c6a.large,
+          # and the node swapped so hard (zram) that provider refreshes and vault logins
+          # stalled for HOURS and looked like network hangs. Request what the run
+          # actually uses so the pod gets a node with real headroom.
           requests:
-            cpu: '500m'
-            memory: '1Gi'
-          limits:
+            cpu: '1'
             memory: '4Gi'
+          limits:
+            memory: '6Gi'
