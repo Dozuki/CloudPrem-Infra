@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.6.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.5.1...v8.6.0) (2026-07-31)
+
+
+### Features
+
+* **physical:** aurora migration runner recovery phases ([#394](https://github.com/Dozuki/CloudPrem-Infra/issues/394)) ([8395b72](https://github.com/Dozuki/CloudPrem-Infra/commit/8395b72091a231a27ad3374066aec4ea1a6af664))
+
+
+### Bug Fixes
+
+* **physical:** BI DMS on default aws/dms keys, serverless cannot use customer keys ([#397](https://github.com/Dozuki/CloudPrem-Infra/issues/397)) ([da358d7](https://github.com/Dozuki/CloudPrem-Infra/commit/da358d7842a06e192227f5c442637c0b27ceddf7))
+
 ## [8.5.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.5.0...v8.5.1) (2026-07-31)
 
 
