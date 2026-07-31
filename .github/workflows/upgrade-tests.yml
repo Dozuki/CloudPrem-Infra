@@ -1,95 +1,113 @@
-name: Upgrade Tests
+# Submit-only trigger for the upgrade harness on the argo-ops cluster. The job's whole
+# life is ~30 seconds: assume the submitter role, create a harness-matrix Workflow, mark
+# the head SHA pending (PRs only), exit. The workflow itself flips the commit status
+# from its exit handler when the run finishes, so no runner sits waiting out a 2-hour
+# test, and the same handler posts the outcome to Slack.
+#
+# This replaces the old label-gated go-test job, which never executed once (100/100
+# runs skipped) and could not have passed if it had (wrong go version, no vault path).
+name: Upgrade tests
 
 on:
   workflow_dispatch:
     inputs:
-      from_ref:
-        description: "baseline ref (default auto:latest-1)"
-        default: "auto:latest-1"
-      to_ref:
-        description: "target ref (default auto:latest)"
-        default: "auto:latest"
       configs:
-        description: "comma-separated configs"
-        default: "min_default,bi_ha,full"
-      region:
-        description: "primary region"
-        default: "us-east-1"
-      dr_region:
-        description: "DR region"
-        default: "us-west-2"
+        description: 'JSON array of configs'
+        default: '["min_default","bi_ha","full"]'
+      from-ref:
+        description: 'baseline ref'
+        default: 'auto:latest-1'
+      to-ref:
+        description: 'target ref'
+        default: 'auto:latest'
   pull_request:
     types: [labeled, synchronize, reopened]
 
-permissions:
-  id-token: write
-  contents: read
-
 concurrency:
-  group: upgrade-tests-${{ github.ref }}
+  group: upgrade-tests-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: false
 
+permissions:
+  id-token: write
+  statuses: write
+
+env:
+  SUBMITTER_ROLE_ARN: arn:aws:iam::010601635461:role/argo-ops-pr-submitter
+  CLUSTER: argo-ops
+  REGION: us-east-1
+  # PR runs test one config, upgrading from the CURRENT release to the PR head.
+  # Dispatch runs take the inputs (defaults = the nightly shape).
+  CONFIGS: ${{ github.event_name == 'pull_request' && '["min_default"]' || inputs.configs }}
+  FROM_REF: ${{ github.event_name == 'pull_request' && 'auto:latest' || inputs.from-ref }}
+  TO_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.to-ref }}
+  PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || '' }}
+  PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
+  NAME_HINT: ${{ github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || 'manual' }}
+
 jobs:
-  matrix:
-    # Run on manual dispatch always; on PRs only when the gate label is present.
+  submit:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-upgrade-tests')
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        config: [min_default, bi_ha, full]
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # full history + tags for worktree refs
-
-      - uses: opentofu/setup-opentofu@v1
-        with:
-          # Keep in step with infra-live/_spacelift/stacks.tf. The pair moves together:
-          # OpenTofu 1.12.x needs Terragrunt >= 1.0.5, which is why the fleet sat on
-          # 1.11.8 while it was on Terragrunt 0.99.4.
-          tofu_version: "1.11.8"
-
-      - name: Install terragrunt
+      # The submit heredoc expands these; refuse anything that could smuggle shell or
+      # YAML through a dispatch input. PR-path values are a hex SHA and org/repo, which
+      # pass these same shapes.
+      - name: Validate parameters
         run: |
-          curl -fsSLo /usr/local/bin/terragrunt \
-            https://github.com/gruntwork-io/terragrunt/releases/download/v0.99.4/terragrunt_linux_amd64
-          chmod +x /usr/local/bin/terragrunt
+          set -euo pipefail
+          [[ "$CONFIGS" =~ ^\[([[:space:]]*\"[a-z0-9_]+\"[[:space:]]*,?)*[[:space:]]*\]$ ]] || { echo "bad configs: $CONFIGS"; exit 1; }
+          [[ "$FROM_REF" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "bad from-ref"; exit 1; }
+          [[ "$TO_REF" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "bad to-ref"; exit 1; }
 
-      - uses: actions/setup-go@v5
+      - name: Assume the submitter role
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          go-version: "1.22"
+          role-to-assume: ${{ env.SUBMITTER_ROLE_ARN }}
+          aws-region: ${{ env.REGION }}
 
-      - name: Install helm + kubectl
+      - name: Point kubectl at the ops cluster
+        run: aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION"
+
+      - name: Submit the harness matrix workflow
+        id: submit
         run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl"
-          chmod +x /usr/local/bin/kubectl
+          set -euo pipefail
+          WF=$(kubectl -n argo create -o name -f - <<EOF
+          apiVersion: argoproj.io/v1alpha1
+          kind: Workflow
+          metadata:
+            generateName: harness-${NAME_HINT}-
+            namespace: argo
+            labels:
+              harness/trigger: ${{ github.event_name == 'pull_request' && 'pr' || 'manual' }}
+          spec:
+            workflowTemplateRef:
+              name: harness-matrix
+            arguments:
+              parameters:
+                - name: configs
+                  value: '${CONFIGS}'
+                - name: scenario
+                  value: upgrade
+                - name: from-ref
+                  value: '${FROM_REF}'
+                - name: to-ref
+                  value: '${TO_REF}'
+                - name: pr-repo
+                  value: '${PR_REPO}'
+                - name: pr-sha
+                  value: '${PR_SHA}'
+          EOF
+          )
+          echo "workflow=${WF#workflow.argoproj.io/}" >> "$GITHUB_OUTPUT"
+          echo "Submitted ${WF}" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ github.event.inputs.region || 'us-east-1' }}
-
-      - name: Run upgrade harness (${{ matrix.config }})
+      - name: Mark the head SHA pending
+        if: github.event_name == 'pull_request'
         env:
-          RUN_INTEGRATION: "1"
-          TG_TF_PATH: tofu # physical layer requires OpenTofu (master_password_wo)
-          DDVTEST_ACCOUNT_ID: ${{ vars.DDVTEST_ACCOUNT_ID }}
-          RUN_ID: gha-${{ github.run_id }}
-          CONFIGS: ${{ matrix.config }}
-          FROM_REF: ${{ github.event.inputs.from_ref || 'auto:latest-1' }}
-          # On a PR, validate the PR head (the staged release); else the dispatch input.
-          TO_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event.inputs.to_ref || 'auto:latest' }}
-          DR_REGION: ${{ github.event.inputs.dr_region || 'us-west-2' }}
-          APP_NAMESPACE: dozuki
-        run: cd live/tests && go test ./scenarios/ -run TestUpgrade -v -timeout 350m
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: terratest-${{ matrix.config }}-${{ github.run_id }}
-          path: live/tests/**/test_output*/**
-          if-no-files-found: ignore
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${PR_SHA}" \
+            -f state=pending \
+            -f context=harness/upgrade-tests \
+            -f description="submitted ${{ steps.submit.outputs.workflow }}"
