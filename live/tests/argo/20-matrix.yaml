@@ -185,6 +185,34 @@ spec:
                 "https://api.github.com/repos/{{workflow.parameters.pr-repo}}/statuses/{{workflow.parameters.pr-sha}}" \
                 -d "{\"state\":\"${GH_STATE}\",\"context\":\"harness/upgrade-tests\",\"description\":\"${DESC:0:130}\"}" \
                 >/dev/null || echo "github status post failed"
+
+              # Also leave a run report on the PR thread. The status above is the merge
+              # gate; the comment is the human-readable history (it survives label
+              # re-runs, one comment per run). PR number comes from the head SHA.
+              PR_NUM=$(curl -sf \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/{{workflow.parameters.pr-repo}}/commits/{{workflow.parameters.pr-sha}}/pulls" \
+                | jq -r '.[0].number // empty') || PR_NUM=""
+              if [ -n "$PR_NUM" ]; then
+                CHILDREN=$(kubectl -n argo get workflows -l 'harness/parent={{workflow.name}}' -o json 2>/dev/null \
+                  | jq -r '.items[] | "| `\(.metadata.name)` | \(.metadata.labels["harness/config"] // "-") | \(.status.phase // "-") | \(.status.message // "")"')
+                [ -z "$CHILDREN" ] && CHILDREN='| _no child workflows_ |  |  |  |'
+                DUR='{{workflow.duration}}'; DUR="${DUR%%.*}"
+                case "$DUR" in ''|*[!0-9]*) DUR=0;; esac
+                BODY=$(printf '### Upgrade harness: %s %s\n\nWorkflow `%s` finished in %dm%02ds.\n\n- configs `%s`, scenario `%s`\n- from `%s` to `%s`\n\n| child workflow | config | phase | message |\n|---|---|---|---|\n%s\n' \
+                  "$EMOJI" "$STATUS" '{{workflow.name}}' "$((DUR/60))" "$((DUR%60))" \
+                  '{{workflow.parameters.configs}}' '{{workflow.parameters.scenario}}' \
+                  '{{workflow.parameters.from-ref}}' '{{workflow.parameters.to-ref}}' "$CHILDREN")
+                jq -n --arg body "$BODY" '{body: $body}' \
+                  | curl -sf -X POST \
+                      -H "Authorization: Bearer ${GH_TOKEN}" \
+                      -H "Accept: application/vnd.github+json" \
+                      "https://api.github.com/repos/{{workflow.parameters.pr-repo}}/issues/${PR_NUM}/comments" \
+                      -d @- >/dev/null || echo "github comment post failed"
+              else
+                echo "no open PR found for the sha; comment skipped"
+              fi
             fi
 
             if [ -n "$SLACK_URL" ]; then
