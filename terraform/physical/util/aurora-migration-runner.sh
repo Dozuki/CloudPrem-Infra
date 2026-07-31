@@ -2,8 +2,8 @@
 # RDS -> Aurora Serverless v2 migration runner. Drives the DB-side phases the
 # aurora_migration_state Terraform (aurora-migration.tf) cannot: native schema
 # pre-load, DMS task orchestration, validation gates, and the fence/cutover
-# sequence. Every step is the 2026-07-26 gca-rehearsal procedure, productionized
-# (design doc: 3m-aurora-dms-migration-design; review round 2 fixes folded in).
+# sequence. Every step is the 2026-07-26 rehearsal procedure, productionized
+# (internal design doc: aurora-dms-migration-design; review fixes folded in).
 #
 # Runs on an operator machine with aws cli + jq; all SQL executes ON THE ENV
 # BASTION via SSM (the bastion has mariadb installed by its State Manager
@@ -18,6 +18,12 @@
 #   load           - assessment, full load to the automatic cached-changes stop,
 #                    deferred indexes then FKs (= orphan check), Initstmt
 #                    removal while stopped + endpoint re-test, CDC resume
+#   load-tail      - RECOVERY: load's post-full-load steps only, for a runner
+#                    that died after the automatic stop (guards on the
+#                    STOPPED_AFTER_CACHED_EVENTS stop reason)
+#   fk-resume      - RECOVERY: continue an interrupted deferred-FK apply by
+#                    diffing live constraint names against deferred-fk.sql,
+#                    then the same endpoint/CDC tail as load-tail
 #   validate       - DMS validation whitelist gate + table checksums
 #                    (CHECKSUM_TABLES="db.t1 db.t2" env var adds tables)
 #   harden         - install the STOP_TASK apply-error policies into the task's
@@ -35,7 +41,7 @@
 #   bi-epoch       - reload the BI DMS task from the (now Aurora) source.
 set -euo pipefail
 
-ID="${1:?identifier (e.g. m3-gca)}"; REGION="${2:?region}"; PHASE="${3:?phase}"
+ID="${1:?identifier (e.g. <customer>-<env>)}"; REGION="${2:?region}"; PHASE="${3:?phase}"
 SRC_ID="$ID"; CLUSTER_ID="$ID"; TASK_ID="${ID}-aurora-migration"
 
 say() { printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
@@ -43,11 +49,12 @@ die() { say "FATAL: $*" >&2; exit 1; }
 
 # --- discovery ---------------------------------------------------------------
 bastion_id() {
-  # Pin the Name tag to "<id>-bastion", NOT tag:Environment. A 3M account keeps
-  # both the new Dozuki-managed (m3-*) and the legacy (mmm-*) bastion, and BOTH
-  # carry Environment=<env>. Matching on Environment alone grabs whichever
-  # Reservations[0] happens to be first - often the legacy bastion, which sits
-  # in a different VPC and cannot route to the m3 RDS (connect times out).
+  # Pin the Name tag to "<id>-bastion", NOT tag:Environment. A migrated
+  # account can keep both the current and the pre-migration legacy bastion,
+  # and BOTH carry Environment=<env>. Matching on Environment alone grabs
+  # whichever Reservations[0] happens to be first - often the legacy bastion,
+  # which sits in a different VPC and cannot route to the RDS (connect times
+  # out).
   local id
   id=$(aws ec2 describe-instances --region "$REGION" \
     --filters "Name=tag:Role,Values=Bastion" "Name=instance-state-name,Values=running" \
@@ -191,7 +198,15 @@ bi_wait_stopped() { # $1=timeout seconds
 first_secret_arn() { # $1 = name prefix
   aws secretsmanager list-secrets --region "$REGION" --query "SecretList[?starts_with(Name, '$1')].ARN" --output text | tr '\t' '\n' | grep -v '^None$' | grep . | head -1
 }
-primary_secret() { first_secret_arn "${ID}-database"; }
+# Some migrated envs carry a legacy-named credentials secret instead of
+# <id>-database. Set LEGACY_DB_SECRET to that name and the DB-side phases fall
+# back to it when the standard name resolves nothing.
+primary_secret() {
+  local arn
+  arn=$(first_secret_arn "${ID}-database")
+  [ -n "$arn" ] || { [ -n "${LEGACY_DB_SECRET:-}" ] && arn=$(first_secret_arn "$LEGACY_DB_SECRET"); }
+  printf '%s' "$arn"
+}
 migration_secret() { first_secret_arn "${ID}-aurora-migration"; }
 src_pg() { aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text; }
 primary_secret_host() { aws secretsmanager get-secret-value --region "$REGION" --secret-id "$(primary_secret)" --query SecretString --output text | jq -r .host; }
@@ -252,12 +267,32 @@ checkpoint_reached() { # $1=final_file_seq $2=final_pos
 }
 
 # --- bastion exec (SSM) ------------------------------------------------------
+# A dead local runner does not cancel an already-dispatched remote command, so
+# a recovery phase started too eagerly can overlap the DDL it is recovering.
+# Refuse while anything is still running on the bastion; an operator who has
+# confirmed the remote side is a zombie can override with SKIP_SSM_BUSY_CHECK=1.
+ssm_refuse_if_busy() {
+  [ -n "${SKIP_SSM_BUSY_CHECK:-}" ] && return 0
+  local busy
+  # jq over merged json, not --query with text output: text emits one count
+  # PER RESULT PAGE, so a long invocation history yields "0\n0" and a false
+  # refusal. All nonterminal states count as busy.
+  busy=$(aws ssm list-command-invocations --region "$REGION" --instance-id "$(bastion_id)" --output json \
+         | jq '[.CommandInvocations[] | select(.Status=="InProgress" or .Status=="Pending" or .Status=="Delayed" or .Status=="Cancelling")] | length')
+  [ "$busy" = "0" ] || die "$busy SSM command(s) still running on the bastion - the prior dispatch may be alive; refusing to overlap (SKIP_SSM_BUSY_CHECK=1 overrides)"
+}
+
+# Optional $1 raises the per-command executionTimeout from the 3600s default.
+# Only the deferred-DDL applies pass a higher cap (a serial FK apply on a large
+# env runs for hours and died at the default partway through, which is what
+# fk-resume recovers); everything else keeps the tight bound so a hung command
+# during a read-only window fails fast instead of squatting for six hours.
 ssm_run() {
-  local script cid status
+  local exec_timeout="${1:-3600}" script cid status
   script="$(cat)"
   cid=$(aws ssm send-command --region "$REGION" --instance-ids "$(bastion_id)" \
         --document-name AWS-RunShellScript --timeout-seconds 5400 \
-        --parameters "$(jq -n --arg c "$script" '{commands: [$c]}')" \
+        --parameters "$(jq -n --arg c "$script" --arg t "$exec_timeout" '{commands: [$c], executionTimeout: [$t]}')" \
         --query 'Command.CommandId' --output text)
   while :; do
     status=$(aws ssm get-command-invocation --region "$REGION" --command-id "$cid" --instance-id "$(bastion_id)" --query Status --output text 2>/dev/null || echo Pending)
@@ -321,7 +356,8 @@ $S -e "SELECT CONCAT(k.constraint_schema,'.',k.table_name,'.',k.constraint_name)
 echo "dangling FKs: $(wc -l < dangling-fks.txt)"; cat dangling-fks.txt
 # object artifacts: routines/events/triggers are NOT migrated by DMS and NOT in
 # base DDL. Dumped here; installed on the target by fence (after the final task
-# stop, so triggers can never fire on DMS-applied DML). Empty on the 3M fleet.
+# stop, so triggers can never fire on DMS-applied DML). Empty on the fleet
+# this was written for.
 mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --no-create-info --no-create-db --routines --events --triggers --skip-lock-tables --no-tablespaces --databases $(tr '\n' ' ' < schemas.txt) > objects.sql
 echo "object artifact counts: routines=$($S -e "SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema NOT IN ('mysql','sys')") triggers=$($S -e "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema NOT IN ('mysql','sys')") events=$($S -e "SELECT COUNT(*) FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')")"
 mariadb-dump --defaults-extra-file=/tmp/mig-src.cnf --no-data --skip-triggers --skip-lock-tables --no-tablespaces --databases $(tr '\n' ' ' < schemas.txt) > full.sql
@@ -396,11 +432,14 @@ load)
   while :; do s=$(task_status); say "  task=$s"; [ "$s" = "stopped" ] && break; [ "$s" = "failed" ] && die "task failed - check the DMS task log"; sleep 60; done
   say "applying deferred DDL (indexes, then FKs = orphan check) while quiescent"
   prep_cnfs
-  ssm_run <<'EOF'
+  # Stage markers make an interruption diagnosable: the DMS stop reason alone
+  # cannot distinguish "indexes not yet applied" from "died mid-FK", and the
+  # recovery phases below key off these files to prove which point was reached.
+  ssm_run 21600 <<'EOF'
 set -e; cd /tmp/mig
 T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --init-command='SET SESSION restrict_fk_on_non_standard_key=0'"
-eval $T < deferred-idx.sql; echo IDX_APPLIED
-eval $T < deferred-fk.sql;  echo FK_APPLIED_ZERO_ORPHANS
+eval $T < deferred-idx.sql; touch .idx-applied; echo IDX_APPLIED
+eval $T < deferred-fk.sql;  touch .fk-applied;  echo FK_APPLIED_ZERO_ORPHANS
 EOF
   say "removing the FK-off Initstmt from the target endpoint (task stopped)"
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
@@ -423,6 +462,134 @@ EOF
   aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
   while [ "$(task_status)" != "running" ]; do sleep 10; done
   say "load complete - CDC running. Soak >= 1 day, then 'validate'."
+  ;;
+
+load-tail)
+  # Recovery for an interrupted load phase: the full load finished and the task
+  # took its automatic STOPPED_AFTER_CACHED_EVENTS stop, but the runner died
+  # before the deferred DDL / Initstmt removal / CDC resume. Same commands as
+  # the load phase from that point on; guards refuse any other task state.
+  # Written for a production run whose driving session died mid-load; the
+  # source binlog retention (48h via rds_set_configuration) is what makes the
+  # late CDC resume safe - check it before leaning on this after a long gap.
+  [ "$(task_status)" = "stopped" ] || die "task not stopped (status=$(task_status)) - load-tail only recovers the post-full-load stop"
+  SR=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].StopReason' --output text)
+  echo "$SR" | grep -q "STOPPED_AFTER_CACHED_EVENTS" || die "stop reason is '$SR', not STOPPED_AFTER_CACHED_EVENTS - refusing"
+  ssm_refuse_if_busy
+  prep_cnfs
+  say "applying deferred indexes while quiescent"
+  ssm_run 21600 <<'EOF'
+set -e; cd /tmp/mig
+[ -f .idx-applied ] && { echo IDX_ALREADY_APPLIED; exit 0; }
+T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --init-command='SET SESSION restrict_fk_on_non_standard_key=0'"
+eval $T < deferred-idx.sql; touch .idx-applied; echo IDX_APPLIED
+EOF
+  say "applying deferred FKs (= orphan check) while quiescent"
+  ssm_run 21600 <<'EOF'
+set -e; cd /tmp/mig
+[ -f .fk-applied ] && { echo FK_ALREADY_APPLIED; exit 0; }
+T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --init-command='SET SESSION restrict_fk_on_non_standard_key=0'"
+eval $T < deferred-fk.sql;  touch .fk-applied;  echo FK_APPLIED_ZERO_ORPHANS
+EOF
+  say "removing the FK-off Initstmt from the target endpoint (task stopped)"
+  TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
+  aws dms modify-endpoint --endpoint-arn "$TEP" --extra-connection-attributes "" --region "$REGION" >/dev/null
+  RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
+  aws dms test-connection --replication-instance-arn "$RIARN" --endpoint-arn "$TEP" --region "$REGION" >/dev/null 2>&1 || true
+  CWAIT=0
+  while :; do
+    cs=$(aws dms describe-connections --region "$REGION" --filters "Name=endpoint-arn,Values=$TEP" --query 'Connections[0].Status' --output text 2>/dev/null || echo none)
+    [ "$cs" = "successful" ] && break
+    [ "$cs" = "failed" ] && die "target endpoint connection test failed after Initstmt removal"
+    CWAIT=$((CWAIT+1)); [ "$CWAIT" -gt 30 ] && die "target endpoint connection did not go successful in 5m (status=$cs)"
+    sleep 10
+  done
+  say "resuming CDC (fresh sessions, FK checks ON)"
+  aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+  while [ "$(task_status)" != "running" ]; do sleep 10; done
+  say "load complete - CDC running. Soak, then 'validate'."
+  ;;
+
+fk-resume)
+  # Recovery for an interrupted deferred-FK apply (SSM executionTimeout killed
+  # the serial mariadb session partway). DDL is per-statement atomic and the
+  # apply is strictly serial, so the target holds an exact prefix of
+  # deferred-fk.sql; filter the already-present constraint names out and apply
+  # the rest, then run the same endpoint/CDC tail as load-tail. The name diff
+  # is only valid under that exact-prefix assumption - it cannot detect a
+  # same-named constraint with a different definition, which is why the
+  # .idx-applied gate below also matters: it proves the interruption happened
+  # inside the FK apply and not somewhere earlier. Statements the parser
+  # cannot classify are KEPT, never dropped - re-applying an existing
+  # constraint fails loudly, silently skipping a missing one would ship a
+  # target without it.
+  [ "$(task_status)" = "stopped" ] || die "task not stopped (status=$(task_status))"
+  SR=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].StopReason' --output text)
+  echo "$SR" | grep -q "STOPPED_AFTER_CACHED_EVENTS" || die "stop reason is '$SR', not STOPPED_AFTER_CACHED_EVENTS - refusing"
+  ssm_refuse_if_busy
+  # The stop reason above cannot prove the index phase ran (it is identical
+  # before, during and after the deferred DDL). The .idx-applied marker can.
+  # An artifact set that predates the markers: verify indexes by hand and set
+  # FK_RESUME_ASSUME_IDX=1 (checked here, locally, before dispatch).
+  if [ -z "${FK_RESUME_ASSUME_IDX:-}" ]; then
+    ssm_run <<'EOF'
+[ -f /tmp/mig/.idx-applied ] || { echo "IDX_MARKER_MISSING - run load-tail instead (it applies indexes first), or verify indexes and set FK_RESUME_ASSUME_IDX=1"; exit 1; }
+echo IDX_MARKER_OK
+EOF
+  fi
+  prep_cnfs
+  say "building the remaining-FK list from live constraint names, then applying it"
+  ssm_run 21600 <<'EOF'
+set -e; cd /tmp/mig
+T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --init-command='SET SESSION restrict_fk_on_non_standard_key=0'"
+mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names \
+  -e "SELECT CONCAT(constraint_schema,'.',constraint_name) FROM information_schema.referential_constraints" > applied-fks.txt
+python3 - <<'PYEOF'
+import re
+applied = set(l.strip() for l in open('applied-fks.txt'))
+# Known limit: the schema.constraint join key is ambiguous if an identifier
+# itself contains a period. Pathological naming; a collision would skip a
+# statement, so schemas with dotted identifiers are outside this phase's
+# support - and load-tail is no fallback mid-FK (it replays the full file and
+# dies on the first duplicate). Recover by hand there: find the last applied
+# statement from the mariadb error position, trim deferred-fk.sql to the
+# remainder, and apply the trimmed file directly.
+# Anchored through "` FOREIGN KEY" so an identifier containing a doubled
+# backtick fails the match and falls into the kept/unparsed bucket instead of
+# being misread as a shorter name.
+pat = re.compile(r'^ALTER TABLE `([^`]+)`\.`[^`]+` ADD CONSTRAINT `([^`]+)` FOREIGN KEY')
+kept, skipped, unparsed = [], 0, 0
+for line in open('deferred-fk.sql'):
+    m = pat.match(line)
+    if not m:
+        # never silently drop a statement we cannot classify
+        kept.append(line); unparsed += 1; continue
+    if f"{m.group(1)}.{m.group(2)}" in applied:
+        skipped += 1
+    else:
+        kept.append(line)
+open('deferred-fk-remaining.sql','w').writelines(kept)
+print(f"skipped={skipped} remaining={len(kept)} unparsed={unparsed}")
+PYEOF
+eval $T < deferred-fk-remaining.sql; touch .fk-applied; echo FK_APPLIED_ZERO_ORPHANS
+EOF
+  say "removing the FK-off Initstmt from the target endpoint (task stopped)"
+  TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
+  aws dms modify-endpoint --endpoint-arn "$TEP" --extra-connection-attributes "" --region "$REGION" >/dev/null
+  RIARN=$(aws dms describe-replication-instances --region "$REGION" --filters "Name=replication-instance-id,Values=${ID}-aurora-migration" --query 'ReplicationInstances[0].ReplicationInstanceArn' --output text)
+  aws dms test-connection --replication-instance-arn "$RIARN" --endpoint-arn "$TEP" --region "$REGION" >/dev/null 2>&1 || true
+  CWAIT=0
+  while :; do
+    cs=$(aws dms describe-connections --region "$REGION" --filters "Name=endpoint-arn,Values=$TEP" --query 'Connections[0].Status' --output text 2>/dev/null || echo none)
+    [ "$cs" = "successful" ] && break
+    [ "$cs" = "failed" ] && die "target endpoint connection test failed after Initstmt removal"
+    CWAIT=$((CWAIT+1)); [ "$CWAIT" -gt 30 ] && die "target endpoint connection did not go successful in 5m (status=$cs)"
+    sleep 10
+  done
+  say "resuming CDC (fresh sessions, FK checks ON)"
+  aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
+  while [ "$(task_status)" != "running" ]; do sleep 10; done
+  say "load complete - CDC running. Soak, then 'validate'."
   ;;
 
 validate)
@@ -532,7 +699,7 @@ fence)
   # Re-entry detection: a previous fence attempt that died AFTER the Terraform
   # fence applied (e.g. mid-epoch failure) leaves the source read_only=1. The
   # marker step below writes to the source, so on a fenced source it would be
-  # refused by the very fence it created (error 1290, hit live on latam). On
+  # refused by the very fence it created (error 1290, hit live in production). On
   # re-entry: reuse the previous attempt's marker (reads still work) and skip
   # the sweep + marker write + interactive fence pause entirely - every proof
   # downstream (negative test, coordinate, marker gate, drain, epoch) re-runs.
@@ -742,8 +909,8 @@ EOF
     --query 'ReplicationTasks[0].TableMappings' --output text > "$VDIR/mappings.json"
   jq -e '.rules | length >= 1' "$VDIR/mappings.json" >/dev/null || die "could not clone the main task's TableMappings - do not trust this epoch"
   # the authoritative table SET: the main task's own statistics identities
-  # (stable on a stopped task; survives the stop - proven live on the gca
-  # cutover). The completion gate requires exact set equality with the fresh
+  # (stable on a stopped task; survives the stop - proven live on a
+  # production cutover). The completion gate requires exact set equality with the fresh
   # task's enumeration, not count equality - equal counts can hide an
   # equal-cardinality substitution (e.g. a rename DDL that MySQL CDC does not
   # replicate leaves the two enumerations different but same-sized).
