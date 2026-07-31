@@ -283,8 +283,13 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	verifyContinuity := false
 	if rm.Scenario == "upgrade" {
 		wantChart, _ := p.Matrix.VersionVar(rm.ToRef, "chart_version").(string)
-		step("verifying upgrade proof (advanced from rev %d; chart %q)", rm.BaselineRev, wantChart)
-		if rerr := validation.AssertUpgraded(kc, rm.Namespace, "dozuki", rm.BaselineRev, wantChart); rerr != nil {
+		fromChart, _ := p.Matrix.VersionVar(rm.FromRef, "chart_version").(string)
+		// A ref delta with no chart delta (a docs-only or infra-only PR) upgrades
+		// nothing through Flux, so the release revision stays put. Only demand an
+		// advance when the chart version actually moved between the refs.
+		mustAdvance := fromChart != wantChart
+		step("verifying upgrade proof (from rev %d; chart %q; advance required: %t)", rm.BaselineRev, wantChart, mustAdvance)
+		if rerr := validation.AssertUpgraded(kc, rm.Namespace, "dozuki", rm.BaselineRev, wantChart, mustAdvance); rerr != nil {
 			return fmt.Errorf("upgrade proof: %w", rerr)
 		}
 		verifyContinuity = true

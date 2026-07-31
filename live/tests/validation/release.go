@@ -42,9 +42,12 @@ func ReleaseRevision(kubeconfig, namespace, name string) (int, error) {
 	return 0, fmt.Errorf("release %s not found", name)
 }
 
-// AssertUpgraded verifies the release is deployed, its revision increased vs
+// AssertUpgraded verifies the release is deployed, its revision advanced vs
 // baselineRevision, and (when wantChartVersion != "") the chart version matches.
-func AssertUpgraded(kubeconfig, namespace, name string, baselineRevision int, wantChartVersion string) error {
+// mustAdvance=false relaxes the revision check to "did not go backwards": a ref
+// delta with no chart delta (a docs-only PR) is a no-op for Flux, so the revision
+// legitimately stays put and only a rollback would be wrong.
+func AssertUpgraded(kubeconfig, namespace, name string, baselineRevision int, wantChartVersion string, mustAdvance bool) error {
 	rels, err := helmList(kubeconfig, namespace)
 	if err != nil {
 		return err
@@ -60,8 +63,11 @@ func AssertUpgraded(kubeconfig, namespace, name string, baselineRevision int, wa
 		if err != nil {
 			return err
 		}
-		if rev <= baselineRevision {
+		if mustAdvance && rev <= baselineRevision {
 			return fmt.Errorf("release %s revision=%d not greater than baseline=%d", name, rev, baselineRevision)
+		}
+		if rev < baselineRevision {
+			return fmt.Errorf("release %s revision=%d went backwards from baseline=%d", name, rev, baselineRevision)
 		}
 		if wantChartVersion != "" {
 			want := name + "-" + wantChartVersion
