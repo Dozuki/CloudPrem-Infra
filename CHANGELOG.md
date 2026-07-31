@@ -2,6 +2,19 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.5.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.4.0...v8.5.0) (2026-07-31)
+
+
+### Features
+
+* **logical:** fail fast on missing artifacts, retry and self-heal flux drift ([b37912c](https://github.com/Dozuki/CloudPrem-Infra/commit/b37912ca9742c77c844b3ce7e8f44ebef2848532))
+* **logical:** tag dynamic EBS volumes with deleteAfter on ephemeral deploys ([#391](https://github.com/Dozuki/CloudPrem-Infra/issues/391)) ([6796515](https://github.com/Dozuki/CloudPrem-Infra/commit/67965150b8fa160672e75f9c19734458d2d31550))
+
+
+### Bug Fixes
+
+* **monitoring:** skip the INSUFFICIENT_DATA to OK transition in slack alerts ([#390](https://github.com/Dozuki/CloudPrem-Infra/issues/390)) ([4584db7](https://github.com/Dozuki/CloudPrem-Infra/commit/4584db7d0177ed7782f980a07e365dbf66b9f615))
+
 ## [8.4.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.3.4...v8.4.0) (2026-07-30)
 
 
