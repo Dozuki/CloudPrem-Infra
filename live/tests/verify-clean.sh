@@ -65,6 +65,29 @@ report "iam-roles"    "$(aws iam list-roles --profile "$P" --query "Roles[?start
 report "iam-policies" "$(aws iam list-policies --scope Local --profile "$P" --query "Policies[?starts_with(PolicyName,'${PREFIX}-')].PolicyName" --output text 2>/dev/null)"
 report "s3"           "$(aws s3api list-buckets --profile "$P" --query "Buckets[?starts_with(Name,'${PREFIX}-')].Name" --output text 2>/dev/null)"
 
+echo "--- vault ---"
+# Vault leftovers are invisible to every AWS sweep above and the reaper never touches
+# them; an orphaned k8s auth mount 400s the next logical apply of the same stack id
+# (found live 2026-07-31: k8s/smoke-min outlived its run and blocked the rerun).
+# Needs VAULT_ADDR + a usable token; degrades to a WARN, never a silent pass.
+if command -v vault >/dev/null && [ -n "${VAULT_ADDR:-}" ] && vault token lookup >/dev/null 2>&1; then
+  report "vault-policy" "$(vault policy list 2>/dev/null | grep "^${PREFIX}-\|^${PREFIX}\$")"
+  _mounts="$(vault auth list -format=json 2>/dev/null | jq -r 'keys[]' 2>/dev/null)"
+  if [ -n "$_mounts" ]; then
+    report "vault-auth" "$(printf '%s\n' "$_mounts" | grep "^k8s/${PREFIX}")"
+  else
+    # sys/auth list needs sudo, which the deployer/admin tokens may lack. The logical
+    # layer creates the mount and the policy together, so probe the mounts implied by
+    # the policy names instead of passing silently.
+    for _pol in $(vault policy list 2>/dev/null | grep "^${PREFIX}-\|^${PREFIX}\$" | grep -v -- '-eso$'); do
+      vault read "sys/auth/k8s/${_pol}/tune" >/dev/null 2>&1 && report "vault-auth(probe)" "k8s/${_pol}"
+    done
+    echo "  WARN vault: sys/auth not listable with this token; mounts probed via policy names only"
+  fi
+else
+  echo "  WARN vault: no VAULT_ADDR or no valid token - vault leftovers NOT checked"
+fi
+
 echo "--- terraform state ---"
 # Orphaned per-run harness state prefixes (RunUpgrade uses local-<ts>-<cfg>/...).
 _state_prefixes() { # <bucket> — prints "prefix (bucket-region)" so a leak names where it lives
