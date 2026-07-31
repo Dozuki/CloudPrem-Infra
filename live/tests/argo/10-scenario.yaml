@@ -190,9 +190,12 @@ spec:
                   value: '{{workflow.parameters.repo-ref}}'
                 # Destroy is the slowest phase on a bad day: RDS deletion, ENI detachment
                 # and NAT teardown all serialise, and the harness retries transient faults
-                # internally.
+                # internally. The first live full-stack destroy blew through 90 minutes and
+                # was deadline-killed with only the Aurora tail left; a killed teardown
+                # strands the stack, so this errs long. The reaper's deleteAfter tag is the
+                # backstop if even this expires.
                 - name: deadline
-                  value: '5400'
+                  value: '10800'
                 - name: keep-on-failure
                   value: '{{workflow.parameters.keep-on-failure}}'
                 # The exit handler's view of how the run ended. The phase template turns a
