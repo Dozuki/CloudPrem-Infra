@@ -11,10 +11,18 @@ resource "kubernetes_storage_class_v1" "ebs_gp3" {
   reclaim_policy         = "Delete"
   volume_binding_mode    = "WaitForFirstConsumer"
   allow_volume_expansion = true
-  parameters = {
-    type      = "gp3"
-    encrypted = "true"
-  }
+  parameters = merge(
+    {
+      type      = "gp3"
+      encrypted = "true"
+    },
+    # Dynamically provisioned volumes are created by the CSI controller, not the
+    # AWS provider, so default_tags (and the harness deleteAfter TTL) never reach
+    # them; a failed teardown leaves them orphaned forever. StorageClass
+    # parameters are immutable, but delete_after is only ever set on ephemeral
+    # harness deploys where the class is created fresh each run.
+    var.delete_after != "" ? { tagSpecification_1 = "deleteAfter=${var.delete_after}" } : {},
+  )
 }
 
 resource "kubernetes_namespace_v1" "app" {
