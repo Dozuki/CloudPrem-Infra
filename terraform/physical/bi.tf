@@ -59,65 +59,42 @@ resource "aws_dms_replication_subnet_group" "this" {
   tags = local.tags
 }
 
+# This key encrypted the DMS endpoint connection info and, briefly, the
+# serverless compute. It no longer feeds DMS at all: DMS Serverless is
+# orchestrated provisioned DMS - its service-linked role creates hidden
+# replication instances in this account, and that SLR cannot be granted a
+# customer key by ANY key policy that was tried (statements for the
+# dms.amazonaws.com principal with and without SourceAccount/CallerAccount
+# conditions, and naming the SLR ARN directly, all still produced
+# KMSKeyNotAccessibleFault at the hidden CreateReplicationInstance, and the
+# endpoint-credential decrypt fails inside the DMS service account with no
+# CloudTrail trace on our side). The replacement endpoints and the compute
+# below use the AWS-managed aws/dms key instead, which is the only
+# combination that provisions. Established empirically on the canary env,
+# 2026-07-31. Old endpoints still reference this key until their env applies
+# the -serverless replacement; the key resource stays until the fleet is through,
+# and retiring it is a follow-up. The policy is left unmanaged here - the
+# explicit policy from the earlier fix attempt is harmless dead weight.
 resource "aws_kms_key" "bi" {
   count = var.enable_bi ? 1 : 0
 
   description             = "BI KMS key for replication credentials"
   enable_key_rotation     = true
   deletion_window_in_days = var.protect_resources ? 30 : 7
-  policy                  = data.aws_iam_policy_document.bi_kms[0].json
 
   tags = local.tags
 }
 
-# The serverless replication encrypts its compute resources with this key
-# (compute_config.kms_key_id below) and accesses it as the dms.amazonaws.com
-# service principal directly, unlike the old provisioned instance whose role
-# got access through IAM policies under the root statement's delegation. A
-# service principal cannot: it needs its own key policy statement. On the
-# default key policy the replication fails at preparing_metadata_resources
-# with "No permission to access Key". Caught by the qa canary.
-data "aws_iam_policy_document" "bi_kms" {
-  count = var.enable_bi ? 1 : 0
-
-  statement {
-    sid = "Enable IAM User Permissions"
-    principals {
-      type        = "AWS"
-      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
-    }
-    actions   = ["kms:*"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid = "AllowDMSServerlessCompute"
-    principals {
-      type        = "Service"
-      identifiers = ["dms.amazonaws.com"]
-    }
-    actions = [
-      "kms:Decrypt",
-      "kms:DescribeKey",
-      "kms:Encrypt",
-      "kms:GenerateDataKey*",
-      "kms:ReEncrypt*",
-      "kms:CreateGrant",
-    ]
-    resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [data.aws_caller_identity.current.account_id]
-    }
-  }
-}
-
 # The provisioned replication instance that used to live here is gone; the serverless
-# replication below replaces it AND the replication task. Measured on the 3M fleet before
-# switching: these replications sit under 5% CPU for 92-100% of hours (usac excepted), so a
+# replication below replaces it AND the replication task. Measured on the production fleet before
+# switching: these replications sit under 5% CPU for 92-100% of hours (the largest env excepted), so a
 # provisioned instance was billing 24/7 for capacity that was idle almost all of it. The
-# subnet group, KMS key, certificate and both endpoints are unchanged and shared.
+# subnet group and certificate are unchanged and shared. The endpoints are replaced
+# once via the -serverless rename (shedding their customer kms_key_arn); the replication
+# config replaces with them (replace_triggered_by), and the new config ARN moves
+# the dms-start Job generation so replication restarts after the logical apply.
+# On envs still carrying the old provisioned task at bump time, state-recorded
+# dependencies destroy the task (provider stops it first) before the endpoints.
 
 resource "aws_dms_certificate" "this" {
   count = local.dms_enabled ? 1 : 0
@@ -132,14 +109,21 @@ resource "aws_dms_certificate" "this" {
 resource "aws_dms_endpoint" "source" {
   count = local.dms_enabled ? 1 : 0
 
-  endpoint_id                 = "${local.identifier}-source"
+  # -serverless: renamed to FORCE replacement. kms_key_arn is create-time-only and
+  # Optional+Computed, so merely deleting it from this config diffs nothing and
+  # the live endpoint would keep the customer key forever. The rename is the
+  # replacement trigger; the fresh endpoint is born on the aws/dms default key.
+  endpoint_id                 = "${local.identifier}-source-serverless"
   certificate_arn             = aws_dms_certificate.this[0].certificate_arn
   ssl_mode                    = "verify-full"
   endpoint_type               = "source"
   engine_name                 = "mysql"
   extra_connection_attributes = "afterConnectScript=call mysql.rds_set_configuration('binlog retention hours', 24);"
   port                        = 3306
-  kms_key_arn                 = aws_kms_key.bi[0].arn
+  # No kms_key_arn: connection info rides the AWS-managed aws/dms key. The
+  # serverless engine cannot decrypt a customer key here (see the key comment
+  # above); this attribute is create-time-only, so setting it again means
+  # replacing the endpoint.
 
   username    = local.db_username
   password    = local.db_password
@@ -151,14 +135,15 @@ resource "aws_dms_endpoint" "source" {
 resource "aws_dms_endpoint" "target" {
   count = local.dms_enabled ? 1 : 0
 
-  endpoint_id                 = "${local.identifier}-target"
+  # -serverless: same forced-replacement rename as the source endpoint.
+  endpoint_id                 = "${local.identifier}-target-serverless"
   certificate_arn             = aws_dms_certificate.this[0].certificate_arn
   ssl_mode                    = "verify-full"
   endpoint_type               = "target"
   engine_name                 = "mysql"
   extra_connection_attributes = "afterConnectScript=call mysql.rds_set_configuration('binlog retention hours', 24);Initstmt=SET FOREIGN_KEY_CHECKS=0;"
   port                        = 3306
-  kms_key_arn                 = aws_kms_key.bi[0].arn
+  # No kms_key_arn, same reason as the source endpoint.
 
   # Engine-agnostic (main.tf): the BI target is a provisioned instance on the default path and an
   # Aurora Serverless cluster when bi_db_engine = "aurora". engine_name stays "mysql" either way
@@ -264,10 +249,11 @@ resource "aws_dms_replication_config" "this" {
   compute_config {
     replication_subnet_group_id = aws_dms_replication_subnet_group.this[0].id
     vpc_security_group_ids      = [module.bi_database_sg.security_group_id]
-    kms_key_id                  = aws_kms_key.bi[0].arn
-    min_capacity_units          = var.bi_dms_min_dcu
-    max_capacity_units          = var.bi_dms_max_dcu
-    multi_az                    = false
+    # No kms_key_id: the SLR's hidden CreateReplicationInstance throws
+    # KMSKeyNotAccessibleFault on any customer key (see the key comment).
+    min_capacity_units = var.bi_dms_min_dcu
+    max_capacity_units = var.bi_dms_max_dcu
+    multi_az           = false
   }
 
   tags = local.tags
@@ -276,6 +262,16 @@ resource "aws_dms_replication_config" "this" {
     # Same reasoning as the old task: DMS rewrites settings it did not get verbatim, which
     # would otherwise be a permanent diff.
     ignore_changes = [replication_settings]
+    # The provider updates endpoint-ARN changes on this resource in place, which
+    # would leave a once-failed replication carrying its poisoned provision state
+    # (and, on the kms migration, mix new endpoints into an old replication).
+    # Replacing along with the endpoints gives a clean config whose fresh ARN
+    # also moves the dms_replication_generation, so the logical dms-start Job
+    # re-runs and starts the new replication.
+    replace_triggered_by = [
+      aws_dms_endpoint.source[0].endpoint_arn,
+      aws_dms_endpoint.target[0].endpoint_arn,
+    ]
   }
 }
 
