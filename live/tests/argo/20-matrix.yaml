@@ -125,7 +125,9 @@ spec:
           apiVersion: argoproj.io/v1alpha1
           kind: Workflow
           metadata:
-            generateName: harness-{{inputs.parameters.config}}-
+            # Config names carry underscores (min_default, bi_ha), which RFC 1123 names
+            # reject, so swap them out here. The harness/config label keeps the real name.
+            generateName: harness-{{=sprig.replace('_', '-', inputs.parameters.config)}}-
             labels:
               harness/config: '{{inputs.parameters.config}}'
               harness/scenario: '{{workflow.parameters.scenario}}'
