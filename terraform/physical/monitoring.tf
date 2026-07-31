@@ -441,6 +441,65 @@ resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
   arn       = module.sns.topic_arn
 }
 
+# --- BI serverless CDC latency alarms --- #
+#
+# Serverless replications do NOT publish under the provisioned-task dimensions
+# (ReplicationInstanceIdentifier + ReplicationTaskIdentifier); they publish under
+# a single ReplicationConfigId dimension whose value is "<account>:<config id>".
+# The config id changes every time the replication config is replaced (endpoint
+# rename, compute change), so the dimension is derived from the config ARN here
+# and follows any replacement in the same apply. Hand-created alarms keyed to a
+# task id latch into ALARM forever the moment the task is deleted.
+#
+# missing=breaching is deliberate: a deprovisioned or stuck replication emits
+# nothing, and it must page before the source's binlog retention window makes a
+# resume impossible. The 6x300s window tolerates the ~20 minute serverless
+# provisioning ladder on restarts without paging.
+locals {
+  bi_replication_config_id = local.dms_enabled ? join(":", [
+    split(":", aws_dms_replication_config.this[0].arn)[4],
+    split(":", aws_dms_replication_config.this[0].arn)[6],
+  ]) : ""
+}
+
+resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_source" {
+  count               = local.dms_enabled ? 1 : 0
+  alarm_name          = "${local.identifier}-dms-cdc-latency-source"
+  alarm_description   = "BI serverless replication ${local.identifier}: CDCLatencySource high or not reporting (missing=breaching)"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 900 # seconds
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
+  period              = 300
+  namespace           = "AWS/DMS"
+  metric_name         = "CDCLatencySource"
+  statistic           = "Maximum"
+  treat_missing_data  = "breaching"
+  dimensions          = { ReplicationConfigId = local.bi_replication_config_id }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
+  count               = local.dms_enabled ? 1 : 0
+  alarm_name          = "${local.identifier}-dms-cdc-latency-target"
+  alarm_description   = "BI serverless replication ${local.identifier}: CDCLatencyTarget high or not reporting (missing=breaching)"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 900 # seconds
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
+  period              = 300
+  namespace           = "AWS/DMS"
+  metric_name         = "CDCLatencyTarget"
+  statistic           = "Maximum"
+  treat_missing_data  = "breaching"
+  dimensions          = { ReplicationConfigId = local.bi_replication_config_id }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
+}
+
 // -- Slack Notification Lambda
 
 # Content-based archive: zips the file's BYTES (not the on-disk file with its
