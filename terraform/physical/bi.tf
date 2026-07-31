@@ -65,8 +65,51 @@ resource "aws_kms_key" "bi" {
   description             = "BI KMS key for replication credentials"
   enable_key_rotation     = true
   deletion_window_in_days = var.protect_resources ? 30 : 7
+  policy                  = data.aws_iam_policy_document.bi_kms[0].json
 
   tags = local.tags
+}
+
+# The serverless replication encrypts its compute resources with this key
+# (compute_config.kms_key_id below) and accesses it as the dms.amazonaws.com
+# service principal directly, unlike the old provisioned instance which went
+# through its instance role and was covered by the root statement alone. On the
+# default key policy the replication fails at preparing_metadata_resources with
+# "No permission to access Key". Caught by the qa canary.
+data "aws_iam_policy_document" "bi_kms" {
+  count = var.enable_bi ? 1 : 0
+
+  statement {
+    sid = "Enable IAM User Permissions"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "AllowDMSServerlessCompute"
+    principals {
+      type        = "Service"
+      identifiers = ["dms.amazonaws.com"]
+    }
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+      "kms:CreateGrant",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
 }
 
 # The provisioned replication instance that used to live here is gone; the serverless
