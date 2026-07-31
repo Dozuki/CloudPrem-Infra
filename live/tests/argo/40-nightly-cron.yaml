@@ -1,0 +1,27 @@
+# Nightly upgrade matrix. All knobs live on harness-matrix; this is only the clock.
+#
+# Timing: 3 configs x ~2h with the harness-semaphore at 2 lands the finish around
+# 06:00 ET. The children gate on the semaphore themselves (NEVER add a semaphore here
+# or at the matrix level: parent+child gating deadlocks any matrix larger than the
+# semaphore). Forbid means a still-running night blocks the next - the semaphore would
+# serialise them anyway, without the visibility.
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: harness-nightly
+  namespace: argo
+spec:
+  # v4 renamed the singular `schedule` away, same as synchronization.semaphore(s).
+  schedules:
+    - '0 2 * * *'
+  timezone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowMetadata:
+    labels:
+      harness/trigger: cron
+  workflowSpec:
+    workflowTemplateRef:
+      name: harness-matrix
