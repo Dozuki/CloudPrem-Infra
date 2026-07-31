@@ -87,6 +87,14 @@ spec:
   # run holding the semaphore forever, not a target.
   activeDeadlineSeconds: 21600
 
+  # Auto Mode consolidation drains "underutilized" nodes whenever load shifts, and a
+  # drain mid-run kills a tofu apply (and strands half-written state, see the orphan
+  # sweeps). This annotation makes Karpenter leave the node alone while a harness pod
+  # is on it.
+  podMetadata:
+    annotations:
+      karpenter.sh/do-not-disrupt: 'true'
+
   # Keep failures around for a few days to inspect; successes are noise once the artifacts
   # are in S3.
   ttlStrategy:
