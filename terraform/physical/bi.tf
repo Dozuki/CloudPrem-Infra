@@ -72,10 +72,11 @@ resource "aws_kms_key" "bi" {
 
 # The serverless replication encrypts its compute resources with this key
 # (compute_config.kms_key_id below) and accesses it as the dms.amazonaws.com
-# service principal directly, unlike the old provisioned instance which went
-# through its instance role and was covered by the root statement alone. On the
-# default key policy the replication fails at preparing_metadata_resources with
-# "No permission to access Key". Caught by the qa canary.
+# service principal directly, unlike the old provisioned instance whose role
+# got access through IAM policies under the root statement's delegation. A
+# service principal cannot: it needs its own key policy statement. On the
+# default key policy the replication fails at preparing_metadata_resources
+# with "No permission to access Key". Caught by the qa canary.
 data "aws_iam_policy_document" "bi_kms" {
   count = var.enable_bi ? 1 : 0
 
