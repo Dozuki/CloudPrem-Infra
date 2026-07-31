@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.5.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.5.0...v8.5.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **physical:** grant the DMS service principal on the BI key for serverless compute ([#392](https://github.com/Dozuki/CloudPrem-Infra/issues/392)) ([085a7e6](https://github.com/Dozuki/CloudPrem-Infra/commit/085a7e6d786c60a9673324ff02638733c1228897))
+
 ## [8.5.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.4.0...v8.5.0) (2026-07-31)
 
 
