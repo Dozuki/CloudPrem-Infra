@@ -11,6 +11,7 @@ import (
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/validation"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 )
 
 // PhaseParams carries everything a single re-entrant phase needs. Unlike RunParams
@@ -357,5 +358,43 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	if derr := tg.Destroy(); derr != nil {
 		return fmt.Errorf("destroy: %w", derr)
 	}
+	// The CloudWatch agent creates /aws/containerinsights/<cluster>/* lazily at
+	// runtime, so they are in no Terraform state and every run re-leaks the same four
+	// groups, which then fail the verify-clean gate. Best-effort: a failure here must
+	// not fail a teardown that already destroyed the stack.
+	if lerr := deleteContainerInsightsLogGroups(ctx, p.Region, identifier); lerr != nil {
+		step("container-insights log-group sweep failed (non-fatal): %v", lerr)
+	}
+	return nil
+}
+
+// deleteContainerInsightsLogGroups removes the out-of-state log groups the CloudWatch
+// agent created for the cluster. Safe after destroy: the agent is gone, nothing
+// recreates them.
+func deleteContainerInsightsLogGroups(ctx context.Context, region, cluster string) error {
+	if cluster == "" {
+		return nil
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return err
+	}
+	cw := cloudwatchlogs.NewFromConfig(cfg)
+	prefix := "/aws/containerinsights/" + cluster + "/"
+	deleted := 0
+	pager := cloudwatchlogs.NewDescribeLogGroupsPaginator(cw, &cloudwatchlogs.DescribeLogGroupsInput{LogGroupNamePrefix: &prefix})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return err
+		}
+		for _, lg := range page.LogGroups {
+			if _, err := cw.DeleteLogGroup(ctx, &cloudwatchlogs.DeleteLogGroupInput{LogGroupName: lg.LogGroupName}); err != nil {
+				return err
+			}
+			deleted++
+		}
+	}
+	step("deleted %d container-insights log groups under %s", deleted, prefix)
 	return nil
 }
