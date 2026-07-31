@@ -154,6 +154,14 @@ EOF
     exit 1
   fi
   log "AWS: assumed $(aws --profile "${_profile}" sts get-caller-identity --query Arn --output text)"
+  # Ambient identity must ALSO be the chained role, not the raw pod identity. The
+  # kubernetes/helm/kubectl providers authenticate through an exec plugin
+  # (`aws eks get-token`, no --profile), which reads only the ambient env; without this
+  # the token carries the pod's mgmt-account role, which has no access entry on the
+  # freshly built cluster, and every cluster-API resource dies 401 Unauthorized.
+  # Exported AFTER vault login (above) on purpose: Vault AWS-auth must see the pod's
+  # own identity, and this line is what would break that if it moved earlier.
+  export AWS_PROFILE="${_profile}"
 fi
 
 # ---------------------------------------------------------------------------
