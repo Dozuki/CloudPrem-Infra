@@ -453,8 +453,14 @@ resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
 #
 # missing=breaching is deliberate: a deprovisioned or stuck replication emits
 # nothing, and it must page before the source's binlog retention window makes a
-# resume impossible. The 6x300s window tolerates the ~20 minute serverless
-# provisioning ladder on restarts without paging.
+# resume impossible. The 6x300s window only softens the case where an
+# ESTABLISHED metric stops (last real datapoint must age out, ~30min). A new
+# metric identity - greenfield env, or any config replacement rotating the
+# dimension value - has no datapoints, so every lookback slot counts as
+# breaching and the alarm pages at its first evaluation, staying in ALARM
+# until the logical layer starts the replication. That page is accurate (BI
+# is not replicating) and expected during those windows; do not "fix" it by
+# switching to notBreaching, which trades it for silent BI death.
 locals {
   bi_replication_config_id = local.dms_enabled ? join(":", [
     split(":", aws_dms_replication_config.this[0].arn)[4],
