@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.6.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.6.0...v8.6.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **physical:** CDC latency alarms for serverless BI replications ([#398](https://github.com/Dozuki/CloudPrem-Infra/issues/398)) ([d91f5d0](https://github.com/Dozuki/CloudPrem-Infra/commit/d91f5d08cadb639038efc003e3197049b4fe6279))
+
 ## [8.6.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.5.1...v8.6.0) (2026-07-31)
 
 
