@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 
@@ -70,6 +72,41 @@ func LoadMatrix(path string) (*Matrix, error) {
 		return nil, fmt.Errorf("parse matrix: %w", err)
 	}
 	return &m, nil
+}
+
+// Salted returns a copy of c with a run-derived suffix appended to the
+// "customer" feature flag, so two runs of the same config never collide on
+// the IAM/Vault/k8s resource names derived from it. The FeatureFlags map is
+// deep-copied first - Matrix.Config returns the matrix's own map by
+// reference, and mutating it in place would corrupt every other holder of
+// this config. A no-op (unchanged copy) when runID is empty, customer is
+// absent/non-string/empty, or customer is already at the 10-char terraform
+// cap. Deterministic in (runID, c.Name): every phase of a run, however many
+// separate pods it spans, must independently recompute the identical salted
+// customer or a later phase renders a different identifier than an earlier
+// one applied.
+func (c Config) Salted(runID string) Config {
+	out := c
+	flags := make(map[string]interface{}, len(c.FeatureFlags))
+	for k, v := range c.FeatureFlags {
+		flags[k] = v
+	}
+	out.FeatureFlags = flags
+
+	customer, ok := flags["customer"].(string)
+	if !ok || customer == "" || runID == "" {
+		return out
+	}
+	n := 10 - len(customer)
+	if n > 4 {
+		n = 4
+	}
+	if n <= 0 {
+		return out
+	}
+	sum := sha256.Sum256([]byte(runID + "/" + c.Name))
+	flags["customer"] = customer + hex.EncodeToString(sum[:])[:n]
+	return out
 }
 
 func (m *Matrix) Config(name string) (Config, error) {

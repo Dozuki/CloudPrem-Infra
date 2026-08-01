@@ -38,6 +38,18 @@ func (p PhaseParams) statePrefix(cfg Config) string {
 	return p.RunID + "-" + cfg.Name + "/"
 }
 
+// Config resolves this phase's Config from the matrix and salts its customer
+// feature flag with the run id, so every phase (and every re-entrant retry of
+// it, however many separate pods that spans) materializes the identical
+// identifier for the same run.
+func (p PhaseParams) Config() (Config, error) {
+	cfg, err := p.Matrix.Config(p.ConfigName)
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg.Salted(p.RunID), nil
+}
+
 // prepareWorktree is the re-entrant replacement for run.go's inline worktree+tg
 // setup: recreate the worktree for ref, scaffold the gitignored live envs, write
 // env.hcl (with the shared deleteAfter), and return the worktree + its TGOptions +
@@ -131,7 +143,7 @@ func (p PhaseParams) loadOrInitManifest(ctx context.Context, cfg Config, scenari
 // scenario), validates it, and records baseline state in the manifest. Re-entrant:
 // re-running re-applies (terragrunt is convergent) and reuses the manifest.
 func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, deleteAfter, namespace string) (err error) {
-	cfg, err := p.Matrix.Config(p.ConfigName)
+	cfg, err := p.Config()
 	if err != nil {
 		return err
 	}
@@ -189,7 +201,7 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 // Upgrade applies the target ref against the SAME state prefix the baseline used,
 // then records ToRef as applied. Requires a prior upgrade-scenario Provision.
 func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
-	cfg, err := p.Matrix.Config(p.ConfigName)
+	cfg, err := p.Config()
 	if err != nil {
 		return err
 	}
@@ -223,7 +235,7 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 // recorded BaselineRev and verifies the continuity sentinel; for fresh it skips
 // both. Re-entrant: reads everything it needs from the manifest + live outputs.
 func (p PhaseParams) Validate(ctx context.Context) (err error) {
-	cfg, err := p.Matrix.Config(p.ConfigName)
+	cfg, err := p.Config()
 	if err != nil {
 		return err
 	}
@@ -310,7 +322,7 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 // applied (essential for cross-architecture upgrades: target code cannot destroy
 // baseline state). No manifest → nothing was provisioned → no-op success. Idempotent.
 func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (err error) {
-	cfg, err := p.Matrix.Config(p.ConfigName)
+	cfg, err := p.Config()
 	if err != nil {
 		return err
 	}

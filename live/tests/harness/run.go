@@ -80,18 +80,21 @@ func phaseParamsFromRun(p RunParams) (PhaseParams, error) {
 // It composes the same re-entrant phases the Argo Workflow drives — this is the
 // local, single-process driver of them.
 func RunUpgrade(p RunParams) (err error) {
-	cfg, err := p.Matrix.Config(p.ConfigName)
-	if err != nil {
-		return err
-	}
 	phaseMarks = nil
 	runStart = time.Now()
+	var cfg Config
 	defer func() { printSummary(p, cfg, err) }()
 
 	pp, derr := phaseParamsFromRun(p)
 	if derr != nil {
 		return derr
 	}
+	// cfg comes from pp.Config() (not p.Matrix.Config) so the summary's displayed
+	// customer matches the salted identifier the phases actually applied.
+	if cfg, err = pp.Config(); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	startTime := p.StartTime
 	if startTime.IsZero() {
@@ -141,17 +144,19 @@ func RunUpgrade(p RunParams) (err error) {
 // upgrade proof, no continuity sentinel — it verifies a clean from-scratch deploy (a
 // class of bug an in-place upgrade can mask). Teardown via defer; first error wins.
 func RunFresh(p RunParams) (err error) {
-	cfg, err := p.Matrix.Config(p.ConfigName)
-	if err != nil {
-		return err
-	}
 	phaseMarks = nil
 	runStart = time.Now()
+	var cfg Config
 	defer func() { printSummary(p, cfg, err) }()
 
 	pp, derr := phaseParamsFromRun(p)
 	if derr != nil {
 		return derr
+	}
+	// cfg comes from pp.Config() (not p.Matrix.Config) so the summary's displayed
+	// customer matches the salted identifier the phases actually applied.
+	if cfg, err = pp.Config(); err != nil {
+		return err
 	}
 	ctx := context.Background()
 	startTime := p.StartTime
@@ -208,16 +213,28 @@ func RunFresh(p RunParams) (err error) {
 // DR buckets via data sources, so the source teardown - which force_destroys them - must
 // come last).
 func RunRecovery(p RunParams, recoverConfigName string) (err error) {
-	cfg, err := p.Matrix.Config(p.ConfigName)
-	if err != nil {
-		return err
-	}
-	rcfg, err := p.Matrix.Config(recoverConfigName)
-	if err != nil {
-		return err
-	}
 	phaseMarks = nil
 	runStart = time.Now()
+
+	// pp/pp2 built up front (before either Config() fetch) so both cfg and rcfg salt
+	// with the SAME base run id (pp2.RunID == pp.RunID) — salting rcfg with p.RunID
+	// here would use the wrong id (p.RunID still carries the source config's suffix)
+	// and disagree with what pp2.Provision resolves internally for the same config.
+	pp, derr := phaseParamsFromRun(p)
+	if derr != nil {
+		return derr
+	}
+	pp2 := pp
+	pp2.ConfigName = recoverConfigName
+
+	cfg, err := pp.Config()
+	if err != nil {
+		return err
+	}
+	rcfg, err := pp2.Config()
+	if err != nil {
+		return err
+	}
 	defer func() { printSummary(p, cfg, err) }()
 
 	// Preflight the ONE cross-region dependency the rebuild cannot work around, before
@@ -231,10 +248,6 @@ func RunRecovery(p RunParams, recoverConfigName string) (err error) {
 		}
 	}
 
-	pp, derr := phaseParamsFromRun(p)
-	if derr != nil {
-		return derr
-	}
 	ctx := context.Background()
 	startTime := p.StartTime
 	if startTime.IsZero() {
@@ -319,8 +332,7 @@ func RunRecovery(p RunParams, recoverConfigName string) (err error) {
 	// The rebuild: a second, independent stack in the DR region, driven through the
 	// exact same phases a fresh deploy uses - because the decided recovery IS a fresh
 	// deploy with three seeded inputs. Same manifest store; its own state prefix.
-	pp2 := pp
-	pp2.ConfigName = recoverConfigName
+	// (pp2 itself was built up front, alongside pp, so cfg/rcfg salt off the same base id.)
 	pp2.Region = rcfg.RegionOr(p.Matrix.Defaults.Region)
 	pp2.ExtraInputs = envInputs
 	defer func() {

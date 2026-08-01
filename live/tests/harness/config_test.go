@@ -118,3 +118,123 @@ func TestVersionDefaults(t *testing.T) {
 		t.Errorf("VersionProfileExists(v6.0) = false, want true (explicit entry)")
 	}
 }
+
+// isLowerHex reports whether s is entirely lowercase hex digits.
+func isLowerHex(s string) bool {
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+func TestSaltedIsDeterministic(t *testing.T) {
+	cfg := Config{Name: "min_default", FeatureFlags: map[string]interface{}{"customer": "smoke"}}
+	a := cfg.Salted("run-123")
+	b := cfg.Salted("run-123")
+	ca, _ := a.FeatureFlags["customer"].(string)
+	cb, _ := b.FeatureFlags["customer"].(string)
+	if ca != cb {
+		t.Errorf("Salted(%q) not deterministic: got %q then %q", "run-123", ca, cb)
+	}
+	if ca == "smoke" {
+		t.Errorf("Salted did not append anything to customer")
+	}
+}
+
+func TestSaltedDiffersByRunID(t *testing.T) {
+	cfg := Config{Name: "min_default", FeatureFlags: map[string]interface{}{"customer": "smoke"}}
+	a, _ := cfg.Salted("run-123").FeatureFlags["customer"].(string)
+	b, _ := cfg.Salted("run-456").FeatureFlags["customer"].(string)
+	if a == b {
+		t.Errorf("different runIDs produced the same salted customer %q", a)
+	}
+}
+
+func TestSaltedDiffersByConfigName(t *testing.T) {
+	flags := map[string]interface{}{"customer": "smoke"}
+	cfg1 := Config{Name: "min_default", FeatureFlags: flags}
+	cfg2 := Config{Name: "full", FeatureFlags: flags}
+	a, _ := cfg1.Salted("run-123").FeatureFlags["customer"].(string)
+	b, _ := cfg2.Salted("run-123").FeatureFlags["customer"].(string)
+	if a == b {
+		t.Errorf("different config names produced the same salted customer %q (salt must include c.Name)", a)
+	}
+}
+
+func TestSaltedFiveCharBaseAppendsFourHexChars(t *testing.T) {
+	cfg := Config{Name: "min_default", FeatureFlags: map[string]interface{}{"customer": "smoke"}}
+	got, _ := cfg.Salted("run-123").FeatureFlags["customer"].(string)
+	if len(got) != 9 {
+		t.Fatalf("len(%q) = %d, want 9 (5-char base + 4-char salt)", got, len(got))
+	}
+	suffix := got[5:]
+	if !isLowerHex(suffix) {
+		t.Errorf("suffix %q is not lowercase hex", suffix)
+	}
+}
+
+func TestSaltedEightCharBaseAppendsTwoHexChars(t *testing.T) {
+	for _, base := range []string{"smokesrc", "smokerec"} {
+		cfg := Config{Name: "recover_source", FeatureFlags: map[string]interface{}{"customer": base}}
+		got, _ := cfg.Salted("run-123").FeatureFlags["customer"].(string)
+		if len(got) != 10 {
+			t.Fatalf("base %q: len(%q) = %d, want 10 (8-char base + 2-char salt)", base, got, len(got))
+		}
+		suffix := got[8:]
+		if !isLowerHex(suffix) {
+			t.Errorf("base %q: suffix %q is not lowercase hex", base, suffix)
+		}
+	}
+}
+
+func TestSaltedNoOpAtOrOverTenCharBase(t *testing.T) {
+	for _, base := range []string{"tenletters", "elevenchars1"} {
+		cfg := Config{Name: "min_default", FeatureFlags: map[string]interface{}{"customer": base}}
+		got, _ := cfg.Salted("run-123").FeatureFlags["customer"].(string)
+		if got != base {
+			t.Errorf("base %q: Salted changed it to %q, want unchanged (already at/over the 10-char cap)", base, got)
+		}
+	}
+}
+
+func TestSaltedNoCustomerFlag(t *testing.T) {
+	cfg := Config{Name: "min_default", FeatureFlags: map[string]interface{}{"enable_bi": true}}
+	got := cfg.Salted("run-123")
+	if _, ok := got.FeatureFlags["customer"]; ok {
+		t.Errorf("customer flag appeared out of nowhere: %v", got.FeatureFlags["customer"])
+	}
+	if got.FeatureFlags["enable_bi"] != true {
+		t.Errorf("unrelated flag enable_bi was disturbed: %v", got.FeatureFlags["enable_bi"])
+	}
+}
+
+func TestSaltedNonStringCustomerFlag(t *testing.T) {
+	cfg := Config{Name: "min_default", FeatureFlags: map[string]interface{}{"customer": true}}
+	got := cfg.Salted("run-123")
+	if got.FeatureFlags["customer"] != true {
+		t.Errorf("non-string customer flag was mutated: %v", got.FeatureFlags["customer"])
+	}
+}
+
+func TestSaltedEmptyRunIDIsNoOp(t *testing.T) {
+	cfg := Config{Name: "min_default", FeatureFlags: map[string]interface{}{"customer": "smoke"}}
+	got := cfg.Salted("")
+	if got.FeatureFlags["customer"] != "smoke" {
+		t.Errorf("empty runID should be a no-op, got %v", got.FeatureFlags["customer"])
+	}
+}
+
+func TestSaltedCopiesFeatureFlagsMap(t *testing.T) {
+	orig := map[string]interface{}{"customer": "smoke"}
+	cfg := Config{Name: "min_default", FeatureFlags: orig}
+	got := cfg.Salted("run-123")
+	got.FeatureFlags["injected"] = "oops"
+	if _, ok := orig["injected"]; ok {
+		t.Errorf("Salted's FeatureFlags map shares storage with the original config's map")
+	}
+	if _, ok := cfg.FeatureFlags["injected"]; ok {
+		t.Errorf("Salted's FeatureFlags map shares storage with cfg.FeatureFlags")
+	}
+}
