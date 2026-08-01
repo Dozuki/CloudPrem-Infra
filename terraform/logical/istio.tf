@@ -15,10 +15,11 @@ locals {
   mesh_state_rank = { disabled = 0, installed = 1, permissive = 2, strict = 3 }
   mesh_rank       = local.mesh_state_rank[var.istio_mesh_state]
 
-  # Platform contract: ambient is validated on commercial AWS EKS Auto Mode only.
-  # Gov joins after the haul pipeline mirrors istio images/charts (phase 2). Azure
-  # is deferred (no node-taint surface on AKS today; see the design annex).
-  mesh_supported = var.cloud == "aws" && !local.is_us_gov
+  # Platform contract: ambient runs on AWS EKS Auto Mode, both partitions. Gov
+  # clusters pull docker.io/ghcr.io/quay.io today, so no image mirror is needed;
+  # the old "phase-2 mirror first" gate was based on a stale airgap assumption.
+  # Azure is deferred (no node-taint surface on AKS today; see the design annex).
+  mesh_supported = var.cloud == "aws"
 
   mesh_installed = local.mesh_rank >= 1
   mesh_enrolled  = local.mesh_rank >= 2

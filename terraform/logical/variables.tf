@@ -66,7 +66,7 @@ variable "enable_datadog" {
 }
 
 variable "istio_mesh_state" {
-  description = "Istio ambient mesh lifecycle state. disabled: nothing installed. installed: control plane + node dataplane running, NodePool startup taints active, no namespaces enrolled. permissive: dozuki/envoy-gateway-system/redis-system enrolled (mesh-to-mesh traffic is auto-mTLS, nothing rejected). strict: STRICT PeerAuthentication enforced with documented carve-outs. States are ordered supersets; walk one step per apply, forward or back. Commercial AWS only until gov phase 2."
+  description = "Istio ambient mesh lifecycle state. disabled: nothing installed. installed: control plane + node dataplane running, NodePool startup taints active, no namespaces enrolled. permissive: dozuki/envoy-gateway-system/redis-system enrolled (mesh-to-mesh traffic is auto-mTLS, nothing rejected). strict: STRICT PeerAuthentication enforced with documented carve-outs. States are ordered supersets; walk one step per apply, forward or back. AWS EKS only (both partitions); Azure not yet supported."
   type        = string
   default     = "disabled"
 

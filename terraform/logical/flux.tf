@@ -536,7 +536,7 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
     }
     precondition {
       condition     = var.istio_mesh_state == "disabled" || local.mesh_supported
-      error_message = "istio_mesh_state requires commercial AWS EKS (non-GovCloud). Gov needs the phase-2 image mirror; Azure is not supported yet."
+      error_message = "istio_mesh_state requires AWS EKS; Azure is not supported yet."
     }
   }
 }
