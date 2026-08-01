@@ -51,6 +51,16 @@ import boto3
 # deprovisioned all stay off this list, and the list is a denylist rather than an
 # allowlist so a message AWS words differently than we assumed still posts.
 #
+# "cannot scale UP" is deliberately NOT here, though its scale-down twin is. They read
+# alike and are opposites: at-minimum means we are paying for capacity nobody wants,
+# at-maximum means the ceiling is throttling the replication. The second is the strongest
+# point-in-time evidence that max_capacity_units is binding, and it is what the
+# -dms-capacity-saturated alarm needs an hour of datapoints to infer. With max at 32
+# against a 1-2 DCU steady state it should approximately never fire, so dropping it would
+# buy no quiet at the cost of the one event worth reading. If it ever does turn noisy,
+# aggregate it into a metric and alarm on N occurrences in 15-30 minutes rather than
+# discarding it here.
+#
 # Matched only AFTER the failure tokens, because two of these phrases are substrings of
 # messages that must page: "provisioning its capacity" sits inside "deprovisioning its
 # capacity", and "has been provisioned" inside "has been deprovisioned". Ordering is
@@ -60,10 +70,11 @@ DMS_ROUTINE_MESSAGES = (
     'scaling down',
     'scaling event completed',
     'cannot scale down',
-    'cannot scale up',
     'is initializing',
     'preparing the resources for metadata collection',
-    'is being tested',
+    # "connections tied to ..." rather than the looser "is being tested", which would also
+    # swallow a future message wording a post-failure connection retest.
+    'connections tied to',
     'fetching metadata',
     'calculating capacity',
     'provisioning its capacity',

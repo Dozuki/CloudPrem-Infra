@@ -519,25 +519,42 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
 }
 
 # Capacity saturation. This is the alarm that lets the slack lambda drop the per-event
-# scaling chatter: a serverless replication posts every scale up, scale down and
-# scale-blocked decision, and no single one of those tells you whether the replication is
-# actually short of capacity. An hour of CapacityUtilization pinned at 90%+ does.
+# scaling chatter: a serverless replication posts every scale up and scale down decision,
+# and no single one of those tells you whether the replication is actually short of
+# capacity over any span worth acting on. Repeated 90% peaks across an hour do.
 #
 # AWS's own guidance ties this metric to the failure mode: a min or max DCU set too low
 # for the workload shows up as CapacityUtilization "consistently at its maximum value",
 # and the replication can fail outright with an out-of-memory event. The fix is raising
 # bi_dms_min_dcu (or max), so the alarm is naming a config change, not a transient.
 #
-# notBreaching, unlike the CDC latency alarms above: "not reporting" is already their job
-# and they are missing=breaching for it. A second missing=breaching alarm on the same
-# replication would just double-page every deprovision and every config replacement.
+# Read the condition precisely: Maximum with 12/12 datapoints means at least one sample
+# reached 90% in each of twelve consecutive 5-minute buckets. That is repeated peaking,
+# NOT continuous saturation - a replication oscillating between 40% and 91% trips this.
+# That is the intended reading (peaks are what precede an OOM), but do not quote this
+# alarm as evidence that utilization sat above 90% for an hour; it cannot show that.
+# Switch the statistic to Average if the sustained reading is ever what is wanted.
+#
+# Known blind spot: on the one full load observed here (gca, 2026-07-31 19:18-19:24Z) DMS
+# published no CapacityUtilization datapoints at all - the metric did not start until
+# 20:45Z. Whether that generalises to every full load is unverified, but assume this alarm
+# may be silent during one, which is exactly when utilization peaks. That gap is covered
+# elsewhere rather than here: a full-load OOM emits "DMS replication has failed", which
+# pages via sns_to_slack.py and triggers the restart lambda.
+#
+# ignore, not notBreaching, and not breaching. The CDC latency alarms above already own
+# "replication stopped reporting" (they are missing=breaching), so a second one here would
+# double-page every deprovision and every config replacement. But notBreaching is wrong in
+# the other direction: if this alarm is ALREADY in ALARM and the replication then dies and
+# stops emitting, notBreaching resolves it ALARM -> OK and posts a recovery to slack for a
+# replication that is actually dead. ignore holds the ALARM state instead.
 resource "aws_cloudwatch_metric_alarm" "bi_dms_capacity_saturated" {
   count               = local.dms_enabled ? 1 : 0
   alarm_name          = "${local.identifier}-dms-capacity-saturated"
-  alarm_description   = "BI serverless replication ${local.identifier}: CapacityUtilization >= 90% for an hour - raise bi_dms_min_dcu/bi_dms_max_dcu before it OOMs"
+  alarm_description   = "BI serverless replication ${local.identifier}: CapacityUtilization peaked >= 90% in every 5-min bucket for an hour - raise bi_dms_min_dcu/bi_dms_max_dcu before it OOMs"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = 90
-  # 12x300s = a full hour of saturation. Deliberately long: a full load legitimately runs
+  # 12x300s = an hour of repeated peaks. Deliberately long: a full load legitimately runs
   # hot, and scale-up is not instant, so a shorter window pages on healthy bursts - the
   # exact noise this alarm exists to replace.
   evaluation_periods  = 12
@@ -546,7 +563,7 @@ resource "aws_cloudwatch_metric_alarm" "bi_dms_capacity_saturated" {
   namespace           = "AWS/DMS"
   metric_name         = "CapacityUtilization"
   statistic           = "Maximum"
-  treat_missing_data  = "notBreaching"
+  treat_missing_data  = "ignore"
   dimensions          = { ReplicationConfigId = local.bi_replication_config_id }
   alarm_actions       = [module.sns.topic_arn]
   ok_actions          = [module.sns.topic_arn]
