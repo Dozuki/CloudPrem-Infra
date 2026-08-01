@@ -89,6 +89,17 @@ spec:
           duration: '30s'
           factor: '2'
           maxDuration: '5m'
+      # Canary for controller-level archiveLogs (infra-tf modules/argo-ops-cluster/argo.tf):
+      # prove the emissary executor can actually read and upload this pod's log before
+      # flipping the flag fleet-wide. The Kubernetes side is unverified - Role
+      # argo-workflows-workflow grants only workflowtaskresults create+patch, no pods/log -
+      # and if a log upload fails Argo marks the node Errored, which retryStrategy above
+      # (limit 2, OnError) turns into up to three reruns of an hour-plus phase, each holding
+      # harness-semaphore (concurrent-stacks 2) against a DDVtest VPC ceiling of 10. Template-
+      # level here on purpose so a bad canary only costs this one template, not the matrix.
+      # Expected to be superseded once the controller-level flag lands and is confirmed live;
+      # this line can come out once that duplicate coverage is redundant.
+      archiveLogs: true
       container:
         image: '{{workflow.parameters.image}}'
         # bash -c rather than an args list because extra-args carries multiple flags and an
