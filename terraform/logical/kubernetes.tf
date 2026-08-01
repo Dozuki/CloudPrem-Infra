@@ -379,6 +379,39 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
                 key      = "eks.amazonaws.com/instance-generation"
                 operator = "Gt"
                 values   = ["4"]
+              },
+              # Memory floor, on top of the category/generation one. This exists
+              # for the workloads whose requests can never express what they
+              # need, NOT to top up an under-request.
+              #
+              # Requests are the right tool when a pod simply asks for too
+              # little, and opensearch is that case - it is sized in the chart
+              # and lands where its request says. Prometheus is the case
+              # requests cannot solve. It requests 1536Mi and backs a 50Gi TSDB,
+              # so it fits a 4GiB shape honestly, by the numbers, and Karpenter
+              # will keep bin-packing it there forever. What it actually needs is
+              # the ~1.4GiB of headroom that is left over for page cache after
+              # the request, plus the EBS baseline that comes with a larger
+              # shape; neither is something a request can ask for. Raising its
+              # request to reserve page cache would be lying about the working
+              # set to get an instance size, which is how you end up with a
+              # request nobody can explain two years from now.
+              #
+              # Alertmanager (200Mi) and grafana (nothing at all until the chart
+              # fix) are the same shape of problem, smaller: correctly sized or
+              # not, they get stacked onto whatever 4GiB node has nominal room.
+              #
+              # Units are mebibytes and Gt takes exactly one value, so >4096
+              # drops c*.large and makes m*.large (8GiB) the smallest node.
+              #
+              # Inert until the selector fix lands. Anything pinned by
+              # capacity-type rather than by nodepool name never reaches this
+              # pool, so this requirement had nothing to apply to; ship the two
+              # together.
+              {
+                key      = "eks.amazonaws.com/instance-memory"
+                operator = "Gt"
+                values   = ["4096"]
               }
             ]
             taints = [
