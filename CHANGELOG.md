@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.6.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.6.1...v8.6.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **physical:** scale fence-epoch validation deadline with table count ([#400](https://github.com/Dozuki/CloudPrem-Infra/issues/400)) ([2912cfb](https://github.com/Dozuki/CloudPrem-Infra/commit/2912cfb218e1f2f07f041e7be288a2ff4de55bb9))
+
 ## [8.6.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.6.0...v8.6.1) (2026-07-31)
 
 
