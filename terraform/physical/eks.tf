@@ -459,6 +459,90 @@ resource "aws_eks_pod_identity_association" "cloudwatch_agent" {
   tags = local.tags
 }
 
+# CloudWatch exporter (the chart's monitoring.cloudwatchExporter deployment).
+#
+# Pulls two AWS/EC2 metrics into Prometheus so we can alert on EBS burst-credit
+# exhaustion. That failure is invisible to Kubernetes: the node keeps reporting
+# Ready and StorageReady=True (StorageReady has no fatal reason, so it can never
+# go False) while every disk-backed pod on it stalls. Nothing in-cluster moves,
+# so nothing in-cluster can alert. Found the hard way on a node that sat
+# IO-starved for five hours with no signal anywhere.
+#
+# Read-only, and narrower than it looks. Discovery goes through the Resource
+# Groups Tagging API, so this needs no ec2:Describe* at all - measured against a
+# live account, a full poll cycle is 1 GetMetricData, 2 ListMetrics and 1 tagging
+# call. None of these four actions support resource-level permissions.
+resource "aws_iam_role" "cloudwatch_exporter_pod_identity" {
+  name = "${local.identifier}-${data.aws_region.current.region}-cw-exporter-pod-identity"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "pods.eks.amazonaws.com"
+        }
+        Action = [
+          "sts:AssumeRole",
+          "sts:TagSession"
+        ]
+      }
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "cloudwatch_exporter_read" {
+  name = "cloudwatch-read"
+  role = aws_iam_role.cloudwatch_exporter_pod_identity.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["cloudwatch:GetMetricData", "cloudwatch:ListMetrics"]
+        Resource = "*"
+      },
+      {
+        # Instance discovery. This is what replaces ec2:DescribeInstances.
+        Effect   = "Allow"
+        Action   = ["tag:GetResources"]
+        Resource = "*"
+      },
+      {
+        # Only used to decorate the series with the account alias, so losing it
+        # costs nothing but a log line. Include it anyway: without it the
+        # exporter logs an AccessDenied WARN on every single poll cycle, forever.
+        Effect   = "Allow"
+        Action   = ["iam:ListAccountAliases"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Same layering rule as the cloudwatch-agent association above: the workload is
+# a logical-layer concern, the IAM is not. The (cluster, namespace, SA) tuple is
+# valid before any of them exist, so this can be created here and simply starts
+# working once the chart schedules the pod.
+#
+# The namespace and SA name are the logical layer's release name and namespace
+# ("dozuki" both, see logical/main.tf k8s_namespace_name and flux.tf
+# releaseName), and the chart derives the SA as <release>-cloudwatch-exporter.
+# Renaming the release breaks this silently - the pod would run with no
+# credentials and fail every poll.
+resource "aws_eks_pod_identity_association" "cloudwatch_exporter" {
+  cluster_name    = module.eks_cluster.cluster_name
+  namespace       = "dozuki"
+  service_account = "dozuki-cloudwatch-exporter"
+  role_arn        = aws_iam_role.cloudwatch_exporter_pod_identity.arn
+
+  tags = local.tags
+}
+
 # metrics-server is now provided by the dozuki chart (metrics-server.enabled, default
 # on) so it's a single source of truth across onprem and cloud - see the chart's
 # values.yaml. The EKS managed addon was retired here; the chart install carries
