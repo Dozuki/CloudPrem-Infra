@@ -17,7 +17,9 @@ Functions:
 - lambda_handler(event, context): Entry point for the Lambda function. Processes the event and sends an alert to Slack.
 
 Environment Variables:
-- SLACK_WEBHOOK_URL: The Slack incoming webhook URL for sending notifications.
+- SLACK_BOT_TOKEN_SSM_PARAM: SSM SecureString holding a bot token (chat:write); preferred path.
+- SLACK_CHANNEL_ID: Channel the bot-token path posts to.
+- SLACK_WEBHOOK_URL: Legacy Slack incoming webhook URL; used when no bot token is configured.
 - AWS_REGION: The AWS region where the Lambda function operates.
 - AWS_ACCOUNT_ID: The AWS account ID.
 - IDENTIFIER: A custom identifier for the AWS setup.
@@ -35,7 +37,13 @@ import urllib.request
 from datetime import datetime
 import boto3
 
-SLACK_WEBHOOK_URL = os.environ['SLACK_WEBHOOK_URL']
+SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
+# Bot-token path (preferred): the token is an SSM SecureString read at runtime,
+# so it never sits in the function's plaintext env, and chat.postMessage posts
+# have the bot as a real author (deletable/editable by token, unlike webhook
+# posts). Takes precedence over the webhook when both are configured.
+SLACK_BOT_TOKEN_SSM_PARAM = os.environ.get('SLACK_BOT_TOKEN_SSM_PARAM', '')
+SLACK_CHANNEL_ID = os.environ.get('SLACK_CHANNEL_ID', '')
 
 # How close a state change must be to the alarm's last config create/update to count
 # as alarm settling rather than a real recovery. Wide on purpose: some metrics (DR
@@ -180,15 +188,31 @@ def lambda_handler(event, context):
         # Unrecognized message schema
         slack_message = f"Unrecognized message schema: {json.dumps(message_json, indent=2)}"
 
-    data = {
-        'text': slack_message
-    }
-
-    request = urllib.request.Request(
-        SLACK_WEBHOOK_URL,
-        data=json.dumps(data).encode('utf-8'),
-        headers={'Content-Type': 'application/json'}
-    )
-
-    with urllib.request.urlopen(request) as response:
-        response.read()
+    if SLACK_BOT_TOKEN_SSM_PARAM and SLACK_CHANNEL_ID:
+        token = boto3.client('ssm').get_parameter(
+            Name=SLACK_BOT_TOKEN_SSM_PARAM, WithDecryption=True
+        )['Parameter']['Value']
+        request = urllib.request.Request(
+            'https://slack.com/api/chat.postMessage',
+            data=json.dumps(
+                {'channel': SLACK_CHANNEL_ID, 'text': slack_message}
+            ).encode('utf-8'),
+            headers={
+                'Content-Type': 'application/json; charset=utf-8',
+                'Authorization': f'Bearer {token}',
+            }
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = json.loads(response.read())
+        # The Web API reports errors in-body with HTTP 200; raise so the
+        # failure is visible in the lambda's logs and retry behavior.
+        if not body.get('ok'):
+            raise RuntimeError(f"chat.postMessage failed: {body.get('error')}")
+    else:
+        request = urllib.request.Request(
+            SLACK_WEBHOOK_URL,
+            data=json.dumps({'text': slack_message}).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response.read()

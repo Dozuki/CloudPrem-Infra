@@ -346,13 +346,13 @@ resource "helm_release" "flux" {
   ]
 
   # Only the controllers the app-delivery path needs; the rest add footprint + images to mirror.
-  # notification-controller comes up only when a Slack webhook is wired (var.flux_slack_webhook_url);
-  # it is what turns the Provider/Alert below into actual Slack posts, so no webhook means no controller.
+  # notification-controller comes up only when Slack delivery is wired (bot token or webhook);
+  # it is what turns the Provider/Alert below into actual Slack posts, so no transport means no controller.
   values = [yamlencode({
     imageAutomationController = { create = false }
     imageReflectionController = { create = false }
     kustomizeController       = { create = false }
-    notificationController    = { create = var.flux_slack_webhook_url != "" }
+    notificationController    = { create = local.flux_slack_enabled }
     # do-not-disrupt on helm-controller ONLY. Karpenter VOLUNTARY DISRUPTION was
     # evicting it mid-upgrade, which kills the reconciliation context and fails the
     # release:
@@ -543,38 +543,55 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
 
 # ---------------------------------------------------------------------------
 # notification-controller -> Slack. Flux posts HelmRelease/OCIRepository events (both failures and
-# successes, eventSeverity=info) to a Slack incoming webhook. Entirely gated on var.flux_slack_webhook_url:
-# empty (the default) creates NO Secret/Provider/Alert and leaves notification-controller off (above), so
-# an env without a webhook wired stays exactly as it was. This layer has no Kustomizations, so the Alert
+# successes, eventSeverity=info) to Slack, over either transport: the bot token + channel pair
+# (preferred, wins when both transports are set) or the legacy incoming webhook. With neither wired
+# (the default) NO Secret/Provider/Alert is created and notification-controller stays off (above), so
+# an env without Slack delivery stays exactly as it was. This layer has no Kustomizations, so the Alert
 # scopes to the resources that actually exist here: the app HelmRelease and its OCIRepository source.
 # ---------------------------------------------------------------------------
 
-# The webhook URL as a Secret the Provider references by `address` key (never inlined in the Provider spec).
+locals {
+  # Either transport lights up the notification path; the bot token wins when
+  # both are set (webhook posts have a synthetic author no token can act on).
+  flux_slack_use_token = var.flux_slack_bot_token != "" && var.flux_slack_channel != ""
+  flux_slack_enabled   = local.flux_slack_use_token || var.flux_slack_webhook_url != ""
+}
+
+# The credential as a Secret the Provider references (never inlined in the
+# Provider spec): `token` for the bot-token path, `address` for the webhook.
 resource "kubernetes_secret_v1" "flux_slack_webhook" {
-  count = var.flux_slack_webhook_url != "" ? 1 : 0
+  count = local.flux_slack_enabled ? 1 : 0
   metadata {
     name      = "flux-slack-webhook"
     namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
   }
-  data = { address = var.flux_slack_webhook_url }
+  data = local.flux_slack_use_token ? { token = var.flux_slack_bot_token } : { address = var.flux_slack_webhook_url }
 }
 
 resource "kubectl_manifest" "flux_slack_provider" {
-  count      = var.flux_slack_webhook_url != "" ? 1 : 0
+  count      = local.flux_slack_enabled ? 1 : 0
   depends_on = [helm_release.flux, kubernetes_secret_v1.flux_slack_webhook]
   yaml_body = yamlencode({
     apiVersion = "notification.toolkit.fluxcd.io/v1beta3"
     kind       = "Provider"
     metadata   = { name = "slack", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
-    spec = {
-      type      = "slack"
-      secretRef = { name = kubernetes_secret_v1.flux_slack_webhook[0].metadata[0].name }
-    }
+    # Token path: address points at the Web API and channel is explicit
+    # (the webhook had it baked in); the secret's `token` becomes Bearer auth.
+    spec = merge(
+      {
+        type      = "slack"
+        secretRef = { name = kubernetes_secret_v1.flux_slack_webhook[0].metadata[0].name }
+      },
+      local.flux_slack_use_token ? {
+        address = "https://slack.com/api/chat.postMessage"
+        channel = var.flux_slack_channel
+      } : {}
+    )
   })
 }
 
 resource "kubectl_manifest" "flux_slack_alert" {
-  count      = var.flux_slack_webhook_url != "" ? 1 : 0
+  count      = local.flux_slack_enabled ? 1 : 0
   depends_on = [kubectl_manifest.flux_slack_provider]
   yaml_body = yamlencode({
     apiVersion = "notification.toolkit.fluxcd.io/v1beta3"
