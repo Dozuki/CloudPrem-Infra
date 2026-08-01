@@ -379,6 +379,23 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
                 key      = "eks.amazonaws.com/instance-generation"
                 operator = "Gt"
                 values   = ["4"]
+              },
+              # Memory floor, on top of the category/generation one. Everything
+              # pinned here (the app tier, and via app_stateful_scheduling in
+              # flux.tf: opensearch, prometheus, alertmanager, grafana) wants a
+              # node bigger than 4GiB, but nothing was enforcing it. A 4GiB shape
+              # leaves ~3106Mi allocatable and opensearch requests 3Gi (3072Mi),
+              # so it FITS - it stayed off c5a.large only because the AWS
+              # DaemonSets (cloudwatch-agent 128Mi + fluent-bit 25Mi) ate the
+              # difference, leaving a 119Mi accident that any addon-request
+              # change in another repo could erase. Land there and opensearch
+              # gets 800 baseline EBS IOPS and no page cache to speak of.
+              # Units are mebibytes and Gt takes exactly one value, so >4096
+              # drops c*.large and makes m*.large (8GiB) the smallest node.
+              {
+                key      = "eks.amazonaws.com/instance-memory"
+                operator = "Gt"
+                values   = ["4096"]
               }
             ]
             taints = [
