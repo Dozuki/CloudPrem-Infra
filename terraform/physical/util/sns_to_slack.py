@@ -37,6 +37,40 @@ import urllib.request
 from datetime import datetime
 import boto3
 
+# Routine serverless lifecycle chatter, dropped before it reaches Slack.
+#
+# A serverless replication narrates every autoscaling decision and every step of its
+# provisioning pipeline. In steady state that is the only DMS traffic the channel gets,
+# so the recurring "cannot scale down, already at the minimum DCU" post is what people
+# learn to scroll past - and the failure that matters scrolls past with it. Sustained
+# capacity pressure is the one scaling signal worth a human, and a single event cannot
+# tell you it is sustained; the <identifier>-dms-capacity-saturated alarm in
+# monitoring.tf covers that instead, on an hour of datapoints.
+#
+# Nothing here is a state a human acts on. Failed, stopped, started, running and
+# deprovisioned all stay off this list, and the list is a denylist rather than an
+# allowlist so a message AWS words differently than we assumed still posts.
+#
+# Matched only AFTER the failure tokens, because two of these phrases are substrings of
+# messages that must page: "provisioning its capacity" sits inside "deprovisioning its
+# capacity", and "has been provisioned" inside "has been deprovisioned". Ordering is
+# what keeps the 48h-deprovision alert from being swallowed by its own prefix.
+DMS_ROUTINE_MESSAGES = (
+    'scaling up',
+    'scaling down',
+    'scaling event completed',
+    'cannot scale down',
+    'cannot scale up',
+    'is initializing',
+    'preparing the resources for metadata collection',
+    'is being tested',
+    'fetching metadata',
+    'calculating capacity',
+    'provisioning its capacity',
+    'has been provisioned',
+    'is being modified',
+)
+
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
 # Bot-token path (preferred): the token is an SSM SecureString read at runtime,
 # so it never sits in the function's plaintext env, and chat.postMessage posts
@@ -150,6 +184,29 @@ def lambda_handler(event, context):
         detail_type = message_json.get('detail-type', 'N/A')
         detail_message = message_json['detail'].get('detailMessage', 'N/A')
         resource_arn = message_json['resources'][0] if message_json['resources'] else 'N/A'
+
+        # Page the channel only on failures. A plain "Replication task stopped"
+        # is routine (operator stops, the migration's automatic
+        # post-full-load stop, fence-time stops) and must not @channel.
+        #
+        # Deprovision is the exception that carries none of those tokens. A serverless
+        # replication stopped or failed for 48h is deprovisioned, which is the one BI state
+        # nothing recovers from - the restart lambda declines it and the fix is a terraform
+        # apply that recreates the config. Matched on both the detail message and the
+        # detail-type, and it catches "deprovisioning" too: that is the transition into the
+        # unrecoverable state, not a routine stop, so it is worth the page.
+        haystack = f"{detail_message} {detail_type}".lower()
+        critical = ("ERROR" in detail_message or "FATAL" in detail_message
+                    or "fail" in haystack or "deprovision" in haystack)
+
+        # Drop before the name lookup, not after: get_task_name calls DMS on every
+        # event, and the dropped ones are the overwhelming majority. Only reached
+        # once the message is known not to be critical - see the substring note on
+        # DMS_ROUTINE_MESSAGES.
+        if not critical and any(p in haystack for p in DMS_ROUTINE_MESSAGES):
+            print(f"skipping routine DMS state change: {detail_message}")
+            return
+
         replication_task_name = get_task_name(resource_arn)
         # Link to THIS region's console (was hardcoded us-east-1). Serverless replications are
         # not replication tasks and do not exist under #taskDetails, so a config ARN needs the
@@ -165,22 +222,7 @@ def lambda_handler(event, context):
                 f"#taskDetails/{replication_task_name}"
             )
 
-        # Page the channel only on failures. A plain "Replication task stopped"
-        # is routine (operator stops, the migration's automatic
-        # post-full-load stop, fence-time stops) and must not @channel.
-        #
-        # Deprovision is the exception that carries none of those tokens. A serverless
-        # replication stopped or failed for 48h is deprovisioned, which is the one BI state
-        # nothing recovers from - the restart lambda declines it and the fix is a terraform
-        # apply that recreates the config. Matched on both the detail message and the
-        # detail-type, and it catches "deprovisioning" too: that is the transition into the
-        # unrecoverable state, not a routine stop, so it is worth the page.
-        haystack = f"{detail_message} {detail_type}".lower()
-        if ("ERROR" in detail_message or "FATAL" in detail_message
-                or "fail" in haystack or "deprovision" in haystack):
-            header = "*DMS Alarm! <!channel>*"
-        else:
-            header = "*DMS Notification*"
+        header = "*DMS Alarm! <!channel>*" if critical else "*DMS Notification*"
 
         slack_message = f"{header}\n\n>Identifier@Region: *{identifier}@{region}*\n>AWS Account ID: *{account_id}*\n>AWS Account Alias: *{account_alias}*\n>Replication Task: *{replication_task_name}*\n>Detail Type: *{detail_type}*\n>Detail Message: *{detail_message}*\n\nTask Link: <{replication_task_link}>"
 

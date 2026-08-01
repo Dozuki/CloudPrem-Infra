@@ -518,6 +518,41 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
   tags                = local.tags
 }
 
+# Capacity saturation. This is the alarm that lets the slack lambda drop the per-event
+# scaling chatter: a serverless replication posts every scale up, scale down and
+# scale-blocked decision, and no single one of those tells you whether the replication is
+# actually short of capacity. An hour of CapacityUtilization pinned at 90%+ does.
+#
+# AWS's own guidance ties this metric to the failure mode: a min or max DCU set too low
+# for the workload shows up as CapacityUtilization "consistently at its maximum value",
+# and the replication can fail outright with an out-of-memory event. The fix is raising
+# bi_dms_min_dcu (or max), so the alarm is naming a config change, not a transient.
+#
+# notBreaching, unlike the CDC latency alarms above: "not reporting" is already their job
+# and they are missing=breaching for it. A second missing=breaching alarm on the same
+# replication would just double-page every deprovision and every config replacement.
+resource "aws_cloudwatch_metric_alarm" "bi_dms_capacity_saturated" {
+  count               = local.dms_enabled ? 1 : 0
+  alarm_name          = "${local.identifier}-dms-capacity-saturated"
+  alarm_description   = "BI serverless replication ${local.identifier}: CapacityUtilization >= 90% for an hour - raise bi_dms_min_dcu/bi_dms_max_dcu before it OOMs"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 90
+  # 12x300s = a full hour of saturation. Deliberately long: a full load legitimately runs
+  # hot, and scale-up is not instant, so a shorter window pages on healthy bursts - the
+  # exact noise this alarm exists to replace.
+  evaluation_periods  = 12
+  datapoints_to_alarm = 12
+  period              = 300
+  namespace           = "AWS/DMS"
+  metric_name         = "CapacityUtilization"
+  statistic           = "Maximum"
+  treat_missing_data  = "notBreaching"
+  dimensions          = { ReplicationConfigId = local.bi_replication_config_id }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
+}
+
 // -- Slack Notification Lambda
 
 # Content-based archive: zips the file's BYTES (not the on-disk file with its
