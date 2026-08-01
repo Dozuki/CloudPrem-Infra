@@ -584,6 +584,12 @@ variable "flux_slack_channel" {
   default     = ""
 }
 
+variable "alertmanager_slack_enabled" {
+  description = "Post warning/critical Alertmanager notifications to the fleet-wide Slack webhook. On by default for AWS stacks, which is what every real env wants. Set false for stacks that are short-lived or disposable (the upgrade-test harness does): their Alertmanager dies with the cluster at teardown, so the resolved notification never sends and the firing message stays in the channel for a cluster that no longer exists."
+  type        = bool
+  default     = true
+}
+
 variable "alertmanager_slack_interactivity_enabled" {
   description = "Enable the Slack Silence 2h action after the standalone signature-verified handler is deployed. The handler and Alertmanager reuse the fleet-global ops BasicAuth credential."
   type        = bool
