@@ -99,7 +99,8 @@ spec:
       # level here on purpose so a bad canary only costs this one template, not the matrix.
       # Expected to be superseded once the controller-level flag lands and is confirmed live;
       # this line can come out once that duplicate coverage is redundant.
-      archiveLogs: true
+      archiveLocation:
+        archiveLogs: true
       container:
         image: '{{workflow.parameters.image}}'
         # bash -c rather than an args list because extra-args carries multiple flags and an
