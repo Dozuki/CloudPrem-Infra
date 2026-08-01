@@ -238,8 +238,8 @@ data "aws_caller_identity" "current" {
   # Using a lifecycle precondition for compound variable validation
   lifecycle {
     precondition {
-      condition     = var.slack_webhook_url != "" || var.alarm_email != ""
-      error_message = "${local.cf_template_version}Please configure either Slack or Email notifications via the slack_webhook_url or alarm_email variables. "
+      condition     = local.slack_notifications_enabled || var.alarm_email != ""
+      error_message = "${local.cf_template_version}Please configure either Slack or Email notifications via slack_bot_token + slack_channel_id (preferred), slack_webhook_url, or alarm_email. "
     }
   }
 }

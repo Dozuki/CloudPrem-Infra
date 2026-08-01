@@ -560,10 +560,23 @@ variable "flux_chart_version" {
 }
 
 variable "flux_slack_webhook_url" {
-  description = "Slack incoming-webhook URL for Flux notifications. When set, notification-controller comes up and a Provider(type=slack)+Alert post HelmRelease/OCIRepository events (successes and failures) to Slack. Empty (default) wires nothing and leaves the controller off - fully opt-in per env."
+  description = "Slack incoming-webhook URL for Flux notifications. Prefer flux_slack_bot_token + flux_slack_channel (webhook posts have a synthetic author no token can delete or edit). When either transport is set, notification-controller comes up and a Provider(type=slack)+Alert post HelmRelease/OCIRepository events (successes and failures) to Slack. Empty (default) wires nothing and leaves the controller off - fully opt-in per env."
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "flux_slack_bot_token" {
+  description = "Slack bot token (chat:write) for Flux notifications via the Slack API. Takes precedence over flux_slack_webhook_url when set together with flux_slack_channel."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "flux_slack_channel" {
+  description = "Slack channel ID the bot-token Flux notifications post to. Required alongside flux_slack_bot_token."
+  type        = string
+  default     = ""
 }
 
 variable "alertmanager_slack_interactivity_enabled" {

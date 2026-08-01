@@ -1,5 +1,14 @@
+locals {
+  # Slack delivery works over either transport: the legacy incoming webhook, or
+  # the bot token + channel pair. Prefer the token: webhook posts have a
+  # synthetic author no token can delete or edit, and the webhook URL sits in
+  # the lambda's plaintext env; the token lives in an SSM SecureString the
+  # lambda reads at runtime.
+  slack_notifications_enabled = var.slack_webhook_url != "" || (var.slack_bot_token != "" && var.slack_channel_id != "")
+}
+
 data "aws_iam_policy_document" "lambda_execution" {
-  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
+  count = local.slack_notifications_enabled || local.dms_enabled ? 1 : 0
 
   statement {
     effect = "Allow"
@@ -14,7 +23,7 @@ data "aws_iam_policy_document" "lambda_execution" {
 }
 
 data "aws_iam_policy_document" "lambda_permissions" {
-  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
+  count = local.slack_notifications_enabled || local.dms_enabled ? 1 : 0
 
   statement {
     actions = [
@@ -39,7 +48,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
 }
 
 resource "aws_iam_policy" "lambda_permissions" {
-  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
+  count = local.slack_notifications_enabled || local.dms_enabled ? 1 : 0
 
   name   = "${local.identifier}-${data.aws_region.current.region}-lambda-alias"
   policy = data.aws_iam_policy_document.lambda_permissions[0].json
@@ -48,7 +57,7 @@ resource "aws_iam_policy" "lambda_permissions" {
 }
 
 resource "aws_iam_role" "lambda_execution" {
-  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
+  count = local.slack_notifications_enabled || local.dms_enabled ? 1 : 0
 
   name               = "${local.identifier}-${data.aws_region.current.region}-lambda-execution"
   assume_role_policy = data.aws_iam_policy_document.lambda_execution[0].json
@@ -56,13 +65,13 @@ resource "aws_iam_role" "lambda_execution" {
   tags = local.tags
 }
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
-  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
+  count = local.slack_notifications_enabled || local.dms_enabled ? 1 : 0
 
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   role       = aws_iam_role.lambda_execution[0].name
 }
 resource "aws_iam_role_policy_attachment" "lambda_iam_alias" {
-  count = var.slack_webhook_url != "" || local.dms_enabled ? 1 : 0
+  count = local.slack_notifications_enabled || local.dms_enabled ? 1 : 0
 
   policy_arn = aws_iam_policy.lambda_permissions[0].arn
   role       = aws_iam_role.lambda_execution[0].name
@@ -512,7 +521,7 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
 # metadata), so the zip is byte-identical on every machine/checkout, at plan and
 # apply. Paths anchored to path.module so they don't depend on the working dir.
 data "archive_file" "slack_sns_lambda" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = local.slack_notifications_enabled ? 1 : 0
 
   type        = "zip"
   output_path = "${path.module}/sns_lambda_payload.zip"
@@ -524,7 +533,7 @@ data "archive_file" "slack_sns_lambda" {
 }
 
 resource "aws_lambda_function" "sns_to_slack" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = local.slack_notifications_enabled ? 1 : 0
 
   filename      = data.archive_file.slack_sns_lambda[0].output_path
   function_name = "${local.identifier}-sns_to_slack"
@@ -538,17 +547,44 @@ resource "aws_lambda_function" "sns_to_slack" {
 
   environment {
     variables = {
-      SLACK_WEBHOOK_URL = var.slack_webhook_url
-      IDENTIFIER        = local.identifier
-      AWS_ACCOUNT_ID    = data.aws_caller_identity.current.account_id
+      SLACK_WEBHOOK_URL         = var.slack_webhook_url
+      SLACK_BOT_TOKEN_SSM_PARAM = var.slack_bot_token != "" ? aws_ssm_parameter.slack_bot_token[0].name : ""
+      SLACK_CHANNEL_ID          = var.slack_channel_id
+      IDENTIFIER                = local.identifier
+      AWS_ACCOUNT_ID            = data.aws_caller_identity.current.account_id
     }
   }
 
   tags = local.tags
 }
 
+resource "aws_ssm_parameter" "slack_bot_token" {
+  count = var.slack_bot_token != "" ? 1 : 0
+
+  name  = "/${local.identifier}/slack-bot-token"
+  type  = "SecureString"
+  value = var.slack_bot_token
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "sns_to_slack_bot_token" {
+  count = var.slack_bot_token != "" ? 1 : 0
+
+  name = "${local.identifier}-sns-to-slack-bot-token"
+  role = aws_iam_role.lambda_execution[0].name
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect   = "Allow",
+      Action   = ["ssm:GetParameter"],
+      Resource = aws_ssm_parameter.slack_bot_token[0].arn
+    }]
+  })
+}
+
 resource "aws_sns_topic_subscription" "sns_to_slack_subscription" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = local.slack_notifications_enabled ? 1 : 0
 
   topic_arn = module.sns.topic_arn
   protocol  = "lambda"
@@ -556,7 +592,7 @@ resource "aws_sns_topic_subscription" "sns_to_slack_subscription" {
 }
 
 resource "aws_lambda_permission" "sns_to_slack_permission" {
-  count = var.slack_webhook_url != "" ? 1 : 0
+  count = local.slack_notifications_enabled ? 1 : 0
 
   statement_id  = "AllowSNSInvoke"
   action        = "lambda:InvokeFunction"

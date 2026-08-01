@@ -114,7 +114,20 @@ variable "alarm_email" {
   default     = ""
 }
 variable "slack_webhook_url" {
-  description = "URL to an optional Slack webhook for SNS alerts."
+  description = "URL to an optional Slack webhook for SNS alerts. Prefer slack_bot_token + slack_channel_id: webhook posts have a synthetic author no token can delete or edit, and the URL sits in the lambda's plaintext env."
+  type        = string
+  default     = ""
+}
+
+variable "slack_bot_token" {
+  description = "Slack bot token (chat:write) for SNS alerts via chat.postMessage. Stored as an SSM SecureString the lambda reads at runtime; takes precedence over slack_webhook_url when set together with slack_channel_id."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "slack_channel_id" {
+  description = "Slack channel ID the bot-token alerts post to. Required alongside slack_bot_token."
   type        = string
   default     = ""
 }
