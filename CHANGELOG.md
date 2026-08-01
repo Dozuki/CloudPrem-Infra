@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.6.2...v8.7.0) (2026-08-01)
+
+
+### Features
+
+* **logical:** allow istio ambient mesh on GovCloud ([b212024](https://github.com/Dozuki/CloudPrem-Infra/commit/b21202453c568d6625963e3e074104db33e6c3ca))
+* optional slack bot-token delivery for SNS alarms and flux notifications ([#402](https://github.com/Dozuki/CloudPrem-Infra/issues/402)) ([5d00b4a](https://github.com/Dozuki/CloudPrem-Infra/commit/5d00b4a88c9b3617b10e86a42985c40547d905f4))
+
 ## [8.6.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.6.1...v8.6.2) (2026-08-01)
 
 
