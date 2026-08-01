@@ -961,7 +961,15 @@ EOF
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
     [ "$EXTRA" -gt 0 ] && die "the fresh task enumerated tables outside the main task's set - enumeration drift (rename/DDL outside CDC?); inspect before touching anything"
     if [ "$MISSING" = "0" ] && [ "$MARKER_OK" = "1" ]; then break; fi
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt 3600 ] && die "fence-epoch validation did not complete in 60m (missing=$MISSING/$MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
+    # Deadline scales with table count. VWAIT is NOT seconds: it adds 20 per
+    # loop but each loop's paginated describe-table-statistics takes ~40s of
+    # wall clock on a 10k+ table env, so real time is roughly VWAIT x2. The
+    # old fixed 3600 (~2h wall) barely fit an 11.9k-table env and cannot fit
+    # a 24k-table one; a miss restarts the whole epoch inside the write
+    # freeze. Observed rate is ~0.25 VWAIT units per table, so count/2 +1800
+    # leaves >2x headroom while still bounding a genuine hang.
+    VMAX=$((MAIN_COUNT / 2 + 1800))
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt "$VMAX" ] && die "fence-epoch validation did not complete (VWAIT=$VWAIT > $VMAX, ~2s wall per unit; missing=$MISSING/$MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
     sleep 20
   done
   NOPK_LIST=$(jq -r '[.[] | select((.v | ascii_downcase) == "no primary key") | .s + "." + .t] | join(" ")' "$VDIR/vstats.json")
