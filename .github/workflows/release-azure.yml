@@ -14,10 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: opentofu/setup-opentofu@v1
         with:
-          terraform_version: 1.13.4
-          terraform_wrapper: false
+          tofu_version_file: azure-config/.opentofu-version
+          tofu_wrapper: false
 
       - name: Assemble bundle
         run: azure-config/scripts/assemble-release.sh "${GITHUB_REF_NAME#azure-}"

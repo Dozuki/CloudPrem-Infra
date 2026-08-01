@@ -24,11 +24,10 @@ jobs:
           # stacks run OPEN_TOFU. Validate it with tofu, not Terraform 1.5.7.
           - module: logical
             tool: tofu
-          # Azure bundles are assembled and validated with Terraform 1.13.4.
-          # Validate the source layer on PRs too, before an azure-v* tag tries to
-          # assemble a release from it.
+          # Azure runs the same OpenTofu version as the other workload layers.
+          # Validate the source layer on PRs before an azure-v* tag assembles it.
           - module: physical-azure
-            tool: terraform
+            tool: tofu
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
@@ -47,13 +46,7 @@ jobs:
         # Match what the fleet runs (infra-live/_spacelift/stacks.tf). Validating on a
         # different version than Spacelift applies with is how a module change passes
         # CI and then fails on a real stack.
-        tofu_version: "1.11.8"
-
-    - name: Setup Terraform
-      if: matrix.tool == 'terraform'
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.13.4
+        tofu_version_file: azure-config/.opentofu-version
 
     - name: ${{ matrix.module }} Module Init
       run: ${{ matrix.tool }} init -backend=false -input=false

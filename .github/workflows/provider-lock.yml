@@ -18,12 +18,14 @@ on:
     paths:
       - '**/.terraform.lock.hcl'
       - '**/main.tf'
+      - 'azure-config/.opentofu-version'
       - '.github/workflows/provider-lock.yml'
   push:
     branches:
       - master
     paths:
       - '**/.terraform.lock.hcl'
+      - 'azure-config/.opentofu-version'
   schedule:
     # First of the month, for the staleness job below.
     - cron: '0 13 1 * *'
@@ -91,7 +93,7 @@ jobs:
           # Track the engine the fleet runs. This job regenerates the lock and fails on
           # any diff, so if it runs a different OpenTofu than the stacks do, it is
           # asserting something about a file the stacks will read differently.
-          tofu_version: 1.11.8
+          tofu_version_file: azure-config/.opentofu-version
 
       - name: Complete the lock and assert nothing was missing
         working-directory: terraform/${{ matrix.module }}

@@ -69,7 +69,7 @@ EOF
 
 _tf() { # dir args...
   local dir="$1"; shift
-  terraform -chdir="$dir" "$@"
+  tofu -chdir="$dir" "$@"
 }
 
 phase_physical() {

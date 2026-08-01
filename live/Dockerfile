@@ -1,31 +1,47 @@
 # OpenTofu, not Terraform: physical requires >= 1.11.1 and logical needs OpenTofu's
 # provider for_each, so the old tf-1.5.2 image could not init either layer.
 #
-# Pinned to the pair the Spacelift fleet runs. Terragrunt 0.99.4 matches exactly, which is
-# the version that matters: 1.1.1 double-assumes iam_role and 403s at init on every stack
-# that has one (infra-live #158). OpenTofu is 1.11.5 rather than the fleet's 1.11.8 only
-# because the base image has no 1.11.8 build.
-#
-# Distro moves with the tag - this one is Ubuntu, so package installs are apt-get. The
-# aws-ot-1.12.x tags are Alpine/apk. Check before changing the FROM.
-FROM devopsinfra/docker-terragrunt:aws-ot-1.11.5-tg-0.99.4
+# Pinned to the exact pair the Spacelift fleet runs. Terragrunt 1.1.1 double-assumes
+# iam_role and 403s at init on every stack that has one (infra-live #158), so these
+# versions move together only after the fleet compatibility path is proven.
+FROM alpine:3.20
+
+ARG TOFU_VERSION=1.11.8
+ARG TERRAGRUNT_VERSION=0.99.4
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+ARG TARGETARCH
 
 ENV KUBE_VERSION="v1.32.0"
 
-# kubectl isn't in the base image; the isolated_run.sh harness needs it. TARGETARCH comes
-# from BuildKit, so an arm64 build gets an arm64 kubectl - the arch used to be hardcoded
-# to amd64, which silently produced an unrunnable binary when built on an Apple Silicon
-# machine. -f so a bad URL fails the build instead of installing an error page as the
-# binary, and a --client call so a broken download fails HERE rather than mid-run.
-ARG TARGETARCH
-RUN set -ex \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+# Build the exact fleet toolchain instead of inheriting the third-party image's nearest
+# available OpenTofu patch. Every downloaded binary is checksum-verified for the
+# BuildKit target architecture.
+RUN set -eux \
+    && apk add --no-cache aws-cli bash ca-certificates curl git jq openssh-client unzip \
+    && tool_arch="${TARGETARCH:-amd64}" \
+    && tofu_base="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}" \
+    && tofu_zip="tofu_${TOFU_VERSION}_linux_${tool_arch}.zip" \
+    && curl -fsSLo "/tmp/${tofu_zip}" "${tofu_base}/${tofu_zip}" \
+    && curl -fsSLo /tmp/TOFU_SHA256SUMS "${tofu_base}/tofu_${TOFU_VERSION}_SHA256SUMS" \
+    && (cd /tmp && grep " ${tofu_zip}$" TOFU_SHA256SUMS | sha256sum -c -) \
+    && unzip -q "/tmp/${tofu_zip}" -d /usr/local/bin \
+    && tg_base="https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}" \
+    && curl -fsSLo "/tmp/terragrunt_linux_${tool_arch}" "${tg_base}/terragrunt_linux_${tool_arch}" \
+    && curl -fsSLo /tmp/TERRAGRUNT_SHA256SUMS "${tg_base}/SHA256SUMS" \
+    && (cd /tmp && grep " terragrunt_linux_${tool_arch}$" TERRAGRUNT_SHA256SUMS | sha256sum -c -) \
+    && install -m 0755 "/tmp/terragrunt_linux_${tool_arch}" /usr/local/bin/terragrunt \
     && curl -fsSLO "https://dl.k8s.io/release/${KUBE_VERSION}/bin/linux/${TARGETARCH:-amd64}/kubectl" \
+    && curl -fsSLo kubectl.sha256 "https://dl.k8s.io/release/${KUBE_VERSION}/bin/linux/${TARGETARCH:-amd64}/kubectl.sha256" \
+    && echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c - \
     && chmod +x kubectl \
     && mv kubectl /usr/local/bin/ \
-    && kubectl version --client \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -f kubectl.sha256 /tmp/tofu_* /tmp/TOFU_SHA256SUMS /tmp/terragrunt_linux_* /tmp/TERRAGRUNT_SHA256SUMS \
+    && if [ "${BUILDPLATFORM}" = "${TARGETPLATFORM}" ]; then \
+        tofu version; \
+        terragrunt --version; \
+        kubectl version --client; \
+        aws --version; \
+    fi
 
 CMD ["bash"]

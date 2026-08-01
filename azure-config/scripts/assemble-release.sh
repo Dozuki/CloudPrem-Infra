@@ -37,11 +37,11 @@ if grep -RInE 'git@github.com:Dozuki/(CloudPrem-Infra|helm)|\.dkr\.ecr\.|s3\.ama
   exit 1
 fi
 
-# 4) Offline sanity: both layers must terraform-init/validate inside the bundle.
+# 4) Offline sanity: both layers must tofu-init/validate inside the bundle.
 for layer in physical-azure logical; do
   ( cd "${STAGE}/terraform/${layer}" \
-    && VAULT_ADDR=http://dummy terraform init -backend=false -input=false >/dev/null \
-    && VAULT_ADDR=http://dummy terraform validate >/dev/null ) \
+    && VAULT_ADDR=http://dummy tofu init -backend=false -input=false >/dev/null \
+    && VAULT_ADDR=http://dummy tofu validate >/dev/null ) \
     || { echo "ERROR: bundle validate failed for ${layer}" >&2; exit 1; }
   rm -rf "${STAGE}/terraform/${layer}/.terraform" "${STAGE}/terraform/${layer}/.terraform.lock.hcl"
 done

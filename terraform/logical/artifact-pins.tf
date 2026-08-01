@@ -17,7 +17,7 @@
 # behavior.
 
 locals {
-  # The registry account, parsed from "<acct>.dkr.ecr.<region>.amazonaws.com".
+  # The registry account, parsed from the configured ECR registry hostname.
   # null for non-ECR hosts (GHCR on Azure/connected installs), which disables
   # the checks. Region comes from the same host, like the chart token above.
   pin_registry_id = try(regex("^(\\d{12})\\.dkr\\.ecr", var.image_repository)[0], null)
