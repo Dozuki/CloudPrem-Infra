@@ -15,7 +15,8 @@ jobs:
       matrix:
         include:
           # The physical layer uses the rds-aurora module (master_password_wo),
-          # which requires Terraform/OpenTofu >= 1.11.1 — run it on OpenTofu 1.12.x.
+          # which requires Terraform/OpenTofu >= 1.11.1 — run it on the fleet's
+          # OpenTofu 1.11.8.
           - module: physical
             tool: tofu
           # The logical layer moved to OpenTofu: it uses provider for_each (azurerm
@@ -23,6 +24,11 @@ jobs:
           # stacks run OPEN_TOFU. Validate it with tofu, not Terraform 1.5.7.
           - module: logical
             tool: tofu
+          # Azure bundles are assembled and validated with Terraform 1.13.4.
+          # Validate the source layer on PRs too, before an azure-v* tag tries to
+          # assemble a release from it.
+          - module: physical-azure
+            tool: terraform
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
@@ -47,10 +53,10 @@ jobs:
       if: matrix.tool == 'terraform'
       uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: 1.5.7
+        terraform_version: 1.13.4
 
     - name: ${{ matrix.module }} Module Init
-      run: ${{ matrix.tool }} init
+      run: ${{ matrix.tool }} init -backend=false -input=false
       working-directory: ./terraform/${{ matrix.module }}
 
     # Checks that all configuration files adhere to a canonical format
@@ -58,8 +64,16 @@ jobs:
       run: ${{ matrix.tool }} fmt -check
       working-directory: ./terraform/${{ matrix.module }}
 
-    # Performs linting on the Terraform files
+    - name: Validate
+      if: matrix.module == 'physical-azure'
+      run: ${{ matrix.tool }} validate
+      working-directory: ./terraform/${{ matrix.module }}
+
+    # This action is configured with the AWS ruleset below. physical-azure has no
+    # Azure TFLint plugin/config in the repo, so init + fmt + validate are its
+    # meaningful credential-free PR gates; do not run AWS rules against it.
     - name: Terraform Linter
+      if: matrix.module != 'physical-azure'
       uses: reviewdog/action-tflint@v1
       with:
         github_token: ${{ secrets.github_token }}

@@ -1,6 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended",
+    ":configMigration",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "ignorePresets": [":ignoreModulesAndTests"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__fixtures__/**"
+  ],
   "description": [
     "The committed .terraform.lock.hcl stops silent provider upgrades. This file is what keeps them flowing anyway, so pinning does not turn into the thing we were actually burned by before: sitting on an ancient provider until the eventual upgrade is a big-bang change nobody wants to start.",
     "Renovate always proposes the NEWEST version that has already passed minimumReleaseAge, and marks anything newer as pending - it does not sit and wait for the newest release to age. So forward motion is guaranteed no matter how long the soak is, and a long soak costs only currency, which we do not care about. What we buy with it is a proposed version that has a real public track record by the time we see it.",
@@ -9,23 +22,42 @@
   "timezone": "America/New_York",
   "schedule": ["before 9am on monday"],
   "prConcurrentLimit": 3,
-  "labels": ["dependencies"],
   "minimumReleaseAge": "30 days",
   "internalChecksFilter": "strict",
   "dependencyDashboard": true,
 
   "lockFileMaintenance": {
-    "enabled": true,
-    "schedule": ["before 9am on monday"]
+    "enabled": false
   },
 
   "packageRules": [
+    {
+      "description": "Terraform and Helm-values changes are part of the versioned deployment artifact. Use fix so release-please publishes a patch instead of leaving the merged change unreachable until some unrelated release.",
+      "matchManagers": ["terraform", "helm-values"],
+      "commitMessagePrefix": "fix(deps):"
+    },
+    {
+      "description": "Workflow-only dependency updates must not publish a CloudPrem release.",
+      "matchManagers": ["github-actions"],
+      "commitMessagePrefix": "chore(ci):"
+    },
+    {
+      "description": "Breaking upgrades stay visible on the Dashboard but need an explicit decision before Renovate creates a PR.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "alpine/k8s tags encode the kubectl minor as a SemVer minor, but kubectl is supported only within one minor of kube-apiserver. EKS versions vary across the fleet, so every change needs Dashboard approval even when Renovate calls it non-major.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["alpine/k8s"],
+      "dependencyDashboardApproval": true
+    },
     {
       "description": "Providers are the fleet-wide blast radius: one bad release reaches every stack that inits. One PR per provider, so a bad bump reverts without dragging unrelated updates with it. 30 days because being current has no value to us and a month of public exposure has quite a lot.",
       "matchManagers": ["terraform"],
       "matchDepTypes": ["provider", "required_provider"],
       "minimumReleaseAge": "30 days",
-      "commitMessagePrefix": "chore(providers):"
+      "commitMessagePrefix": "fix(providers):"
     },
     {
       "description": "aws 6.57.0 (2026-07-29) has a request-signing regression that makes data-source reads fail across IAM/KMS/EC2/STS, so plans die during refresh - hashicorp/terraform-provider-aws#49170. This lives here rather than as '!= 6.57.0' in required_providers because Renovate's hashicorp versioning has no '!=' operator: it warns 'Unsupported hashicorp constraint' and then skips the dependency, leaving the AWS provider unmanaged forever. Delete this rule once a fixed release is out and adopted.",
@@ -45,12 +77,21 @@
       "matchFileNames": ["live/tests/**"],
       "minimumReleaseAge": "3 days",
       "commitMessagePrefix": "test(harness):"
+    },
+    {
+      "description": "The harness container also ships to nobody and release-please excludes it.",
+      "matchManagers": ["dockerfile"],
+      "matchFileNames": ["live/tests/**"],
+      "minimumReleaseAge": "3 days",
+      "commitMessagePrefix": "test(harness):"
     }
   ],
 
   "vulnerabilityAlerts": {
     "description": "Security fixes skip the soak. The reason to wait is that other people have not found the bugs yet, and that reasoning inverts once the bug is known and being exploited.",
+    "schedule": [],
     "minimumReleaseAge": null,
-    "labels": ["security"]
+    "dependencyDashboardApproval": false,
+    "commitMessagePrefix": "fix(security):"
   }
 }
