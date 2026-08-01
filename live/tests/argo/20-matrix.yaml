@@ -177,7 +177,10 @@ spec:
             export VAULT_ADDR='{{workflow.parameters.vault-addr}}'
             vault login -method=aws role=deployer region=us-east-1 >/dev/null || { echo "vault login failed"; exit 0; }
             GH_TOKEN="$(vault kv get -field=github_token secret/dozuki/global/harness-notify 2>/dev/null)"
-            SLACK_URL="$(vault kv get -field=webhookUrl secret/dozuki/global/slack 2>/dev/null)"
+            # Bot token + channel, not the incoming webhook: webhook posts have a
+            # synthetic author no token can delete/edit, and can't thread.
+            SLACK_TOKEN="$(vault kv get -field=botToken secret/dozuki/global/slack 2>/dev/null)"
+            SLACK_CHANNEL="$(vault kv get -field=channelId secret/dozuki/global/slack 2>/dev/null)"
 
             STATUS='{{workflow.status}}'
             [ "$STATUS" = Succeeded ] && GH_STATE=success || GH_STATE=failure
@@ -222,10 +225,11 @@ spec:
               fi
             fi
 
-            if [ -n "$SLACK_URL" ]; then
-              curl -sf -X POST -H 'Content-type: application/json' \
-                --data "{\"text\":\"${EMOJI} ${DESC}\"}" "$SLACK_URL" \
-                >/dev/null || echo "slack post failed"
+            if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+              curl -sf -X POST -H 'Content-type: application/json; charset=utf-8' \
+                -H "Authorization: Bearer ${SLACK_TOKEN}" \
+                --data "{\"channel\":\"${SLACK_CHANNEL}\",\"text\":\"${EMOJI} ${DESC}\"}" \
+                https://slack.com/api/chat.postMessage >/dev/null || echo "slack post failed"
             fi
             exit 0
         resources:
