@@ -101,6 +101,13 @@ spec:
     secondsAfterSuccess: 86400
     secondsAfterFailure: 259200
 
+  # Default is OnWorkflowSuccess, which leaves a failed run's 10Gi workspace bound until
+  # ttlStrategy reaps the workflow three days later. Teardown is an exit handler, so it
+  # has already finished with the clone and the worktrees by the time the workflow is
+  # marked complete, and nothing reads the volume after that. Logs live in S3, not here.
+  volumeClaimGC:
+    strategy: OnWorkflowCompletion
+
   onExit: teardown
 
   # The repo clone is the one thing worth sharing between phases: a full clone with tags,
