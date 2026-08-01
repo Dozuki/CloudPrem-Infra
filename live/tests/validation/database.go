@@ -122,22 +122,28 @@ func AssertDMSRunning(ctx context.Context, region, taskARN string) error {
 	}
 }
 
-// AssertLocalInfileEnabled proves the BI Aurora cluster still accepts LOAD DATA LOCAL
-// INFILE, which is how the DMS full load writes into it. The physical layer used to pin
-// local_infile=1 in the BI CLUSTER parameter group; that pin was removed because it can
-// never converge (1 is the engine default, so ModifyDBClusterParameterGroup is a silent
-// no-op AWS keeps answering as Source=system/ApplyMethod=pending-reboot, and the provider
-// reads that stale apply_method straight back into state, re-planning forever, see
+// AssertLocalInfileEnabled checks that local_infile is still declared as 1 on the BI
+// Aurora writer, since LOAD DATA LOCAL INFILE is how the DMS full load writes into it.
+// The physical layer used to pin local_infile=1 in the BI CLUSTER parameter group; that
+// pin was removed because it can never converge (1 is the engine default, so
+// ModifyDBClusterParameterGroup is a silent no-op AWS keeps answering as
+// Source=system/ApplyMethod=pending-reboot, and the provider reads that stale apply_method
+// straight back into state, re-planning forever, see
 // hashicorp/terraform-provider-aws#30802). The pin was also in the wrong place to begin
 // with: local_infile is an INSTANCE-level parameter that the cluster-level API merely
 // tolerates, so an entry there never had any effect on the engine.
 //
-// This checks the value where it actually takes effect, the writer's DB (instance)
-// parameter group, and asserts the effective value rather than the presence of an
-// override. Default-sourced 1 passes, an explicit 1 passes, and the only thing that fails
-// is a real 0 (someone adding an override that would break the full load). Removing the
-// pin therefore trades a permanently-drifting declaration for a check that catches the
-// failure the pin was supposed to prevent but could not.
+// This reads the writer's DB (instance) parameter group, which is the only place an
+// override can take effect. Default-sourced 1 passes, an explicit 1 passes, and the only
+// thing that fails is a real 0 (someone adding an override that would break the full
+// load).
+//
+// Scope, deliberately narrow: this is the group's DECLARED value, not the value the
+// engine is running. The two diverge while a change waits on a reboot, so the apply
+// status is logged and warned on rather than asserted (the instance group legitimately
+// sits at pending-reboot after creation because group_concat_max_len is pinned that way).
+// The running value is checked where it actually gates work: the migration runner's
+// preload gate does SELECT @@local_infile against the target before any full load.
 func AssertLocalInfileEnabled(ctx context.Context, region, clusterID string) error {
 	if clusterID == "" {
 		return nil // no aurora BI cluster in this config
@@ -160,6 +166,7 @@ func AssertLocalInfileEnabled(ctx context.Context, region, clusterID string) err
 		return fmt.Errorf("BI instance %s has no DB parameter group", instanceID)
 	}
 	pg := aws.ToString(inst.DBInstances[0].DBParameterGroups[0].DBParameterGroupName)
+	applyStatus := aws.ToString(inst.DBInstances[0].DBParameterGroups[0].ParameterApplyStatus)
 
 	value, source, found, err := dbParameter(ctx, rc, pg, "local_infile")
 	if err != nil {
@@ -171,8 +178,12 @@ func AssertLocalInfileEnabled(ctx context.Context, region, clusterID string) err
 	if value != "1" {
 		return fmt.Errorf("BI local_infile=%q (source=%s) in %s, want 1 - the DMS full load needs LOAD DATA LOCAL INFILE", value, source, pg)
 	}
-	fmt.Fprintf(os.Stderr, ">> [harness %s] BI local_infile=1 (source=%s) in %s\n",
-		time.Now().Format("15:04:05"), source, pg)
+	if applyStatus != "in-sync" {
+		fmt.Fprintf(os.Stderr, ">> [harness %s] WARN BI parameter group %s is %s, so the running value may lag what it declares\n",
+			time.Now().Format("15:04:05"), pg, applyStatus)
+	}
+	fmt.Fprintf(os.Stderr, ">> [harness %s] BI local_infile=1 declared (source=%s, group %s %s)\n",
+		time.Now().Format("15:04:05"), source, pg, applyStatus)
 	return nil
 }
 

@@ -484,9 +484,10 @@ module "bi_aurora" {
         # default value is a no-op AWS never records as user-sourced, so the group keeps
         # answering Source=system/ApplyMethod=pending-reboot while the config asks for
         # immediate and the plan re-drifts forever (terraform-provider-aws#30802). The pin
-        # never protected the full load; what does is the validation harness, which reads the
-        # effective local_infile off the WRITER's db_parameter_group below (where the setting
-        # actually lives) and fails the run if anything has turned it off.
+        # never protected the full load, so nothing enforces this at apply time now; the
+        # backstop is the upgrade harness, which on the BI scenarios reads local_infile off
+        # the WRITER's db_parameter_group below (where an override would actually take
+        # effect) and fails if anything has turned it off.
       ],
       # Exports only ship what the engine writes, so the export list above is inert without
       # these. Same set and same conditions as the primary cluster in aurora.tf.

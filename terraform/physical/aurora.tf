@@ -104,9 +104,12 @@ module "aurora" {
       # scheduler stays OFF until the cutover repoint so nothing fires on the
       # target before the first app write (the migration runner asserts it at
       # its gates). local_infile, which the DMS full load needs, is NOT pinned
-      # here for the same reason as lower_case_table_names above: 1 is the
-      # engine default, so the write is a silent no-op AWS keeps reporting as
-      # Source=system/ApplyMethod=pending-reboot and the entry drifts forever
+      # here: same class of landmine as lower_case_table_names above, different
+      # failure mode. That one AWS rejects outright; this one AWS accepts and
+      # drops, because local_infile is an instance-level parameter this
+      # cluster-level API merely tolerates and 1 is already the engine default.
+      # The write is a silent no-op AWS keeps reporting as
+      # Source=system/ApplyMethod=pending-reboot, so the entry drifts forever
       # (terraform-provider-aws#30802). The runner asserts the effective value
       # at its preload gate instead.
       local.aurora_migration_active && var.aurora_migration_state == "provision" ? [
