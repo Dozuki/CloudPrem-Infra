@@ -186,11 +186,20 @@ locals {
       # the account into this cluster's Prometheus. region is deliberately left
       # to the chart, which falls back to aws.region above.
       #
-      # Cost is about 1 GetMetricData call per node per 5 minutes, ~$1.40/month.
+      # GetMetricData bills per metric requested, not per API call ($0.01 per
+      # 1,000), so YACE batching them into one call does not reduce the bill and
+      # the 1M-request free tier does not apply. Two metrics per node every 5
+      # minutes works out to ~$0.17 per node-month, so a steady 8-node cluster
+      # is ~$1.40/month and it scales with the node count.
       cloudwatchExporter = {
-        enabled     = var.cloud == "aws"
+        enabled     = var.cloud == "aws" && var.cloudwatch_exporter_enabled
         clusterName = var.eks_cluster_id
-        fips        = local.is_us_gov # GovCloud rejects the standard CloudWatch endpoints
+        # FIPS endpoints are a compliance choice, not a partition requirement.
+        # GovCloud's standard regional endpoints resolve fine; we opt in because
+        # gov workloads should stay on validated crypto. YACE only applies this
+        # to CloudWatch and falls back to the standard Resource Groups Tagging
+        # endpoint either way, so this does not make every call FIPS.
+        fips = local.is_us_gov
       }
     }
 
