@@ -46,6 +46,26 @@ var transientNetRE = regexp.MustCompile(`(?i)no such host|connection reset by pe
 // of being retried into a confusing timeout.
 var vaultTokenExpiredRE = regexp.MustCompile(`(?i)failed to lookup token`)
 
+// eksKmsPropagationRE matches the EKS CreateCluster / KMS authorization race. EKS checks
+// that the cluster role can use the secrets-encryption key at CreateCluster time. The
+// upstream EKS module attaches that permission with an IAM policy attachment that is not
+// in aws_eks_cluster's depends_on list, so the two can land in the same second and EKS
+// evaluates against a role whose new policy has not propagated. The answer is
+// "Access denied to KMS key ... due to explicit deny policy or revoked grant" when there
+// is neither a deny nor a revoked grant. Two configs in the 2026-08-01 matrix ran side by
+// side: one attached the policy 4s before CreateCluster and passed, the other at +0s and
+// failed, with structurally identical key policies resolving the same role.
+//
+// The AWS provider already retries this class of race for the IAM-role wordings but its
+// allowlist does not carry the KMS message. Safe to retry for the usual reason: apply is
+// idempotent.
+//
+// A key policy that genuinely denies the role produces the same sentence, and this rule
+// cannot tell the two apart. The cost of being wrong is bounded: three extra attempts,
+// about three minutes, then the run fails with the same error it would have failed with
+// immediately.
+var eksKmsPropagationRE = regexp.MustCompile(`(?s)Access denied to KMS key.*due to explicit deny policy or revoked grant`)
+
 type TGOptions struct {
 	WorkingDir   string
 	AccountID    string
@@ -110,6 +130,12 @@ func (o TGOptions) Apply() error {
 		if attempt < maxAttempts && kubeAuthRaceRE.MatchString(out) {
 			wait := time.Duration(attempt*30) * time.Second
 			fmt.Fprintf(os.Stderr, "\n>> harness: EKS access-entry propagation race; retrying apply in %s (attempt %d/%d)\n\n", wait, attempt+1, maxAttempts)
+			time.Sleep(wait)
+			continue
+		}
+		if attempt < maxAttempts && eksKmsPropagationRE.MatchString(out) {
+			wait := time.Duration(attempt*30) * time.Second
+			fmt.Fprintf(os.Stderr, "\n>> harness: EKS/KMS IAM propagation race on CreateCluster; retrying apply in %s (attempt %d/%d)\n\n", wait, attempt+1, maxAttempts)
 			time.Sleep(wait)
 			continue
 		}
