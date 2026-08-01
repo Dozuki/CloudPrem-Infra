@@ -158,7 +158,7 @@ locals {
       # until the same value is deliberately mirrored into Key Vault.
       alertmanager = {
         slack = {
-          enabled = var.cloud == "aws"
+          enabled = var.cloud == "aws" && var.alertmanager_slack_enabled
           # The shared Slack app sends Silence 2h button callbacks to the
           # standalone interaction handler, which reuses the fleet-global ops
           # login. Keep the button off until that signature-verified handler is

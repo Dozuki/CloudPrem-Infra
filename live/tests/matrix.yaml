@@ -95,6 +95,12 @@ configs:
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
+      # Every config sets this. A smoke stack is a real AWS stack, so it inherits the
+      # fleet Slack route and pages the shared channel like a customer env would - and
+      # small clusters trip node-capacity alerts (KubeCPUOvercommitCluster) by design.
+      # Worse, teardown deletes Alertmanager along with the cluster, so the resolved
+      # notification never sends and the firing message outlives the stack it describes.
+      alertmanager_slack_enabled: false
       # sso_admin_role_arn intentionally unset: when the harness runs AS the SSO
       # admin role (local runs), that identity IS the EKS cluster creator, so an
       # explicit access entry for it collides with the auto-created creator entry
@@ -137,6 +143,7 @@ configs:
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
+      alertmanager_slack_enabled: false
   # Recovery scenario (TestRecover / RunRecovery): recover_source is the "lost" stack
   # (DR on, drill on, BI off to keep the ~4h wall clock down); recover is the DR-REGION
   # rebuild stood up from the promoted cluster's snapshot + the adopted *-dr-* buckets.
@@ -160,6 +167,7 @@ configs:
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
+      alertmanager_slack_enabled: false
   - name: recover
     env: min
     env_path: "live/standard/us-west-2"   # the DR region — this config IS the rebuild
@@ -185,6 +193,7 @@ configs:
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
+      alertmanager_slack_enabled: false
   - name: full
     env: full
     feature_flags:
@@ -214,3 +223,4 @@ configs:
       vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
+      alertmanager_slack_enabled: false
