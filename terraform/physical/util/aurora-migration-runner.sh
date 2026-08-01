@@ -136,7 +136,7 @@ ssm_run() {
   script="$(cat)"
   cid=$(aws ssm send-command --region "$REGION" --instance-ids "$(bastion_id)" \
         --document-name AWS-RunShellScript --timeout-seconds 5400 \
-        --parameters "$(jq -n --arg c "$script" '{commands: [$c]}')" \
+        --parameters "$(jq -n --arg c "$script" '{commands: [$c], executionTimeout: ["21600"]}')" \
         --query 'Command.CommandId' --output text)
   while :; do
     status=$(aws ssm get-command-invocation --region "$REGION" --command-id "$cid" --instance-id "$(bastion_id)" --query Status --output text 2>/dev/null || echo Pending)
