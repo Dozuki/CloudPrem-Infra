@@ -12,6 +12,7 @@ import (
 type Capabilities struct {
 	HasDR           bool
 	HasDMS          bool
+	HasBIAurora     bool
 	HasGuideBuckets bool
 	HasLogging      bool
 }
@@ -21,6 +22,7 @@ func DetectCapabilities(o validation.StackOutputs) Capabilities {
 	return Capabilities{
 		HasDR:           len(o.DRBucketNames) > 0,
 		HasDMS:          o.DMSTaskARN != "",
+		HasBIAurora:     o.BIAuroraClusterID != "",
 		HasGuideBuckets: len(o.GuideBuckets) > 0,
 	}
 }

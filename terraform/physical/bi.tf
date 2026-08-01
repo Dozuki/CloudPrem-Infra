@@ -476,14 +476,18 @@ module "bi_aurora" {
     parameters = concat(
       [
         { name = "binlog_format", value = "ROW", apply_method = "pending-reboot" },
-        # DMS full-loads MySQL-compatible targets with LOAD DATA LOCAL INFILE, which the server
-        # refuses unless local_infile is on. Aurora MySQL already defaults it to 1, so this is a
-        # pin rather than a fix - verified against aurora-mysql8.4: the parameter is settable at
-        # cluster level, and writing 1 is dropped as a no-op precisely because 1 is the system
-        # default (writing 0 does stick). Kept explicit because this cluster is a DMS target for
-        # its whole life and a full load is how it gets rebuilt, so a group that someone had
-        # turned off would break the rebuild silently and at the worst possible moment.
-        { name = "local_infile", value = "1", apply_method = "immediate" },
+        # local_infile is deliberately NOT pinned here, same class of landmine as
+        # lower_case_table_names in aurora.tf. DMS full-loads this cluster with LOAD DATA LOCAL
+        # INFILE, which the server refuses unless local_infile is on, and Aurora MySQL already
+        # defaults it to 1. That default is exactly why a pin cannot work: local_infile is an
+        # instance-level parameter this cluster-level API merely tolerates, and writing the
+        # default value is a no-op AWS never records as user-sourced, so the group keeps
+        # answering Source=system/ApplyMethod=pending-reboot while the config asks for
+        # immediate and the plan re-drifts forever (terraform-provider-aws#30802). The pin
+        # never protected the full load, so nothing enforces this at apply time now; the
+        # backstop is the upgrade harness, which on the BI scenarios reads local_infile off
+        # the WRITER's db_parameter_group below (where an override would actually take
+        # effect) and fails if anything has turned it off.
       ],
       # Exports only ship what the engine writes, so the export list above is inert without
       # these. Same set and same conditions as the primary cluster in aurora.tf.

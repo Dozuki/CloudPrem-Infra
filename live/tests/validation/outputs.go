@@ -11,6 +11,10 @@ type StackOutputs struct {
 	DMSTaskARN string
 	DMSEnabled bool
 
+	// BI. Only the aurora BI engine produces a cluster id, so a non-empty value is both
+	// the identifier and the "this stack has an aurora BI cluster" signal.
+	BIAuroraClusterID string // bi_aurora_cluster_id
+
 	// S3 guide buckets (source region) — non-empty entries collected from the
 	// four typed bucket outputs (guide_images, guide_objects, guide_pdfs, documents).
 	GuideBuckets []string

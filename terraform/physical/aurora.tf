@@ -100,12 +100,19 @@ module "aurora" {
         # code (caught on dev-min). The migration runner asserts the effective
         # value at its gates instead.
       ],
-      # Migration-only relaxations, removed again after cleanup. local_infile is
-      # required by DMS full load; the event scheduler stays OFF until the
-      # cutover repoint so nothing fires on the target before the first app
-      # write (the migration runner asserts both at its gates).
+      # Migration-only relaxation, removed again after cleanup. The event
+      # scheduler stays OFF until the cutover repoint so nothing fires on the
+      # target before the first app write (the migration runner asserts it at
+      # its gates). local_infile, which the DMS full load needs, is NOT pinned
+      # here: same class of landmine as lower_case_table_names above, different
+      # failure mode. That one AWS rejects outright; this one AWS accepts and
+      # drops, because local_infile is an instance-level parameter this
+      # cluster-level API merely tolerates and 1 is already the engine default.
+      # The write is a silent no-op AWS keeps reporting as
+      # Source=system/ApplyMethod=pending-reboot, so the entry drifts forever
+      # (terraform-provider-aws#30802). The runner asserts the effective value
+      # at its preload gate instead.
       local.aurora_migration_active && var.aurora_migration_state == "provision" ? [
-        { name = "local_infile", value = "1", apply_method = "immediate" },
         { name = "event_scheduler", value = "OFF", apply_method = "immediate" },
       ] : [],
       contains(var.rds_log_exports, "audit") ? [

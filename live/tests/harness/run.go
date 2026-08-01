@@ -413,6 +413,18 @@ func runInfraValidators(ctx context.Context, p RunParams, region, kubeconfig str
 		}
 	}
 
+	// Ahead of the DMS wait on purpose: a full load into a BI cluster with local_infile
+	// off fails, and AssertDMSRunning would burn its whole serverless budget first and
+	// then report a DMS-side symptom that names nothing useful. This is a cheap read with
+	// no ordering dependency on DMS.
+	if caps.HasBIAurora {
+		if lerr := validation.AssertLocalInfileEnabled(ctx, region, outs.BIAuroraClusterID); lerr != nil {
+			return fmt.Errorf("BI local_infile guard: %w", lerr)
+		}
+	} else {
+		step("skipped: BI local_infile guard (no aurora BI cluster in %s)", p.ToRef)
+	}
+
 	if caps.HasDMS {
 		if derr := validation.AssertDMSRunning(ctx, region, outs.DMSTaskARN); derr != nil {
 			return fmt.Errorf("DMS running: %w", derr)
@@ -648,6 +660,7 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		Region:                  region,
 		DMSTaskARN:              str(physical, "dms_task_arn"),
 		DMSEnabled:              boolVal(physical, "dms_enabled"),
+		BIAuroraClusterID:       str(physical, "bi_aurora_cluster_id"),
 		GuideBuckets:            guideBuckets,
 		GuideBucketByKind:       guideByKind,
 		DRBucketNames:           drBucketNames,

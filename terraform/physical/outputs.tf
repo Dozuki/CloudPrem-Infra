@@ -74,6 +74,10 @@ output "bi_database_credential_secret" {
   description = "If BI is enabled, this is the ARN to the AWS SecretsManager secret that contains the connection information for the BI database."
   value       = try(aws_secretsmanager_secret.replica_database_credentials[0].arn, "")
 }
+output "bi_aurora_cluster_id" {
+  description = "Identifier of the BI Aurora cluster, empty on the rds BI engine or with BI/DMS off. Non-empty is what tells a consumer this stack has an aurora BI cluster at all; the validation harness uses it to find the writer's parameter group (local_infile must stay 1 for the DMS full load)."
+  value       = try(module.bi_aurora[0].cluster_id, "")
+}
 output "bi_vpn_configuration_bucket" {
   description = "If BI is enabled, this is the S3 bucket that stores the OpenVPN configuration files for clients to connect to the BI database from the internet."
   value       = try(module.vpn[0].aws_vpn_configuration_bucket, "")
