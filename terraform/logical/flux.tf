@@ -242,7 +242,16 @@ locals {
   # chart they would make these pods unschedulable there. Same reason the chart's
   # dozuki.onDemand* helpers gate on aws.enabled. The `for..if` idiom (not cond?{}:{})
   # matches app_azure_values - see the type-unification note above it.
-  stateful_node_selector = { "karpenter.sh/capacity-type" = "on-demand" }
+  #
+  # Select the pool by NAME, not by capacity-type. capacity-type is an attribute the spot
+  # pool also sets: it requests capacity-type In [spot, on-demand] as an ICE fallback, so a
+  # spot-pool node running on-demand capacity carries capacity-type=on-demand and satisfies
+  # this selector. With the spot pool outweighing this one 100 to 10 it won every time, the
+  # on-demand pool never launched a node at all, and its NoSchedule taint therefore never
+  # kept anything off these nodes - opensearch shared a node with untainted workloads until
+  # the node ran out of page cache. Naming the pool is what actually engages both the taint
+  # and the pool's WhenEmpty disruption policy (2026-08-01).
+  stateful_node_selector = { "karpenter.sh/nodepool" = "on-demand" }
   stateful_tolerations = [{
     key      = "eks.amazonaws.com/capacity-type"
     operator = "Equal"
