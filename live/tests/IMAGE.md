@@ -114,6 +114,7 @@ holds Vault. The existing precedent keeps GitHub-trusted roles in sandbox and pl
 accounts (`cloudprem-test-harness` in DDVtest, `dozuki-operator-cicd` in dozukicloud), and
 this image is not worth breaking that.
 
-Still to wire: the ECR repo itself, a pull-policy entry for the Argo cluster's pod
-identity, and a build-and-push workflow pinning the image by digest in the
-WorkflowTemplates.
+All of this is wired now: the repo exists (infra-tf `mpc-harness-image`, applied via the
+`mpcharness-image` stack), the Argo pod identity can pull cross-account, and
+`.github/workflows/harness-image.yml` builds and pushes on master. The digest pin
+in `argo/00-phase-templates.yaml` is still a manual bump after each publish.
