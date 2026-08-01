@@ -35,9 +35,11 @@ env:
   SUBMITTER_ROLE_ARN: arn:aws:iam::010601635461:role/argo-ops-pr-submitter
   CLUSTER: argo-ops
   REGION: us-east-1
-  # PR runs test one config, upgrading from the CURRENT release to the PR head.
-  # Dispatch runs take the inputs (defaults = the nightly shape).
-  CONFIGS: ${{ github.event_name == 'pull_request' && '["min_default"]' || inputs.configs }}
+  # PR runs test min + bi in parallel (semaphore is 2, so wall clock = bi_ha alone,
+  # and two upgrade paths get covered). full stays nightly-only: it is the slowest
+  # stack and its extra coverage (provisioned-RDS BI, istio strict) is not worth the
+  # PR wait. Dispatch runs take the inputs (defaults = the nightly shape).
+  CONFIGS: ${{ github.event_name == 'pull_request' && '["min_default","bi_ha"]' || inputs.configs }}
   FROM_REF: ${{ github.event_name == 'pull_request' && 'auto:latest' || inputs.from-ref }}
   TO_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.to-ref }}
   PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || '' }}
