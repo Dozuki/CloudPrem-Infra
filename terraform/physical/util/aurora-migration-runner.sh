@@ -350,6 +350,9 @@ S="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
 T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names --init-command='SET SESSION restrict_fk_on_non_standard_key=0'"
 $S -e "SELECT @@binlog_format, @@binlog_row_image, @@log_bin" | grep -q "ROW	FULL	1" || { echo "SOURCE NOT CDC-READY"; exit 1; }
 [ "$($S -e 'SELECT @@lower_case_table_names')" = "$(eval $T -e "'SELECT @@lower_case_table_names'")" ] || { echo LCTN_MISMATCH; exit 1; }
+# local_infile is no longer pinned in the cluster PG (default-valued pins are a silent
+# no-op that drift forever); the full load depends on it, so assert the effective value
+[ "$(eval $T -e "'SELECT @@local_infile'")" = "1" ] || { echo TARGET_LOCAL_INFILE_OFF; exit 1; }
 $S -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','information_schema','performance_schema','sys','innodb','tmp') AND schema_name NOT LIKE 'awsdms%'" > schemas.txt
 # dangling FKs: unenforceable residue, excluded from the target and reported
 $S -e "SELECT CONCAT(k.constraint_schema,'.',k.table_name,'.',k.constraint_name) FROM information_schema.key_column_usage k LEFT JOIN information_schema.tables t ON t.table_schema=k.referenced_table_schema AND t.table_name=k.referenced_table_name WHERE k.referenced_table_name IS NOT NULL AND t.table_name IS NULL" > dangling-fks.txt

@@ -421,6 +421,14 @@ func runInfraValidators(ctx context.Context, p RunParams, region, kubeconfig str
 		step("skipped: DMS (no dms_task_arn in %s)", p.ToRef)
 	}
 
+	if caps.HasBIAurora {
+		if lerr := validation.AssertLocalInfileEnabled(ctx, region, outs.BIAuroraClusterID); lerr != nil {
+			return fmt.Errorf("BI local_infile guard: %w", lerr)
+		}
+	} else {
+		step("skipped: BI local_infile guard (no aurora BI cluster in %s)", p.ToRef)
+	}
+
 	if p.EnableDR && caps.HasDR {
 		// Existence check: DR buckets versioned + replicated RDS backup present.
 		if derr := validation.AssertDRExistence(ctx, p.DRRegion, outs.DRBucketNames, outs); derr != nil {
@@ -648,6 +656,7 @@ func readOutputs(tg TGOptions, region string) (validation.StackOutputs, error) {
 		Region:                  region,
 		DMSTaskARN:              str(physical, "dms_task_arn"),
 		DMSEnabled:              boolVal(physical, "dms_enabled"),
+		BIAuroraClusterID:       str(physical, "bi_aurora_cluster_id"),
 		GuideBuckets:            guideBuckets,
 		GuideBucketByKind:       guideByKind,
 		DRBucketNames:           drBucketNames,

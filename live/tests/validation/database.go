@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/databasemigrationservice"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 )
 
 // A freshly started DMS task does not reach "running" instantly. It is created, sits at
@@ -118,6 +120,99 @@ func AssertDMSRunning(ctx context.Context, region, taskARN string) error {
 		case <-time.After(dmsPollEvery):
 		}
 	}
+}
+
+// AssertLocalInfileEnabled proves the BI Aurora cluster still accepts LOAD DATA LOCAL
+// INFILE, which is how the DMS full load writes into it. The physical layer used to pin
+// local_infile=1 in the BI CLUSTER parameter group; that pin was removed because it can
+// never converge (1 is the engine default, so ModifyDBClusterParameterGroup is a silent
+// no-op AWS keeps answering as Source=system/ApplyMethod=pending-reboot, and the provider
+// reads that stale apply_method straight back into state, re-planning forever, see
+// hashicorp/terraform-provider-aws#30802). The pin was also in the wrong place to begin
+// with: local_infile is an INSTANCE-level parameter that the cluster-level API merely
+// tolerates, so an entry there never had any effect on the engine.
+//
+// This checks the value where it actually takes effect, the writer's DB (instance)
+// parameter group, and asserts the effective value rather than the presence of an
+// override. Default-sourced 1 passes, an explicit 1 passes, and the only thing that fails
+// is a real 0 (someone adding an override that would break the full load). Removing the
+// pin therefore trades a permanently-drifting declaration for a check that catches the
+// failure the pin was supposed to prevent but could not.
+func AssertLocalInfileEnabled(ctx context.Context, region, clusterID string) error {
+	if clusterID == "" {
+		return nil // no aurora BI cluster in this config
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return err
+	}
+	rc := rds.NewFromConfig(cfg)
+
+	instanceID, err := clusterWriterInstance(ctx, rc, clusterID)
+	if err != nil {
+		return err
+	}
+	inst, err := rc.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: aws.String(instanceID)})
+	if err != nil {
+		return err
+	}
+	if len(inst.DBInstances) == 0 || len(inst.DBInstances[0].DBParameterGroups) == 0 {
+		return fmt.Errorf("BI instance %s has no DB parameter group", instanceID)
+	}
+	pg := aws.ToString(inst.DBInstances[0].DBParameterGroups[0].DBParameterGroupName)
+
+	value, source, found, err := dbParameter(ctx, rc, pg, "local_infile")
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("local_infile not present in BI parameter group %s", pg)
+	}
+	if value != "1" {
+		return fmt.Errorf("BI local_infile=%q (source=%s) in %s, want 1 - the DMS full load needs LOAD DATA LOCAL INFILE", value, source, pg)
+	}
+	fmt.Fprintf(os.Stderr, ">> [harness %s] BI local_infile=1 (source=%s) in %s\n",
+		time.Now().Format("15:04:05"), source, pg)
+	return nil
+}
+
+// clusterWriterInstance resolves the cluster's writer. Serverless v2 BI clusters run a
+// single writer, but a reader can be added, and only the writer takes the DMS load.
+func clusterWriterInstance(ctx context.Context, rc *rds.Client, clusterID string) (string, error) {
+	out, err := rc.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(clusterID)})
+	if err != nil {
+		return "", err
+	}
+	if len(out.DBClusters) == 0 {
+		return "", fmt.Errorf("BI cluster %s not found", clusterID)
+	}
+	for _, m := range out.DBClusters[0].DBClusterMembers {
+		if aws.ToBool(m.IsClusterWriter) {
+			return aws.ToString(m.DBInstanceIdentifier), nil
+		}
+	}
+	return "", fmt.Errorf("BI cluster %s has no writer instance", clusterID)
+}
+
+// dbParameter pulls one parameter out of a DB parameter group. DescribeDBParameters has no
+// name filter, so every page has to be walked; the group carries a few hundred entries, so
+// this is two or three calls at most.
+func dbParameter(ctx context.Context, rc *rds.Client, group, name string) (value, source string, found bool, err error) {
+	p := rds.NewDescribeDBParametersPaginator(rc, &rds.DescribeDBParametersInput{
+		DBParameterGroupName: aws.String(group),
+	})
+	for p.HasMorePages() {
+		page, perr := p.NextPage(ctx)
+		if perr != nil {
+			return "", "", false, perr
+		}
+		for _, param := range page.Parameters {
+			if aws.ToString(param.ParameterName) == name {
+				return aws.ToString(param.ParameterValue), aws.ToString(param.Source), true, nil
+			}
+		}
+	}
+	return "", "", false, nil
 }
 
 // describeDMSTask resolves the status of whatever the physical layer's dms_task_arn output
