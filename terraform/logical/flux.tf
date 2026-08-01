@@ -543,9 +543,10 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
 
 # ---------------------------------------------------------------------------
 # notification-controller -> Slack. Flux posts HelmRelease/OCIRepository events (both failures and
-# successes, eventSeverity=info) to a Slack incoming webhook. Entirely gated on var.flux_slack_webhook_url:
-# empty (the default) creates NO Secret/Provider/Alert and leaves notification-controller off (above), so
-# an env without a webhook wired stays exactly as it was. This layer has no Kustomizations, so the Alert
+# successes, eventSeverity=info) to Slack, over either transport: the bot token + channel pair
+# (preferred, wins when both transports are set) or the legacy incoming webhook. With neither wired
+# (the default) NO Secret/Provider/Alert is created and notification-controller stays off (above), so
+# an env without Slack delivery stays exactly as it was. This layer has no Kustomizations, so the Alert
 # scopes to the resources that actually exist here: the app HelmRelease and its OCIRepository source.
 # ---------------------------------------------------------------------------
 

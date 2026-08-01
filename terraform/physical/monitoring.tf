@@ -3,8 +3,11 @@ locals {
   # the bot token + channel pair. Prefer the token: webhook posts have a
   # synthetic author no token can delete or edit, and the webhook URL sits in
   # the lambda's plaintext env; the token lives in an SSM SecureString the
-  # lambda reads at runtime.
-  slack_notifications_enabled = var.slack_webhook_url != "" || (var.slack_bot_token != "" && var.slack_channel_id != "")
+  # lambda reads at runtime. Every token-path resource gates on slack_use_token
+  # (the complete pair), never on token presence alone - a half-set pair is
+  # also rejected by the slack_bot_token variable validation.
+  slack_use_token             = var.slack_bot_token != "" && var.slack_channel_id != ""
+  slack_notifications_enabled = var.slack_webhook_url != "" || local.slack_use_token
 }
 
 data "aws_iam_policy_document" "lambda_execution" {
@@ -545,10 +548,15 @@ resource "aws_lambda_function" "sns_to_slack" {
 
   source_code_hash = data.archive_file.slack_sns_lambda[0].output_base64sha256
 
+  # 3s default is too tight for the token path: an SSM GetParameter plus the
+  # Slack POST on a cold start can exceed it. Nothing invokes this
+  # synchronously, so be generous.
+  timeout = 30
+
   environment {
     variables = {
       SLACK_WEBHOOK_URL         = var.slack_webhook_url
-      SLACK_BOT_TOKEN_SSM_PARAM = var.slack_bot_token != "" ? aws_ssm_parameter.slack_bot_token[0].name : ""
+      SLACK_BOT_TOKEN_SSM_PARAM = local.slack_use_token ? aws_ssm_parameter.slack_bot_token[0].name : ""
       SLACK_CHANNEL_ID          = var.slack_channel_id
       IDENTIFIER                = local.identifier
       AWS_ACCOUNT_ID            = data.aws_caller_identity.current.account_id
@@ -559,7 +567,7 @@ resource "aws_lambda_function" "sns_to_slack" {
 }
 
 resource "aws_ssm_parameter" "slack_bot_token" {
-  count = var.slack_bot_token != "" ? 1 : 0
+  count = local.slack_use_token ? 1 : 0
 
   name  = "/${local.identifier}/slack-bot-token"
   type  = "SecureString"
@@ -569,7 +577,7 @@ resource "aws_ssm_parameter" "slack_bot_token" {
 }
 
 resource "aws_iam_role_policy" "sns_to_slack_bot_token" {
-  count = var.slack_bot_token != "" ? 1 : 0
+  count = local.slack_use_token ? 1 : 0
 
   name = "${local.identifier}-sns-to-slack-bot-token"
   role = aws_iam_role.lambda_execution[0].name

@@ -202,7 +202,7 @@ def lambda_handler(event, context):
                 'Authorization': f'Bearer {token}',
             }
         )
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=10) as response:
             body = json.loads(response.read())
         # The Web API reports errors in-body with HTTP 200; raise so the
         # failure is visible in the lambda's logs and retry behavior.
@@ -214,5 +214,5 @@ def lambda_handler(event, context):
             data=json.dumps({'text': slack_message}).encode('utf-8'),
             headers={'Content-Type': 'application/json'}
         )
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=10) as response:
             response.read()

@@ -124,10 +124,15 @@ variable "slack_bot_token" {
   type        = string
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = (var.slack_bot_token == "") == (var.slack_channel_id == "")
+    error_message = "slack_bot_token and slack_channel_id must be set together (or both left empty)."
+  }
 }
 
 variable "slack_channel_id" {
-  description = "Slack channel ID the bot-token alerts post to. Required alongside slack_bot_token."
+  description = "Slack channel ID the bot-token alerts post to. Required alongside slack_bot_token. The bot must be a member of this channel (invite it, or grant chat:write.public for public channels) or every delivery fails not_in_channel at runtime."
   type        = string
   default     = ""
 }

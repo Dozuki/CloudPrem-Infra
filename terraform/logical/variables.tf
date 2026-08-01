@@ -571,10 +571,15 @@ variable "flux_slack_bot_token" {
   type        = string
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = (var.flux_slack_bot_token == "") == (var.flux_slack_channel == "")
+    error_message = "flux_slack_bot_token and flux_slack_channel must be set together (or both left empty)."
+  }
 }
 
 variable "flux_slack_channel" {
-  description = "Slack channel ID the bot-token Flux notifications post to. Required alongside flux_slack_bot_token."
+  description = "Slack channel ID the bot-token Flux notifications post to. Required alongside flux_slack_bot_token. The bot must be a member of this channel (invite it, or grant chat:write.public for public channels) or every delivery fails not_in_channel at runtime."
   type        = string
   default     = ""
 }
