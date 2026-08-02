@@ -1,5 +1,7 @@
 terraform {
-  required_version = ">= 1.5.0"
+  # The Azure deploy kit and Spacelift workload stacks both run OpenTofu 1.11.8.
+  # This floor matches the physical layer; engine selection remains deployment tooling.
+  required_version = ">= 1.11.1"
 
   required_providers {
     azurerm = {

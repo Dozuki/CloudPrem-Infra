@@ -2,7 +2,8 @@
 # Downloads pinned CLI tools into .bin/ with checksum verification.
 # Sourced by bootstrap.sh after lib/common.sh.
 
-TERRAFORM_VERSION="1.13.4"
+TOFU_VERSION="$(tr -d '[:space:]' < "${KIT_ROOT}/.opentofu-version")"
+[[ -n "$TOFU_VERSION" ]] || die "azure-config/.opentofu-version is empty"
 KUBELOGIN_VERSION="v0.2.10"
 KUBECTL_VERSION="v1.33.4"
 HELM_VERSION="v3.19.0"
@@ -16,12 +17,12 @@ ensure_tools() {
   command -v az >/dev/null 2>&1 || die "Azure CLI (az) is required. Install: https://learn.microsoft.com/cli/azure/install-azure-cli"
   command -v unzip >/dev/null 2>&1 || die "unzip is required (apt-get install unzip / yum install unzip)"
 
-  _ensure_terraform "$os" "$arch"
+  _ensure_tofu "$os" "$arch"
   _ensure_kubelogin "$os" "$arch"
   _ensure_kubectl "$os" "$arch"
   _ensure_helm "$os" "$arch"
   _ensure_jq "$os" "$arch"
-  log "tools ready: $(terraform version -json | "${BIN_DIR}/jq" -r .terraform_version 2>/dev/null || terraform version | head -1)"
+  log "tools ready: $(tofu version -json | "${BIN_DIR}/jq" -r .terraform_version 2>/dev/null || tofu version | head -1)"
 }
 
 _fetch() { # url dest
@@ -33,24 +34,24 @@ _verify() { # file expected_sha
   [[ "$got" == "$2" ]] || die "checksum mismatch for $1 (got $got, want $2)"
 }
 
-_ensure_terraform() {
-  # Note: grep -q on the pipe trips pipefail (SIGPIPE on terraform's multi-line
+_ensure_tofu() {
+  # Note: grep -q on the pipe trips pipefail (SIGPIPE on OpenTofu's multi-line
   # output), so capture the first line instead. CHECKPOINT_DISABLE skips the
   # upstream version-check network call.
-  if [[ -x "${BIN_DIR}/terraform" ]]; then
+  if [[ -x "${BIN_DIR}/tofu" ]]; then
     local have
-    have="$(CHECKPOINT_DISABLE=1 "${BIN_DIR}/terraform" version 2>/dev/null | head -n1)" || true
-    [[ "$have" == "Terraform v${TERRAFORM_VERSION}" ]] && return 0
+    have="$(CHECKPOINT_DISABLE=1 "${BIN_DIR}/tofu" version 2>/dev/null | head -n1)" || true
+    [[ "$have" == "OpenTofu v${TOFU_VERSION}" ]] && return 0
   fi
-  local os=$1 arch=$2 base="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
-  local zip="terraform_${TERRAFORM_VERSION}_${os}_${arch}.zip" tmp; tmp="$(mktemp -d)"
+  local os=$1 arch=$2 base="https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}"
+  local zip="tofu_${TOFU_VERSION}_${os}_${arch}.zip" tmp; tmp="$(mktemp -d)"
   _fetch "${base}/${zip}" "${tmp}/${zip}"
-  _fetch "${base}/terraform_${TERRAFORM_VERSION}_SHA256SUMS" "${tmp}/SUMS"
+  _fetch "${base}/tofu_${TOFU_VERSION}_SHA256SUMS" "${tmp}/SUMS"
   local want; want="$(awk -v f="$zip" '$2==f{print $1}' "${tmp}/SUMS")"
   [[ -n "$want" ]] || die "no checksum for ${zip} in SHA256SUMS"
   _verify "${tmp}/${zip}" "$want"
   unzip -oq "${tmp}/${zip}" -d "${BIN_DIR}" && rm -rf "$tmp"
-  log "installed terraform ${TERRAFORM_VERSION}"
+  log "installed OpenTofu ${TOFU_VERSION}"
 }
 
 _ensure_kubelogin() {

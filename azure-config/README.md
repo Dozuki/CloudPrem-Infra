@@ -7,8 +7,12 @@ Self-contained deployment bundle for Dozuki MPC (managed private cloud) on Azure
 - Subscription role: Owner (or Contributor + Role Based Access Control Administrator)
 - GHCR credentials file (ghcr.env, provided by Dozuki with the bundle)
 - An Entra security group for cluster admins (deploying user must be a member)
-- Outbound HTTPS to: github.com, ghcr.io, releases.hashicorp.com, dl.k8s.io, get.helm.sh
+- Outbound HTTPS to: github.com, ghcr.io, dl.k8s.io, get.helm.sh
   (cluster nodes also need outbound HTTPS to ghcr.io for runtime image pulls)
+
+The bundle downloads and checksum-verifies the OpenTofu version pinned in
+`.opentofu-version` (currently 1.11.8). It does not require Terraform or
+Terragrunt on the operator's machine.
 
 ## Quick start
 1. `cp physical.tfvars.example physical.tfvars` and fill in the REQUIRED values.
