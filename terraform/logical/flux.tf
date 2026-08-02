@@ -547,9 +547,16 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # upgrade retries=2: with retries=0 ONE failed upgrade (an eviction, a
       # not-yet-mirrored image, a transient webhook) stalls the release until a
       # human does the requestedAt+forceAt dance (seen live 2026-07-30). Two
-      # retries let it self-heal once the cause clears; remediateLastFailure
-      # stays false so a failure never auto-rolls-back over a completed
-      # migration. Install keeps retries=0: install remediation uninstalls
+      # retries let it self-heal once the cause clears. What that costs:
+      # remediation (strategy defaults to rollback) runs BETWEEN each attempt,
+      # so retries=2 means up to 2 rollbacks per failed upgrade, and the counter
+      # resets on a chart version change, so it bounds one cycle and not the
+      # loop (dev-min 2026-08-01). remediateLastFailure=false is load-bearing,
+      # not redundant: Flux defaults it to TRUE whenever retries > 0. It governs
+      # only the failure after retries are spent, parking the release on the new
+      # revision instead of rolling back - a human sees a failed release rather
+      # than a chart silently older than the schema already in the database.
+      # Install keeps retries=0: install remediation uninstalls
       # first, which is not a loop we want running unattended.
       upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 2, remediateLastFailure = false } }
       # rollback.force=false pinned explicitly (it is the Helm default, but this is the one
