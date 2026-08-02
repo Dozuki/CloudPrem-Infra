@@ -39,6 +39,10 @@
 #                    app - gate BEFORE confirming physical, not here).
 #   abort          - pre-cutover abort with hard guards; refuses after cutover.
 #   bi-epoch       - reload the BI DMS task from the (now Aurora) source.
+#   writers        - READ-ONLY. Measures whether app writers are actually
+#                    drained, by sampling InnoDB row-change counters rather than
+#                    trusting session counts. Run it before the fence to learn
+#                    which cutover mode you are in.
 #
 # Environment overrides:
 #   FENCE_PREFLIGHT=warn         report the fence pre-flight blockers and carry on
@@ -53,6 +57,7 @@
 #                                resumes from the same marker.
 #   FENCE_BACKUP_MARGIN_MIN=30   how close to the source's backup window is too
 #                                close to start a fence.
+#   WRITERS_SAMPLE_SEC=15        sampling window for the writers phase.
 #   CHECKSUM_TABLES="db.t1 ..."  extra tables for the validate phase.
 #   LEGACY_DB_SECRET=<prefix>    fallback prefix for the primary DB secret.
 set -euo pipefail
@@ -491,6 +496,63 @@ bi_kind >/dev/null
 [ "$(bi_kind)" = none ] || bi_arn_cached >/dev/null
 
 case "$PHASE" in
+
+# READ-ONLY. Answers "are app writers actually drained?" with a measurement
+# instead of the assertion the fence phase used to print.
+#
+# Measure ROW CHANGES, not connections and not Handler_*. Connections lie: the
+# app's pool holds idle sessions whether or not it is writing, and it reconnects
+# between kill sweeps (the fence's own sweep comment says so). Handler_write
+# lies harder, because it counts writes to internal temporary tables from SELECT
+# sorting - measured 355/s on a live source whose real business write rate was
+# 4.7 rows/s. Using it as a drain check means a fully drained source still looks
+# busy and nobody ever believes the drain worked.
+#
+# Innodb_rows_inserted/updated/deleted count actual InnoDB table row changes and
+# go to a hard zero on a quiesced source. That is the signal.
+writers)
+  prep_cnfs
+  SAMPLE="${WRITERS_SAMPLE_SEC:-15}"
+  # DMS holds long-lived sessions and a Binlog Dump thread as the same DB user
+  # as the app, so the only way to tell them apart is the source address.
+  DMSIPS=$(aws dms describe-replication-instances --region "$REGION" \
+           --query 'ReplicationInstances[].ReplicationInstancePrivateIpAddresses[]' --output text 2>/dev/null | tr '\t' '\n' | grep . | sort -u || true)
+  if [ -n "$DMSIPS" ]; then
+    say "DMS replication instance IPs (excluded from the app-session count):"
+    printf '%s\n' "$DMSIPS" | sed 's/^/    /'
+  else
+    say "WARNING: could not resolve DMS replication instance IPs - app/DMS session"
+    say "         attribution below is unreliable. Check dms:DescribeReplicationInstances."
+  fi
+  DMSRE=$(printf '%s' "$DMSIPS" | tr '\n' '|' | sed 's/|$//;s/\./\\./g')
+  [ -n "$DMSRE" ] || DMSRE='__no_dms_ip_matched__'
+  say "sampling row-change counters over ${SAMPLE}s..."
+  ssm_run 300 <<EOF
+M="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
+C="SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME IN ('Innodb_rows_inserted','Innodb_rows_updated','Innodb_rows_deleted')"
+\$M -e "\$C" | sort > /tmp/wr1.txt
+sleep $SAMPLE
+\$M -e "\$C" | sort > /tmp/wr2.txt
+TOT=\$(join /tmp/wr1.txt /tmp/wr2.txt | awk '{d=\$3-\$2; printf "  %-22s %10d  (%.2f/s)\n", \$1, d, d/$SAMPLE; t+=d} END {print "TOTAL_ROW_CHANGES="t+0 > "/tmp/wrtot"}')
+echo "\$TOT"
+echo "row_changes_total=\$(sed 's/.*=//' /tmp/wrtot)"
+echo "open_transactions=\$(\$M -e 'SELECT COUNT(*) FROM information_schema.innodb_trx')"
+echo "app_sessions=\$(\$M -e "SELECT COUNT(*) FROM information_schema.processlist WHERE command != 'Binlog Dump' AND user NOT IN ('rdsadmin','event_scheduler') AND SUBSTRING_INDEX(host,':',1) NOT REGEXP '^($DMSRE)\$' AND id != CONNECTION_ID()")"
+echo "read_only=\$(\$M -e 'SELECT @@read_only')"
+echo "--- non-DMS sessions doing work right now ---"
+\$M -e "SELECT id, user, SUBSTRING_INDEX(host,':',1) src, command, time, LEFT(REPLACE(info,CHAR(10),' '),60) FROM information_schema.processlist WHERE command NOT IN ('Sleep','Binlog Dump','Daemon') AND user NOT IN ('rdsadmin') AND SUBSTRING_INDEX(host,':',1) NOT REGEXP '^($DMSRE)\$' AND id != CONNECTION_ID()"
+EOF
+  say ""
+  say "READING THE RESULT:"
+  say "  row_changes_total = 0 across two consecutive runs is the drain proof."
+  say "  Anything above zero means writers are still live, whatever the session"
+  say "  count says. Compare against an UNDRAINED baseline taken beforehand so"
+  say "  you know what busy looks like on this env."
+  say "  open_transactions > 0 means a write is mid-flight regardless of the rate."
+  say "  This does NOT fence anything - it only tells you which cutover mode you"
+  say "  are in, which decides whether the fence's gates are customer-visible"
+  say "  write downtime or happen inside an outage that already started."
+  ;;
 
 status)
   say "migration task: $(task_status)   bi task: $(bi_task_status)"
