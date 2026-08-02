@@ -497,15 +497,17 @@ resource "helm_release" "external_secrets" {
       value = "1"
     },
     {
-      # Chart ships no requests at all, which makes the pod free in Karpenter's
-      # bin-packing and lets the topology spread below be silently ignored (a
-      # zero-request pod always "fits", so the scheduler has nothing to skew).
-      # Small real requests give the spread something to bite on. Requests only,
-      # no limits: an under-set memory limit OOMKills the webhook, which is the
+      # Chart ships no requests at all. Two consequences: the pod is free in
+      # Karpenter's bin-packing, so it can be packed onto a node with no real
+      # headroom left, and it lands in BestEffort QoS, which is what the kubelet
+      # evicts first under node pressure. Small real requests fix both. They do
+      # NOT affect the topology spread below - PodTopologySpread scoring counts
+      # matching pods per domain and never looks at requests. Requests only, no
+      # limits: an under-set memory limit OOMKills the webhook, which is the
       # exact fail-closed outage this block exists to prevent. Measured on
       # dev-min 2026-08-02: 1m CPU / 32Mi. Memory is requested at 64Mi rather
-      # than at the observed 32Mi so the pod is not first in line for eviction
-      # the moment a node comes under memory pressure.
+      # than the observed 32Mi to leave headroom and keep the pod out of the
+      # front of the eviction queue.
       name  = "webhook.resources.requests.cpu"
       value = "10m"
     },
@@ -534,10 +536,10 @@ resource "helm_release" "external_secrets" {
   # Pending forever on genuinely single-node clusters (the smallest
   # CloudPrem tiers). Soft means it is a preference, not a guarantee: on a
   # cluster with one schedulable node both replicas still land together, and
-  # we can lose the pair. The requests set above are what make the preference
-  # worth anything at all (a zero-request pod always fits, so the scheduler
-  # never sees a skew to correct). No labelSelector needed - the chart
-  # auto-fills it from the webhook's own selector labels when omitted.
+  # we can lose the pair. topologyKey is hostname, so this is node-loss
+  # protection only and buys nothing against a zone failure. No labelSelector
+  # needed - the chart auto-fills it from the webhook's own selector labels
+  # when omitted.
   values = [
     yamlencode({
       webhook = {

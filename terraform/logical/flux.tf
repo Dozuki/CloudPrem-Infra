@@ -553,20 +553,23 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # resets on a chart version change, so it bounds one cycle and not the
       # loop (dev-min 2026-08-01). remediateLastFailure=false is load-bearing,
       # not redundant: Flux defaults it to TRUE whenever retries > 0. It governs
-      # only the failure after retries are spent, parking the release on the new
-      # revision instead of rolling back - a human sees a failed release rather
-      # than a chart silently older than the schema already in the database.
+      # only the failure after retries are spent: Flux performs no rollback, so the
+      # release stays failed and live state may be left partially applied, pending
+      # operator recovery. A human sees a failed release rather than a chart
+      # silently older than the schema already in the database.
       # Install keeps retries=0: install remediation uninstalls
       # first, which is not a loop we want running unattended.
       upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 2, remediateLastFailure = false } }
       # rollback.force=false pinned explicitly (it is the Helm default, but this is the one
       # knob here that can destroy data, so it gets written down rather than inherited).
-      # Remediation re-renders the previous revision over the live objects, and force=true
-      # resolves any conflict by deleting and recreating the object. The db-migrations Job is
-      # the object most likely to conflict (spec.template and spec.selector are immutable), so
-      # force would delete a completed migration and re-run it unattended, mid-incident, on a
-      # database that is already one schema version ahead. A rollback that fails loudly and
-      # parks the release is the better outcome.
+      # Under client-side apply force does not wait for a conflict: it selects the replace
+      # strategy and recreates every same-named object it visits, so a completed db-migrations
+      # Job would be deleted and re-run unattended, mid-incident, on a database already one
+      # schema version ahead. Under server-side apply Flux documents force as ignored, and the
+      # flux_chart_version pinned here is on the SSA line, so today this is defense-in-depth
+      # for client-side or adopted releases rather than an active guard. It does not govern
+      # the ordinary create/prune cycle that happens when the Job name changes. A rollback
+      # that fails loudly and parks the release is the better outcome.
       rollback = { force = false }
       # driftDetection=enabled corrects cluster drift back to the chart's desired state. Promoted from warn after a fleet
       # sweep (2026-07-30) found drift on exactly one env, and it was stale old-chart state helm's 3-way merge could never
