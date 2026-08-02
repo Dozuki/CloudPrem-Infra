@@ -9,7 +9,7 @@
 | <a name="requirement_external"></a> [external](#requirement\_external) | ~> 2.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | ~> 3.0 |
 | <a name="requirement_kubectl"></a> [kubectl](#requirement\_kubectl) | 2.1.5 |
-| <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 2.0 |
+| <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 3.0 |
 | <a name="requirement_local"></a> [local](#requirement\_local) | ~> 2.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
 | <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.0 |
@@ -25,7 +25,7 @@
 | <a name="provider_external"></a> [external](#provider\_external) | ~> 2.0 |
 | <a name="provider_helm"></a> [helm](#provider\_helm) | ~> 3.0 |
 | <a name="provider_kubectl"></a> [kubectl](#provider\_kubectl) | 2.1.5 |
-| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | ~> 2.0 |
+| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | ~> 3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 | <a name="provider_tls"></a> [tls](#provider\_tls) | ~> 4.0 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | ~> 4.0 |
@@ -56,6 +56,8 @@ No modules.
 | [kubectl_manifest.dozuki_helmrelease](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.dozuki_ocirepository](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
+| [kubectl_manifest.flux_relay_external_secret](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
+| [kubectl_manifest.flux_relay_secret_store](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.flux_slack_alert](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.flux_slack_provider](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
 | [kubectl_manifest.peer_auth_carveouts](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
@@ -93,6 +95,7 @@ No modules.
 | [kubernetes_secret_v1.redis_auth_eg](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.vault_auth_token](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_service_account_v1.eso_vault_auth](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_account_v1) | resource |
+| [kubernetes_service_account_v1.flux_external_secrets](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_account_v1) | resource |
 | [kubernetes_service_account_v1.vault_auth](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_account_v1) | resource |
 | [kubernetes_service_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service_v1) | resource |
 | [kubernetes_storage_class_v1.ebs_gp3](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/storage_class_v1) | resource |
@@ -177,9 +180,10 @@ No modules.
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_dns_sa_name"></a> [external\_dns\_sa\_name](#input\_external\_dns\_sa\_name) | external-dns service account name (must match the AWS role trust subject). | `string` | `"external-dns"` | no |
 | <a name="input_flux_chart_version"></a> [flux\_chart\_version](#input\_flux\_chart\_version) | fluxcd-community/flux2 chart version for the app-delivery controllers. 2.19.0 = Flux 2.9.1 (helm-controller v1.6.2, Helm 4/SSA line), validated adopting the release cleanly on min under Helm 3 and 4. | `string` | `"2.19.0"` | no |
-| <a name="input_flux_slack_bot_token"></a> [flux\_slack\_bot\_token](#input\_flux\_slack\_bot\_token) | Slack bot token (chat:write) for Flux notifications via the Slack API. Takes precedence over flux\_slack\_webhook\_url when set together with flux\_slack\_channel. | `string` | `""` | no |
-| <a name="input_flux_slack_channel"></a> [flux\_slack\_channel](#input\_flux\_slack\_channel) | Slack channel ID the bot-token Flux notifications post to. Required alongside flux\_slack\_bot\_token. The bot must be a member of this channel (invite it, or grant chat:write.public for public channels) or every delivery fails not\_in\_channel at runtime. | `string` | `""` | no |
-| <a name="input_flux_slack_webhook_url"></a> [flux\_slack\_webhook\_url](#input\_flux\_slack\_webhook\_url) | Slack incoming-webhook URL for Flux notifications. Prefer flux\_slack\_bot\_token + flux\_slack\_channel (webhook posts have a synthetic author no token can delete or edit). When either transport is set, notification-controller comes up and a Provider(type=slack)+Alert post HelmRelease/OCIRepository events (successes and failures) to Slack. Empty (default) wires nothing and leaves the controller off - fully opt-in per env. | `string` | `""` | no |
+| <a name="input_flux_slack_bot_token"></a> [flux\_slack\_bot\_token](#input\_flux\_slack\_bot\_token) | Legacy Slack bot token for Flux's fixed native formatter. Ignored when flux\_slack\_relay\_enabled is true; the signed relay keeps the bot token out of customer clusters. | `string` | `""` | no |
+| <a name="input_flux_slack_channel"></a> [flux\_slack\_channel](#input\_flux\_slack\_channel) | Slack channel ID for the legacy direct bot-token transport. The signed relay owns its channel server-side. | `string` | `""` | no |
+| <a name="input_flux_slack_relay_enabled"></a> [flux\_slack\_relay\_enabled](#input\_flux\_slack\_relay\_enabled) | Route Flux events through the partition-local signed relay for golden Slack cards and deployment lifecycle threads. AWS only; the relay endpoint and HMAC token are projected from Vault by External Secrets. | `bool` | `false` | no |
+| <a name="input_flux_slack_webhook_url"></a> [flux\_slack\_webhook\_url](#input\_flux\_slack\_webhook\_url) | Legacy Slack incoming-webhook URL for Flux notifications. Ignored when flux\_slack\_relay\_enabled is true. Empty leaves this fallback transport off. | `string` | `""` | no |
 | <a name="input_gateway_dns_label"></a> [gateway\_dns\_label](#input\_gateway\_dns\_label) | Azure DNS label for the gateway LoadBalancer (azure). Yields <label>.<region>.cloudapp.azure.com. Empty = LB public IP with no DNS label. | `string` | `""` | no |
 | <a name="input_ghcr_pull_token"></a> [ghcr\_pull\_token](#input\_ghcr\_pull\_token) | GitHub token (read:packages) for pulling MPC images from GHCR (Azure only). | `string` | `""` | no |
 | <a name="input_ghcr_pull_username"></a> [ghcr\_pull\_username](#input\_ghcr\_pull\_username) | GitHub username for pulling MPC images from GHCR (Azure only). | `string` | `""` | no |

@@ -144,9 +144,12 @@ resource "vault_kubernetes_auth_backend_role" "eso" {
   backend   = vault_auth_backend.kubernetes[0].path
   role_name = "dozuki-app"
 
-  bound_service_account_names      = ["dozuki-external-secrets"]
-  bound_service_account_namespaces = [local.k8s_namespace_name]
-  audience                         = var.vault_address
+  bound_service_account_names = ["dozuki-external-secrets"]
+  bound_service_account_namespaces = concat(
+    [local.k8s_namespace_name],
+    local.flux_slack_use_relay ? [kubernetes_namespace_v1.flux_system.metadata[0].name] : [],
+  )
+  audience = var.vault_address
 
   token_policies = [vault_policy.eso_readonly[0].name]
   token_ttl      = 3600

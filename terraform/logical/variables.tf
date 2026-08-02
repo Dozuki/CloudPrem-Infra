@@ -559,15 +559,21 @@ variable "flux_chart_version" {
   default     = "2.19.0"
 }
 
+variable "flux_slack_relay_enabled" {
+  description = "Route Flux events through the partition-local signed relay for golden Slack cards and deployment lifecycle threads. AWS only; the relay endpoint and HMAC token are projected from Vault by External Secrets."
+  type        = bool
+  default     = false
+}
+
 variable "flux_slack_webhook_url" {
-  description = "Slack incoming-webhook URL for Flux notifications. Prefer flux_slack_bot_token + flux_slack_channel (webhook posts have a synthetic author no token can delete or edit). When either transport is set, notification-controller comes up and a Provider(type=slack)+Alert post HelmRelease/OCIRepository events (successes and failures) to Slack. Empty (default) wires nothing and leaves the controller off - fully opt-in per env."
+  description = "Legacy Slack incoming-webhook URL for Flux notifications. Ignored when flux_slack_relay_enabled is true. Empty leaves this fallback transport off."
   type        = string
   default     = ""
   sensitive   = true
 }
 
 variable "flux_slack_bot_token" {
-  description = "Slack bot token (chat:write) for Flux notifications via the Slack API. Takes precedence over flux_slack_webhook_url when set together with flux_slack_channel."
+  description = "Legacy Slack bot token for Flux's fixed native formatter. Ignored when flux_slack_relay_enabled is true; the signed relay keeps the bot token out of customer clusters."
   type        = string
   default     = ""
   sensitive   = true
@@ -579,7 +585,7 @@ variable "flux_slack_bot_token" {
 }
 
 variable "flux_slack_channel" {
-  description = "Slack channel ID the bot-token Flux notifications post to. Required alongside flux_slack_bot_token. The bot must be a member of this channel (invite it, or grant chat:write.public for public channels) or every delivery fails not_in_channel at runtime."
+  description = "Slack channel ID for the legacy direct bot-token transport. The signed relay owns its channel server-side."
   type        = string
   default     = ""
 }

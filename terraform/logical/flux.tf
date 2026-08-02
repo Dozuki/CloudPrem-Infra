@@ -619,25 +619,33 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
 }
 
 # ---------------------------------------------------------------------------
-# notification-controller -> Slack. Flux posts HelmRelease/OCIRepository events (both failures and
-# successes, eventSeverity=info) to Slack, over either transport: the bot token + channel pair
-# (preferred, wins when both transports are set) or the legacy incoming webhook. With neither wired
-# (the default) NO Secret/Provider/Alert is created and notification-controller stays off (above), so
-# an env without Slack delivery stays exactly as it was. This layer has no Kustomizations, so the Alert
-# scopes to the resources that actually exist here: the app HelmRelease and its OCIRepository source.
+# notification-controller -> signed fleet relay -> Slack. Flux posts HelmRelease/OCIRepository events
+# (both failures and successes, eventSeverity=info) as generic-hmac payloads. The relay verifies the
+# partition-local Vault token, renders the approved card format, and correlates one desired revision's
+# source + release events into a deployment thread. Direct bot-token/webhook delivery remains only as
+# a migration fallback; the relay wins when enabled. With no transport, notification-controller stays
+# off. This layer has no Kustomizations, so the Alert scopes to the app HelmRelease and OCIRepository.
 # ---------------------------------------------------------------------------
 
 locals {
-  # Either transport lights up the notification path; the bot token wins when
-  # both are set (webhook posts have a synthetic author no token can act on).
-  flux_slack_use_token = var.flux_slack_bot_token != "" && var.flux_slack_channel != ""
-  flux_slack_enabled   = local.flux_slack_use_token || var.flux_slack_webhook_url != ""
+  flux_slack_use_relay = var.cloud == "aws" && var.flux_slack_relay_enabled
+  # Legacy direct transports stay available for old partitions, but never win
+  # over the relay's controllable Block Kit renderer.
+  flux_slack_use_token = !local.flux_slack_use_relay && var.flux_slack_bot_token != "" && var.flux_slack_channel != ""
+  flux_slack_enabled   = local.flux_slack_use_relay || local.flux_slack_use_token || var.flux_slack_webhook_url != ""
 }
 
-# The credential as a Secret the Provider references (never inlined in the
-# Provider spec): `token` for the bot-token path, `address` for the webhook.
+check "flux_slack_relay_aws_only" {
+  assert {
+    condition     = !var.flux_slack_relay_enabled || var.cloud == "aws"
+    error_message = "flux_slack_relay_enabled requires an AWS-backed environment with the partition-local Vault relay."
+  }
+}
+
+# Legacy direct credential. Relay-enabled environments replace this with the
+# ExternalSecret below, so the Slack bot token no longer enters the cluster.
 resource "kubernetes_secret_v1" "flux_slack_webhook" {
-  count = local.flux_slack_enabled ? 1 : 0
+  count = local.flux_slack_enabled && !local.flux_slack_use_relay ? 1 : 0
   metadata {
     name      = "flux-slack-webhook"
     namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
@@ -645,21 +653,119 @@ resource "kubernetes_secret_v1" "flux_slack_webhook" {
   data = local.flux_slack_use_token ? { token = var.flux_slack_bot_token } : { address = var.flux_slack_webhook_url }
 }
 
+# The app chart's SecretStore is namespace-scoped to dozuki. Give flux-system
+# its own identity and store using the same environment-scoped Vault role. That
+# role is read-only and this namespace can sync only the endpoint + relay HMAC
+# token; the Slack bot token remains server-side in the relay's SSM cache.
+resource "kubernetes_service_account_v1" "flux_external_secrets" {
+  count = local.flux_slack_use_relay ? 1 : 0
+
+  metadata {
+    name      = "dozuki-external-secrets"
+    namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
+  }
+}
+
+resource "kubectl_manifest" "flux_relay_secret_store" {
+  count = local.flux_slack_use_relay ? 1 : 0
+  depends_on = [
+    helm_release.external_secrets,
+    kubernetes_service_account_v1.flux_external_secrets,
+    vault_kubernetes_auth_backend_role.eso,
+  ]
+  yaml_body = yamlencode({
+    apiVersion = "external-secrets.io/v1"
+    kind       = "SecretStore"
+    metadata = {
+      name      = "flux-relay-vault"
+      namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
+    }
+    spec = {
+      provider = {
+        vault = {
+          server  = var.vault_address
+          path    = "secret"
+          version = "v2"
+          auth = {
+            kubernetes = {
+              mountPath = "k8s/${local.vault_stack_label}"
+              role      = "dozuki-app"
+              serviceAccountRef = {
+                name      = kubernetes_service_account_v1.flux_external_secrets[0].metadata[0].name
+                audiences = [var.vault_address]
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+}
+
+resource "kubectl_manifest" "flux_relay_external_secret" {
+  count      = local.flux_slack_use_relay ? 1 : 0
+  depends_on = [kubectl_manifest.flux_relay_secret_store]
+  yaml_body = yamlencode({
+    apiVersion = "external-secrets.io/v1"
+    kind       = "ExternalSecret"
+    metadata = {
+      name      = "flux-slack-relay"
+      namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
+    }
+    spec = {
+      refreshInterval = "5m"
+      secretStoreRef  = { name = "flux-relay-vault", kind = "SecretStore" }
+      target = {
+        name           = "flux-slack-relay"
+        creationPolicy = "Owner"
+        deletionPolicy = "Retain"
+        template = {
+          engineVersion = "v2"
+          data = {
+            address = "{{ .url }}"
+            token   = "{{ .token }}"
+          }
+        }
+      }
+      data = [
+        {
+          secretKey = "url"
+          remoteRef = {
+            key      = "dozuki/global/alertmanager-slack-relay-endpoint"
+            property = "url"
+          }
+        },
+        {
+          secretKey = "token"
+          remoteRef = {
+            key      = "dozuki/global/alertmanager-slack-relay"
+            property = "token"
+          }
+        },
+      ]
+    }
+  })
+}
+
 resource "kubectl_manifest" "flux_slack_provider" {
-  count      = local.flux_slack_enabled ? 1 : 0
-  depends_on = [helm_release.flux, kubernetes_secret_v1.flux_slack_webhook]
+  count = local.flux_slack_enabled ? 1 : 0
+  depends_on = [
+    helm_release.flux,
+    kubernetes_secret_v1.flux_slack_webhook,
+    kubectl_manifest.flux_relay_external_secret,
+  ]
   yaml_body = yamlencode({
     apiVersion = "notification.toolkit.fluxcd.io/v1beta3"
     kind       = "Provider"
     metadata   = { name = "slack", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
-    # Token path: address points at the Web API and channel is explicit
-    # (the webhook had it baked in); the secret's `token` becomes Bearer auth.
     spec = merge(
       {
-        type      = "slack"
-        secretRef = { name = kubernetes_secret_v1.flux_slack_webhook[0].metadata[0].name }
+        type = local.flux_slack_use_relay ? "generic-hmac" : "slack"
+        secretRef = {
+          name = local.flux_slack_use_relay ? "flux-slack-relay" : kubernetes_secret_v1.flux_slack_webhook[0].metadata[0].name
+        }
       },
-      local.flux_slack_use_token ? {
+      !local.flux_slack_use_relay && local.flux_slack_use_token ? {
         address = "https://slack.com/api/chat.postMessage"
         channel = var.flux_slack_channel
       } : {}
