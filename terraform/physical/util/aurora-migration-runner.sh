@@ -254,12 +254,12 @@ hhmm_to_min() { printf '%s' "$1" | awk -F: '{ print ($1 * 60) + $2 }'; }
 # Minutes until the source's backup window NEXT opens, or 9999 if no window is
 # set. Inside the window it returns the wait until tomorrow's, which is why the
 # caller must ask backup_window_open first and only fall through to this.
-minutes_to_backup_window() {
-  local w start now delta
-  w=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
-      --query 'DBInstances[0].PreferredBackupWindow' --output text 2>/dev/null || echo None)
-  { [ -n "$w" ] && [ "$w" != None ]; } || { printf '9999'; return; }
-  start=$(hhmm_to_min "${w%%-*}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+# $1 = a "HH:MM-HH:MM" UTC window. Pure functions: the caller owns the AWS read,
+# so a failed describe surfaces as one blocker instead of three silent defaults.
+minutes_to_window() {
+  local start now delta
+  case "$1" in [0-9][0-9]:[0-9][0-9]-[0-9][0-9]:[0-9][0-9]) : ;; *) printf 'malformed'; return ;; esac
+  start=$(hhmm_to_min "${1%%-*}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
   delta=$(( start - now ))
   # spelled as if/fi rather than "[ test ] && assign" so the exit status of the
   # last statement before the printf is never the false branch of a test
@@ -267,12 +267,10 @@ minutes_to_backup_window() {
   printf '%s' "$delta"
 }
 
-backup_window_open() {
-  local w start end now
-  w=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
-      --query 'DBInstances[0].PreferredBackupWindow' --output text 2>/dev/null || echo None)
-  { [ -n "$w" ] && [ "$w" != None ]; } || return 1
-  start=$(hhmm_to_min "${w%%-*}"); end=$(hhmm_to_min "${w##*-}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+window_open() {
+  local start end now
+  case "$1" in [0-9][0-9]:[0-9][0-9]-[0-9][0-9]:[0-9][0-9]) : ;; *) return 1 ;; esac
+  start=$(hhmm_to_min "${1%%-*}"); end=$(hhmm_to_min "${1##*-}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
   # a window may wrap midnight (e.g. 23:30-00:00), so the two cases differ
   if [ "$start" -le "$end" ]; then [ "$now" -ge "$start" ] && [ "$now" -lt "$end" ]
   else [ "$now" -ge "$start" ] || [ "$now" -lt "$end" ]; fi
@@ -280,43 +278,73 @@ backup_window_open() {
 
 # Every reason the next parameter apply could be deferred or refused, as
 # "code: detail" lines. Empty output means clear to fence.
+#
+# EVERY PROBE MUST FAIL CLOSED. This function is consumed as
+# `blockers=$(fence_blockers)`, and errexit is NOT in force inside a command
+# substitution used as an assignment RHS - a probe that dies mid-function does
+# not abort the caller, it just contributes nothing, and an empty result reads
+# as "clear". Verified on bash 3.2 and 5.2. So a probe may never signal failure
+# by falling silent: each one resolves to an explicit sentinel that produces a
+# blocker line. An unreadable fact is a refusal, the same rule `abort` already
+# follows.
+#
+# This is not hypothetical. rds:DescribeDBSnapshots is a permission this gate
+# introduced; a runner role that predates it would silently report "no snapshot
+# running" on every fence forever, defeating the check whose whole point is the
+# safety-snapshot case.
+#
+# One describe, reused. Five separate calls each carried their own throttle and
+# permission exposure for facts that all live in the same response.
 fence_blockers() {
-  local st pg_status pending snaps mins
-  st=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
-       --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo unknown)
-  # "backing-up" is the state that produced the 262.89s apply. "modifying",
-  # "upgrading" and friends queue applies the same way; anything that is not
-  # plainly available is a reason to stop and look.
-  [ "$st" = available ] || echo "instance-status: $st (only 'available' applies parameters promptly)"
-
-  # An apply already in flight is what makes the fence unabortable. Refuse to add
-  # a second one on top of it.
-  pg_status=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
-              --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus' --output text 2>/dev/null || echo unknown)
-  [ "$pg_status" = in-sync ] || echo "parameter-group: $pg_status (an apply is in flight; the unfence would be refused)"
-
-  pending=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
-            --query 'DBInstances[0].PendingModifiedValues' --output json 2>/dev/null | jq -rc 'if (. // {}) == {} then "" else tostring end')
-  [ -z "$pending" ] || echo "pending-modifications: $pending"
-
-  # Manual snapshots defer applies exactly as automated backups do, and a cutover
-  # runbook that takes a safety snapshot first is the likely way to hit this.
-  snaps=$(aws rds describe-db-snapshots --db-instance-identifier "$SRC_ID" --region "$REGION" \
-          --query 'DBSnapshots[?Status!=`available`].[DBSnapshotIdentifier,Status]' --output text 2>/dev/null | tr '\t' '=' | tr '\n' ' ' | sed 's/ *$//')
-  [ -z "$snaps" ] || echo "snapshot-in-progress: $snaps"
-
-  if backup_window_open; then
-    echo "backup-window: OPEN now (a backup may start or be running)"
+  local inst st pg_status pending snaps mins
+  inst=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+         --query 'DBInstances[0]' --output json 2>/dev/null) || inst=""
+  if [ -z "$inst" ] || ! echo "$inst" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    echo "instance-probe: FAILED (describe-db-instances unreadable - treat as unsafe; check credentials and rds:DescribeDBInstances)"
   else
-    mins=$(minutes_to_backup_window)
-    # A non-integer here means the probe itself broke. Report that rather than
-    # letting [ -ge ] error out, which reads like a backup-window finding and
-    # sends the operator looking in the wrong place.
-    case "$mins" in
-      '' | *[!0-9]*) echo "backup-window: UNKNOWN (probe returned '$mins' - treat as unsafe and check by hand)" ;;
-      *) [ "$mins" -ge "${FENCE_BACKUP_MARGIN_MIN:-30}" ] || \
-           echo "backup-window: opens in ${mins}m (under the ${FENCE_BACKUP_MARGIN_MIN:-30}m margin; the fence could be caught by it)" ;;
-    esac
+    # "backing-up" is the state that produced the 262.89s apply. "modifying",
+    # "upgrading" and friends queue applies the same way; anything that is not
+    # plainly available is a reason to stop and look.
+    st=$(echo "$inst" | jq -r '.DBInstanceStatus // "unknown"')
+    [ "$st" = available ] || echo "instance-status: $st (only 'available' applies parameters promptly)"
+
+    # An apply already in flight is what makes the fence unabortable. Refuse to
+    # add a second one on top of it.
+    pg_status=$(echo "$inst" | jq -r '.DBParameterGroups[0].ParameterApplyStatus // "unknown"')
+    [ "$pg_status" = in-sync ] || echo "parameter-group: $pg_status (an apply is in flight; the unfence would be refused)"
+
+    pending=$(echo "$inst" | jq -rc 'if (.PendingModifiedValues // {}) == {} then "" else (.PendingModifiedValues | tostring) end')
+    [ -z "$pending" ] || echo "pending-modifications: $pending"
+
+    # RDS always returns a PreferredBackupWindow, so absence here means the probe
+    # is wrong, not that backups are off.
+    W=$(echo "$inst" | jq -r '.PreferredBackupWindow // ""')
+    if [ -z "$W" ]; then
+      echo "backup-window: UNREADABLE (no PreferredBackupWindow in the describe - treat as unsafe)"
+    elif window_open "$W"; then
+      echo "backup-window: OPEN now (a backup may start or be running)"
+    else
+      mins=$(minutes_to_window "$W")
+      case "$mins" in
+        '' | *[!0-9]*) echo "backup-window: UNKNOWN (computed '$mins' from '$W' - treat as unsafe and check by hand)" ;;
+        *) [ "$mins" -ge "${FENCE_BACKUP_MARGIN_MIN:-30}" ] || \
+             echo "backup-window: opens in ${mins}m (under the ${FENCE_BACKUP_MARGIN_MIN:-30}m margin; the fence could be caught by it)" ;;
+      esac
+    fi
+  fi
+
+  # Match the IN-FLIGHT states explicitly rather than negating 'available'. A
+  # snapshot that failed months ago sits in DBSnapshots as Status=failed until
+  # someone deletes it, and negating 'available' would let it block every fence
+  # forever.
+  snaps=$(aws rds describe-db-snapshots --db-instance-identifier "$SRC_ID" --region "$REGION" \
+          --query 'DBSnapshots[?Status==`creating` || Status==`copying` || Status==`modifying`].[DBSnapshotIdentifier,Status]' \
+          --output text 2>/dev/null) || snaps="PROBE_FAILED"
+  if [ "$snaps" = "PROBE_FAILED" ]; then
+    echo "snapshot-probe: FAILED (describe-db-snapshots unreadable - treat as unsafe; the runner role may lack rds:DescribeDBSnapshots)"
+  else
+    snaps=$(printf '%s' "$snaps" | tr '\t' '=' | tr '\n' ' ' | sed 's/ *$//')
+    [ -z "$snaps" ] || echo "snapshot-in-progress: $snaps"
   fi
 }
 
@@ -821,9 +849,14 @@ fence)
   # only sets them at task creation - assert the EFFECTIVE settings.
   [ "$(effective_apply_policies)" = "STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK" ] || \
     die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
-  # Fail fast, before the kill sweep touches anything. Re-checked immediately
-  # before the apply prompt, since a backup can start during the steps between.
-  preflight_fence_gate "entry"
+  # NOTE: the pre-flight gate deliberately does NOT run here. It belongs inside
+  # the fresh-fence branch below, after the RO0 already-fenced probe. On
+  # re-entry the source is ALREADY read_only with customers down, there is no
+  # parameter apply left to defer, and the gate's blockers ("an apply is in
+  # flight", "the backup window opens in Nm") are all meaningless - a fence that
+  # has been up through its own multi-hour epoch will drift into the backup
+  # window as a matter of course. Gating recovery on them would strand an
+  # operator mid-outage hunting for FENCE_PREFLIGHT=warn.
   prep_cnfs
   # NOTE on the validation-epoch scope (see the epoch block after the drain
   # proof): the fresh task validates the main task's ENTIRE mapping scope (a
@@ -877,6 +910,10 @@ EOF
     [ -n "$MARK" ] || die "re-entry: no marker found on the fenced source - cannot anchor the epoch; unfence and start over"
     say "  reusing marker '$MARK' from the prior attempt"
   else
+  # Fresh fence only. Fail fast here, before the kill sweep touches anything.
+  # Re-checked immediately before the apply prompt, since a backup can start
+  # during the steps between.
+  preflight_fence_gate "entry"
   MARK="cutover-$(date -u +%s)"
   say "kill sweep (by connection id - app and runner share the master user) + marker '$MARK'"
   ssm_run <<EOF
@@ -1291,11 +1328,25 @@ EOF
   fi
   say ">>> UNFENCE: set aurora_migration_source_fenced = false in env.hcl and"
   say ">>> confirm the gated apply (Terraform refuses this while state=cutover)."
-  say "Polling for read_only=0..."
+  # Bounded for the same reason as the fence-side poll, and it matters more here:
+  # this is the path taken when things have already gone wrong, so hanging
+  # forever waiting on an unfence apply is the worst possible failure mode. The
+  # source stays fenced if this dies, which is the state it was already in, and
+  # abort is re-runnable.
+  ADEADLINE=$((SECONDS + 60 * ${FENCE_APPLY_TIMEOUT_MIN:-30}))
+  say "Polling for read_only=0 (deadline ${FENCE_APPLY_TIMEOUT_MIN:-30}m)..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
-); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "0" ] && break; sleep 30; done
+); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "0" ] && break
+    if [ "$SECONDS" -ge "$ADEADLINE" ]; then
+      die "source did not reach read_only=0 within ${FENCE_APPLY_TIMEOUT_MIN:-30}m - the unfence apply
+has not landed. The source is STILL FENCED. Check the Spacelift run, and note that an unfence is
+refused while another apply is in flight (InvalidDBParameterGroupState, self-clearing). 'abort' is
+re-runnable once it lands."
+    fi
+    sleep 30
+  done
   # re-verify the guard AFTER the human-gated apply window (TOCTOU close-out).
   # Every fact is captured with an explicit error check: an unreadable fact is a
   # refusal, never a pass.
