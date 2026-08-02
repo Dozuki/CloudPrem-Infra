@@ -16,6 +16,20 @@ locals {
   # The page must name the REAL DR region; var.dr_region is "" wherever env.hcl omits
   # it (see data.aws_region.dr in dr_aurora.tf).
   dr_region_actual = local.aurora_dr_enabled ? data.aws_region.dr[0].region : var.dr_region
+  victorops_cloudwatch_endpoint_configured = nonsensitive(
+    var.victorops_cloudwatch_endpoint_template != "" &&
+    var.victorops_cloudwatch_endpoint_template != "CHANGE_ME"
+  )
+  dr_paging_endpoint_configured = (
+    var.dr_paging_endpoint != "" || local.victorops_cloudwatch_endpoint_configured
+  )
+  dr_paging_endpoint_actual = var.dr_paging_endpoint != "" ? var.dr_paging_endpoint : (
+    local.victorops_cloudwatch_endpoint_configured ? replace(
+      var.victorops_cloudwatch_endpoint_template,
+      "$routing_key",
+      var.victorops_dr_routing_key,
+    ) : ""
+  )
 
   # The page. Everything the on-call needs to act safely, in the alarm body itself -
   # the incident may have taken the wiki/dashboards with it. Kept under CloudWatch's
@@ -38,21 +52,22 @@ resource "aws_sns_topic" "dr_paging" {
   tags = local.tags
 }
 
-# The acknowledged path: PagerDuty/Opsgenie SNS inbound URL (auto-confirms).
+# The acknowledged path: the shared Splunk On-Call AWS CloudWatch endpoint uses
+# mpc-dr by default; dr_paging_endpoint remains an explicit compatibility override.
 resource "aws_sns_topic_subscription" "dr_paging_endpoint" {
-  count    = local.aurora_dr_enabled && var.dr_paging_endpoint != "" ? 1 : 0
+  count    = local.aurora_dr_enabled && local.dr_paging_endpoint_configured ? 1 : 0
   provider = aws.dr
 
   topic_arn              = aws_sns_topic.dr_paging[0].arn
   protocol               = "https"
-  endpoint               = var.dr_paging_endpoint
+  endpoint               = local.dr_paging_endpoint_actual
   endpoint_auto_confirms = true
 }
 
 # Email fallback so the page at least lands SOMEWHERE while no paging integration is
 # configured. Email is notification, not paging - the check below keeps that visible.
 resource "aws_sns_topic_subscription" "dr_paging_email" {
-  count    = local.aurora_dr_enabled && var.dr_paging_endpoint == "" && var.alarm_email != "" ? 1 : 0
+  count    = local.aurora_dr_enabled && !local.dr_paging_endpoint_configured && var.alarm_email != "" ? 1 : 0
   provider = aws.dr
 
   topic_arn = aws_sns_topic.dr_paging[0].arn
@@ -95,7 +110,7 @@ resource "aws_cloudwatch_metric_alarm" "dr_replication_deadman" {
 # into the void. Say so on every plan rather than pretending email suffices.
 check "dr_paging_operational" {
   assert {
-    condition     = !local.aurora_dr_enabled || var.dr_paging_endpoint != ""
-    error_message = "DR is enabled but dr_paging_endpoint is unset: the DR dead-man only emails alarm_email, so nobody is paged and nothing escalates. DR detection is NOT operationally enabled until an acknowledged paging endpoint (PagerDuty/Opsgenie SNS URL) is configured."
+    condition     = !local.aurora_dr_enabled || local.dr_paging_endpoint_configured
+    error_message = "DR is enabled but VictorOps paging is unset: the DR dead-man only emails alarm_email, so nobody is paged and nothing escalates. Seed the write-only victorops-cloudwatch Spacelift context or set the compatibility dr_paging_endpoint override."
   }
 }

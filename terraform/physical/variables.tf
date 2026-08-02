@@ -521,13 +521,42 @@ variable "operations_owner" {
 }
 
 variable "dr_paging_endpoint" {
-  description = "HTTPS endpoint of an ACKNOWLEDGED paging integration (PagerDuty/Opsgenie SNS inbound URL) for the DR dead-man page. Empty falls back to an email subscription on alarm_email - which is notification, not paging: nobody is woken up and nothing escalates, so DR detection is not operationally enabled (a check warns on every plan until this is set)."
+  description = "Compatibility override for the DR dead-man HTTPS paging endpoint. Prefer victorops_cloudwatch_endpoint_template, which derives the mpc-dr endpoint from the shared Splunk On-Call integration. Empty falls back to VictorOps and then email."
   type        = string
   default     = ""
 
   validation {
     condition     = var.dr_paging_endpoint == "" || startswith(var.dr_paging_endpoint, "https://")
     error_message = "dr_paging_endpoint must be an https:// URL (or empty)."
+  }
+}
+
+variable "victorops_cloudwatch_endpoint_template" {
+  description = "Shared Splunk On-Call AWS CloudWatch HTTPS endpoint ending in the literal $routing_key placeholder. The write-only Spacelift context supplies it fleet-wide."
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition = (
+      contains(["", "CHANGE_ME"], var.victorops_cloudwatch_endpoint_template) ||
+      (
+        startswith(var.victorops_cloudwatch_endpoint_template, "https://") &&
+        endswith(var.victorops_cloudwatch_endpoint_template, "$routing_key")
+      )
+    )
+    error_message = "victorops_cloudwatch_endpoint_template must be empty, CHANGE_ME during bootstrap, or an https:// URL ending in the literal $routing_key placeholder."
+  }
+}
+
+variable "victorops_dr_routing_key" {
+  description = "Splunk On-Call routing key used for DR dead-man alarm and recovery events."
+  type        = string
+  default     = "mpc-dr"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]+$", var.victorops_dr_routing_key))
+    error_message = "victorops_dr_routing_key may contain only letters, numbers, hyphens, and underscores."
   }
 }
 
