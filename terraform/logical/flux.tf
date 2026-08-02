@@ -561,22 +561,26 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # first, which is not a loop we want running unattended.
       # upgrade.force pinned false for the same reason as rollback.force below, and it
       # carries more weight here: every reconcile that produces a change goes through
-      # upgrade, while rollback only runs on remediation. force=true selects Helm's
-      # replace strategy, so an upgrade that leaves the migration Job name unchanged
-      # would delete the completed Job and re-run migrations. It is also the knob
-      # reached for to punch through immutable-field errors, which is the exact class
-      # of failure the chart's manualSelector change fixes at the source.
+      # upgrade, while rollback only runs on remediation. It is also the knob reached
+      # for to punch through immutable-field errors, where it makes things worse, not
+      # better (see below).
       upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", force = false, remediation = { retries = 2, remediateLastFailure = false } }
-      # rollback.force=false pinned explicitly (it is the Helm default, but this is the one
-      # knob here that can destroy data, so it gets written down rather than inherited).
-      # Under client-side apply force does not wait for a conflict: it selects the replace
-      # strategy and recreates every same-named object it visits, so a completed db-migrations
-      # Job would be deleted and re-run unattended, mid-incident, on a database already one
-      # schema version ahead. Under server-side apply Flux documents force as ignored, and the
-      # flux_chart_version pinned here is on the SSA line, so today this is defense-in-depth
-      # for client-side or adopted releases rather than an active guard. It does not govern
-      # the ordinary create/prune cycle that happens when the Job name changes. A rollback
-      # that fails loudly and parks the release is the better outcome.
+      # Both force knobs pinned false explicitly. That is already the Helm default, but the
+      # semantics are widely misread, so they get written down rather than inherited.
+      # What force actually does, checked against source (helm v3.19.0 pkg/kube/client.go
+      # updateResource, v4.0.0 replaceResource): it swaps the patch for helper.Replace, a
+      # whole-object PUT. It does NOT delete and recreate, so it will not re-run a completed
+      # db-migrations Job. The reason to keep it off is the opposite of the usual pitch. A
+      # PUT sends only what the chart renders, so any field the server populated and the
+      # chart does not carry is dropped or makes the PUT fail outright, and an immutable
+      # field whose live value was server-defaulted (exactly the auto-stamped Job selector
+      # this chart change removes) turns a survivable patch into a hard failure. It is an
+      # all-or-nothing write with no upside on this release.
+      # Scope: helm v4 refuses force-replace together with server-side apply, and the
+      # HelmRelease CRD documents force as ignored under SSA. The flux_chart_version pinned
+      # here is on the SSA line, so today both pins are defense-in-depth for client-side or
+      # adopted releases rather than an active guard. Neither governs the ordinary
+      # create/prune cycle that happens when the Job name changes.
       rollback = { force = false }
       # driftDetection=enabled corrects cluster drift back to the chart's desired state. Promoted from warn after a fleet
       # sweep (2026-07-30) found drift on exactly one env, and it was stale old-chart state helm's 3-way merge could never
