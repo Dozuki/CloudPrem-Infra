@@ -559,7 +559,14 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # silently older than the schema already in the database.
       # Install keeps retries=0: install remediation uninstalls
       # first, which is not a loop we want running unattended.
-      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 2, remediateLastFailure = false } }
+      # upgrade.force pinned false for the same reason as rollback.force below, and it
+      # carries more weight here: every reconcile that produces a change goes through
+      # upgrade, while rollback only runs on remediation. force=true selects Helm's
+      # replace strategy, so an upgrade that leaves the migration Job name unchanged
+      # would delete the completed Job and re-run migrations. It is also the knob
+      # reached for to punch through immutable-field errors, which is the exact class
+      # of failure the chart's manualSelector change fixes at the source.
+      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", force = false, remediation = { retries = 2, remediateLastFailure = false } }
       # rollback.force=false pinned explicitly (it is the Helm default, but this is the one
       # knob here that can destroy data, so it gets written down rather than inherited).
       # Under client-side apply force does not wait for a conflict: it selects the replace

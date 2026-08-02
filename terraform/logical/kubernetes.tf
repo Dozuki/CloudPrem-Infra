@@ -516,13 +516,18 @@ resource "helm_release" "external_secrets" {
       value = "64Mi"
     },
     {
-      # Without a priority class an evicted replica just sits Pending until
-      # Karpenter provisions a node, and the PDB stays blocked that whole time
-      # (it counts healthy pods, not scheduled ones). system-cluster-critical
-      # lets the replacement preempt instead of wait, which is correct for a
-      # fail-closed admission webhook: every ExternalSecret and SecretStore in
-      # the cluster is stuck behind it. It is a built-in class, works outside
-      # kube-system, and is already in use on dev-min (dozuki, istio-system,
+      # A Pending replica keeps the PDB blocked: disruptionsAllowed counts
+      # healthy pods, not scheduled ones, so one unschedulable replica stalls
+      # every drain behind it. Priority shortens that window, it does not remove
+      # it. Preemption only fires when evicting lower-priority pods on some node
+      # actually makes this pod fit, and at a 10m/64Mi request it usually fits
+      # somewhere without preempting anything; on a genuinely full cluster it
+      # still waits on Karpenter. What the class buys unconditionally is the
+      # rest: head of the scheduling queue, nothing else can preempt it, and the
+      # kubelet ranks it last for node-pressure eviction. Worth it for a
+      # fail-closed admission webhook, where every ExternalSecret and SecretStore
+      # in the cluster is stuck behind it. Built-in class, works outside
+      # kube-system, already in use on dev-min (dozuki, istio-system,
       # amazon-cloudwatch).
       name  = "webhook.priorityClassName"
       value = "system-cluster-critical"
