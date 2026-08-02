@@ -173,6 +173,39 @@ locals {
           }
         }
       }
+
+      # Alerts on EBS burst-credit exhaustion, which nothing in-cluster can see:
+      # the node stays Ready and StorageReady=True while every disk-backed pod on
+      # it stalls. The CloudWatch metric is the only thing that moves.
+      #
+      # AWS only, and specifically EKS Auto Mode only - the alerts use the EC2
+      # instance ID as the node name with no join, which holds because physical
+      # turns Auto Mode on unconditionally. Credentials come from the pod-identity
+      # association in physical (aws_eks_pod_identity_association.cloudwatch_exporter);
+      # without it the pod runs and fails every poll, which is why the chart ships
+      # this default-off and it is turned on here rather than there.
+      #
+      # clusterName scopes discovery to this cluster's nodes via the
+      # kubernetes.io/cluster/<name>=owned tag. Leaving it empty is a render
+      # error in the chart, on purpose: unscoped it would pull every cluster in
+      # the account into this cluster's Prometheus. region is deliberately left
+      # to the chart, which falls back to aws.region above.
+      #
+      # GetMetricData bills per metric requested, not per API call ($0.01 per
+      # 1,000), so YACE batching them into one call does not reduce the bill and
+      # the 1M-request free tier does not apply. Two metrics per node every 5
+      # minutes works out to ~$0.17 per node-month, so a steady 8-node cluster
+      # is ~$1.40/month and it scales with the node count.
+      cloudwatchExporter = {
+        enabled     = var.cloud == "aws" && var.cloudwatch_exporter_enabled
+        clusterName = var.eks_cluster_id
+        # FIPS endpoints are a compliance choice, not a partition requirement.
+        # GovCloud's standard regional endpoints resolve fine; we opt in because
+        # gov workloads should stay on validated crypto. YACE only applies this
+        # to CloudWatch and falls back to the standard Resource Groups Tagging
+        # endpoint either way, so this does not make every call FIPS.
+        fips = local.is_us_gov
+      }
     }
 
     # metrics-server ships in the chart (default on) as the single source of truth across

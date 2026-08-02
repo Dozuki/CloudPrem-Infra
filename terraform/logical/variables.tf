@@ -596,6 +596,12 @@ variable "alertmanager_slack_interactivity_enabled" {
   default     = false
 }
 
+variable "cloudwatch_exporter_enabled" {
+  description = "Scrape the two EC2 EBS burst-credit CloudWatch metrics into Prometheus. On by default on AWS because nothing else in the cluster can see EBS exhaustion. Set false to opt a stack out of the small per-node CloudWatch bill; the physical IAM role and pod identity association stay, they just go unused."
+  type        = bool
+  default     = true
+}
+
 # ---------------------------------------------------------------------------
 # memcached proxy tier (chart >= 2.1.0). All default OFF - the rendered values
 # are unchanged from before these existed until an env opts in.
