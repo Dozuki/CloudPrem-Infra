@@ -264,7 +264,11 @@ hhmm_to_min() { printf '%s' "$1" | awk -F: '{ print ($1 * 60) + $2 }'; }
 minutes_to_window() {
   local start now delta
   case "$1" in [0-9][0-9]:[0-9][0-9]-[0-9][0-9]:[0-9][0-9]) : ;; *) printf 'malformed'; return ;; esac
+  # A failed date or awk yields an empty string, which bash arithmetic silently
+  # reads as 0 - producing a plausible "minutes until window" that passes the
+  # margin test. Validate both operands so a broken clock blocks instead.
   start=$(hhmm_to_min "${1%%-*}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+  case "${start}/${now}" in *[!0-9/]*|/*|*/) printf 'clockfail'; return ;; esac
   delta=$(( start - now ))
   # spelled as if/fi rather than "[ test ] && assign" so the exit status of the
   # last statement before the printf is never the false branch of a test
@@ -276,6 +280,9 @@ window_open() {
   local start end now
   case "$1" in [0-9][0-9]:[0-9][0-9]-[0-9][0-9]:[0-9][0-9]) : ;; *) return 1 ;; esac
   start=$(hhmm_to_min "${1%%-*}"); end=$(hhmm_to_min "${1##*-}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+  # same clock-failure guard; returning 1 here is safe because minutes_to_window
+  # is consulted next and reports 'clockfail', which blocks
+  case "${start}/${end}/${now}" in *[!0-9/]*|/*|*/) return 1 ;; esac
   # a window may wrap midnight (e.g. 23:30-00:00), so the two cases differ
   if [ "$start" -le "$end" ]; then [ "$now" -ge "$start" ] && [ "$now" -lt "$end" ]
   else [ "$now" -ge "$start" ] || [ "$now" -lt "$end" ]; fi
@@ -1102,6 +1109,9 @@ FENCE_APPLY_TIMEOUT_MIN=<minutes> if the apply is legitimately slow."
   FREEZE_T0=$SECONDS
   freeze_mark() { say "  [freeze +$((SECONDS - FREEZE_T0))s] $*"; }
   freeze_mark "read_only=1 confirmed - source is now rejecting writes"
+  [ "$RO0" = "1" ] && say "  (RE-ENTRY: this clock starts NOW, not at the original fence - the true"
+  [ "$RO0" = "1" ] && say "   freeze is longer than anything reported below. Use the prior run's log.)"
+  : 
   say "post-fence kill sweep (anything that connected during the apply window;"
   say "read_only already blocks their writes, this just tidies sessions)"
   ssm_run <<'EOF'
