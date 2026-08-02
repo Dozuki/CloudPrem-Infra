@@ -1,4 +1,36 @@
 #!/usr/bin/env bash
+#
+# STATUS 2026-08-02: NO ENVIRONMENT CURRENTLY USES THIS PATH. Read this before
+# assuming the fence below is the recommended way to move a database.
+#
+# Every environment that migrated with this runner has completed and sits on
+# aurora_migration_state = "off". The last candidate abandoned the DMS route
+# rather than finishing it, on measured grounds:
+#
+#   The fence's final validation epoch does not scale with TABLE COUNT. Measured
+#   at the shipping config on a 24,285-table source: ~72 tables/min, so 5-6h with
+#   the source read_only, and two full-scope runs were killed by the replication
+#   instance running out of memory. DMS validation retains roughly 1-2 MB per
+#   table for the life of the task and never releases it, so the ceiling is the
+#   number of tables, NOT partition size or data volume - a 30,000,000
+#   PartitionSize and a 1,000,000 one both drained. An 11.9k-table environment
+#   completed its epoch comfortably; twice that did not fit at all.
+#
+# So: this runner is sound for a moderate table count and has been hardened
+# further below, but for a large multi-tenant source the epoch alone can exceed
+# any acceptable write freeze. Measure tables/min on a throwaway ValidationOnly
+# task BEFORE committing to a fence window.
+#
+# The cheaper alternative when the goal is only leaving an unsupported engine
+# version: an RDS Blue/Green Deployment upgrades the provisioned instance in
+# place with a switchover measured in about a minute and no application repoint.
+# Drive it from the CLI, not Terraform - the AWS provider's blue_green_update
+# switches over as soon as green is available and then deletes the old primary
+# with SkipFinalSnapshot=true, which removes both the validation pause and the
+# rollback.
+#
+# ---------------------------------------------------------------------------
+#
 # RDS -> Aurora Serverless v2 migration runner. Drives the DB-side phases the
 # aurora_migration_state Terraform (aurora-migration.tf) cannot: native schema
 # pre-load, DMS task orchestration, validation gates, and the fence/cutover
