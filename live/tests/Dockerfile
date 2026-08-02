@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 #
 # Runtime image for the CloudPrem test harness phases (provision/upgrade/validate/
 # teardown). One image, one binary, four subcommands - the same code path run.sh drives
@@ -16,7 +16,7 @@
 # each pulling ~12 providers (aws and azurerm alone are most of a gigabyte). Stage 3 warms
 # a plugin cache from the repo's committed lockfiles so those inits resolve locally.
 
-ARG ALPINE_VERSION=3.22
+ARG ALPINE_VERSION=3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
 ARG GO_VERSION=1.25
 
 # Fleet pins. tofu/terragrunt MUST match infra-live/_spacelift/stacks.tf: the pair moves

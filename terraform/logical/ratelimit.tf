@@ -132,7 +132,7 @@ resource "kubernetes_deployment_v1" "ratelimit_redis" {
 
         container {
           name  = "redis"
-          image = "redis:7-alpine"
+          image = "redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2"
 
           # --save "" disables persistence (in-memory only).
           # --requirepass sources the password from the env var below.
