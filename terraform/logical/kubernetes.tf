@@ -471,6 +471,85 @@ resource "helm_release" "external_secrets" {
       name  = "crds.createClusterSecretStore"
       value = "true"
     },
+    {
+      # Chart default is 1. A single webhook replica is a single point of
+      # failure for every ExternalSecret/SecretStore admission in the
+      # cluster (fail-closed) - the dev-min rollback loop on 2026-08-01 was
+      # made worse by exactly this: the sole webhook pod rescheduling took
+      # down 6 ExternalSecrets + the SecretStore at once.
+      name  = "webhook.replicaCount"
+      value = "2"
+    },
+    {
+      # Chart default is false. Without one, nothing stops Karpenter from
+      # draining a node and taking every webhook replica on it at once,
+      # which is the fail-closed admission outage we are fixing.
+      name  = "webhook.podDisruptionBudget.enabled"
+      value = "true"
+    },
+    {
+      # maxUnavailable, not minAvailable: the chart's own PDB template
+      # prefers maxUnavailable over minAvailable once both keys are present,
+      # and minAvailable=2 on a 2-replica deployment would forbid every
+      # eviction outright, permanently blocking Karpenter consolidation of
+      # any node hosting a webhook replica.
+      name  = "webhook.podDisruptionBudget.maxUnavailable"
+      value = "1"
+    },
+    {
+      # Chart ships no requests at all, which makes the pod free in Karpenter's
+      # bin-packing and lets the topology spread below be silently ignored (a
+      # zero-request pod always "fits", so the scheduler has nothing to skew).
+      # Small real requests give the spread something to bite on. Requests only,
+      # no limits: an under-set memory limit OOMKills the webhook, which is the
+      # exact fail-closed outage this block exists to prevent. Measured on
+      # dev-min 2026-08-02: 1m CPU / 32Mi. Memory is requested at 64Mi rather
+      # than at the observed 32Mi so the pod is not first in line for eviction
+      # the moment a node comes under memory pressure.
+      name  = "webhook.resources.requests.cpu"
+      value = "10m"
+    },
+    {
+      name  = "webhook.resources.requests.memory"
+      value = "64Mi"
+    },
+    {
+      # Without a priority class an evicted replica just sits Pending until
+      # Karpenter provisions a node, and the PDB stays blocked that whole time
+      # (it counts healthy pods, not scheduled ones). system-cluster-critical
+      # lets the replacement preempt instead of wait, which is correct for a
+      # fail-closed admission webhook: every ExternalSecret and SecretStore in
+      # the cluster is stuck behind it. It is a built-in class, works outside
+      # kube-system, and is already in use on dev-min (dozuki, istio-system,
+      # amazon-cloudwatch).
+      name  = "webhook.priorityClassName"
+      value = "system-cluster-critical"
+    },
+  ]
+
+  # List-of-objects value, safer as a values block than a dotted/indexed
+  # `set` entry. Biases the 2 webhook replicas onto separate nodes so a
+  # single node loss is less likely to take out both. Soft (ScheduleAnyway),
+  # not DoNotSchedule: a hard constraint would strand the 2nd replica
+  # Pending forever on genuinely single-node clusters (the smallest
+  # CloudPrem tiers). Soft means it is a preference, not a guarantee: on a
+  # cluster with one schedulable node both replicas still land together, and
+  # we can lose the pair. The requests set above are what make the preference
+  # worth anything at all (a zero-request pod always fits, so the scheduler
+  # never sees a skew to correct). No labelSelector needed - the chart
+  # auto-fills it from the webhook's own selector labels when omitted.
+  values = [
+    yamlencode({
+      webhook = {
+        topologySpreadConstraints = [
+          {
+            maxSkew           = 1
+            topologyKey       = "kubernetes.io/hostname"
+            whenUnsatisfiable = "ScheduleAnyway"
+          }
+        ]
+      }
+    })
   ]
 }
 
