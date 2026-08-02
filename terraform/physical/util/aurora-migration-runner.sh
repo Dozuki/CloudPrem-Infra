@@ -1296,8 +1296,8 @@ EOF
     # Read that as a ceiling on a hang, NOT as the expected duration. Actual
     # validation time is driven by DMS's row-compare throughput (data volume),
     # not by table count; table count only sets this bound. Measured epochs:
-    # ~25m on a completed mid-size cutover, ~1h for 10.2k/11.9k tables during
-    # the gca rehearsal.
+    # ~25m on a completed mid-size cutover, and ~1h to sweep 10.2k of 11.9k
+    # tables on a larger rehearsal.
     # The old fixed 3600 barely fit an 11.9k-table env and cannot fit a
     # 24k-table one; a miss restarts the whole epoch inside the write freeze.
     VMAX=$((MAIN_COUNT / 2 + 1800))
