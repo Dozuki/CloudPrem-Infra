@@ -471,6 +471,92 @@ resource "helm_release" "external_secrets" {
       name  = "crds.createClusterSecretStore"
       value = "true"
     },
+    {
+      # Chart default is 1. A single webhook replica is a single point of
+      # failure for every ExternalSecret/SecretStore admission in the
+      # cluster (fail-closed) - the dev-min rollback loop on 2026-08-01 was
+      # made worse by exactly this: the sole webhook pod rescheduling took
+      # down 6 ExternalSecrets + the SecretStore at once.
+      name  = "webhook.replicaCount"
+      value = "2"
+    },
+    {
+      # Chart default is false. Without one, nothing stops Karpenter from
+      # draining a node and taking every webhook replica on it at once,
+      # which is the fail-closed admission outage we are fixing.
+      name  = "webhook.podDisruptionBudget.enabled"
+      value = "true"
+    },
+    {
+      # maxUnavailable, not minAvailable: the chart's own PDB template
+      # prefers maxUnavailable over minAvailable once both keys are present,
+      # and minAvailable=2 on a 2-replica deployment would forbid every
+      # eviction outright, permanently blocking Karpenter consolidation of
+      # any node hosting a webhook replica.
+      name  = "webhook.podDisruptionBudget.maxUnavailable"
+      value = "1"
+    },
+    {
+      # Chart ships no requests at all. Two consequences: the pod is free in
+      # Karpenter's bin-packing, so it can be packed onto a node with no real
+      # headroom left, and it lands in BestEffort QoS, which is what the kubelet
+      # evicts first under node pressure. Small real requests fix both. They do
+      # NOT affect the topology spread below - PodTopologySpread scoring counts
+      # matching pods per domain and never looks at requests. Requests only, no
+      # limits: an under-set memory limit OOMKills the webhook, which is the
+      # exact fail-closed outage this block exists to prevent. Measured on
+      # dev-min 2026-08-02: 1m CPU / 32Mi. Memory is requested at 64Mi rather
+      # than the observed 32Mi to leave headroom and keep the pod out of the
+      # front of the eviction queue.
+      name  = "webhook.resources.requests.cpu"
+      value = "10m"
+    },
+    {
+      name  = "webhook.resources.requests.memory"
+      value = "64Mi"
+    },
+    {
+      # A Pending replica keeps the PDB blocked: disruptionsAllowed counts
+      # healthy pods, not scheduled ones, so one unschedulable replica stalls
+      # every drain behind it. Priority shortens that window, it does not remove
+      # it. Preemption only fires when evicting lower-priority pods on some node
+      # actually makes this pod fit, and at a 10m/64Mi request it usually fits
+      # somewhere without preempting anything; on a genuinely full cluster it
+      # still waits on Karpenter. What the class buys unconditionally is the
+      # rest: head of the scheduling queue, nothing else can preempt it, and the
+      # kubelet ranks it last for node-pressure eviction. Worth it for a
+      # fail-closed admission webhook, where every ExternalSecret and SecretStore
+      # in the cluster is stuck behind it. Built-in class, works outside
+      # kube-system, already in use on dev-min (dozuki, istio-system,
+      # amazon-cloudwatch).
+      name  = "webhook.priorityClassName"
+      value = "system-cluster-critical"
+    },
+  ]
+
+  # List-of-objects value, safer as a values block than a dotted/indexed
+  # `set` entry. Biases the 2 webhook replicas onto separate nodes so a
+  # single node loss is less likely to take out both. Soft (ScheduleAnyway),
+  # not DoNotSchedule: a hard constraint would strand the 2nd replica
+  # Pending forever on genuinely single-node clusters (the smallest
+  # CloudPrem tiers). Soft means it is a preference, not a guarantee: on a
+  # cluster with one schedulable node both replicas still land together, and
+  # we can lose the pair. topologyKey is hostname, so this is node-loss
+  # protection only and buys nothing against a zone failure. No labelSelector
+  # needed - the chart auto-fills it from the webhook's own selector labels
+  # when omitted.
+  values = [
+    yamlencode({
+      webhook = {
+        topologySpreadConstraints = [
+          {
+            maxSkew           = 1
+            topologyKey       = "kubernetes.io/hostname"
+            whenUnsatisfiable = "ScheduleAnyway"
+          }
+        ]
+      }
+    })
   ]
 }
 

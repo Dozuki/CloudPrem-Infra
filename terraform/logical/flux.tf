@@ -547,11 +547,41 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # upgrade retries=2: with retries=0 ONE failed upgrade (an eviction, a
       # not-yet-mirrored image, a transient webhook) stalls the release until a
       # human does the requestedAt+forceAt dance (seen live 2026-07-30). Two
-      # retries let it self-heal once the cause clears; remediateLastFailure
-      # stays false so a failure never auto-rolls-back over a completed
-      # migration. Install keeps retries=0: install remediation uninstalls
+      # retries let it self-heal once the cause clears. What that costs:
+      # remediation (strategy defaults to rollback) runs BETWEEN each attempt,
+      # so retries=2 means up to 2 rollbacks per failed upgrade, and the counter
+      # resets on a chart version change, so it bounds one cycle and not the
+      # loop (dev-min 2026-08-01). remediateLastFailure=false is load-bearing,
+      # not redundant: Flux defaults it to TRUE whenever retries > 0. It governs
+      # only the failure after retries are spent: Flux performs no rollback, so the
+      # release stays failed and live state may be left partially applied, pending
+      # operator recovery. A human sees a failed release rather than a chart
+      # silently older than the schema already in the database.
+      # Install keeps retries=0: install remediation uninstalls
       # first, which is not a loop we want running unattended.
-      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 2, remediateLastFailure = false } }
+      # upgrade.force pinned false for the same reason as rollback.force below, and it
+      # carries more weight here: every reconcile that produces a change goes through
+      # upgrade, while rollback only runs on remediation. It is also the knob reached
+      # for to punch through immutable-field errors, where it makes things worse, not
+      # better (see below).
+      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", force = false, remediation = { retries = 2, remediateLastFailure = false } }
+      # Both force knobs pinned false explicitly. That is already the Helm default, but the
+      # semantics are widely misread, so they get written down rather than inherited.
+      # What force actually does, checked against source (helm v3.19.0 pkg/kube/client.go
+      # updateResource, v4.0.0 replaceResource): it swaps the patch for helper.Replace, a
+      # whole-object PUT. It does NOT delete and recreate, so it will not re-run a completed
+      # db-migrations Job. The reason to keep it off is the opposite of the usual pitch. A
+      # PUT sends only what the chart renders, so any field the server populated and the
+      # chart does not carry is dropped or makes the PUT fail outright, and an immutable
+      # field whose live value was server-defaulted (exactly the auto-stamped Job selector
+      # this chart change removes) turns a survivable patch into a hard failure. It is an
+      # all-or-nothing write with no upside on this release.
+      # Scope: helm v4 refuses force-replace together with server-side apply, and the
+      # HelmRelease CRD documents force as ignored under SSA. The flux_chart_version pinned
+      # here is on the SSA line, so today both pins are defense-in-depth for client-side or
+      # adopted releases rather than an active guard. Neither governs the ordinary
+      # create/prune cycle that happens when the Job name changes.
+      rollback = { force = false }
       # driftDetection=enabled corrects cluster drift back to the chart's desired state. Promoted from warn after a fleet
       # sweep (2026-07-30) found drift on exactly one env, and it was stale old-chart state helm's 3-way merge could never
       # fix: failed upgrade attempts record the new manifest without fully applying it, so the next successful upgrade sees
