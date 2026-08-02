@@ -19,6 +19,7 @@ Functions:
 Environment Variables:
 - SLACK_BOT_TOKEN_SSM_PARAM: SSM SecureString holding a bot token (chat:write); preferred path.
 - SLACK_CHANNEL_ID: Channel the bot-token path posts to.
+- SLACK_STATE_TABLE: DynamoDB table used to update ALARM roots when they resolve.
 - SLACK_WEBHOOK_URL: Legacy Slack incoming webhook URL; used when no bot token is configured.
 - AWS_REGION: The AWS region where the Lambda function operates.
 - AWS_ACCOUNT_ID: The AWS account ID.
@@ -33,8 +34,11 @@ post messages to the designated Slack channel."""
 
 import json
 import os
+import re
+import time
+import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 import boto3
 
 # Routine serverless lifecycle chatter, dropped before it reaches Slack.
@@ -89,6 +93,13 @@ SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL', '')
 # posts). Takes precedence over the webhook when both are configured.
 SLACK_BOT_TOKEN_SSM_PARAM = os.environ.get('SLACK_BOT_TOKEN_SSM_PARAM', '')
 SLACK_CHANNEL_ID = os.environ.get('SLACK_CHANNEL_ID', '')
+SLACK_STATE_TABLE = os.environ.get('SLACK_STATE_TABLE', '')
+
+STATE_TTL_SECONDS = 30 * 24 * 3600
+COLOR_CRITICAL = '#e01e5a'
+COLOR_WARNING = '#ecb22e'
+COLOR_RESOLVED = '#2eb67d'
+COLOR_INFO = '#36c5f0'
 
 # How close a state change must be to the alarm's last config create/update to count
 # as alarm settling rather than a real recovery. Wide on purpose: some metrics (DR
@@ -152,21 +163,350 @@ def get_task_name(task_arn):
     return task_arn.rsplit(":", 1)[-1] or task_arn
 
 
+def _clip(value, limit=2900):
+    text = str(value or 'N/A')
+    return text if len(text) <= limit else text[:limit - 1] + '…'
+
+
+def _parse_time(value):
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+
+
+def _slack_relative(value):
+    parsed = _parse_time(value)
+    if not parsed:
+        return _clip(value)
+    return f"<!date^{int(parsed.timestamp())}^{{relative}}|{parsed.isoformat()}>"
+
+
+def _format_duration(started_at, ended_at):
+    started = _parse_time(started_at)
+    ended = _parse_time(ended_at)
+    if not started or not ended:
+        return 'Unknown'
+    seconds = max(int((ended - started).total_seconds()), 0)
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    parts = []
+    if days:
+        parts.append(f'{days}d')
+    if hours:
+        parts.append(f'{hours}h')
+    if minutes:
+        parts.append(f'{minutes}m')
+    if not parts:
+        parts.append(f'{seconds}s')
+    return ' '.join(parts[:2])
+
+
+def _field(label, value):
+    return {'type': 'mrkdwn', 'text': f'*{label}*\n{_clip(value, 1900)}'}
+
+
+def _button(text, url, action_id):
+    return {
+        'type': 'button',
+        'text': {'type': 'plain_text', 'text': text},
+        'url': url,
+        'action_id': action_id,
+    }
+
+
+def _card(color, header, summary, detail_label, detail, fields,
+          evidence_label, evidence, actions, footer, mention=False):
+    header_text = f'{header} <!channel>' if mention else header
+    blocks = [
+        {'type': 'section', 'text': {'type': 'mrkdwn', 'text': f'*{header_text}*'}},
+        {'type': 'section', 'text': {'type': 'mrkdwn', 'text': f'*{_clip(summary)}*'}},
+    ]
+    if detail:
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
+                       'text': f'*{detail_label}*\n{_clip(detail)}'}})
+    if fields:
+        blocks.append({'type': 'section', 'fields': fields})
+    if evidence:
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
+                       'text': f'*{evidence_label}*\n`{_clip(evidence, 2700)}`'}})
+    if actions:
+        blocks.append({'type': 'actions', 'elements': actions})
+    blocks.append({'type': 'context', 'elements': [
+        {'type': 'mrkdwn', 'text': _clip(footer, 1900)}
+    ]})
+    return {'attachments': [{
+        'color': color,
+        'fallback': f'{header}: {_clip(summary, 500)}',
+        'blocks': blocks,
+    }]}
+
+
+def _alarm_console_url(region, alarm_name):
+    encoded = urllib.parse.quote(alarm_name, safe='')
+    return (f'https://{region}.console.aws.amazon.com/cloudwatch/home?region={region}'
+            f'#alarmsV2:alarm/{encoded}')
+
+
+def _runbook_url(description):
+    match = re.search(r'https?://[^\s<>()]+', description or '')
+    return match.group(0).rstrip('.,;)') if match else None
+
+
+def _alarm_resource(trigger):
+    dimensions = trigger.get('Dimensions') or []
+    values = []
+    for dimension in dimensions:
+        if isinstance(dimension, dict):
+            value = dimension.get('value') or dimension.get('Value')
+            if value:
+                values.append(str(value))
+    return ', '.join(values) if values else 'Account-wide'
+
+
+def _alarm_evidence(trigger):
+    metric = trigger.get('MetricName') or 'metric'
+    statistic = trigger.get('Statistic') or trigger.get('StatisticType') or ''
+    operator = {
+        'GreaterThanThreshold': '>',
+        'GreaterThanOrEqualToThreshold': '≥',
+        'LessThanThreshold': '<',
+        'LessThanOrEqualToThreshold': '≤',
+    }.get(trigger.get('ComparisonOperator'), trigger.get('ComparisonOperator') or '')
+    threshold = trigger.get('Threshold', '?')
+    evaluations = trigger.get('EvaluationPeriods') or '?'
+    datapoints = trigger.get('DatapointsToAlarm') or evaluations
+    period = trigger.get('Period')
+    window = f'{datapoints}/{evaluations} datapoints'
+    if period:
+        window += f' × {int(period) // 60 if int(period) >= 60 else int(period)}' + (
+            'm' if int(period) >= 60 else 's')
+    prefix = f'{statistic} ' if statistic else ''
+    return f'{prefix}{metric} {operator} {threshold} · {window}'
+
+
+def cloudwatch_card(message_json, identifier, region, account_id, account_alias,
+                    started_at=None):
+    """Return a Slack incident card and state metadata for a CloudWatch event."""
+    alarm_name = message_json.get('AlarmName', 'Unknown alarm')
+    description = message_json.get('AlarmDescription') or alarm_name
+    state = message_json.get('NewStateValue', 'UNKNOWN')
+    reason = message_json.get('NewStateReason') or 'CloudWatch did not supply a reason.'
+    changed_at = message_json.get('StateChangeTime')
+    trigger = message_json.get('Trigger') or {}
+    namespace = trigger.get('Namespace') or 'CloudWatch'
+    resource = _alarm_resource(trigger)
+    console_url = _alarm_console_url(region, alarm_name)
+    actions = [_button('Open CloudWatch', console_url, 'open_cloudwatch')]
+    runbook = _runbook_url(description)
+    if runbook:
+        actions.append(_button('Runbook', runbook, 'open_runbook'))
+
+    if state == 'ALARM':
+        payload = _card(
+            COLOR_CRITICAL,
+            f'🔴 CRITICAL · CloudWatch · {identifier}',
+            description,
+            'IMPACT', reason,
+            [_field('SERVICE', namespace), _field('REGION', region),
+             _field('RESOURCE', resource),
+             _field('STARTED', _slack_relative(started_at or changed_at))],
+            'EVIDENCE', _alarm_evidence(trigger), actions,
+            f'Active · Investigate now · {alarm_name} · {account_alias} ({account_id})',
+            mention=True,
+        )
+    elif state == 'OK':
+        duration = _format_duration(started_at, changed_at) if started_at else 'Unknown'
+        payload = _card(
+            COLOR_RESOLVED,
+            f'✅ RESOLVED · CloudWatch · {identifier}',
+            f'{description} is back within its configured threshold.',
+            'OUTCOME', reason,
+            [_field('SERVICE', namespace), _field('REGION', region),
+             _field('DURATION', duration), _field('RESOURCE', resource)],
+            'FINAL READING', _alarm_evidence(trigger), actions,
+            f'Automatically resolved · {alarm_name} · {account_alias} ({account_id})',
+        )
+    else:
+        payload = _card(
+            COLOR_WARNING,
+            f'🟠 STATE CHANGE · CloudWatch · {identifier}',
+            description,
+            'STATUS', reason,
+            [_field('SERVICE', namespace), _field('REGION', region),
+             _field('STATE', state), _field('RESOURCE', resource)],
+            'CONFIGURED SIGNAL', _alarm_evidence(trigger), actions,
+            f'Needs review · {alarm_name} · {account_alias} ({account_id})',
+        )
+
+    return payload, {
+        'alarm_key': message_json.get('AlarmArn') or f'{identifier}:{region}:{alarm_name}',
+        'alarm_name': alarm_name,
+        'state': state,
+        'changed_at': changed_at,
+    }
+
+
+def dms_card(message_json, identifier, region, account_id, account_alias,
+             task_name, critical, task_url):
+    detail_type = message_json.get('detail-type', 'DMS state change')
+    detail = message_json.get('detail') or {}
+    detail_message = detail.get('detailMessage', 'DMS did not supply details.')
+    header = ('🔴 CRITICAL' if critical else '🔵 UPDATE') + f' · DMS · {identifier}'
+    color = COLOR_CRITICAL if critical else COLOR_INFO
+    return _card(
+        color, header, detail_type,
+        'IMPACT' if critical else 'OUTCOME', detail_message,
+        [_field('SERVICE', 'AWS DMS'), _field('REGION', region),
+         _field('RESOURCE', task_name), _field('ACCOUNT', account_alias)],
+        'EVIDENCE', detail_message,
+        [_button('Open DMS', task_url, 'open_dms')],
+        f'{"Active · Investigate now" if critical else "Operational update"}'
+        f' · {account_alias} ({account_id})',
+        mention=critical,
+    )
+
+
+def unknown_card(message_json, identifier, region):
+    keys = ', '.join(sorted(message_json.keys())) or 'none'
+    return _card(
+        COLOR_WARNING, f'🟠 UNRECOGNIZED · AWS SNS · {identifier}',
+        'A notification used an unsupported schema.',
+        'IMPACT', 'The full event is in the Lambda logs for investigation.',
+        [_field('REGION', region), _field('TOP-LEVEL KEYS', keys)],
+        'EVIDENCE', 'Renderer fallback used', [],
+        'Needs renderer review · no raw event data posted to Slack',
+    )
+
+
+def _slack_api(method, token, body):
+    request = urllib.request.Request(
+        f'https://slack.com/api/{method}',
+        data=json.dumps(body).encode('utf-8'),
+        headers={
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': f'Bearer {token}',
+        },
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        result = json.loads(response.read())
+    if not result.get('ok'):
+        raise RuntimeError(f'{method} failed: {result.get("error")}')
+    return result
+
+
+def _post_bot(token, payload, thread_ts=None):
+    body = {'channel': SLACK_CHANNEL_ID, **payload}
+    if thread_ts:
+        body['thread_ts'] = thread_ts
+    return _slack_api('chat.postMessage', token, body)['ts']
+
+
+def _update_bot(token, message_ts, payload):
+    _slack_api('chat.update', token,
+               {'channel': SLACK_CHANNEL_ID, 'ts': message_ts, **payload})
+
+
+def _post_webhook(payload):
+    request = urllib.request.Request(
+        SLACK_WEBHOOK_URL,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        response.read()
+
+
+def _bot_token():
+    return boto3.client('ssm').get_parameter(
+        Name=SLACK_BOT_TOKEN_SSM_PARAM, WithDecryption=True
+    )['Parameter']['Value']
+
+
+def _get_alarm_state(alarm_key):
+    if not SLACK_STATE_TABLE:
+        return None
+    item = boto3.client('dynamodb').get_item(
+        TableName=SLACK_STATE_TABLE,
+        Key={'AlarmKey': {'S': alarm_key}},
+        ConsistentRead=True,
+    ).get('Item')
+    if not item:
+        return None
+    return {
+        'message_ts': item['MessageTs']['S'],
+        'started_at': item['StartedAt']['S'],
+        'status': item['Status']['S'],
+    }
+
+
+def _put_alarm_state(alarm_key, message_ts, started_at, status):
+    if not SLACK_STATE_TABLE:
+        return
+    boto3.client('dynamodb').put_item(
+        TableName=SLACK_STATE_TABLE,
+        Item={
+            'AlarmKey': {'S': alarm_key},
+            'MessageTs': {'S': message_ts},
+            'StartedAt': {'S': started_at or datetime.now(timezone.utc).isoformat()},
+            'Status': {'S': status},
+            'ExpiresAt': {'N': str(int(time.time()) + STATE_TTL_SECONDS)},
+        },
+    )
+
+
+def _deliver_cloudwatch_bot(token, message_json, identifier, region,
+                            account_id, account_alias):
+    alarm_key = message_json.get('AlarmArn') or (
+        f'{identifier}:{region}:{message_json.get("AlarmName", "Unknown alarm")}')
+    prior = _get_alarm_state(alarm_key)
+    state = message_json.get('NewStateValue', 'UNKNOWN')
+    # A newly firing incident may reuse an alarm key whose last row is a resolved
+    # idempotency tombstone; only carry its start into a recovery or a duplicate
+    # ALARM update, never into the next distinct incident.
+    started_at = (prior.get('started_at') if prior and
+                  (state != 'ALARM' or prior.get('status') == 'ALARM') else None)
+    payload, metadata = cloudwatch_card(
+        message_json, identifier, region, account_id, account_alias, started_at)
+
+    if state == 'ALARM':
+        if prior and prior.get('status') == 'ALARM':
+            message_ts = prior['message_ts']
+            _update_bot(token, message_ts, payload)
+        else:
+            message_ts = _post_bot(token, payload)
+            started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
+        _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM')
+        return
+
+    if state == 'OK' and prior:
+        _update_bot(token, prior['message_ts'], payload)
+        if prior.get('status') != 'RESOLVED':
+            _post_bot(token, {
+                'text': (f'✅ Automatically resolved · {metadata["alarm_name"]} · '
+                         f'{_format_duration(prior["started_at"], metadata["changed_at"])}')
+            }, thread_ts=prior['message_ts'])
+        _put_alarm_state(alarm_key, prior['message_ts'], prior['started_at'], 'RESOLVED')
+        return
+
+    _post_bot(token, payload)
+
+
 def lambda_handler(event, context):
     message_json = json.loads(event['Records'][0]['Sns']['Message'])
     account_id = os.environ["AWS_ACCOUNT_ID"]
     account_alias = get_account_alias() or 'N/A'
-
     identifier = os.environ["IDENTIFIER"]
     region = os.environ["AWS_REGION"]
 
+    payload = None
+    cloudwatch = False
+
     if 'AlarmName' in message_json:
-        # Process CloudWatch Alarm message
         alarm_name = message_json.get('AlarmName', 'N/A')
-        alarm_description = message_json.get('AlarmDescription', 'N/A')
         old_state_value = message_json.get('OldStateValue')
         new_state_value = message_json.get('NewStateValue', 'N/A')
-        new_state_reason = message_json.get('NewStateReason', 'N/A')
 
         # A freshly created alarm goes INSUFFICIENT_DATA -> OK as its first datapoints
         # arrive. That is alarm birth, not a recovery: an apply that adds a batch of
@@ -182,19 +522,15 @@ def lambda_handler(event, context):
                 and alarm_recently_configured(message_json)):
             print(f"skipping INSUFFICIENT_DATA -> OK for {alarm_name} (alarm settling)")
             return
-
-        if new_state_value == "ALARM":
-            header = "*CloudWatch Alarm! <!channel>*"
-        else:
-            header = "*CloudWatch Notification*"
-
-        slack_message = f"{header}\n\n>Identifier@Region: *{identifier}@{region}*\n>AWS Account ID: {account_id}\n>AWS Account Alias: {account_alias}\n>Alarm: {alarm_name}\n>Description: {alarm_description}\n>State: {new_state_value}\n>Reason: {new_state_reason}"
+        cloudwatch = True
+        payload, _ = cloudwatch_card(
+            message_json, identifier, region, account_id, account_alias)
 
     elif 'detail-type' in message_json:
-        # Process DMS Replication Task State Change message
         detail_type = message_json.get('detail-type', 'N/A')
-        detail_message = message_json['detail'].get('detailMessage', 'N/A')
-        resource_arn = message_json['resources'][0] if message_json['resources'] else 'N/A'
+        detail_message = (message_json.get('detail') or {}).get('detailMessage', 'N/A')
+        resources = message_json.get('resources') or []
+        resource_arn = resources[0] if resources else 'N/A'
 
         # Page the channel only on failures. A plain "Replication task stopped"
         # is routine (operator stops, the migration's automatic
@@ -233,39 +569,24 @@ def lambda_handler(event, context):
                 f"#taskDetails/{replication_task_name}"
             )
 
-        header = "*DMS Alarm! <!channel>*" if critical else "*DMS Notification*"
-
-        slack_message = f"{header}\n\n>Identifier@Region: *{identifier}@{region}*\n>AWS Account ID: *{account_id}*\n>AWS Account Alias: *{account_alias}*\n>Replication Task: *{replication_task_name}*\n>Detail Type: *{detail_type}*\n>Detail Message: *{detail_message}*\n\nTask Link: <{replication_task_link}>"
+        payload = dms_card(
+            message_json, identifier, region, account_id, account_alias,
+            replication_task_name, critical, replication_task_link)
 
     else:
-        # Unrecognized message schema
-        slack_message = f"Unrecognized message schema: {json.dumps(message_json, indent=2)}"
+        # Keep potentially sensitive/raw event data in CloudWatch logs, not Slack.
+        print(f"unrecognized SNS message schema: {json.dumps(message_json, default=str)}")
+        payload = unknown_card(message_json, identifier, region)
 
     if SLACK_BOT_TOKEN_SSM_PARAM and SLACK_CHANNEL_ID:
-        token = boto3.client('ssm').get_parameter(
-            Name=SLACK_BOT_TOKEN_SSM_PARAM, WithDecryption=True
-        )['Parameter']['Value']
-        request = urllib.request.Request(
-            'https://slack.com/api/chat.postMessage',
-            data=json.dumps(
-                {'channel': SLACK_CHANNEL_ID, 'text': slack_message}
-            ).encode('utf-8'),
-            headers={
-                'Content-Type': 'application/json; charset=utf-8',
-                'Authorization': f'Bearer {token}',
-            }
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            body = json.loads(response.read())
-        # The Web API reports errors in-body with HTTP 200; raise so the
-        # failure is visible in the lambda's logs and retry behavior.
-        if not body.get('ok'):
-            raise RuntimeError(f"chat.postMessage failed: {body.get('error')}")
+        token = _bot_token()
+        if cloudwatch:
+            _deliver_cloudwatch_bot(
+                token, message_json, identifier, region, account_id, account_alias)
+        else:
+            _post_bot(token, payload)
     else:
-        request = urllib.request.Request(
-            SLACK_WEBHOOK_URL,
-            data=json.dumps({'text': slack_message}).encode('utf-8'),
-            headers={'Content-Type': 'application/json'}
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            response.read()
+        # Incoming webhooks render the same card, but cannot edit a prior root or
+        # create a correlated lifecycle thread. Bot-token installations get that
+        # behavior through _deliver_cloudwatch_bot above.
+        _post_webhook(payload)
