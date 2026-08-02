@@ -922,7 +922,18 @@ harden)
   ;;
 
 fence)
-  say "PRECONDITIONS (yours): app writers scaled to zero + DDL freeze in effect"
+  # Stated honestly, because the old one-liner ("app writers scaled to zero")
+  # contradicted the kill sweep's own comment below, which assumes a LIVE app
+  # whose pool reconnects between sweeps. Both modes are supported and they have
+  # very different downtime profiles, so the operator needs to know which they
+  # are in rather than reading an instruction the code does not rely on.
+  say "PRECONDITIONS (yours): DDL freeze in effect. Draining app writers first is"
+  say "  STRONGLY preferred but is not a correctness requirement - the write cutoff"
+  say "  is read_only=1 itself, and the kill sweep below is best-effort against a"
+  say "  live connection pool. Note which mode you are in: with writers drained the"
+  say "  outage began before this phase; without, it begins at the fence and every"
+  say "  gate below (including the validation epoch) is customer-visible write"
+  say "  downtime."
   # The drain proof leans on the STOP_TASK apply-error policies (a conflict must
   # stop the task, never advance the checkpoint past a missing row). Terraform
   # only sets them at task creation - assert the EFFECTIVE settings.
@@ -1046,6 +1057,15 @@ budget with FENCE_APPLY_TIMEOUT_MIN=<minutes> if the apply is legitimately slow.
     sleep 30
   done
   fi
+  # Freeze envelope starts here: read_only=1 is confirmed, so from this point the
+  # source rejects writes. Every later milestone reports its offset from this, so
+  # a rehearsal produces a real breakdown instead of an estimate. Note the
+  # customer-visible outage may start EARLIER (see the writers precondition
+  # above) and ends LATER (the post-GO physical + logical applies and the pod
+  # rollout all run with the source still fenced, and are not timed here).
+  FREEZE_T0=$SECONDS
+  freeze_mark() { say "  [freeze +$((SECONDS - FREEZE_T0))s] $*"; }
+  freeze_mark "read_only=1 confirmed - source is now rejecting writes"
   say "post-fence kill sweep (anything that connected during the apply window;"
   say "read_only already blocks their writes, this just tidies sessions)"
   ssm_run <<'EOF'
@@ -1134,7 +1154,7 @@ EOF
   say "gate: post-stop checkpoint at or past the final coordinate (the drain proof)"
   CKTRIES=0
   while :; do
-    if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached (post-stop)"; break; fi
+    if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached (post-stop)"; freeze_mark "drain proof passed (cycles=$CKTRIES)"; break; fi
     CKTRIES=$((CKTRIES+1)); [ "$CKTRIES" -gt 10 ] && die "post-stop checkpoint short of the final coordinate after 10 resume/stop cycles - inspect the task (RecoveryCheckpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text); final=$FINAL_FILE:$FINAL_POS)"
     say "  checkpoint short of final - resuming to drain the backlog, then re-stopping (cycle $CKTRIES)"
     aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
@@ -1228,10 +1248,20 @@ EOF
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
   say "  validating (every enumerated table must reach Validated or No-primary-key in this epoch)"
   VWAIT=0
+  # Instrumentation. The epoch is the largest single step inside the freeze and
+  # nothing has ever measured where its time actually goes. Splitting per-loop
+  # wall clock into API time versus sleep answers three open questions at once:
+  # whether the VWAIT-to-wall factor is 2 or 3, whether the loop is API-bound or
+  # validation-bound, and whether convergence tracks table COUNT or data VOLUME
+  # (the deadline formula assumes count, but row-compare throughput is a volume
+  # operation). Pure logging, no control flow depends on it.
+  EPOCH_T0=$SECONDS; EPOCH_API=0; PREV_MISSING=""
   while :; do
     # same pagination rule: raw json + jq -s, never --query aggregates/projections
+    API_T0=$SECONDS
     aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
       --output json | jq -s '[.[].TableStatistics[] | {s: .SchemaName, t: .TableName, v: .ValidationState}]' > "$VDIR/vstats.json"
+    API_S=$((SECONDS - API_T0)); EPOCH_API=$((EPOCH_API + API_S))
     # terminal-bad states die immediately; "no primary key" is the accepted,
     # reported exception (those tables cannot be row-validated at all)
     NBAD=$(jq '[.[] | select(.v | test("mismatch|error|suspend"; "i"))] | length' "$VDIR/vstats.json")
@@ -1247,7 +1277,13 @@ EOF
       ($main[0] | map({key: ([.s, .t] | tojson), value: true}) | from_entries) as $known
       | [ $now[0][] | select(($known[[.s, .t] | tojson] // false) | not) ] | length')
     MARKER_OK=$(jq '[.[] | select(.s == "aurora_mig_ctl" and .t == "marker" and ((.v | ascii_downcase) == "validated"))] | length' "$VDIR/vstats.json")
+    # rate = tables cleared since the last sample, the thing that tells you
+    # whether this will ever finish and roughly when
+    EPOCH_S=$((SECONDS - EPOCH_T0))
+    if [ -n "$PREV_MISSING" ]; then RATE=$((PREV_MISSING - MISSING)); else RATE="-"; fi
+    PREV_MISSING=$MISSING
     say "  missing=$MISSING/$MAIN_COUNT extra=$EXTRA bad=$NBAD marker_validated=$MARKER_OK"
+    say "    elapsed=${EPOCH_S}s api_total=${EPOCH_API}s api_this_loop=${API_S}s cleared_since_last=$RATE vwait=$VWAIT"
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
     [ "$EXTRA" -gt 0 ] && die "the fresh task enumerated tables outside the main task's set - enumeration drift (rename/DDL outside CDC?); inspect before touching anything"
     if [ "$MISSING" = "0" ] && [ "$MARKER_OK" = "1" ]; then break; fi
@@ -1270,6 +1306,9 @@ EOF
   done
   NOPK_LIST=$(jq -r '[.[] | select((.v | ascii_downcase) == "no primary key") | .s + "." + .t] | join(" ")' "$VDIR/vstats.json")
   [ -z "$NOPK_LIST" ] || say "  no-PK tables outside row validation (documented exception): $NOPK_LIST"
+  # The number the next planning round needs: what the epoch ACTUALLY cost, and
+  # how much of it was the polling API rather than DMS validating.
+  say "  EPOCH TIMING: total=$((SECONDS - EPOCH_T0))s of which api=${EPOCH_API}s, tables=$MAIN_COUNT, final_vwait=$VWAIT"
   say "  epoch validation PASSED - removing the validation task"
   vtask_teardown
   rm -rf "$VDIR"
@@ -1298,6 +1337,10 @@ TGT_COUNTS="$($T -e "SELECT CONCAT((SELECT COUNT(*) FROM information_schema.rout
 [ "$SRC_COUNTS" = "$TGT_COUNTS" ] && echo "OBJECTS_VERIFIED $SRC_COUNTS" || { echo "OBJECT_COUNT_MISMATCH src=$SRC_COUNTS tgt=$TGT_COUNTS"; exit 1; }
 EOF
   say ""
+  freeze_mark "all gates passed - handing off to the cutover apply"
+  say "NOTE: the freeze does NOT end here. The source stays read_only through the"
+  say "      physical apply, its auto-following logical apply, and the pod rollout."
+  say "      Time those too - that tail is unmeasured and may exceed everything above."
   say "GO: the gate has passed. Confirming the aurora_migration_state=cutover"
   say "physical apply IS the promotion - its auto-following logical apply"
   say "repoints the app at Aurora (the point of no return). After the logical"
