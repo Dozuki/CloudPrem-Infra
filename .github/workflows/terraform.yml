@@ -37,11 +37,11 @@ jobs:
     steps:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: Setup OpenTofu
       if: matrix.tool == 'tofu'
-      uses: opentofu/setup-opentofu@v1
+      uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
       with:
         # Match what the fleet runs (infra-live/_spacelift/stacks.tf). Validating on a
         # different version than Spacelift applies with is how a module change passes
@@ -67,7 +67,7 @@ jobs:
     # meaningful credential-free PR gates; do not run AWS rules against it.
     - name: Terraform Linter
       if: matrix.module != 'physical-azure'
-      uses: reviewdog/action-tflint@v1
+      uses: reviewdog/action-tflint@54a5e5aed57dcfbb4662ec548de876df33d6288d # v1
       with:
         github_token: ${{ secrets.github_token }}
         working_directory: "./terraform/${{ matrix.module }}"

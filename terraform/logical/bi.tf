@@ -60,7 +60,7 @@ resource "kubernetes_job_v1" "dms_start" {
           # the ":latest" supply-chain TODO this line used to carry. That botocore is
           # also new enough for the serverless calls below (start-replication landed
           # in botocore 1.29).
-          image = "alpine/k8s:1.31.0"
+          image = "alpine/k8s:1.31.0@sha256:66dd3f7db6c4cf152b688d83aad11ceed9eb2da0c4e7de1034c7d4ccea1b55ef"
           command = [
             "/bin/sh",
             "-c",
@@ -256,7 +256,7 @@ resource "kubernetes_job_v1" "grafana_db_create" {
       spec {
         container {
           name  = "grafana-db-create"
-          image = "mysql:9.3"
+          image = "mysql:9.3@sha256:b9d8b7ec6e6aced08b1cfe50776f8e323c0a625adf4e10e69f90fc686ea10807"
           env {
             name = "MYSQL_HOST"
             value_from {

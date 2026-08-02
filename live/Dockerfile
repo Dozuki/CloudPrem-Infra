@@ -4,7 +4,7 @@
 # Pinned to the exact pair the Spacelift fleet runs. Terragrunt 1.1.1 double-assumes
 # iam_role and 403s at init on every stack that has one (infra-live #158), so these
 # versions move together only after the fleet compatibility path is proven.
-FROM alpine:3.20
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
 ARG TOFU_VERSION=1.11.8
 ARG TERRAGRUNT_VERSION=0.99.4
