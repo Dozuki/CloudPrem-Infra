@@ -273,6 +273,32 @@ variable "rds_engine_family" {
     error_message = "Only 5.7, 8.0 or 8.4 are allowed mysql engine families"
   }
 }
+variable "rds_blue_green_update" {
+  description = <<-EOT
+    Perform changes to the provisioned RDS primary via an RDS Blue/Green Deployment instead of
+    modifying the instance in place.
+
+    This exists for the 8.0 -> 8.4 major upgrade. An in-place major upgrade restarts the engine
+    and runs the upgrade on the live instance, which on a large multi-tenant stack is minutes of
+    hard downtime with no confident upper bound. Blue/Green builds a second environment at the
+    new version, keeps it in sync by replication, and switches over once it has caught up -
+    AWS puts the switchover at roughly a minute, and it PRESERVES THE ENDPOINT HOSTNAME, so
+    nothing downstream has to be repointed.
+
+    Default false, deliberately. Blue/Green runs a full second copy of the database for the
+    duration, so it is not free, and it has prerequisites a stack can silently fail: binary
+    logging must be on (backup_retention_period > 0), and the instance must not itself be a read
+    replica. Turn it on for the apply that changes the engine version, then turn it off.
+
+    Caveat worth reading before you use it on a family change. Moving rds_engine_family also
+    REPLACES the parameter group (its family is derived from that variable), so the plan couples
+    a blue/green instance update with a parameter-group replacement. Read the plan rather than
+    confirming it blind.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "rds_engine_version" {
   description = <<-EOT
     MySQL engine version for the PROVISIONED RDS primary (db_engine = "rds") and its read

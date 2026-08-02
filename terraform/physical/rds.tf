@@ -173,6 +173,12 @@ module "primary_database" {
   engine         = "mysql"
   engine_version = var.rds_engine_family
 
+  # Opt-in, and off unless a stack asks for it. An in-place major upgrade restarts the engine on
+  # the live instance; blue/green builds the new version alongside, replicates into it, and
+  # switches over in about a minute WITHOUT changing the endpoint hostname, so nothing downstream
+  # needs repointing. See the variable for the prerequisites and the parameter-group caveat.
+  blue_green_update = var.rds_blue_green_update ? { enabled = "true" } : {}
+
   port                         = 3306
   instance_class               = data.aws_rds_orderable_db_instance.default.instance_class
   allocated_storage            = var.rds_allocated_storage
