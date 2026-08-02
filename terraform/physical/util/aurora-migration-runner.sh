@@ -39,6 +39,18 @@
 #                    app - gate BEFORE confirming physical, not here).
 #   abort          - pre-cutover abort with hard guards; refuses after cutover.
 #   bi-epoch       - reload the BI DMS task from the (now Aurora) source.
+#
+# Environment overrides:
+#   FENCE_PREFLIGHT=warn         report the fence pre-flight blockers and carry on
+#                                instead of refusing. The gate exists to stop a
+#                                fence landing behind a backup (measured 262.89s
+#                                vs a normal 3.3-6.7s, and unabortable while it
+#                                runs); this is the escape hatch for when the
+#                                cutover has to proceed regardless.
+#   FENCE_BACKUP_MARGIN_MIN=30   how close to the source's backup window is too
+#                                close to start a fence.
+#   CHECKSUM_TABLES="db.t1 ..."  extra tables for the validate phase.
+#   LEGACY_DB_SECRET=<prefix>    fallback prefix for the primary DB secret.
 set -euo pipefail
 
 ID="${1:?identifier (e.g. <customer>-<env>)}"; REGION="${2:?region}"; PHASE="${3:?phase}"
@@ -211,6 +223,119 @@ migration_secret() { first_secret_arn "${ID}-aurora-migration"; }
 src_pg() { aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text; }
 primary_secret_host() { aws secretsmanager get-secret-value --region "$REGION" --secret-id "$(primary_secret)" --query SecretString --output text | jq -r .host; }
 
+# --- fence pre-flight: RDS defers parameter applies behind backups ------------
+# MEASURED 2026-08-02 (ddvtest, RDS 8.0.46, both db.t3.medium and db.m5.8xlarge):
+# the read_only fence lands in 3.3-6.7s on a quiet instance. One run took 262.89s
+# because creating a read replica had triggered a backup (RDS events: "Backing up
+# DB instance 06:16:10" -> "Finished 06:19:33") and the parameter apply landed 9s
+# AFTER the backup finished. RDS queues the apply behind the backup.
+#
+# The duration is not the worst of it. For that whole window the UNFENCE is also
+# refused - ModifyDBParameterGroup returns InvalidDBParameterGroupState ("this
+# parameter group cannot be modified because it is currently being applied"),
+# reproduced deterministically. So a backup-contended fence is an UNABORTABLE
+# fence: the source is read-only, customers are down, and the documented rollback
+# is unavailable until the backup completes.
+#
+# This gate converts an 80x timing variance from a surprise during the fence into
+# a decision before it. It does NOT suppress automated backups: dropping
+# BackupRetentionPeriod to 0 deletes the existing automated backups, which is the
+# rollback path for the very cutover being run. Schedule around the window, do
+# not disarm it.
+#
+# Override with FENCE_PREFLIGHT=warn to report and continue. A stuck or
+# misreported backup must never be able to strand a cutover that has to proceed.
+hhmm_to_min() { printf '%s' "$1" | awk -F: '{ print ($1 * 60) + $2 }'; }
+
+# Minutes until the source's backup window NEXT opens, or 9999 if no window is
+# set. Inside the window it returns the wait until tomorrow's, which is why the
+# caller must ask backup_window_open first and only fall through to this.
+minutes_to_backup_window() {
+  local w start now delta
+  w=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+      --query 'DBInstances[0].PreferredBackupWindow' --output text 2>/dev/null || echo None)
+  { [ -n "$w" ] && [ "$w" != None ]; } || { printf '9999'; return; }
+  start=$(hhmm_to_min "${w%%-*}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+  delta=$(( start - now ))
+  # spelled as if/fi rather than "[ test ] && assign" so the exit status of the
+  # last statement before the printf is never the false branch of a test
+  if [ "$delta" -lt 0 ]; then delta=$(( delta + 1440 )); fi
+  printf '%s' "$delta"
+}
+
+backup_window_open() {
+  local w start end now
+  w=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+      --query 'DBInstances[0].PreferredBackupWindow' --output text 2>/dev/null || echo None)
+  { [ -n "$w" ] && [ "$w" != None ]; } || return 1
+  start=$(hhmm_to_min "${w%%-*}"); end=$(hhmm_to_min "${w##*-}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+  # a window may wrap midnight (e.g. 23:30-00:00), so the two cases differ
+  if [ "$start" -le "$end" ]; then [ "$now" -ge "$start" ] && [ "$now" -lt "$end" ]
+  else [ "$now" -ge "$start" ] || [ "$now" -lt "$end" ]; fi
+}
+
+# Every reason the next parameter apply could be deferred or refused, as
+# "code: detail" lines. Empty output means clear to fence.
+fence_blockers() {
+  local st pg_status pending snaps mins
+  st=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+       --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo unknown)
+  # "backing-up" is the state that produced the 262.89s apply. "modifying",
+  # "upgrading" and friends queue applies the same way; anything that is not
+  # plainly available is a reason to stop and look.
+  [ "$st" = available ] || echo "instance-status: $st (only 'available' applies parameters promptly)"
+
+  # An apply already in flight is what makes the fence unabortable. Refuse to add
+  # a second one on top of it.
+  pg_status=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+              --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus' --output text 2>/dev/null || echo unknown)
+  [ "$pg_status" = in-sync ] || echo "parameter-group: $pg_status (an apply is in flight; the unfence would be refused)"
+
+  pending=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+            --query 'DBInstances[0].PendingModifiedValues' --output json 2>/dev/null | jq -rc 'if (. // {}) == {} then "" else tostring end')
+  [ -z "$pending" ] || echo "pending-modifications: $pending"
+
+  # Manual snapshots defer applies exactly as automated backups do, and a cutover
+  # runbook that takes a safety snapshot first is the likely way to hit this.
+  snaps=$(aws rds describe-db-snapshots --db-instance-identifier "$SRC_ID" --region "$REGION" \
+          --query 'DBSnapshots[?Status!=`available`].[DBSnapshotIdentifier,Status]' --output text 2>/dev/null | tr '\t' '=' | tr '\n' ' ' | sed 's/ *$//')
+  [ -z "$snaps" ] || echo "snapshot-in-progress: $snaps"
+
+  if backup_window_open; then
+    echo "backup-window: OPEN now (a backup may start or be running)"
+  else
+    mins=$(minutes_to_backup_window)
+    # A non-integer here means the probe itself broke. Report that rather than
+    # letting [ -ge ] error out, which reads like a backup-window finding and
+    # sends the operator looking in the wrong place.
+    case "$mins" in
+      '' | *[!0-9]*) echo "backup-window: UNKNOWN (probe returned '$mins' - treat as unsafe and check by hand)" ;;
+      *) [ "$mins" -ge "${FENCE_BACKUP_MARGIN_MIN:-30}" ] || \
+           echo "backup-window: opens in ${mins}m (under the ${FENCE_BACKUP_MARGIN_MIN:-30}m margin; the fence could be caught by it)" ;;
+    esac
+  fi
+}
+
+# $1 = a short label for the log line, so the two call sites are distinguishable
+preflight_fence_gate() {
+  local blockers mode="${FENCE_PREFLIGHT:-enforce}"
+  say "pre-flight ($1): checking nothing will defer the parameter apply"
+  blockers=$(fence_blockers)
+  if [ -z "$blockers" ]; then
+    say "  clear - instance available, no apply in flight, no snapshot running, backup window not near"
+    return 0
+  fi
+  say "  BLOCKED:"; printf '%s\n' "$blockers" | sed 's/^/    - /'
+  if [ "$mode" = warn ]; then
+    say "  FENCE_PREFLIGHT=warn - continuing anyway. Expect a slow fence and an unabortable window."
+    return 0
+  fi
+  die "fence pre-flight failed (see above). A parameter apply issued now can be deferred behind a
+backup or snapshot - measured at 262.89s against a normal 3.3-6.7s - and the unfence is REFUSED for
+that whole window, so the abort path is unavailable while it lasts. Wait for the condition to clear
+and re-run. To proceed regardless: FENCE_PREFLIGHT=warn $0 $ID $REGION $PHASE"
+}
+
 # DMS validation clean-state whitelist: anything else is unclean. Matched
 # case-insensitively ("No primary key" casing differs across DMS versions).
 unclean_validation_count() {
@@ -340,6 +465,11 @@ status)
   say "rds: $(rds_endpoint 2>/dev/null || echo none)"
   say "aurora: $(aurora_endpoint 2>/dev/null || echo none)"
   say "primary secret host: $(primary_secret_host 2>/dev/null || echo unknown)  (aurora after cutover)"
+  # Read-only preview of the fence gate, so the window can be chosen before the
+  # cutover call rather than discovered at the fence.
+  PF=$(fence_blockers 2>/dev/null || echo "preflight-probe-failed")
+  if [ -z "$PF" ]; then say "fence pre-flight: clear"
+  else say "fence pre-flight: BLOCKED"; printf '%s\n' "$PF" | sed 's/^/    - /'; fi
   ;;
 
 preload)
@@ -671,6 +801,9 @@ fence)
   # only sets them at task creation - assert the EFFECTIVE settings.
   [ "$(effective_apply_policies)" = "STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK" ] || \
     die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
+  # Fail fast, before the kill sweep touches anything. Re-checked immediately
+  # before the apply prompt, since a backup can start during the steps between.
+  preflight_fence_gate "entry"
   prep_cnfs
   # NOTE on the validation-epoch scope (see the epoch block after the drain
   # proof): the fresh task validates the main task's ENTIRE mapping scope (a
@@ -753,6 +886,10 @@ echo "foreign_sessions_remaining=\$LEFT (best-effort; fence is the cutoff)"
 mariadb --defaults-extra-file=/tmp/mig-src.cnf -e "INSERT INTO aurora_mig_ctl.marker (tag) VALUES ('$MARK');"
 echo MARKER_COMMITTED
 EOF
+  # The load-bearing check: this is the apply that gets deferred. The entry check
+  # can be minutes stale by now (BI stop, kill sweep, marker commit all sit
+  # between them) and a backup starting in that gap is exactly the 262.89s case.
+  preflight_fence_gate "pre-apply"
   say ""
   say ">>> NOW APPLY THE TERRAFORM FENCE: set aurora_migration_source_fenced = true"
   say ">>> in this env's env.hcl and confirm the gated physical apply, then return."
@@ -1055,6 +1192,25 @@ $T -e "SELECT CONCAT('DROP TRIGGER IF EXISTS \`',trigger_schema,'\`.\`',trigger_
 $T -e "SELECT CONCAT('DROP EVENT IF EXISTS \`',event_schema,'\`.\`',event_name,'\`;') FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')" >> /tmp/drop-objs.sql
 if [ -s /tmp/drop-objs.sql ]; then mariadb --defaults-extra-file=/tmp/mig-tgt.cnf < /tmp/drop-objs.sql && echo TARGET_OBJECTS_DROPPED; else echo NO_TARGET_OBJECTS; fi
 EOF
+  # An unfence issued while the FENCE apply is still in flight is REFUSED by RDS:
+  # InvalidDBParameterGroupState ("this parameter group cannot be modified
+  # because it is currently being applied"). Reproduced deterministically
+  # 2026-08-02. On a quiet instance the lock clears in ~0.7s and nobody notices;
+  # behind a backup it lasts as long as the backup does (measured 262.89s), and
+  # for that whole window the fence is UNABORTABLE. Report the state rather than
+  # letting the operator meet the error as a mystery Terraform failure.
+  PGS=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+        --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus' --output text 2>/dev/null || echo unknown)
+  if [ "$PGS" != in-sync ]; then
+    say "WARNING: source parameter group is '$PGS', not in-sync. An unfence apply issued now"
+    say "         will be REFUSED with InvalidDBParameterGroupState. This is expected and"
+    say "         self-clearing - wait for in-sync (seconds normally, the length of a backup"
+    say "         if one is running) and apply then. The fence stays up until you do."
+    say "         Watch it: aws rds describe-db-instances --db-instance-identifier $SRC_ID \\"
+    say "           --region $REGION --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus'"
+  else
+    say "source parameter group is in-sync - an unfence apply will be accepted"
+  fi
   say ">>> UNFENCE: set aurora_migration_source_fenced = false in env.hcl and"
   say ">>> confirm the gated apply (Terraform refuses this while state=cutover)."
   say "Polling for read_only=0..."
