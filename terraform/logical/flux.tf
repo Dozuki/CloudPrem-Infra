@@ -552,6 +552,15 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # migration. Install keeps retries=0: install remediation uninstalls
       # first, which is not a loop we want running unattended.
       upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", remediation = { retries = 2, remediateLastFailure = false } }
+      # rollback.force=false pinned explicitly (it is the Helm default, but this is the one
+      # knob here that can destroy data, so it gets written down rather than inherited).
+      # Remediation re-renders the previous revision over the live objects, and force=true
+      # resolves any conflict by deleting and recreating the object. The db-migrations Job is
+      # the object most likely to conflict (spec.template and spec.selector are immutable), so
+      # force would delete a completed migration and re-run it unattended, mid-incident, on a
+      # database that is already one schema version ahead. A rollback that fails loudly and
+      # parks the release is the better outcome.
+      rollback = { force = false }
       # driftDetection=enabled corrects cluster drift back to the chart's desired state. Promoted from warn after a fleet
       # sweep (2026-07-30) found drift on exactly one env, and it was stale old-chart state helm's 3-way merge could never
       # fix: failed upgrade attempts record the new manifest without fully applying it, so the next successful upgrade sees
