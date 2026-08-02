@@ -144,14 +144,43 @@ resource "vault_kubernetes_auth_backend_role" "eso" {
   backend   = vault_auth_backend.kubernetes[0].path
   role_name = "dozuki-app"
 
-  bound_service_account_names = ["dozuki-external-secrets"]
-  bound_service_account_namespaces = concat(
-    [local.k8s_namespace_name],
-    local.flux_slack_use_relay ? [kubernetes_namespace_v1.flux_system.metadata[0].name] : [],
-  )
-  audience = var.vault_address
+  bound_service_account_names      = ["dozuki-external-secrets"]
+  bound_service_account_namespaces = [local.k8s_namespace_name]
+  audience                         = var.vault_address
 
   token_policies = [vault_policy.eso_readonly[0].name]
+  token_ttl      = 3600
+  token_max_ttl  = 86400
+}
+
+# flux-system needs only the signed relay transport, not the application or
+# fleet-wide global secrets available to the app namespace's ESO role.
+resource "vault_policy" "flux_relay_readonly" {
+  count = local.flux_slack_use_relay ? 1 : 0
+
+  name = "${local.vault_stack_label}-flux-relay"
+
+  policy = <<-EOT
+    path "secret/data/dozuki/global/alertmanager-slack-relay" {
+      capabilities = ["read"]
+    }
+    path "secret/data/dozuki/global/alertmanager-slack-relay-endpoint" {
+      capabilities = ["read"]
+    }
+  EOT
+}
+
+resource "vault_kubernetes_auth_backend_role" "flux_relay" {
+  count = local.flux_slack_use_relay ? 1 : 0
+
+  backend   = vault_auth_backend.kubernetes[0].path
+  role_name = "flux-slack-relay"
+
+  bound_service_account_names      = ["dozuki-external-secrets"]
+  bound_service_account_namespaces = [kubernetes_namespace_v1.flux_system.metadata[0].name]
+  audience                         = var.vault_address
+
+  token_policies = [vault_policy.flux_relay_readonly[0].name]
   token_ttl      = 3600
   token_max_ttl  = 86400
 }

@@ -654,9 +654,9 @@ resource "kubernetes_secret_v1" "flux_slack_webhook" {
 }
 
 # The app chart's SecretStore is namespace-scoped to dozuki. Give flux-system
-# its own identity and store using the same environment-scoped Vault role. That
-# role is read-only and this namespace can sync only the endpoint + relay HMAC
-# token; the Slack bot token remains server-side in the relay's SSM cache.
+# its own identity and narrowly scoped Vault role. This namespace can read only
+# the endpoint + relay HMAC token; the Slack bot token remains server-side in
+# the relay's SSM cache.
 resource "kubernetes_service_account_v1" "flux_external_secrets" {
   count = local.flux_slack_use_relay ? 1 : 0
 
@@ -671,7 +671,7 @@ resource "kubectl_manifest" "flux_relay_secret_store" {
   depends_on = [
     helm_release.external_secrets,
     kubernetes_service_account_v1.flux_external_secrets,
-    vault_kubernetes_auth_backend_role.eso,
+    vault_kubernetes_auth_backend_role.flux_relay,
   ]
   yaml_body = yamlencode({
     apiVersion = "external-secrets.io/v1"
@@ -689,7 +689,7 @@ resource "kubectl_manifest" "flux_relay_secret_store" {
           auth = {
             kubernetes = {
               mountPath = "k8s/${local.vault_stack_label}"
-              role      = "dozuki-app"
+              role      = "flux-slack-relay"
               serviceAccountRef = {
                 name      = kubernetes_service_account_v1.flux_external_secrets[0].metadata[0].name
                 audiences = [var.vault_address]
