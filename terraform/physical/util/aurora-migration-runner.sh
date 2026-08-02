@@ -301,7 +301,7 @@ window_open() {
 # One describe, reused. Five separate calls each carried their own throttle and
 # permission exposure for facts that all live in the same response.
 fence_blockers() {
-  local inst st pg_status pending snaps mins
+  local inst st pg_status pending snaps mins W RAW
   inst=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
          --query 'DBInstances[0]' --output json 2>/dev/null) || inst=""
   if [ -z "$inst" ] || ! echo "$inst" | jq -e 'type == "object"' >/dev/null 2>&1; then
@@ -315,11 +315,24 @@ fence_blockers() {
 
     # An apply already in flight is what makes the fence unabortable. Refuse to
     # add a second one on top of it.
+    # ONLY "applying" is an apply in flight. "pending-reboot" means a STATIC
+    # parameter change is waiting for a reboot; dynamic parameters (read_only is
+    # one) still apply immediately, so blocking on it would strand a cutover
+    # indefinitely on any stack carrying an unrebooted static change.
     pg_status=$(echo "$inst" | jq -r '.DBParameterGroups[0].ParameterApplyStatus // "unknown"')
-    [ "$pg_status" = in-sync ] || echo "parameter-group: $pg_status (an apply is in flight; the unfence would be refused)"
+    case "$pg_status" in
+      in-sync|pending-reboot) : ;;
+      unknown) echo "parameter-group: UNREADABLE (treat as unsafe)" ;;
+      *) echo "parameter-group: $pg_status (an apply is in flight; the unfence would be refused)" ;;
+    esac
 
-    pending=$(echo "$inst" | jq -rc 'if (.PendingModifiedValues // {}) == {} then "" else (.PendingModifiedValues | tostring) end')
-    [ -z "$pending" ] || echo "pending-modifications: $pending"
+    # Informational, NOT a blocker. PendingModifiedValues is the future
+    # maintenance queue (a scheduled class or engine change), not evidence that
+    # anything is applying now. Blocking on it would refuse legitimate cutovers.
+    # Written to STDERR deliberately: stdout IS the blocker channel here, so a
+    # note printed to stdout would block exactly what it says it does not.
+    pending=$(echo "$inst" | jq -rc 'if (.PendingModifiedValues // {}) == {} then "" else (.PendingModifiedValues | tostring) end') || pending=""
+    [ -z "$pending" ] || say "  note: pending modifications queued for maintenance (not blocking): $pending" >&2
 
     # RDS always returns a PreferredBackupWindow, so absence here means the probe
     # is wrong, not that backups are off.
@@ -338,19 +351,31 @@ fence_blockers() {
     fi
   fi
 
-  # Match the IN-FLIGHT states explicitly rather than negating 'available'. A
-  # snapshot that failed months ago sits in DBSnapshots as Status=failed until
-  # someone deletes it, and negating 'available' would let it block every fence
-  # forever.
+  # Match 'creating' ONLY. Negating 'available' would let a snapshot that failed
+  # months ago (Status=failed, kept until deleted) block every fence forever, and
+  # 'copying' is snapshot-to-snapshot work that does not touch the live source.
   snaps=$(aws rds describe-db-snapshots --db-instance-identifier "$SRC_ID" --region "$REGION" \
-          --query 'DBSnapshots[?Status==`creating` || Status==`copying` || Status==`modifying`].[DBSnapshotIdentifier,Status]' \
+          --query 'DBSnapshots[?Status==`creating`].[DBSnapshotIdentifier,Status]' \
           --output text 2>/dev/null) || snaps="PROBE_FAILED"
   if [ "$snaps" = "PROBE_FAILED" ]; then
     echo "snapshot-probe: FAILED (describe-db-snapshots unreadable - treat as unsafe; the runner role may lack rds:DescribeDBSnapshots)"
   else
-    snaps=$(printf '%s' "$snaps" | tr '\t' '=' | tr '\n' ' ' | sed 's/ *$//')
+    # Reformat in a way that cannot erase a real finding: if the pipeline broke,
+    # fall back to the raw value rather than an empty string.
+    RAW="$snaps"
+    snaps=$(printf '%s' "$RAW" | tr '\t' '=' | tr '\n' ' ' | sed 's/ *$//') || snaps="$RAW"
+    if [ -n "$RAW" ] && [ -z "$snaps" ]; then snaps="$RAW"; fi
     [ -z "$snaps" ] || echo "snapshot-in-progress: $snaps"
   fi
+}
+
+# Minutes budget as a base-10 integer. "08" is invalid octal in bash arithmetic
+# and would abort mid-fence; zero or negative would expire instantly.
+timeout_min() {
+  local v="${FENCE_APPLY_TIMEOUT_MIN:-30}"
+  case "$v" in ''|*[!0-9]*) v=30 ;; esac
+  v=$((10#$v)); [ "$v" -ge 1 ] || v=30
+  printf '%s' "$v"
 }
 
 # $1 = a short label for the log line, so the two call sites are distinguishable
@@ -500,58 +525,62 @@ case "$PHASE" in
 # READ-ONLY. Answers "are app writers actually drained?" with a measurement
 # instead of the assertion the fence phase used to print.
 #
-# Measure ROW CHANGES, not connections and not Handler_*. Connections lie: the
-# app's pool holds idle sessions whether or not it is writing, and it reconnects
-# between kill sweeps (the fence's own sweep comment says so). Handler_write
-# lies harder, because it counts writes to internal temporary tables from SELECT
-# sorting - measured 355/s on a live source whose real business write rate was
-# 4.7 rows/s. Using it as a drain check means a fully drained source still looks
-# busy and nobody ever believes the drain worked.
+# THE SIGNAL IS THE DMS PER-TABLE COUNTERS, not any server status variable.
+# Measured on a live source at a quiet hour, all at the same moment:
 #
-# Innodb_rows_inserted/updated/deleted count actual InnoDB table row changes and
-# go to a hard zero on a quiesced source. That is the signal.
+#   Handler_write          4099/s   <- almost entirely internal temp tables
+#   Created_tmp_tables       12.7/s <- the source of that noise
+#   Innodb_rows_inserted      9.2/s <- still ~13x inflated by temp-table inserts
+#   DMS mapped-table DML      0.7/s <- the actual business writes
+#
+# Every server-wide counter is inflated by internal work (temp tables from
+# SELECT sorting, system tables, schemas outside the migration scope). An
+# operator watching Innodb_rows_inserted would read 9/s on a source with almost
+# no real writes, conclude the drain never worked, and either wait forever or
+# stop trusting the check.
+#
+# describe-table-statistics counts exactly the tables being migrated, costs the
+# source nothing, and is already running. Two samples and a diff name the tables
+# still taking writes, which is far more actionable than a rate: it tells you
+# WHICH site or job to go drain.
+#
+# Caveat worth knowing: these counters reset across DMS task lifecycle events,
+# so a delta is only meaningful within one task run, and CDC latency (seconds)
+# means a sample lags the source slightly. Both are fine for a drain check.
 writers)
-  prep_cnfs
-  SAMPLE="${WRITERS_SAMPLE_SEC:-15}"
-  # DMS holds long-lived sessions and a Binlog Dump thread as the same DB user
-  # as the app, so the only way to tell them apart is the source address.
-  DMSIPS=$(aws dms describe-replication-instances --region "$REGION" \
-           --query 'ReplicationInstances[].ReplicationInstancePrivateIpAddresses[]' --output text 2>/dev/null | tr '\t' '\n' | grep . | sort -u || true)
-  if [ -n "$DMSIPS" ]; then
-    say "DMS replication instance IPs (excluded from the app-session count):"
-    printf '%s\n' "$DMSIPS" | sed 's/^/    /'
-  else
-    say "WARNING: could not resolve DMS replication instance IPs - app/DMS session"
-    say "         attribution below is unreliable. Check dms:DescribeReplicationInstances."
-  fi
-  DMSRE=$(printf '%s' "$DMSIPS" | tr '\n' '|' | sed 's/|$//;s/\./\\./g')
-  [ -n "$DMSRE" ] || DMSRE='__no_dms_ip_matched__'
-  say "sampling row-change counters over ${SAMPLE}s..."
-  ssm_run 300 <<EOF
-M="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
-C="SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME IN ('Innodb_rows_inserted','Innodb_rows_updated','Innodb_rows_deleted')"
-\$M -e "\$C" | sort > /tmp/wr1.txt
-sleep $SAMPLE
-\$M -e "\$C" | sort > /tmp/wr2.txt
-TOT=\$(join /tmp/wr1.txt /tmp/wr2.txt | awk '{d=\$3-\$2; printf "  %-22s %10d  (%.2f/s)\n", \$1, d, d/$SAMPLE; t+=d} END {print "TOTAL_ROW_CHANGES="t+0 > "/tmp/wrtot"}')
-echo "\$TOT"
-echo "row_changes_total=\$(sed 's/.*=//' /tmp/wrtot)"
-echo "open_transactions=\$(\$M -e 'SELECT COUNT(*) FROM information_schema.innodb_trx')"
-echo "app_sessions=\$(\$M -e "SELECT COUNT(*) FROM information_schema.processlist WHERE command != 'Binlog Dump' AND user NOT IN ('rdsadmin','event_scheduler') AND SUBSTRING_INDEX(host,':',1) NOT REGEXP '^($DMSRE)\$' AND id != CONNECTION_ID()")"
-echo "read_only=\$(\$M -e 'SELECT @@read_only')"
-echo "--- non-DMS sessions doing work right now ---"
-\$M -e "SELECT id, user, SUBSTRING_INDEX(host,':',1) src, command, time, LEFT(REPLACE(info,CHAR(10),' '),60) FROM information_schema.processlist WHERE command NOT IN ('Sleep','Binlog Dump','Daemon') AND user NOT IN ('rdsadmin') AND SUBSTRING_INDEX(host,':',1) NOT REGEXP '^($DMSRE)\$' AND id != CONNECTION_ID()"
-EOF
+  SAMPLE="${WRITERS_SAMPLE_SEC:-120}"
+  TARN=$(task_arn)
+  [ -n "$TARN" ] && [ "$TARN" != None ] || die "cannot resolve the migration task - the DMS counters are the drain signal"
+  say "sampling DMS per-table DML over ${SAMPLE}s (the tables being migrated, not server-wide counters)"
+  WDIR=$(mktemp -d "/tmp/writers-${ID}.XXXXXX")
+  # same pagination rule as the epoch: raw json + jq -s, never --query aggregates
+  aws dms describe-table-statistics --replication-task-arn "$TARN" --region "$REGION" --output json \
+    | jq -s '[.[].TableStatistics[] | {k:(.SchemaName+"."+.TableName), n:(.Inserts+.Updates+.Deletes)}] | from_entries? // (map({key:.k,value:.n}) | from_entries)' > "$WDIR/s1.json"
+  sleep "$SAMPLE"
+  aws dms describe-table-statistics --replication-task-arn "$TARN" --region "$REGION" --output json \
+    | jq -s '[.[].TableStatistics[] | {k:(.SchemaName+"."+.TableName), n:(.Inserts+.Updates+.Deletes)}] | from_entries? // (map({key:.k,value:.n}) | from_entries)' > "$WDIR/s2.json"
+  jq -n --slurpfile a "$WDIR/s1.json" --slurpfile b "$WDIR/s2.json" --argjson w "$SAMPLE" '
+    ($a[0] // {}) as $A | ($b[0] // {}) as $B
+    | [ $B | to_entries[] | {t:.key, d:(.value - ($A[.key] // 0))} | select(.d > 0) ]
+    | sort_by(-.d) as $rows
+    | { total: ([$rows[].d] | add // 0), tables: ($rows | length), top: ($rows[0:15]) }' > "$WDIR/diff.json"
+  WTOT=$(jq -r '.total' "$WDIR/diff.json"); WTABS=$(jq -r '.tables' "$WDIR/diff.json")
+  say "  row changes in window: $WTOT across $WTABS table(s)"
+  [ "$WTABS" = "0" ] || jq -r '.top[] | "    \(.t)  \(.d)"' "$WDIR/diff.json"
+  rm -rf "$WDIR"
   say ""
-  say "READING THE RESULT:"
-  say "  row_changes_total = 0 across two consecutive runs is the drain proof."
-  say "  Anything above zero means writers are still live, whatever the session"
-  say "  count says. Compare against an UNDRAINED baseline taken beforehand so"
-  say "  you know what busy looks like on this env."
-  say "  open_transactions > 0 means a write is mid-flight regardless of the rate."
-  say "  This does NOT fence anything - it only tells you which cutover mode you"
-  say "  are in, which decides whether the fence's gates are customer-visible"
-  say "  write downtime or happen inside an outage that already started."
+  if [ "$WTOT" = "0" ]; then
+    say "VERDICT: DRAINED for this window. Run again to confirm it holds - one quiet"
+    say "  window is not a drain, two consecutive zero windows is."
+  else
+    say "VERDICT: NOT DRAINED. The tables listed above are still taking writes;"
+    say "  each names the site or job to go stop. Server-wide counters would only"
+    say "  have given you a rate, and an inflated one."
+  fi
+  say ""
+  say "This phase fences nothing. It tells you which cutover mode you are in,"
+  say "which decides whether the fence's gates are customer-visible write downtime"
+  say "or happen inside an outage that already started."
   ;;
 
 status)
@@ -911,14 +940,27 @@ fence)
   # only sets them at task creation - assert the EFFECTIVE settings.
   [ "$(effective_apply_policies)" = "STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK" ] || \
     die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
-  # NOTE: the pre-flight gate deliberately does NOT run here. It belongs inside
-  # the fresh-fence branch below, after the RO0 already-fenced probe. On
-  # re-entry the source is ALREADY read_only with customers down, there is no
-  # parameter apply left to defer, and the gate's blockers ("an apply is in
-  # flight", "the backup window opens in Nm") are all meaningless - a fence that
-  # has been up through its own multi-hour epoch will drift into the backup
-  # window as a matter of course. Gating recovery on them would strand an
-  # operator mid-outage hunting for FENCE_PREFLIGHT=warn.
+  # Pre-flight runs HERE, before anything mutates state. It used to sit after
+  # the BI stop, so a refusal left the BI replication stopped with no instruction
+  # to restart it. A gate that aborts must abort before it can strand anything.
+  #
+  # Skipped when the source is already fenced: on re-entry there is no parameter
+  # apply left to defer, and the gate's blockers ("an apply is in flight", "the
+  # backup window opens in Nm") are meaningless - a fence that has been up
+  # through its own multi-hour epoch drifts into the backup window as a matter
+  # of course. Gating recovery on that would strand an operator mid-outage
+  # hunting for FENCE_PREFLIGHT=warn. read_only is cheap to read directly.
+  RO_EARLY=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+             --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text 2>/dev/null || echo "")
+  if [ -n "$RO_EARLY" ]; then
+    RO_EARLY=$(aws rds describe-db-parameters --db-parameter-group-name "$RO_EARLY" --region "$REGION" \
+               --query 'Parameters[?ParameterName==`read_only`].ParameterValue' --output text 2>/dev/null || echo "")
+  fi
+  if [ "$RO_EARLY" = "1" ]; then
+    say "source parameter group already carries read_only=1 - skipping pre-flight (re-entry)"
+  else
+    preflight_fence_gate "entry"
+  fi
   prep_cnfs
   # NOTE on the validation-epoch scope (see the epoch block after the drain
   # proof): the fresh task validates the main task's ENTIRE mapping scope (a
@@ -972,10 +1014,6 @@ EOF
     [ -n "$MARK" ] || die "re-entry: no marker found on the fenced source - cannot anchor the epoch; unfence and start over"
     say "  reusing marker '$MARK' from the prior attempt"
   else
-  # Fresh fence only. Fail fast here, before the kill sweep touches anything.
-  # Re-checked immediately before the apply prompt, since a backup can start
-  # during the steps between.
-  preflight_fence_gate "entry"
   MARK="cutover-$(date -u +%s)"
   say "kill sweep (by connection id - app and runner share the master user) + marker '$MARK'"
   ssm_run <<EOF
@@ -1008,7 +1046,22 @@ EOF
   # The load-bearing check: this is the apply that gets deferred. The entry check
   # can be minutes stale by now (BI stop, kill sweep, marker commit all sit
   # between them) and a backup starting in that gap is exactly the 262.89s case.
-  preflight_fence_gate "pre-apply"
+  #
+  # A refusal HERE lands after side effects, unavoidably - checking earlier is
+  # what makes the check useless. So say exactly what state the operator is in.
+  # It is fully recoverable: re-running 'fence' from the top is idempotent (BI is
+  # already stopped and bi_stop tolerates that, the marker is just another row,
+  # and killed sessions reconnect).
+  if ! preflight_fence_gate "pre-apply"; then
+    say ""
+    say "STATE AFTER THIS REFUSAL - nothing is fenced, nothing is lost:"
+    say "  - BI replication is STOPPED (restart it if you are standing down)"
+    say "  - app sessions were swept and will have reconnected"
+    say "  - marker '$MARK' is committed on the source (harmless)"
+    say "  - the source is NOT fenced and is still serving writes"
+    say "RECOVERY: clear the blocker and re-run 'fence'. It is idempotent."
+    exit 1
+  fi
   say ""
   say ">>> NOW APPLY THE TERRAFORM FENCE: set aurora_migration_source_fenced = true"
   say ">>> in this env's env.hcl and confirm the gated physical apply, then return."
@@ -1022,18 +1075,20 @@ EOF
   # Dying here is safe in both directions. If the apply never landed the source
   # is unfenced and nothing has changed; if it landed just after the deadline,
   # re-running 'fence' takes the RO0=1 re-entry path and reuses this marker.
-  FDEADLINE=$((SECONDS + 60 * ${FENCE_APPLY_TIMEOUT_MIN:-30}))
-  say "Polling for read_only=1 (deadline ${FENCE_APPLY_TIMEOUT_MIN:-30}m)..."
+  FTMO=$(timeout_min); FDEADLINE=$((SECONDS + 60 * FTMO))
+  say "Polling for read_only=1 (deadline ${FTMO}m)..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
 ); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "1" ] && break
     if [ "$SECONDS" -ge "$FDEADLINE" ]; then
       say "parameter group apply status: $(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus' --output text 2>/dev/null || echo unknown)"
-      die "source did not reach read_only=1 within ${FENCE_APPLY_TIMEOUT_MIN:-30}m. The fence apply
-has not landed. Check the Spacelift run for the physical stack. Nothing here is committed: the
-source is still writable and re-running 'fence' resumes from this marker ('$MARK'). Raise the
-budget with FENCE_APPLY_TIMEOUT_MIN=<minutes> if the apply is legitimately slow."
+      die "source did not reach read_only=1 within ${FTMO}m. The fence apply has not landed as of
+the last probe - it may still land after this exit, so RE-CHECK read_only before assuming the source
+is writable. Check the Spacelift run for the physical stack. Nothing here is committed, and
+re-running 'fence' handles both outcomes: it resumes from marker '$MARK' if unfenced, or takes the
+already-fenced re-entry path if the apply landed late. Raise the budget with
+FENCE_APPLY_TIMEOUT_MIN=<minutes> if the apply is legitimately slow."
     fi
     sleep 30
   done
@@ -1395,17 +1450,18 @@ EOF
   # forever waiting on an unfence apply is the worst possible failure mode. The
   # source stays fenced if this dies, which is the state it was already in, and
   # abort is re-runnable.
-  ADEADLINE=$((SECONDS + 60 * ${FENCE_APPLY_TIMEOUT_MIN:-30}))
-  say "Polling for read_only=0 (deadline ${FENCE_APPLY_TIMEOUT_MIN:-30}m)..."
+  ATMO=$(timeout_min); ADEADLINE=$((SECONDS + 60 * ATMO))
+  say "Polling for read_only=0 (deadline ${ATMO}m)..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
 ); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "0" ] && break
     if [ "$SECONDS" -ge "$ADEADLINE" ]; then
-      die "source did not reach read_only=0 within ${FENCE_APPLY_TIMEOUT_MIN:-30}m - the unfence apply
-has not landed. The source is STILL FENCED. Check the Spacelift run, and note that an unfence is
-refused while another apply is in flight (InvalidDBParameterGroupState, self-clearing). 'abort' is
-re-runnable once it lands."
+      die "source did not reach read_only=0 within ${ATMO}m - the unfence apply has not landed as of
+the last probe. The source was STILL FENCED at that probe and the main DMS task and BI are still
+stopped, but the unfence may land after this exit, so re-check rather than assuming. An unfence is
+refused while another apply is in flight (InvalidDBParameterGroupState, self-clearing); a
+pending-reboot parameter group is NOT such a case. 'abort' is re-runnable."
     fi
     sleep 30
   done
