@@ -2,6 +2,20 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.9.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.8.0...v8.9.0) (2026-08-02)
+
+
+### Features
+
+* add actionable Slack incident cards ([#413](https://github.com/Dozuki/CloudPrem-Infra/issues/413)) ([79578c6](https://github.com/Dozuki/CloudPrem-Infra/commit/79578c6c05c362484a7f3f4eb0d1191e4bc008ae))
+* **logical:** harden external-secrets webhook, pin upgrade/rollback force=false ([#424](https://github.com/Dozuki/CloudPrem-Infra/issues/424)) ([58193a1](https://github.com/Dozuki/CloudPrem-Infra/commit/58193a1fb52900e1bad7aef97a423d03669868e4))
+
+
+### Bug Fixes
+
+* **ci:** make TFLint configuration errors fatal ([#425](https://github.com/Dozuki/CloudPrem-Infra/issues/425)) ([fd653c0](https://github.com/Dozuki/CloudPrem-Infra/commit/fd653c0e44c88dd1557d3d81698c187c6074d186))
+* **providers:** Update Terraform kubernetes to v3 ([#423](https://github.com/Dozuki/CloudPrem-Infra/issues/423)) ([22840cb](https://github.com/Dozuki/CloudPrem-Infra/commit/22840cbeb33e431db924fb13c2be0f00ec3aac3b))
+
 ## [8.8.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.7.0...v8.8.0) (2026-08-02)
 
 
