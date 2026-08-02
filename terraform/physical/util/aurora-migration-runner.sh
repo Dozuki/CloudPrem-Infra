@@ -52,6 +52,10 @@
 #                                vs a normal 3.3-6.7s, and unabortable while it
 #                                runs); this is the escape hatch for when the
 #                                cutover has to proceed regardless.
+#   FENCE_APPLY_TIMEOUT_MIN=30   how long to wait for the human-gated fence apply
+#                                to land before giving up. Dying is safe: the
+#                                source is still writable and re-running fence
+#                                resumes from the same marker.
 #   FENCE_BACKUP_MARGIN_MIN=30   how close to the source's backup window is too
 #                                close to start a fence.
 #   CHECKSUM_TABLES="db.t1 ..."  extra tables for the validate phase.
@@ -1011,11 +1015,31 @@ EOF
   say ""
   say ">>> NOW APPLY THE TERRAFORM FENCE: set aurora_migration_source_fenced = true"
   say ">>> in this env's env.hcl and confirm the gated physical apply, then return."
-  say "Polling for read_only=1..."
+  # BOUNDED. This was the one unbounded wait left in the phase, which is out of
+  # step with the rest of the file (every other wait dies rather than hang).
+  # The source is still WRITABLE here - the poll is waiting for the fence to
+  # land, so this is not read_only time. It is still customer downtime: the
+  # phase's stated precondition is that app writers are already scaled to zero.
+  # So a silently failed or forgotten Spacelift apply used to extend the outage
+  # with no limit and no prompt to look.
+  # Dying here is safe in both directions. If the apply never landed the source
+  # is unfenced and nothing has changed; if it landed just after the deadline,
+  # re-running 'fence' takes the RO0=1 re-entry path and reuses this marker.
+  FDEADLINE=$((SECONDS + 60 * ${FENCE_APPLY_TIMEOUT_MIN:-30}))
+  say "Polling for read_only=1 (deadline ${FENCE_APPLY_TIMEOUT_MIN:-30}m)..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
-); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "1" ] && break; sleep 30; done
+); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "1" ] && break
+    if [ "$SECONDS" -ge "$FDEADLINE" ]; then
+      say "parameter group apply status: $(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus' --output text 2>/dev/null || echo unknown)"
+      die "source did not reach read_only=1 within ${FENCE_APPLY_TIMEOUT_MIN:-30}m. The fence apply
+has not landed. Check the Spacelift run for the physical stack. Nothing here is committed: the
+source is still writable and re-running 'fence' resumes from this marker ('$MARK'). Raise the
+budget with FENCE_APPLY_TIMEOUT_MIN=<minutes> if the apply is legitimately slow."
+    fi
+    sleep 30
+  done
   fi
   say "post-fence kill sweep (anything that connected during the apply window;"
   say "read_only already blocks their writes, this just tidies sessions)"
@@ -1223,14 +1247,20 @@ EOF
     [ "$EXTRA" -gt 0 ] && die "the fresh task enumerated tables outside the main task's set - enumeration drift (rename/DDL outside CDC?); inspect before touching anything"
     if [ "$MISSING" = "0" ] && [ "$MARKER_OK" = "1" ]; then break; fi
     # Deadline scales with table count. VWAIT is NOT seconds: it adds 20 per
-    # loop but each loop's paginated describe-table-statistics takes ~40s of
-    # wall clock on a 10k+ table env, so real time is roughly VWAIT x2. The
-    # old fixed 3600 (~2h wall) barely fit an 11.9k-table env and cannot fit
-    # a 24k-table one; a miss restarts the whole epoch inside the write
-    # freeze. Observed rate is ~0.25 VWAIT units per table, so count/2 +1800
-    # leaves >2x headroom while still bounding a genuine hang.
+    # loop, but each loop costs the paginated describe-table-statistics (~40s of
+    # wall clock on a 10k+ table env) PLUS the 20s sleep below. So the real
+    # conversion is ~60s of wall per 20 units, i.e. VWAIT x3, not the x2 an
+    # earlier revision of this comment claimed. At MAIN_COUNT=24k that is an
+    # ~11.6h ceiling, not ~7.7h.
+    # Read that as a ceiling on a hang, NOT as the expected duration. Actual
+    # validation time is driven by DMS's row-compare throughput (data volume),
+    # not by table count; table count only sets this bound. Measured epochs:
+    # ~25m on a completed mid-size cutover, ~1h for 10.2k/11.9k tables during
+    # the gca rehearsal.
+    # The old fixed 3600 barely fit an 11.9k-table env and cannot fit a
+    # 24k-table one; a miss restarts the whole epoch inside the write freeze.
     VMAX=$((MAIN_COUNT / 2 + 1800))
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt "$VMAX" ] && die "fence-epoch validation did not complete (VWAIT=$VWAIT > $VMAX, ~2s wall per unit; missing=$MISSING/$MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt "$VMAX" ] && die "fence-epoch validation did not complete (VWAIT=$VWAIT > $VMAX, ~3s wall per unit; missing=$MISSING/$MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
     sleep 20
   done
   NOPK_LIST=$(jq -r '[.[] | select((.v | ascii_downcase) == "no primary key") | .s + "." + .t] | join(" ")' "$VDIR/vstats.json")
