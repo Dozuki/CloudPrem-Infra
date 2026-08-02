@@ -411,6 +411,42 @@ timeout_min() {
   printf '%s' "$v"
 }
 
+# Validation PartitionSize for the fence epoch, as a base-10 integer.
+#
+# Why this is pinned rather than left at the AWS default: DMS validation builds a
+# comparison predicate per partition BOUNDARY, and emits malformed SQL (error
+# 1064, an empty predicate term) when a boundary lands on a row whose key column
+# holds an empty string. Such a table reports "Table error" with zero failed and
+# zero suspended records, and the epoch loop dies on it - after the source is
+# already fenced. A table small enough to be a SINGLE partition has no boundary.
+#
+# Measured on a 24,285-table env: 5,205 tables carry a string-typed column in the
+# primary key (any ordinal - the observed failure is on the THIRD key column), and
+# the largest of them holds 425,119 rows by exact COUNT(*). At 1,000,000 every one
+# of them is single-partition, with 2.35x margin.
+#
+# The bounds matter as much as the default. Below 500,000 an at-risk table starts
+# partitioning again and the defect returns. Above 5,000,000 partitions get large
+# enough to drive the replication instance's memory down hard (measured: a
+# 30,000,000 setting drove freeable memory 12.9 -> 5.9 GB and had to be killed).
+# An operator reaching for this knob is by definition inside a customer outage, so
+# the range is enforced rather than documented.
+#
+# Raising it does NOT weaken the proof: a planted single-row divergence was
+# detected identically at 10,000 and at 1,000,000 (Mismatched records, failed=1),
+# on a single-partition at-risk table, with row counts equal on both sides so a
+# count check alone would have missed it.
+validation_partition_size() {
+  local v="${FENCE_VALIDATION_PARTITION_SIZE:-1000000}"
+  case "$v" in ''|*[!0-9]*) die "FENCE_VALIDATION_PARTITION_SIZE must be a positive integer (got '$v')" ;; esac
+  v=$((10#$v))
+  { [ "$v" -ge 500000 ] && [ "$v" -le 5000000 ]; } || \
+    die "FENCE_VALIDATION_PARTITION_SIZE must be between 500000 and 5000000 (got $v). Below 500000 re-partitions
+the at-risk tables and reintroduces the empty-string-key defect; above 5000000 moves toward the partition sizes
+that exhausted the replication instance's memory."
+  printf '%s' "$v"
+}
+
 # $1 = a short label for the log line, so the two call sites are distinguishable
 preflight_fence_gate() {
   local blockers mode="${FENCE_PREFLIGHT:-enforce}"
@@ -437,6 +473,70 @@ unclean_validation_count() {
   aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
     --query 'TableStatistics[].ValidationState' --output text | tr '\t' '\n' | \
     awk '{ l=tolower($0) } l != "validated" && l != "no primary key" && NF { c++ } END { print c+0 }'
+}
+
+# Freeable memory on the migration replication instance, in GB, as the epoch
+# watchdog's input. Prints -1 when there is no usable datapoint so the caller can
+# tell "blind" apart from "low" - a CloudWatch gap must never read as 0 and kill a
+# healthy fence. GNU and BSD date disagree on relative-time flags; try both.
+epoch_free_gb() {
+  local start end
+  end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  start=$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || \
+    start=$(date -u -v-15M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || { printf '%s' -1; return; }
+  aws cloudwatch get-metric-statistics --region "$REGION" \
+    --namespace AWS/DMS --metric-name FreeableMemory \
+    --dimensions "Name=ReplicationInstanceIdentifier,Value=${ID}-aurora-migration" \
+    --start-time "$start" --end-time "$end" --period 60 --statistics Average \
+    --query 'sort_by(Datapoints,&Timestamp)[-1].Average' --output text 2>/dev/null | \
+    awk '{ if ($1 == "None" || $1 == "") print -1; else printf "%.2f", $1/1073741824; f=1 }
+         END { if (!f) print -1 }'
+}
+
+# Main-task validation rows that are NOT clean, as schema<TAB>table<TAB>state.
+# Identities, not a bare count: the count alone cannot tell a stale "Table error"
+# apart from a live "Mismatched records", and the post-epoch gate needs to.
+# Raw json + jq -s, never a --query projection (JMESPath evaluates per page).
+unclean_validation_rows() {
+  aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
+    --output json | jq -rs '[.[].TableStatistics[]]
+      | .[]
+      | select(((.ValidationState // "") | ascii_downcase) as $v
+               | $v != "validated" and $v != "no primary key" and $v != "")
+      | [.SchemaName, .TableName, .ValidationState] | @tsv'
+}
+
+# Adjudicate the main task's unclean rows against a completed epoch's evidence.
+#   $1 = path to the epoch's vstats.json
+#   stdin = unclean rows as schema<TAB>table<TAB>state
+# Dies on anything the epoch does not explicitly clear; prints the forgiven list.
+#
+# Narrowed for one specific, measured reason: the main task accumulates HISTORICAL
+# states a fresh task does not reproduce. Observed live - the main task reported
+# "Table error" for two tables that a fresh validation task reported "Validated",
+# because the underlying defect depends on where a partition boundary happens to
+# land. Refusing on that refuses a cutover whose data is provably fine.
+#
+# So a stale "Table error" is forgiven ONLY when this epoch re-validated that exact
+# table. Mismatched records, Suspended, plain Error and any unknown future state
+# still refuse. Demotion is BY IDENTITY and by that single state, never by count.
+adjudicate_main_task_states() {
+  local vstats="$1" hard="" stale="" us ut uv ulv
+  [ -s "$vstats" ] || die "epoch evidence file missing or empty ($vstats) - refusing to adjudicate"
+  while IFS="$(printf '\t')" read -r us ut uv; do
+    [ -n "$us" ] || continue
+    ulv=$(printf '%s' "$uv" | tr '[:upper:]' '[:lower:]')
+    if [ "$ulv" = "table error" ] && \
+       jq -e --arg s "$us" --arg t "$ut" \
+         'any(.[]; .s == $s and .t == $t and (((.v // "") | ascii_downcase) == "validated"))' \
+         "$vstats" >/dev/null 2>&1; then
+      stale="$stale $us.$ut"
+    else
+      hard="$hard $us.$ut($uv)"
+    fi
+  done
+  [ -z "$hard" ] || die "main-task validation states are not clean:$hard - inspect before promoting"
+  printf '%s' "$stale"
 }
 
 # The four CDC apply-error policies, from the task's EFFECTIVE settings (what
@@ -1308,13 +1408,22 @@ EOF
   SEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-source" --query 'Endpoints[0].EndpointArn' --output text)
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
   say "  creating the validation-only task ($VTASK_ID)"
+  # Settings travel via a FILE for the same reason the mappings do (argv limits),
+  # and PartitionSize is pinned rather than defaulted - see validation_partition_size.
+  VPART=$(validation_partition_size)
+  say "  validation PartitionSize=$VPART (pinned; single-partitions every at-risk table)"
+  cat > "$VDIR/vsettings.json" <<EOF
+{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":16,"PartitionSize":$VPART,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}
+EOF
+  jq -e '.ValidationSettings.PartitionSize >= 500000' "$VDIR/vsettings.json" >/dev/null || \
+    die "refusing to create the epoch task: PartitionSize missing or too small in $VDIR/vsettings.json"
   VARN=$(aws dms create-replication-task --region "$REGION" \
     --replication-task-identifier "$VTASK_ID" \
     --replication-instance-arn "$RIARN" \
     --source-endpoint-arn "$SEP" --target-endpoint-arn "$TEP" \
     --migration-type full-load \
     --table-mappings "file://$VDIR/mappings.json" \
-    --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":16,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
+    --replication-task-settings "file://$VDIR/vsettings.json" \
     --query 'ReplicationTask.ReplicationTaskArn' --output text)
   vwait_status ready 600
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
@@ -1327,7 +1436,16 @@ EOF
   # validation-bound, and whether convergence tracks table COUNT or data VOLUME
   # (the deadline formula assumes count, but row-compare throughput is a volume
   # operation). Pure logging, no control flow depends on it.
-  EPOCH_T0=$SECONDS; EPOCH_API=0; PREV_MISSING=""
+  EPOCH_T0=$SECONDS; EPOCH_API=0; PREV_MISSING=""; VSTOPPED=0
+  # Liveness. Before this, the loop polled ONLY table statistics: if the
+  # validation task failed, was deleted, or exhausted the instance's memory, the
+  # stats went stale and every gate read clean-but-incomplete (NBAD=0 so no die,
+  # EXTRA=0 so no die, MISSING=MAIN_COUNT so no break). The loop then ground all
+  # the way to VMAX with the source read_only - about 11.6h at 24k tables. VMAX is
+  # documented as a bound on a hang; it was the ONLY bound on this one.
+  VMEM_FLOOR="${FENCE_EPOCH_MEM_FLOOR_GB:-3}"
+  case "$VMEM_FLOOR" in ''|*[!0-9]*) VMEM_FLOOR=3 ;; esac
+  say "  epoch watchdog armed: task-health each loop, freeable-memory floor ${VMEM_FLOOR}GB"
   while :; do
     # same pagination rule: raw json + jq -s, never --query aggregates/projections
     API_T0=$SECONDS
@@ -1356,6 +1474,37 @@ EOF
     PREV_MISSING=$MISSING
     say "  missing=$MISSING/$MAIN_COUNT extra=$EXTRA bad=$NBAD marker_validated=$MARKER_OK"
     say "    elapsed=${EPOCH_S}s api_total=${EPOCH_API}s api_this_loop=${API_S}s cleared_since_last=$RATE vwait=$VWAIT"
+    # Watchdog 1: the task must still be alive. Dying states are fatal at once.
+    # Plain "stopped" is NOT immediately fatal (validation-only tasks stop
+    # themselves on completion, and the break below may be one poll away), but a
+    # stopped task makes no further progress, so a stopped task with work left is
+    # fatal after three consecutive polls rather than after VMAX.
+    VST=$(vtask_status)
+    case "$VST" in
+      failed|stopped-after-fail|deleting|none)
+        die "fence-epoch validation task is '$VST' - it is no longer running, so the statistics above are frozen
+and every gate would read clean-but-incomplete. Inspect $VTASK_ID before touching anything." ;;
+      stopped)
+        VSTOPPED=$((VSTOPPED+1))
+        [ "$VSTOPPED" -lt 3 ] || die "fence-epoch validation task has been 'stopped' for 3 consecutive polls with
+missing=$MISSING/$MAIN_COUNT marker=$MARKER_OK - it ended without completing the set. Inspect $VTASK_ID." ;;
+      *) VSTOPPED=0 ;;
+    esac
+    # Watchdog 2: replication-instance memory. Large validation tasks accumulate
+    # memory for the life of the task (measured ~1-2 MB per validated table), and
+    # an OOM here strands the fence in the state watchdog 1 describes. Failing
+    # loudly at a floor beats discovering it at VMAX. A missing datapoint warns
+    # rather than dies: a CloudWatch gap must not kill a healthy fence.
+    VFREE=$(epoch_free_gb)
+    case "$VFREE" in
+      -1) say "    WARNING: freeable-memory metric unreadable this loop - watchdog blind, continuing" ;;
+      *) say "    freeable_memory=${VFREE}GB (floor ${VMEM_FLOOR}GB)"
+         awk -v f="$VFREE" -v m="$VMEM_FLOOR" 'BEGIN { exit !(f < m) }' && \
+           die "fence-epoch aborted: replication instance freeable memory ${VFREE}GB fell below the ${VMEM_FLOOR}GB
+floor with missing=$MISSING/$MAIN_COUNT. Continuing risks an OOM that strands the fence. The source is still
+fenced: re-run the fence phase to re-enter (it is idempotent via the RO0=1 path), or unfence to abort.
+Consider a smaller FENCE_VALIDATION_PARTITION_SIZE or a larger replication instance." ;;
+    esac
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
     [ "$EXTRA" -gt 0 ] && die "the fresh task enumerated tables outside the main task's set - enumeration drift (rename/DDL outside CDC?); inspect before touching anything"
     if [ "$MISSING" = "0" ] && [ "$MARKER_OK" = "1" ]; then break; fi
@@ -1381,13 +1530,35 @@ EOF
   # The number the next planning round needs: what the epoch ACTUALLY cost, and
   # how much of it was the polling API rather than DMS validating.
   say "  EPOCH TIMING: total=$((SECONDS - EPOCH_T0))s of which api=${EPOCH_API}s, tables=$MAIN_COUNT, final_vwait=$VWAIT"
+  # Main-task whole-task gate (its stats survive the stop): catches a table that
+  # went Mismatched/Suspended during soak. Evaluated HERE, before teardown, because
+  # it now cross-checks against this epoch's evidence and $VDIR must still exist.
+  #
+  # Narrowed, for one specific reason: the main task accumulates HISTORICAL states
+  # that a fresh task does not reproduce. Measured live - the main task reported
+  # "Table error" for two tables that a fresh validation task reported "Validated",
+  # because the underlying defect depends on where a partition boundary happens to
+  # land. Refusing on that would refuse a cutover whose data is provably fine.
+  #
+  # So a stale "Table error" is forgiven ONLY when this epoch re-validated that
+  # exact table. Everything else - Mismatched records, Suspended, plain Error, any
+  # unknown future state - still refuses, unchanged. This deliberately does not
+  # demote by count: it demotes by identity, and only for the one state whose
+  # staleness is understood.
+  UNCLEAN_ROWS=$(unclean_validation_rows)
+  if [ -n "$UNCLEAN_ROWS" ]; then
+    # The `|| die` is load-bearing, not decoration. adjudicate_main_task_states
+    # refuses by calling die, but it runs here inside a command substitution, and
+    # an exit inside $(...) ends only that subshell - the assignment would still
+    # succeed with an empty value and the fence would sail past a real refusal.
+    # errexit does not cover this either (it is not in force inside x=$(f)).
+    STALE=$(printf '%s\n' "$UNCLEAN_ROWS" | adjudicate_main_task_states "$VDIR/vstats.json") || \
+      die "main-task validation states are not clean (see the FATAL above) - inspect before promoting"
+    [ -z "$STALE" ] || say "  main-task stale 'Table error' cleared - each re-validated by this epoch:$STALE"
+  fi
   say "  epoch validation PASSED - removing the validation task"
   vtask_teardown
   rm -rf "$VDIR"
-  # main-task whole-task whitelist gate (its stats survive the stop): catches a
-  # table that went Mismatched/Suspended during soak.
-  U=$(unclean_validation_count)
-  [ "$U" = "0" ] || die "main-task validation states are not clean (unclean=$U) - inspect before promoting"
   say "checkpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)"
   say "installing object artifacts AFTER the final stop (DMS can never apply DML"
   say "through freshly installed triggers). Dumped FRESH from the fenced source -"
