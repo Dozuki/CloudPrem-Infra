@@ -4,6 +4,12 @@
 # terraform_required_providers rule aborts with "Invalid expression" on that construct. Disable
 # just that rule here; every other rule still runs. Re-enable if tflint gains OpenTofu
 # provider-for_each support.
+plugin "aws" {
+  enabled = true
+  version = "0.48.0"
+  source  = "github.com/terraform-linters/tflint-ruleset-aws"
+}
+
 rule "terraform_required_providers" {
   enabled = false
 }

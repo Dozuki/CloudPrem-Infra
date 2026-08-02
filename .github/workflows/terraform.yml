@@ -62,9 +62,10 @@ jobs:
       run: ${{ matrix.tool }} validate
       working-directory: ./terraform/${{ matrix.module }}
 
-    # This action is configured with the AWS ruleset below. physical-azure has no
-    # Azure TFLint plugin/config in the repo, so init + fmt + validate are its
-    # meaningful credential-free PR gates; do not run AWS rules against it.
+    # The AWS-backed layers have local configs that pin and enable the AWS
+    # ruleset. physical-azure has no Azure TFLint plugin/config in the repo, so
+    # init + fmt + validate are its meaningful credential-free PR gates; do not
+    # run AWS rules against it.
     - name: Terraform Linter
       if: matrix.module != 'physical-azure'
       uses: reviewdog/action-tflint@54a5e5aed57dcfbb4662ec548de876df33d6288d # v1
@@ -72,9 +73,11 @@ jobs:
         github_token: ${{ secrets.github_token }}
         working_directory: "./terraform/${{ matrix.module }}"
         reporter: github-pr-review
-        fail_on_error: "false"
+        # Keep warnings as review comments, but fail for configuration/runtime
+        # errors instead of allowing a broken lint invocation to pass CI.
+        fail_level: "error"
         filter_mode: "nofilter"
-        tflint_rulesets: "aws"
+        tflint_init: "true"
 
     # tfsec removed — deprecated in favor of Trivy. The reviewdog/action-tfsec
     # action crashes on tfsec v1.28.0 output parsing. Migrate to Trivy in a
