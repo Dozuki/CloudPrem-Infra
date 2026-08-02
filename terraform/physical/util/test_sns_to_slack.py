@@ -24,6 +24,7 @@ package layout of whatever directory terraform zips it into.
 import os
 import sys
 import importlib.util
+from unittest import mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -124,6 +125,93 @@ CASES = [
 ]
 
 
+def alarm_fixture(state="ALARM"):
+    return {
+        "AlarmName": "3m-usac-api-5xx",
+        "AlarmDescription": "Checkout API error rate is elevated. https://runbooks.example/api-5xx",
+        "AlarmArn": "arn:aws:cloudwatch:us-east-1:111:alarm:3m-usac-api-5xx",
+        "OldStateValue": "OK" if state == "ALARM" else "ALARM",
+        "NewStateValue": state,
+        "NewStateReason": ("Threshold Crossed: 8 datapoints were above 5"
+                           if state == "ALARM" else "Threshold Crossed: 3 datapoints were below 5"),
+        "StateChangeTime": ("2026-08-01T12:00:00.000+0000"
+                            if state == "ALARM" else "2026-08-01T12:08:00.000+0000"),
+        "Trigger": {
+            "Namespace": "AWS/ApplicationELB",
+            "MetricName": "HTTPCode_Target_5XX_Count",
+            "Statistic": "Sum",
+            "ComparisonOperator": "GreaterThanThreshold",
+            "Threshold": 5,
+            "EvaluationPeriods": 3,
+            "DatapointsToAlarm": 3,
+            "Period": 60,
+            "Dimensions": [{"name": "LoadBalancer", "value": "app/checkout/abc"}],
+        },
+    }
+
+
+def renderer_checks():
+    checks = []
+
+    active, _ = sns_to_slack.cloudwatch_card(
+        alarm_fixture(), "3m-usac", "us-east-1", "111", "prod")
+    active_text = str(active)
+    checks.extend([
+        ("critical rail", active["attachments"][0]["color"] == sns_to_slack.COLOR_CRITICAL),
+        ("critical header", "🔴 CRITICAL · CloudWatch · 3m-usac" in active_text),
+        ("critical UX sections", all(x in active_text for x in
+                                     ("IMPACT", "SERVICE", "RESOURCE", "EVIDENCE"))),
+        ("critical real actions", "Open CloudWatch" in active_text and "Runbook" in active_text),
+        ("critical pages channel", "<!channel>" in active_text),
+    ])
+
+    resolved, _ = sns_to_slack.cloudwatch_card(
+        alarm_fixture("OK"), "3m-usac", "us-east-1", "111", "prod",
+        started_at="2026-08-01T12:00:00.000+0000")
+    resolved_text = str(resolved)
+    checks.extend([
+        ("resolved rail", resolved["attachments"][0]["color"] == sns_to_slack.COLOR_RESOLVED),
+        ("resolved header", "✅ RESOLVED · CloudWatch · 3m-usac" in resolved_text),
+        ("resolved outcome", all(x in resolved_text for x in ("OUTCOME", "DURATION", "8m"))),
+        ("resolved does not page", "<!channel>" not in resolved_text),
+    ])
+
+    dms_event = {"detail-type": "DMS Replication State Change",
+                 "detail": {"detailMessage": "DMS replication has failed."}}
+    dms = sns_to_slack.dms_card(
+        dms_event, "3m-usac", "us-east-1", "111", "prod", "bi-replication",
+        True, "https://console.aws.amazon.com/dms")
+    dms_text = str(dms)
+    checks.extend([
+        ("DMS unified header", "🔴 CRITICAL · DMS · 3m-usac" in dms_text),
+        ("DMS unified actions", "Open DMS" in dms_text),
+    ])
+
+    fallback = sns_to_slack.unknown_card(
+        {"schema": "secret raw payload"}, "3m-usac", "us-east-1")
+    checks.append(("unknown payload stays out of Slack", "secret raw payload" not in str(fallback)))
+
+    updates, posts, states = [], [], []
+    prior = {"message_ts": "111.222", "started_at": "2026-08-01T12:00:00.000+0000",
+             "status": "ALARM"}
+    with mock.patch.object(sns_to_slack, "_get_alarm_state", return_value=prior), \
+         mock.patch.object(sns_to_slack, "_update_bot",
+                           side_effect=lambda token, ts, payload: updates.append((ts, payload))), \
+         mock.patch.object(sns_to_slack, "_post_bot",
+                           side_effect=lambda token, payload, thread_ts=None:
+                           posts.append((payload, thread_ts)) or "333.444"), \
+         mock.patch.object(sns_to_slack, "_put_alarm_state",
+                           side_effect=lambda *args: states.append(args)):
+        sns_to_slack._deliver_cloudwatch_bot(
+            "xoxb", alarm_fixture("OK"), "3m-usac", "us-east-1", "111", "prod")
+    checks.extend([
+        ("resolution updates root", len(updates) == 1 and updates[0][0] == "111.222"),
+        ("resolution posts thread event", len(posts) == 1 and posts[0][1] == "111.222"),
+        ("resolution keeps idempotency tombstone", bool(states) and states[0][-1] == "RESOLVED"),
+    ])
+    return checks
+
+
 def main():
     failures = []
     for message, expected, why in CASES:
@@ -131,10 +219,16 @@ def main():
         if got != expected:
             failures.append((message, expected, got, why))
 
+    checks = renderer_checks()
+    for name, passed in checks:
+        if not passed:
+            failures.append((name, "PASS", "FAIL", "renderer/lifecycle contract"))
+
     for message, expected, got, why in failures:
         print(f"FAIL  expected {expected}, got {got}\n      {message[:100]}\n      ({why})")
 
-    print(f"\n{len(CASES) - len(failures)}/{len(CASES)} passed")
+    total = len(CASES) + len(checks)
+    print(f"\n{total - len(failures)}/{total} passed")
     return 1 if failures else 0
 
 

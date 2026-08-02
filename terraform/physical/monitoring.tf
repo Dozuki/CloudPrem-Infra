@@ -610,9 +610,39 @@ resource "aws_lambda_function" "sns_to_slack" {
       SLACK_WEBHOOK_URL         = var.slack_webhook_url
       SLACK_BOT_TOKEN_SSM_PARAM = local.slack_use_token ? aws_ssm_parameter.slack_bot_token[0].name : ""
       SLACK_CHANNEL_ID          = var.slack_channel_id
+      SLACK_STATE_TABLE         = local.slack_use_token ? aws_dynamodb_table.slack_alarm_state[0].name : ""
       IDENTIFIER                = local.identifier
       AWS_ACCOUNT_ID            = data.aws_caller_identity.current.account_id
     }
+  }
+
+  tags = local.tags
+}
+
+# Correlate CloudWatch ALARM -> OK on the bot-token path so recovery edits the
+# original incident card and adds one thread event instead of creating a second,
+# disconnected root post. The webhook fallback cannot update messages and does
+# not use this table. Resolved rows remain briefly as idempotency tombstones and
+# expire automatically.
+resource "aws_dynamodb_table" "slack_alarm_state" {
+  count = local.slack_use_token ? 1 : 0
+
+  name         = "${local.identifier}-slack-alarm-state"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "AlarmKey"
+
+  attribute {
+    name = "AlarmKey"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ExpiresAt"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
   }
 
   tags = local.tags
@@ -639,6 +669,24 @@ resource "aws_iam_role_policy" "sns_to_slack_bot_token" {
       Effect   = "Allow",
       Action   = ["ssm:GetParameter"],
       Resource = aws_ssm_parameter.slack_bot_token[0].arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "sns_to_slack_alarm_state" {
+  count = local.slack_use_token ? 1 : 0
+
+  name = "${local.identifier}-sns-to-slack-alarm-state"
+  role = aws_iam_role.lambda_execution[0].name
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+      ],
+      Resource = aws_dynamodb_table.slack_alarm_state[0].arn
     }]
   })
 }
