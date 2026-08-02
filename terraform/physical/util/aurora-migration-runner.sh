@@ -575,7 +575,12 @@ EOF
 
 preload)
   prep_cnfs
-  ssm_run <<'EOF'
+  # 21600 like the other heavy DDL steps, not the 3600 default. This block runs
+  # a full --no-data mariadb-dump across every schema (24k+ tables on the largest
+  # env, one SHOW CREATE TABLE each) plus the python split, and a TimedOut here
+  # wastes the whole prep run. Raising the cap cannot slow a healthy run: it only
+  # changes when SSM gives up.
+  ssm_run 21600 <<'EOF'
 set -e; cd /tmp; rm -rf mig && mkdir mig && cd mig
 S="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
 T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names --init-command='SET SESSION restrict_fk_on_non_standard_key=0'"
