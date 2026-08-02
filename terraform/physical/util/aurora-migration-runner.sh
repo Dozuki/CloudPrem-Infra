@@ -358,6 +358,32 @@ fence_blockers() {
     fi
   fi
 
+  # Validation states, checked HERE rather than only deep inside the fence.
+  #
+  # The fence has TWO validation gates and both fire late: the epoch loop dies on
+  # any state matching mismatch|error|suspend, and the whitelist gate dies on
+  # anything outside {validated, no primary key}. Both run AFTER the source is
+  # fenced, after the drain proof, and after a validation epoch measured in tens
+  # of minutes to hours. So an unclean table today means: spend the entire
+  # customer outage, then refuse.
+  #
+  # Surfacing it in pre-flight turns that into a refusal in seconds at zero
+  # customer cost, and weakens nothing - the late gates still stand. Measured on
+  # a live migration: 3 tables sat in "Table error" the whole time, so this is
+  # the current real state of things, not a hypothetical.
+  #
+  # Skipped when no migration task exists, so 'status' on an unmigrated env stays
+  # quiet. Fails closed on a probe error, like every other check here.
+  TA=$(task_arn 2>/dev/null) || TA=""
+  if [ -n "$TA" ] && [ "$TA" != None ]; then
+    UNC=$(unclean_validation_count 2>/dev/null) || UNC=PROBE_FAILED
+    case "$UNC" in
+      0) : ;;
+      '' | *[!0-9]*) echo "validation-probe: FAILED (could not read the task's validation states - treat as unsafe; got '$UNC')" ;;
+      *) echo "validation-states: $UNC table(s) outside {validated, no primary key}. BOTH fence validation gates will die on these, but only after the source is fenced and the epoch has run. Resolve or prove them before fencing." ;;
+    esac
+  fi
+
   # Match 'creating' ONLY. Negating 'available' would let a snapshot that failed
   # months ago (Status=failed, kept until deleted) block every fence forever, and
   # 'copying' is snapshot-to-snapshot work that does not touch the live source.
