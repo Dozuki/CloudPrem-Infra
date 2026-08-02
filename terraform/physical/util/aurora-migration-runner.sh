@@ -1,4 +1,36 @@
 #!/usr/bin/env bash
+#
+# STATUS 2026-08-02: NO ENVIRONMENT CURRENTLY USES THIS PATH. Read this before
+# assuming the fence below is the recommended way to move a database.
+#
+# Every environment that migrated with this runner has completed and sits on
+# aurora_migration_state = "off". The last candidate abandoned the DMS route
+# rather than finishing it, on measured grounds:
+#
+#   The fence's final validation epoch does not scale with TABLE COUNT. Measured
+#   at the shipping config on a 24,285-table source: ~72 tables/min, so 5-6h with
+#   the source read_only, and two full-scope runs were killed by the replication
+#   instance running out of memory. DMS validation retains roughly 1-2 MB per
+#   table for the life of the task and never releases it, so the ceiling is the
+#   number of tables, NOT partition size or data volume - a 30,000,000
+#   PartitionSize and a 1,000,000 one both drained. An 11.9k-table environment
+#   completed its epoch comfortably; twice that did not fit at all.
+#
+# So: this runner is sound for a moderate table count and has been hardened
+# further below, but for a large multi-tenant source the epoch alone can exceed
+# any acceptable write freeze. Measure tables/min on a throwaway ValidationOnly
+# task BEFORE committing to a fence window.
+#
+# The cheaper alternative when the goal is only leaving an unsupported engine
+# version: an RDS Blue/Green Deployment upgrades the provisioned instance in
+# place with a switchover measured in about a minute and no application repoint.
+# Drive it from the CLI, not Terraform - the AWS provider's blue_green_update
+# switches over as soon as green is available and then deletes the old primary
+# with SkipFinalSnapshot=true, which removes both the validation pause and the
+# rollback.
+#
+# ---------------------------------------------------------------------------
+#
 # RDS -> Aurora Serverless v2 migration runner. Drives the DB-side phases the
 # aurora_migration_state Terraform (aurora-migration.tf) cannot: native schema
 # pre-load, DMS task orchestration, validation gates, and the fence/cutover
@@ -39,6 +71,27 @@
 #                    app - gate BEFORE confirming physical, not here).
 #   abort          - pre-cutover abort with hard guards; refuses after cutover.
 #   bi-epoch       - reload the BI DMS task from the (now Aurora) source.
+#   writers        - READ-ONLY. Measures whether app writers are actually
+#                    drained, by sampling InnoDB row-change counters rather than
+#                    trusting session counts. Run it before the fence to learn
+#                    which cutover mode you are in.
+#
+# Environment overrides:
+#   FENCE_PREFLIGHT=warn         report the fence pre-flight blockers and carry on
+#                                instead of refusing. The gate exists to stop a
+#                                fence landing behind a backup (measured 262.89s
+#                                vs a normal 3.3-6.7s, and unabortable while it
+#                                runs); this is the escape hatch for when the
+#                                cutover has to proceed regardless.
+#   FENCE_APPLY_TIMEOUT_MIN=30   how long to wait for the human-gated fence apply
+#                                to land before giving up. Dying is safe: the
+#                                source is still writable and re-running fence
+#                                resumes from the same marker.
+#   FENCE_BACKUP_MARGIN_MIN=30   how close to the source's backup window is too
+#                                close to start a fence.
+#   WRITERS_SAMPLE_SEC=15        sampling window for the writers phase.
+#   CHECKSUM_TABLES="db.t1 ..."  extra tables for the validate phase.
+#   LEGACY_DB_SECRET=<prefix>    fallback prefix for the primary DB secret.
 set -euo pipefail
 
 ID="${1:?identifier (e.g. <customer>-<env>)}"; REGION="${2:?region}"; PHASE="${3:?phase}"
@@ -211,12 +264,311 @@ migration_secret() { first_secret_arn "${ID}-aurora-migration"; }
 src_pg() { aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text; }
 primary_secret_host() { aws secretsmanager get-secret-value --region "$REGION" --secret-id "$(primary_secret)" --query SecretString --output text | jq -r .host; }
 
+# --- fence pre-flight: RDS defers parameter applies behind backups ------------
+# MEASURED 2026-08-02 (ddvtest, RDS 8.0.46, both db.t3.medium and db.m5.8xlarge):
+# the read_only fence lands in 3.3-6.7s on a quiet instance. One run took 262.89s
+# because creating a read replica had triggered a backup (RDS events: "Backing up
+# DB instance 06:16:10" -> "Finished 06:19:33") and the parameter apply landed 9s
+# AFTER the backup finished. RDS queues the apply behind the backup.
+#
+# The duration is not the worst of it. For that whole window the UNFENCE is also
+# refused - ModifyDBParameterGroup returns InvalidDBParameterGroupState ("this
+# parameter group cannot be modified because it is currently being applied"),
+# reproduced deterministically. So a backup-contended fence is an UNABORTABLE
+# fence: the source is read-only, customers are down, and the documented rollback
+# is unavailable until the backup completes.
+#
+# This gate converts an 80x timing variance from a surprise during the fence into
+# a decision before it. It does NOT suppress automated backups: dropping
+# BackupRetentionPeriod to 0 deletes the existing automated backups, which is the
+# rollback path for the very cutover being run. Schedule around the window, do
+# not disarm it.
+#
+# Override with FENCE_PREFLIGHT=warn to report and continue. A stuck or
+# misreported backup must never be able to strand a cutover that has to proceed.
+hhmm_to_min() { printf '%s' "$1" | awk -F: '{ print ($1 * 60) + $2 }'; }
+
+# Minutes until the source's backup window NEXT opens, or 9999 if no window is
+# set. Inside the window it returns the wait until tomorrow's, which is why the
+# caller must ask backup_window_open first and only fall through to this.
+# $1 = a "HH:MM-HH:MM" UTC window. Pure functions: the caller owns the AWS read,
+# so a failed describe surfaces as one blocker instead of three silent defaults.
+minutes_to_window() {
+  local start now delta
+  case "$1" in [0-9][0-9]:[0-9][0-9]-[0-9][0-9]:[0-9][0-9]) : ;; *) printf 'malformed'; return ;; esac
+  # A failed date or awk yields an empty string, which bash arithmetic silently
+  # reads as 0 - producing a plausible "minutes until window" that passes the
+  # margin test. Validate both operands so a broken clock blocks instead.
+  start=$(hhmm_to_min "${1%%-*}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+  case "${start}/${now}" in *[!0-9/]*|/*|*/) printf 'clockfail'; return ;; esac
+  delta=$(( start - now ))
+  # spelled as if/fi rather than "[ test ] && assign" so the exit status of the
+  # last statement before the printf is never the false branch of a test
+  if [ "$delta" -lt 0 ]; then delta=$(( delta + 1440 )); fi
+  printf '%s' "$delta"
+}
+
+window_open() {
+  local start end now
+  case "$1" in [0-9][0-9]:[0-9][0-9]-[0-9][0-9]:[0-9][0-9]) : ;; *) return 1 ;; esac
+  start=$(hhmm_to_min "${1%%-*}"); end=$(hhmm_to_min "${1##*-}"); now=$(hhmm_to_min "$(date -u +%H:%M)")
+  # same clock-failure guard; returning 1 here is safe because minutes_to_window
+  # is consulted next and reports 'clockfail', which blocks
+  case "${start}/${end}/${now}" in *[!0-9/]*|/*|*/) return 1 ;; esac
+  # a window may wrap midnight (e.g. 23:30-00:00), so the two cases differ
+  if [ "$start" -le "$end" ]; then [ "$now" -ge "$start" ] && [ "$now" -lt "$end" ]
+  else [ "$now" -ge "$start" ] || [ "$now" -lt "$end" ]; fi
+}
+
+# Every reason the next parameter apply could be deferred or refused, as
+# "code: detail" lines. Empty output means clear to fence.
+#
+# EVERY PROBE MUST FAIL CLOSED. This function is consumed as
+# `blockers=$(fence_blockers)`, and errexit is NOT in force inside a command
+# substitution used as an assignment RHS - a probe that dies mid-function does
+# not abort the caller, it just contributes nothing, and an empty result reads
+# as "clear". Verified on bash 3.2 and 5.2. So a probe may never signal failure
+# by falling silent: each one resolves to an explicit sentinel that produces a
+# blocker line. An unreadable fact is a refusal, the same rule `abort` already
+# follows.
+#
+# This is not hypothetical. rds:DescribeDBSnapshots is a permission this gate
+# introduced; a runner role that predates it would silently report "no snapshot
+# running" on every fence forever, defeating the check whose whole point is the
+# safety-snapshot case.
+#
+# One describe, reused. Five separate calls each carried their own throttle and
+# permission exposure for facts that all live in the same response.
+fence_blockers() {
+  local inst st pg_status pending snaps mins W RAW
+  inst=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+         --query 'DBInstances[0]' --output json 2>/dev/null) || inst=""
+  if [ -z "$inst" ] || ! echo "$inst" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    echo "instance-probe: FAILED (describe-db-instances unreadable - treat as unsafe; check credentials and rds:DescribeDBInstances)"
+  else
+    # "backing-up" is the state that produced the 262.89s apply. "modifying",
+    # "upgrading" and friends queue applies the same way; anything that is not
+    # plainly available is a reason to stop and look.
+    st=$(echo "$inst" | jq -r '.DBInstanceStatus // "unknown"')
+    [ "$st" = available ] || echo "instance-status: $st (only 'available' applies parameters promptly)"
+
+    # An apply already in flight is what makes the fence unabortable. Refuse to
+    # add a second one on top of it.
+    # ONLY "applying" is an apply in flight. "pending-reboot" means a STATIC
+    # parameter change is waiting for a reboot; dynamic parameters (read_only is
+    # one) still apply immediately, so blocking on it would strand a cutover
+    # indefinitely on any stack carrying an unrebooted static change.
+    pg_status=$(echo "$inst" | jq -r '.DBParameterGroups[0].ParameterApplyStatus // "unknown"')
+    case "$pg_status" in
+      in-sync|pending-reboot) : ;;
+      unknown) echo "parameter-group: UNREADABLE (treat as unsafe)" ;;
+      *) echo "parameter-group: $pg_status (an apply is in flight; the unfence would be refused)" ;;
+    esac
+
+    # Informational, NOT a blocker. PendingModifiedValues is the future
+    # maintenance queue (a scheduled class or engine change), not evidence that
+    # anything is applying now. Blocking on it would refuse legitimate cutovers.
+    # Written to STDERR deliberately: stdout IS the blocker channel here, so a
+    # note printed to stdout would block exactly what it says it does not.
+    pending=$(echo "$inst" | jq -rc 'if (.PendingModifiedValues // {}) == {} then "" else (.PendingModifiedValues | tostring) end') || pending=""
+    [ -z "$pending" ] || say "  note: pending modifications queued for maintenance (not blocking): $pending" >&2
+
+    # RDS always returns a PreferredBackupWindow, so absence here means the probe
+    # is wrong, not that backups are off.
+    W=$(echo "$inst" | jq -r '.PreferredBackupWindow // ""')
+    if [ -z "$W" ]; then
+      echo "backup-window: UNREADABLE (no PreferredBackupWindow in the describe - treat as unsafe)"
+    elif window_open "$W"; then
+      echo "backup-window: OPEN now (a backup may start or be running)"
+    else
+      mins=$(minutes_to_window "$W")
+      case "$mins" in
+        '' | *[!0-9]*) echo "backup-window: UNKNOWN (computed '$mins' from '$W' - treat as unsafe and check by hand)" ;;
+        *) [ "$mins" -ge "${FENCE_BACKUP_MARGIN_MIN:-30}" ] || \
+             echo "backup-window: opens in ${mins}m (under the ${FENCE_BACKUP_MARGIN_MIN:-30}m margin; the fence could be caught by it)" ;;
+      esac
+    fi
+  fi
+
+  # Validation states, checked HERE rather than only deep inside the fence.
+  #
+  # The fence has TWO validation gates and both fire late: the epoch loop dies on
+  # any state matching mismatch|error|suspend, and the whitelist gate dies on
+  # anything outside {validated, no primary key}. Both run AFTER the source is
+  # fenced, after the drain proof, and after a validation epoch measured in tens
+  # of minutes to hours. So an unclean table today means: spend the entire
+  # customer outage, then refuse.
+  #
+  # Surfacing it in pre-flight turns that into a refusal in seconds at zero
+  # customer cost, and weakens nothing - the late gates still stand. Measured on
+  # a live migration: 3 tables sat in "Table error" the whole time, so this is
+  # the current real state of things, not a hypothetical.
+  #
+  # Skipped when no migration task exists, so 'status' on an unmigrated env stays
+  # quiet. Fails closed on a probe error, like every other check here.
+  TA=$(task_arn 2>/dev/null) || TA=""
+  if [ -n "$TA" ] && [ "$TA" != None ]; then
+    UNC=$(unclean_validation_count 2>/dev/null) || UNC=PROBE_FAILED
+    case "$UNC" in
+      0) : ;;
+      '' | *[!0-9]*) echo "validation-probe: FAILED (could not read the task's validation states - treat as unsafe; got '$UNC')" ;;
+      *) echo "validation-states: $UNC table(s) outside {validated, no primary key}. BOTH fence validation gates will die on these, but only after the source is fenced and the epoch has run. Resolve or prove them before fencing." ;;
+    esac
+  fi
+
+  # Match 'creating' ONLY. Negating 'available' would let a snapshot that failed
+  # months ago (Status=failed, kept until deleted) block every fence forever, and
+  # 'copying' is snapshot-to-snapshot work that does not touch the live source.
+  snaps=$(aws rds describe-db-snapshots --db-instance-identifier "$SRC_ID" --region "$REGION" \
+          --query 'DBSnapshots[?Status==`creating`].[DBSnapshotIdentifier,Status]' \
+          --output text 2>/dev/null) || snaps="PROBE_FAILED"
+  if [ "$snaps" = "PROBE_FAILED" ]; then
+    echo "snapshot-probe: FAILED (describe-db-snapshots unreadable - treat as unsafe; the runner role may lack rds:DescribeDBSnapshots)"
+  else
+    # Reformat in a way that cannot erase a real finding: if the pipeline broke,
+    # fall back to the raw value rather than an empty string.
+    RAW="$snaps"
+    snaps=$(printf '%s' "$RAW" | tr '\t' '=' | tr '\n' ' ' | sed 's/ *$//') || snaps="$RAW"
+    if [ -n "$RAW" ] && [ -z "$snaps" ]; then snaps="$RAW"; fi
+    [ -z "$snaps" ] || echo "snapshot-in-progress: $snaps"
+  fi
+}
+
+# Minutes budget as a base-10 integer. "08" is invalid octal in bash arithmetic
+# and would abort mid-fence; zero or negative would expire instantly.
+timeout_min() {
+  local v="${FENCE_APPLY_TIMEOUT_MIN:-30}"
+  case "$v" in ''|*[!0-9]*) v=30 ;; esac
+  v=$((10#$v)); [ "$v" -ge 1 ] || v=30
+  printf '%s' "$v"
+}
+
+# Validation PartitionSize for the fence epoch, as a base-10 integer.
+#
+# Why this is pinned rather than left at the AWS default: DMS validation builds a
+# comparison predicate per partition BOUNDARY, and emits malformed SQL (error
+# 1064, an empty predicate term) when a boundary lands on a row whose key column
+# holds an empty string. Such a table reports "Table error" with zero failed and
+# zero suspended records, and the epoch loop dies on it - after the source is
+# already fenced. A table small enough to be a SINGLE partition has no boundary.
+#
+# Measured on a 24,285-table env: 5,205 tables carry a string-typed column in the
+# primary key (any ordinal - the observed failure is on the THIRD key column), and
+# the largest of them holds 425,119 rows by exact COUNT(*). At 1,000,000 every one
+# of them is single-partition, with 2.35x margin.
+#
+# The bounds matter as much as the default. Below 500,000 an at-risk table starts
+# partitioning again and the defect returns. Above 5,000,000 partitions get large
+# enough to drive the replication instance's memory down hard (measured: a
+# 30,000,000 setting drove freeable memory 12.9 -> 5.9 GB and had to be killed).
+# An operator reaching for this knob is by definition inside a customer outage, so
+# the range is enforced rather than documented.
+#
+# Raising it does NOT weaken the proof: a planted single-row divergence was
+# detected identically at 10,000 and at 1,000,000 (Mismatched records, failed=1),
+# on a single-partition at-risk table, with row counts equal on both sides so a
+# count check alone would have missed it.
+validation_partition_size() {
+  local v="${FENCE_VALIDATION_PARTITION_SIZE:-1000000}"
+  case "$v" in ''|*[!0-9]*) die "FENCE_VALIDATION_PARTITION_SIZE must be a positive integer (got '$v')" ;; esac
+  v=$((10#$v))
+  { [ "$v" -ge 500000 ] && [ "$v" -le 5000000 ]; } || \
+    die "FENCE_VALIDATION_PARTITION_SIZE must be between 500000 and 5000000 (got $v). Below 500000 re-partitions
+the at-risk tables and reintroduces the empty-string-key defect; above 5000000 moves toward the partition sizes
+that exhausted the replication instance's memory."
+  printf '%s' "$v"
+}
+
+# $1 = a short label for the log line, so the two call sites are distinguishable
+preflight_fence_gate() {
+  local blockers mode="${FENCE_PREFLIGHT:-enforce}"
+  say "pre-flight ($1): checking nothing will defer the parameter apply"
+  blockers=$(fence_blockers)
+  if [ -z "$blockers" ]; then
+    say "  clear - instance available, no apply in flight, no snapshot running, backup window not near"
+    return 0
+  fi
+  say "  BLOCKED:"; printf '%s\n' "$blockers" | sed 's/^/    - /'
+  if [ "$mode" = warn ]; then
+    say "  FENCE_PREFLIGHT=warn - continuing anyway. Expect a slow fence and an unabortable window."
+    return 0
+  fi
+  die "fence pre-flight failed (see above). A parameter apply issued now can be deferred behind a
+backup or snapshot - measured at 262.89s against a normal 3.3-6.7s - and the unfence is REFUSED for
+that whole window, so the abort path is unavailable while it lasts. Wait for the condition to clear
+and re-run. To proceed regardless: FENCE_PREFLIGHT=warn $0 $ID $REGION $PHASE"
+}
+
 # DMS validation clean-state whitelist: anything else is unclean. Matched
 # case-insensitively ("No primary key" casing differs across DMS versions).
 unclean_validation_count() {
   aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
     --query 'TableStatistics[].ValidationState' --output text | tr '\t' '\n' | \
     awk '{ l=tolower($0) } l != "validated" && l != "no primary key" && NF { c++ } END { print c+0 }'
+}
+
+# Freeable memory on the migration replication instance, in GB, as the epoch
+# watchdog's input. Prints -1 when there is no usable datapoint so the caller can
+# tell "blind" apart from "low" - a CloudWatch gap must never read as 0 and kill a
+# healthy fence. GNU and BSD date disagree on relative-time flags; try both.
+epoch_free_gb() {
+  local start end
+  end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  start=$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || \
+    start=$(date -u -v-15M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || { printf '%s' -1; return; }
+  aws cloudwatch get-metric-statistics --region "$REGION" \
+    --namespace AWS/DMS --metric-name FreeableMemory \
+    --dimensions "Name=ReplicationInstanceIdentifier,Value=${ID}-aurora-migration" \
+    --start-time "$start" --end-time "$end" --period 60 --statistics Average \
+    --query 'sort_by(Datapoints,&Timestamp)[-1].Average' --output text 2>/dev/null | \
+    awk '{ if ($1 == "None" || $1 == "") print -1; else printf "%.2f", $1/1073741824; f=1 }
+         END { if (!f) print -1 }'
+}
+
+# Main-task validation rows that are NOT clean, as schema<TAB>table<TAB>state.
+# Identities, not a bare count: the count alone cannot tell a stale "Table error"
+# apart from a live "Mismatched records", and the post-epoch gate needs to.
+# Raw json + jq -s, never a --query projection (JMESPath evaluates per page).
+unclean_validation_rows() {
+  aws dms describe-table-statistics --replication-task-arn "$(task_arn)" --region "$REGION" \
+    --output json | jq -rs '[.[].TableStatistics[]]
+      | .[]
+      | select(((.ValidationState // "") | ascii_downcase) as $v
+               | $v != "validated" and $v != "no primary key" and $v != "")
+      | [.SchemaName, .TableName, .ValidationState] | @tsv'
+}
+
+# Adjudicate the main task's unclean rows against a completed epoch's evidence.
+#   $1 = path to the epoch's vstats.json
+#   stdin = unclean rows as schema<TAB>table<TAB>state
+# Dies on anything the epoch does not explicitly clear; prints the forgiven list.
+#
+# Narrowed for one specific, measured reason: the main task accumulates HISTORICAL
+# states a fresh task does not reproduce. Observed live - the main task reported
+# "Table error" for two tables that a fresh validation task reported "Validated",
+# because the underlying defect depends on where a partition boundary happens to
+# land. Refusing on that refuses a cutover whose data is provably fine.
+#
+# So a stale "Table error" is forgiven ONLY when this epoch re-validated that exact
+# table. Mismatched records, Suspended, plain Error and any unknown future state
+# still refuse. Demotion is BY IDENTITY and by that single state, never by count.
+adjudicate_main_task_states() {
+  local vstats="$1" hard="" stale="" us ut uv ulv
+  [ -s "$vstats" ] || die "epoch evidence file missing or empty ($vstats) - refusing to adjudicate"
+  while IFS="$(printf '\t')" read -r us ut uv; do
+    [ -n "$us" ] || continue
+    ulv=$(printf '%s' "$uv" | tr '[:upper:]' '[:lower:]')
+    if [ "$ulv" = "table error" ] && \
+       jq -e --arg s "$us" --arg t "$ut" \
+         'any(.[]; .s == $s and .t == $t and (((.v // "") | ascii_downcase) == "validated"))' \
+         "$vstats" >/dev/null 2>&1; then
+      stale="$stale $us.$ut"
+    else
+      hard="$hard $us.$ut($uv)"
+    fi
+  done
+  [ -z "$hard" ] || die "main-task validation states are not clean:$hard - inspect before promoting"
+  printf '%s' "$stale"
 }
 
 # The four CDC apply-error policies, from the task's EFFECTIVE settings (what
@@ -335,16 +687,87 @@ bi_kind >/dev/null
 
 case "$PHASE" in
 
+# READ-ONLY. Answers "are app writers actually drained?" with a measurement
+# instead of the assertion the fence phase used to print.
+#
+# THE SIGNAL IS THE DMS PER-TABLE COUNTERS, not any server status variable.
+# Measured on a live source at a quiet hour, all at the same moment:
+#
+#   Handler_write          4099/s   <- almost entirely internal temp tables
+#   Created_tmp_tables       12.7/s <- the source of that noise
+#   Innodb_rows_inserted      9.2/s <- still ~13x inflated by temp-table inserts
+#   DMS mapped-table DML      0.7/s <- the actual business writes
+#
+# Every server-wide counter is inflated by internal work (temp tables from
+# SELECT sorting, system tables, schemas outside the migration scope). An
+# operator watching Innodb_rows_inserted would read 9/s on a source with almost
+# no real writes, conclude the drain never worked, and either wait forever or
+# stop trusting the check.
+#
+# describe-table-statistics counts exactly the tables being migrated, costs the
+# source nothing, and is already running. Two samples and a diff name the tables
+# still taking writes, which is far more actionable than a rate: it tells you
+# WHICH site or job to go drain.
+#
+# Caveat worth knowing: these counters reset across DMS task lifecycle events,
+# so a delta is only meaningful within one task run, and CDC latency (seconds)
+# means a sample lags the source slightly. Both are fine for a drain check.
+writers)
+  SAMPLE="${WRITERS_SAMPLE_SEC:-120}"
+  TARN=$(task_arn)
+  [ -n "$TARN" ] && [ "$TARN" != None ] || die "cannot resolve the migration task - the DMS counters are the drain signal"
+  say "sampling DMS per-table DML over ${SAMPLE}s (the tables being migrated, not server-wide counters)"
+  WDIR=$(mktemp -d "/tmp/writers-${ID}.XXXXXX")
+  # same pagination rule as the epoch: raw json + jq -s, never --query aggregates
+  aws dms describe-table-statistics --replication-task-arn "$TARN" --region "$REGION" --output json \
+    | jq -s '[.[].TableStatistics[] | {k:(.SchemaName+"."+.TableName), n:(.Inserts+.Updates+.Deletes)}] | from_entries? // (map({key:.k,value:.n}) | from_entries)' > "$WDIR/s1.json"
+  sleep "$SAMPLE"
+  aws dms describe-table-statistics --replication-task-arn "$TARN" --region "$REGION" --output json \
+    | jq -s '[.[].TableStatistics[] | {k:(.SchemaName+"."+.TableName), n:(.Inserts+.Updates+.Deletes)}] | from_entries? // (map({key:.k,value:.n}) | from_entries)' > "$WDIR/s2.json"
+  jq -n --slurpfile a "$WDIR/s1.json" --slurpfile b "$WDIR/s2.json" --argjson w "$SAMPLE" '
+    ($a[0] // {}) as $A | ($b[0] // {}) as $B
+    | [ $B | to_entries[] | {t:.key, d:(.value - ($A[.key] // 0))} | select(.d > 0) ]
+    | sort_by(-.d) as $rows
+    | { total: ([$rows[].d] | add // 0), tables: ($rows | length), top: ($rows[0:15]) }' > "$WDIR/diff.json"
+  WTOT=$(jq -r '.total' "$WDIR/diff.json"); WTABS=$(jq -r '.tables' "$WDIR/diff.json")
+  say "  row changes in window: $WTOT across $WTABS table(s)"
+  [ "$WTABS" = "0" ] || jq -r '.top[] | "    \(.t)  \(.d)"' "$WDIR/diff.json"
+  rm -rf "$WDIR"
+  say ""
+  if [ "$WTOT" = "0" ]; then
+    say "VERDICT: DRAINED for this window. Run again to confirm it holds - one quiet"
+    say "  window is not a drain, two consecutive zero windows is."
+  else
+    say "VERDICT: NOT DRAINED. The tables listed above are still taking writes;"
+    say "  each names the site or job to go stop. Server-wide counters would only"
+    say "  have given you a rate, and an inflated one."
+  fi
+  say ""
+  say "This phase fences nothing. It tells you which cutover mode you are in,"
+  say "which decides whether the fence's gates are customer-visible write downtime"
+  say "or happen inside an outage that already started."
+  ;;
+
 status)
   say "migration task: $(task_status)   bi task: $(bi_task_status)"
   say "rds: $(rds_endpoint 2>/dev/null || echo none)"
   say "aurora: $(aurora_endpoint 2>/dev/null || echo none)"
   say "primary secret host: $(primary_secret_host 2>/dev/null || echo unknown)  (aurora after cutover)"
+  # Read-only preview of the fence gate, so the window can be chosen before the
+  # cutover call rather than discovered at the fence.
+  PF=$(fence_blockers 2>/dev/null || echo "preflight-probe-failed")
+  if [ -z "$PF" ]; then say "fence pre-flight: clear"
+  else say "fence pre-flight: BLOCKED"; printf '%s\n' "$PF" | sed 's/^/    - /'; fi
   ;;
 
 preload)
   prep_cnfs
-  ssm_run <<'EOF'
+  # 21600 like the other heavy DDL steps, not the 3600 default. This block runs
+  # a full --no-data mariadb-dump across every schema (24k+ tables on the largest
+  # env, one SHOW CREATE TABLE each) plus the python split, and a TimedOut here
+  # wastes the whole prep run. Raising the cap cannot slow a healthy run: it only
+  # changes when SSM gives up.
+  ssm_run 21600 <<'EOF'
 set -e; cd /tmp; rm -rf mig && mkdir mig && cd mig
 S="mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names"
 T="mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names --init-command='SET SESSION restrict_fk_on_non_standard_key=0'"
@@ -665,12 +1088,44 @@ harden)
   ;;
 
 fence)
-  say "PRECONDITIONS (yours): app writers scaled to zero + DDL freeze in effect"
+  # Stated honestly, because the old one-liner ("app writers scaled to zero")
+  # contradicted the kill sweep's own comment below, which assumes a LIVE app
+  # whose pool reconnects between sweeps. Both modes are supported and they have
+  # very different downtime profiles, so the operator needs to know which they
+  # are in rather than reading an instruction the code does not rely on.
+  say "PRECONDITIONS (yours): DDL freeze in effect. Draining app writers first is"
+  say "  STRONGLY preferred but is not a correctness requirement - the write cutoff"
+  say "  is read_only=1 itself, and the kill sweep below is best-effort against a"
+  say "  live connection pool. Note which mode you are in: with writers drained the"
+  say "  outage began before this phase; without, it begins at the fence and every"
+  say "  gate below (including the validation epoch) is customer-visible write"
+  say "  downtime."
   # The drain proof leans on the STOP_TASK apply-error policies (a conflict must
   # stop the task, never advance the checkpoint past a missing row). Terraform
   # only sets them at task creation - assert the EFFECTIVE settings.
   [ "$(effective_apply_policies)" = "STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK" ] || \
     die "the task's effective apply-error policies are not STOP_TASK - run the 'harden' phase first"
+  # Pre-flight runs HERE, before anything mutates state. It used to sit after
+  # the BI stop, so a refusal left the BI replication stopped with no instruction
+  # to restart it. A gate that aborts must abort before it can strand anything.
+  #
+  # Skipped when the source is already fenced: on re-entry there is no parameter
+  # apply left to defer, and the gate's blockers ("an apply is in flight", "the
+  # backup window opens in Nm") are meaningless - a fence that has been up
+  # through its own multi-hour epoch drifts into the backup window as a matter
+  # of course. Gating recovery on that would strand an operator mid-outage
+  # hunting for FENCE_PREFLIGHT=warn. read_only is cheap to read directly.
+  RO_EARLY=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+             --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text 2>/dev/null || echo "")
+  if [ -n "$RO_EARLY" ]; then
+    RO_EARLY=$(aws rds describe-db-parameters --db-parameter-group-name "$RO_EARLY" --region "$REGION" \
+               --query 'Parameters[?ParameterName==`read_only`].ParameterValue' --output text 2>/dev/null || echo "")
+  fi
+  if [ "$RO_EARLY" = "1" ]; then
+    say "source parameter group already carries read_only=1 - skipping pre-flight (re-entry)"
+  else
+    preflight_fence_gate "entry"
+  fi
   prep_cnfs
   # NOTE on the validation-epoch scope (see the epoch block after the drain
   # proof): the fresh task validates the main task's ENTIRE mapping scope (a
@@ -753,15 +1208,68 @@ echo "foreign_sessions_remaining=\$LEFT (best-effort; fence is the cutoff)"
 mariadb --defaults-extra-file=/tmp/mig-src.cnf -e "INSERT INTO aurora_mig_ctl.marker (tag) VALUES ('$MARK');"
 echo MARKER_COMMITTED
 EOF
+  # The load-bearing check: this is the apply that gets deferred. The entry check
+  # can be minutes stale by now (BI stop, kill sweep, marker commit all sit
+  # between them) and a backup starting in that gap is exactly the 262.89s case.
+  #
+  # A refusal HERE lands after side effects, unavoidably - checking earlier is
+  # what makes the check useless. So say exactly what state the operator is in.
+  # It is fully recoverable: re-running 'fence' from the top is idempotent (BI is
+  # already stopped and bi_stop tolerates that, the marker is just another row,
+  # and killed sessions reconnect).
+  if ! preflight_fence_gate "pre-apply"; then
+    say ""
+    say "STATE AFTER THIS REFUSAL - nothing is fenced, nothing is lost:"
+    say "  - BI replication is STOPPED (restart it if you are standing down)"
+    say "  - app sessions were swept and will have reconnected"
+    say "  - marker '$MARK' is committed on the source (harmless)"
+    say "  - the source is NOT fenced and is still serving writes"
+    say "RECOVERY: clear the blocker and re-run 'fence'. It is idempotent."
+    exit 1
+  fi
   say ""
   say ">>> NOW APPLY THE TERRAFORM FENCE: set aurora_migration_source_fenced = true"
   say ">>> in this env's env.hcl and confirm the gated physical apply, then return."
-  say "Polling for read_only=1..."
+  # BOUNDED. This was the one unbounded wait left in the phase, which is out of
+  # step with the rest of the file (every other wait dies rather than hang).
+  # The source is still WRITABLE here - the poll is waiting for the fence to
+  # land, so this is not read_only time. It is still customer downtime: the
+  # phase's stated precondition is that app writers are already scaled to zero.
+  # So a silently failed or forgotten Spacelift apply used to extend the outage
+  # with no limit and no prompt to look.
+  # Dying here is safe in both directions. If the apply never landed the source
+  # is unfenced and nothing has changed; if it landed just after the deadline,
+  # re-running 'fence' takes the RO0=1 re-entry path and reuses this marker.
+  FTMO=$(timeout_min); FDEADLINE=$((SECONDS + 60 * FTMO))
+  say "Polling for read_only=1 (deadline ${FTMO}m)..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
-); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "1" ] && break; sleep 30; done
+); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "1" ] && break
+    if [ "$SECONDS" -ge "$FDEADLINE" ]; then
+      say "parameter group apply status: $(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus' --output text 2>/dev/null || echo unknown)"
+      die "source did not reach read_only=1 within ${FTMO}m. The fence apply has not landed as of
+the last probe - it may still land after this exit, so RE-CHECK read_only before assuming the source
+is writable. Check the Spacelift run for the physical stack. Nothing here is committed, and
+re-running 'fence' handles both outcomes: it resumes from marker '$MARK' if unfenced, or takes the
+already-fenced re-entry path if the apply landed late. Raise the budget with
+FENCE_APPLY_TIMEOUT_MIN=<minutes> if the apply is legitimately slow."
+    fi
+    sleep 30
+  done
   fi
+  # Freeze envelope starts here: read_only=1 is confirmed, so from this point the
+  # source rejects writes. Every later milestone reports its offset from this, so
+  # a rehearsal produces a real breakdown instead of an estimate. Note the
+  # customer-visible outage may start EARLIER (see the writers precondition
+  # above) and ends LATER (the post-GO physical + logical applies and the pod
+  # rollout all run with the source still fenced, and are not timed here).
+  FREEZE_T0=$SECONDS
+  freeze_mark() { say "  [freeze +$((SECONDS - FREEZE_T0))s] $*"; }
+  freeze_mark "read_only=1 confirmed - source is now rejecting writes"
+  [ "$RO0" = "1" ] && say "  (RE-ENTRY: this clock starts NOW, not at the original fence - the true"
+  [ "$RO0" = "1" ] && say "   freeze is longer than anything reported below. Use the prior run's log.)"
+  : 
   say "post-fence kill sweep (anything that connected during the apply window;"
   say "read_only already blocks their writes, this just tidies sessions)"
   ssm_run <<'EOF'
@@ -850,7 +1358,7 @@ EOF
   say "gate: post-stop checkpoint at or past the final coordinate (the drain proof)"
   CKTRIES=0
   while :; do
-    if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached (post-stop)"; break; fi
+    if checkpoint_reached "$FINAL_FILE" "$FINAL_POS"; then say "  checkpoint reached (post-stop)"; freeze_mark "drain proof passed (cycles=$CKTRIES)"; break; fi
     CKTRIES=$((CKTRIES+1)); [ "$CKTRIES" -gt 10 ] && die "post-stop checkpoint short of the final coordinate after 10 resume/stop cycles - inspect the task (RecoveryCheckpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text); final=$FINAL_FILE:$FINAL_POS)"
     say "  checkpoint short of final - resuming to drain the backlog, then re-stopping (cycle $CKTRIES)"
     aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
@@ -932,22 +1440,50 @@ EOF
   SEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-source" --query 'Endpoints[0].EndpointArn' --output text)
   TEP=$(aws dms describe-endpoints --region "$REGION" --filters "Name=endpoint-id,Values=${ID}-aurora-migration-target" --query 'Endpoints[0].EndpointArn' --output text)
   say "  creating the validation-only task ($VTASK_ID)"
+  # Settings travel via a FILE for the same reason the mappings do (argv limits),
+  # and PartitionSize is pinned rather than defaulted - see validation_partition_size.
+  VPART=$(validation_partition_size)
+  say "  validation PartitionSize=$VPART (pinned; single-partitions every at-risk table)"
+  cat > "$VDIR/vsettings.json" <<EOF
+{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":16,"PartitionSize":$VPART,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}
+EOF
+  jq -e '.ValidationSettings.PartitionSize >= 500000' "$VDIR/vsettings.json" >/dev/null || \
+    die "refusing to create the epoch task: PartitionSize missing or too small in $VDIR/vsettings.json"
   VARN=$(aws dms create-replication-task --region "$REGION" \
     --replication-task-identifier "$VTASK_ID" \
     --replication-instance-arn "$RIARN" \
     --source-endpoint-arn "$SEP" --target-endpoint-arn "$TEP" \
     --migration-type full-load \
     --table-mappings "file://$VDIR/mappings.json" \
-    --replication-task-settings '{"FullLoadSettings":{"TargetTablePrepMode":"DO_NOTHING"},"ValidationSettings":{"EnableValidation":true,"ValidationOnly":true,"ThreadCount":16,"FailureMaxCount":10000},"Logging":{"EnableLogging":true}}' \
+    --replication-task-settings "file://$VDIR/vsettings.json" \
     --query 'ReplicationTask.ReplicationTaskArn' --output text)
   vwait_status ready 600
   aws dms start-replication-task --replication-task-arn "$VARN" --start-replication-task-type start-replication --region "$REGION" >/dev/null
   say "  validating (every enumerated table must reach Validated or No-primary-key in this epoch)"
   VWAIT=0
+  # Instrumentation. The epoch is the largest single step inside the freeze and
+  # nothing has ever measured where its time actually goes. Splitting per-loop
+  # wall clock into API time versus sleep answers three open questions at once:
+  # whether the VWAIT-to-wall factor is 2 or 3, whether the loop is API-bound or
+  # validation-bound, and whether convergence tracks table COUNT or data VOLUME
+  # (the deadline formula assumes count, but row-compare throughput is a volume
+  # operation). Pure logging, no control flow depends on it.
+  EPOCH_T0=$SECONDS; EPOCH_API=0; PREV_MISSING=""; VSTOPPED=0
+  # Liveness. Before this, the loop polled ONLY table statistics: if the
+  # validation task failed, was deleted, or exhausted the instance's memory, the
+  # stats went stale and every gate read clean-but-incomplete (NBAD=0 so no die,
+  # EXTRA=0 so no die, MISSING=MAIN_COUNT so no break). The loop then ground all
+  # the way to VMAX with the source read_only - about 11.6h at 24k tables. VMAX is
+  # documented as a bound on a hang; it was the ONLY bound on this one.
+  VMEM_FLOOR="${FENCE_EPOCH_MEM_FLOOR_GB:-3}"
+  case "$VMEM_FLOOR" in ''|*[!0-9]*) VMEM_FLOOR=3 ;; esac
+  say "  epoch watchdog armed: task-health each loop, freeable-memory floor ${VMEM_FLOOR}GB"
   while :; do
     # same pagination rule: raw json + jq -s, never --query aggregates/projections
+    API_T0=$SECONDS
     aws dms describe-table-statistics --replication-task-arn "$VARN" --region "$REGION" \
       --output json | jq -s '[.[].TableStatistics[] | {s: .SchemaName, t: .TableName, v: .ValidationState}]' > "$VDIR/vstats.json"
+    API_S=$((SECONDS - API_T0)); EPOCH_API=$((EPOCH_API + API_S))
     # terminal-bad states die immediately; "no primary key" is the accepted,
     # reported exception (those tables cannot be row-validated at all)
     NBAD=$(jq '[.[] | select(.v | test("mismatch|error|suspend"; "i"))] | length' "$VDIR/vstats.json")
@@ -963,30 +1499,98 @@ EOF
       ($main[0] | map({key: ([.s, .t] | tojson), value: true}) | from_entries) as $known
       | [ $now[0][] | select(($known[[.s, .t] | tojson] // false) | not) ] | length')
     MARKER_OK=$(jq '[.[] | select(.s == "aurora_mig_ctl" and .t == "marker" and ((.v | ascii_downcase) == "validated"))] | length' "$VDIR/vstats.json")
+    # rate = tables cleared since the last sample, the thing that tells you
+    # whether this will ever finish and roughly when
+    EPOCH_S=$((SECONDS - EPOCH_T0))
+    if [ -n "$PREV_MISSING" ]; then RATE=$((PREV_MISSING - MISSING)); else RATE="-"; fi
+    PREV_MISSING=$MISSING
     say "  missing=$MISSING/$MAIN_COUNT extra=$EXTRA bad=$NBAD marker_validated=$MARKER_OK"
+    say "    elapsed=${EPOCH_S}s api_total=${EPOCH_API}s api_this_loop=${API_S}s cleared_since_last=$RATE vwait=$VWAIT"
+    # Watchdog 1: the task must still be alive. Dying states are fatal at once.
+    # Plain "stopped" is NOT immediately fatal (validation-only tasks stop
+    # themselves on completion, and the break below may be one poll away), but a
+    # stopped task makes no further progress, so a stopped task with work left is
+    # fatal after three consecutive polls rather than after VMAX.
+    VST=$(vtask_status)
+    case "$VST" in
+      failed|stopped-after-fail|deleting|none)
+        die "fence-epoch validation task is '$VST' - it is no longer running, so the statistics above are frozen
+and every gate would read clean-but-incomplete. Inspect $VTASK_ID before touching anything." ;;
+      stopped)
+        VSTOPPED=$((VSTOPPED+1))
+        [ "$VSTOPPED" -lt 3 ] || die "fence-epoch validation task has been 'stopped' for 3 consecutive polls with
+missing=$MISSING/$MAIN_COUNT marker=$MARKER_OK - it ended without completing the set. Inspect $VTASK_ID." ;;
+      *) VSTOPPED=0 ;;
+    esac
+    # Watchdog 2: replication-instance memory. Large validation tasks accumulate
+    # memory for the life of the task (measured ~1-2 MB per validated table), and
+    # an OOM here strands the fence in the state watchdog 1 describes. Failing
+    # loudly at a floor beats discovering it at VMAX. A missing datapoint warns
+    # rather than dies: a CloudWatch gap must not kill a healthy fence.
+    VFREE=$(epoch_free_gb)
+    case "$VFREE" in
+      -1) say "    WARNING: freeable-memory metric unreadable this loop - watchdog blind, continuing" ;;
+      *) say "    freeable_memory=${VFREE}GB (floor ${VMEM_FLOOR}GB)"
+         awk -v f="$VFREE" -v m="$VMEM_FLOOR" 'BEGIN { exit !(f < m) }' && \
+           die "fence-epoch aborted: replication instance freeable memory ${VFREE}GB fell below the ${VMEM_FLOOR}GB
+floor with missing=$MISSING/$MAIN_COUNT. Continuing risks an OOM that strands the fence. The source is still
+fenced: re-run the fence phase to re-enter (it is idempotent via the RO0=1 path), or unfence to abort.
+Consider a smaller FENCE_VALIDATION_PARTITION_SIZE or a larger replication instance." ;;
+    esac
     [ "$NBAD" -gt 0 ] && die "fence-epoch validation found non-clean tables - inspect $VTASK_ID table statistics before touching anything"
     [ "$EXTRA" -gt 0 ] && die "the fresh task enumerated tables outside the main task's set - enumeration drift (rename/DDL outside CDC?); inspect before touching anything"
     if [ "$MISSING" = "0" ] && [ "$MARKER_OK" = "1" ]; then break; fi
     # Deadline scales with table count. VWAIT is NOT seconds: it adds 20 per
-    # loop but each loop's paginated describe-table-statistics takes ~40s of
-    # wall clock on a 10k+ table env, so real time is roughly VWAIT x2. The
-    # old fixed 3600 (~2h wall) barely fit an 11.9k-table env and cannot fit
-    # a 24k-table one; a miss restarts the whole epoch inside the write
-    # freeze. Observed rate is ~0.25 VWAIT units per table, so count/2 +1800
-    # leaves >2x headroom while still bounding a genuine hang.
+    # loop, but each loop costs the paginated describe-table-statistics (~40s of
+    # wall clock on a 10k+ table env) PLUS the 20s sleep below. So the real
+    # conversion is ~60s of wall per 20 units, i.e. VWAIT x3, not the x2 an
+    # earlier revision of this comment claimed. At MAIN_COUNT=24k that is an
+    # ~11.6h ceiling, not ~7.7h.
+    # Read that as a ceiling on a hang, NOT as the expected duration. Actual
+    # validation time is driven by DMS's row-compare throughput (data volume),
+    # not by table count; table count only sets this bound. Measured epochs:
+    # ~25m on a completed mid-size cutover, and ~1h to sweep 10.2k of 11.9k
+    # tables on a larger rehearsal.
+    # The old fixed 3600 barely fit an 11.9k-table env and cannot fit a
+    # 24k-table one; a miss restarts the whole epoch inside the write freeze.
     VMAX=$((MAIN_COUNT / 2 + 1800))
-    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt "$VMAX" ] && die "fence-epoch validation did not complete (VWAIT=$VWAIT > $VMAX, ~2s wall per unit; missing=$MISSING/$MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
+    VWAIT=$((VWAIT+20)); [ "$VWAIT" -gt "$VMAX" ] && die "fence-epoch validation did not complete (VWAIT=$VWAIT > $VMAX, ~3s wall per unit; missing=$MISSING/$MAIN_COUNT, marker=$MARKER_OK) - inspect $VTASK_ID"
     sleep 20
   done
   NOPK_LIST=$(jq -r '[.[] | select((.v | ascii_downcase) == "no primary key") | .s + "." + .t] | join(" ")' "$VDIR/vstats.json")
   [ -z "$NOPK_LIST" ] || say "  no-PK tables outside row validation (documented exception): $NOPK_LIST"
+  # The number the next planning round needs: what the epoch ACTUALLY cost, and
+  # how much of it was the polling API rather than DMS validating.
+  say "  EPOCH TIMING: total=$((SECONDS - EPOCH_T0))s of which api=${EPOCH_API}s, tables=$MAIN_COUNT, final_vwait=$VWAIT"
+  # Main-task whole-task gate (its stats survive the stop): catches a table that
+  # went Mismatched/Suspended during soak. Evaluated HERE, before teardown, because
+  # it now cross-checks against this epoch's evidence and $VDIR must still exist.
+  #
+  # Narrowed, for one specific reason: the main task accumulates HISTORICAL states
+  # that a fresh task does not reproduce. Measured live - the main task reported
+  # "Table error" for two tables that a fresh validation task reported "Validated",
+  # because the underlying defect depends on where a partition boundary happens to
+  # land. Refusing on that would refuse a cutover whose data is provably fine.
+  #
+  # So a stale "Table error" is forgiven ONLY when this epoch re-validated that
+  # exact table. Everything else - Mismatched records, Suspended, plain Error, any
+  # unknown future state - still refuses, unchanged. This deliberately does not
+  # demote by count: it demotes by identity, and only for the one state whose
+  # staleness is understood.
+  UNCLEAN_ROWS=$(unclean_validation_rows)
+  if [ -n "$UNCLEAN_ROWS" ]; then
+    # The `|| die` is load-bearing, not decoration. adjudicate_main_task_states
+    # refuses by calling die, but it runs here inside a command substitution, and
+    # an exit inside $(...) ends only that subshell - the assignment would still
+    # succeed with an empty value and the fence would sail past a real refusal.
+    # errexit does not cover this either (it is not in force inside x=$(f)).
+    STALE=$(printf '%s\n' "$UNCLEAN_ROWS" | adjudicate_main_task_states "$VDIR/vstats.json") || \
+      die "main-task validation states are not clean (see the FATAL above) - inspect before promoting"
+    [ -z "$STALE" ] || say "  main-task stale 'Table error' cleared - each re-validated by this epoch:$STALE"
+  fi
   say "  epoch validation PASSED - removing the validation task"
   vtask_teardown
   rm -rf "$VDIR"
-  # main-task whole-task whitelist gate (its stats survive the stop): catches a
-  # table that went Mismatched/Suspended during soak.
-  U=$(unclean_validation_count)
-  [ "$U" = "0" ] || die "main-task validation states are not clean (unclean=$U) - inspect before promoting"
   say "checkpoint: $(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text)"
   say "installing object artifacts AFTER the final stop (DMS can never apply DML"
   say "through freshly installed triggers). Dumped FRESH from the fenced source -"
@@ -1008,6 +1612,10 @@ TGT_COUNTS="$($T -e "SELECT CONCAT((SELECT COUNT(*) FROM information_schema.rout
 [ "$SRC_COUNTS" = "$TGT_COUNTS" ] && echo "OBJECTS_VERIFIED $SRC_COUNTS" || { echo "OBJECT_COUNT_MISMATCH src=$SRC_COUNTS tgt=$TGT_COUNTS"; exit 1; }
 EOF
   say ""
+  freeze_mark "all gates passed - handing off to the cutover apply"
+  say "NOTE: the freeze does NOT end here. The source stays read_only through the"
+  say "      physical apply, its auto-following logical apply, and the pod rollout."
+  say "      Time those too - that tail is unmeasured and may exceed everything above."
   say "GO: the gate has passed. Confirming the aurora_migration_state=cutover"
   say "physical apply IS the promotion - its auto-following logical apply"
   say "repoints the app at Aurora (the point of no return). After the logical"
@@ -1055,13 +1663,47 @@ $T -e "SELECT CONCAT('DROP TRIGGER IF EXISTS \`',trigger_schema,'\`.\`',trigger_
 $T -e "SELECT CONCAT('DROP EVENT IF EXISTS \`',event_schema,'\`.\`',event_name,'\`;') FROM information_schema.events WHERE event_schema NOT IN ('mysql','sys')" >> /tmp/drop-objs.sql
 if [ -s /tmp/drop-objs.sql ]; then mariadb --defaults-extra-file=/tmp/mig-tgt.cnf < /tmp/drop-objs.sql && echo TARGET_OBJECTS_DROPPED; else echo NO_TARGET_OBJECTS; fi
 EOF
+  # An unfence issued while the FENCE apply is still in flight is REFUSED by RDS:
+  # InvalidDBParameterGroupState ("this parameter group cannot be modified
+  # because it is currently being applied"). Reproduced deterministically
+  # 2026-08-02. On a quiet instance the lock clears in ~0.7s and nobody notices;
+  # behind a backup it lasts as long as the backup does (measured 262.89s), and
+  # for that whole window the fence is UNABORTABLE. Report the state rather than
+  # letting the operator meet the error as a mystery Terraform failure.
+  PGS=$(aws rds describe-db-instances --db-instance-identifier "$SRC_ID" --region "$REGION" \
+        --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus' --output text 2>/dev/null || echo unknown)
+  if [ "$PGS" != in-sync ]; then
+    say "WARNING: source parameter group is '$PGS', not in-sync. An unfence apply issued now"
+    say "         will be REFUSED with InvalidDBParameterGroupState. This is expected and"
+    say "         self-clearing - wait for in-sync (seconds normally, the length of a backup"
+    say "         if one is running) and apply then. The fence stays up until you do."
+    say "         Watch it: aws rds describe-db-instances --db-instance-identifier $SRC_ID \\"
+    say "           --region $REGION --query 'DBInstances[0].DBParameterGroups[0].ParameterApplyStatus'"
+  else
+    say "source parameter group is in-sync - an unfence apply will be accepted"
+  fi
   say ">>> UNFENCE: set aurora_migration_source_fenced = false in env.hcl and"
   say ">>> confirm the gated apply (Terraform refuses this while state=cutover)."
-  say "Polling for read_only=0..."
+  # Bounded for the same reason as the fence-side poll, and it matters more here:
+  # this is the path taken when things have already gone wrong, so hanging
+  # forever waiting on an unfence apply is the worst possible failure mode. The
+  # source stays fenced if this dies, which is the state it was already in, and
+  # abort is re-runnable.
+  ATMO=$(timeout_min); ADEADLINE=$((SECONDS + 60 * ATMO))
+  say "Polling for read_only=0 (deadline ${ATMO}m)..."
   while :; do RO=$(ssm_run <<'EOF'
 mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SELECT @@read_only"
 EOF
-); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "0" ] && break; sleep 30; done
+); RO=$(echo "$RO" | tr -d '[:space:]'); say "  read_only=$RO"; [ "$RO" = "0" ] && break
+    if [ "$SECONDS" -ge "$ADEADLINE" ]; then
+      die "source did not reach read_only=0 within ${ATMO}m - the unfence apply has not landed as of
+the last probe. The source was STILL FENCED at that probe and the main DMS task and BI are still
+stopped, but the unfence may land after this exit, so re-check rather than assuming. An unfence is
+refused while another apply is in flight (InvalidDBParameterGroupState, self-clearing); a
+pending-reboot parameter group is NOT such a case. 'abort' is re-runnable."
+    fi
+    sleep 30
+  done
   # re-verify the guard AFTER the human-gated apply window (TOCTOU close-out).
   # Every fact is captured with an explicit error check: an unreadable fact is a
   # refusal, never a pass.
