@@ -33,5 +33,8 @@
     "ApplyErrorEscalationPolicy": "STOP_TASK"
   },
   "Logging": { "EnableLogging": true },
-  "ControlTablesSettings": { "ControlSchema": "awsdms_control" }
+  "ControlTablesSettings": {
+    "ControlSchema": "awsdms_control",
+    "StatusTableEnabled": true
+  }
 }

@@ -39,6 +39,11 @@
 #                    app - gate BEFORE confirming physical, not here).
 #   abort          - pre-cutover abort with hard guards; refuses after cutover.
 #   bi-epoch       - reload the BI DMS task from the (now Aurora) source.
+#   proof-observe  - READ-ONLY. Samples the source binlog coordinate, the DMS
+#                    RecoveryCheckpoint and the target status control table side
+#                    by side, so a stop-free drain proof can be measured during
+#                    soak before anyone trusts it inside the fence. Needs
+#                    'harden' first (the status table is a task setting).
 #
 # Environment overrides:
 #   FENCE_PREFLIGHT=warn         report the fence pre-flight blockers and carry on
@@ -354,6 +359,32 @@ effective_apply_policies() {
     jq -r '.ErrorBehavior | [.ApplyErrorInsertPolicy, .ApplyErrorUpdatePolicy, .ApplyErrorDeletePolicy, .ApplyErrorEscalationPolicy] | join(",")'
 }
 
+# Whether the status control table is on in the task's EFFECTIVE settings. DMS
+# echoes this key with both spellings on some versions, so accept either; absent
+# means false.
+status_table_enabled() {
+  aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" \
+    --query 'ReplicationTasks[0].ReplicationTaskSettings' --output text | \
+    jq -r '((.ControlTablesSettings.StatusTableEnabled // .ControlTablesSettings.statusTableEnabled) // false) | tostring'
+}
+
+control_schema() {
+  aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" \
+    --query 'ReplicationTasks[0].ReplicationTaskSettings' --output text | \
+    jq -r '.ControlTablesSettings.ControlSchema // "awsdms_control"'
+}
+
+# The task's RecoveryCheckpoint as a bare "seq pos", or empty. Same two
+# spellings checkpoint_reached already handles.
+checkpoint_coord() {
+  local ck m
+  ck=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" --query 'ReplicationTasks[0].RecoveryCheckpoint' --output text 2>/dev/null || echo "")
+  m=$(echo "$ck" | grep -oE 'mysql-bin-changelog\.[0-9]+:[0-9]+' | head -1)
+  [ -n "$m" ] || m=$(echo "$ck" | grep -oE '\$\.[0-9]+:[0-9]+' | head -1)
+  [ -n "$m" ] || return 1
+  printf '%s %s' "$(echo "$m" | cut -d. -f2 | cut -d: -f1)" "$(echo "$m" | cut -d: -f2)"
+}
+
 # Bounded task-state wait. Dies on the DMS failure states and on timeout - an
 # unbounded poll here would hang the fence (source read-only, customers waiting)
 # on a task that will never reach the wanted state.
@@ -470,6 +501,72 @@ status)
   PF=$(fence_blockers 2>/dev/null || echo "preflight-probe-failed")
   if [ -z "$PF" ]; then say "fence pre-flight: clear"
   else say "fence pre-flight: BLOCKED"; printf '%s\n' "$PF" | sed 's/^/    - /'; fi
+  say "status control table: $(status_table_enabled 2>/dev/null || echo unknown) (proof-observe needs it on)"
+  ;;
+
+# Read-only. Samples the three positions that a fast drain proof would have to
+# agree about, so their relationship can be MEASURED over the soak instead of
+# assumed at the fence.
+#
+# Why this exists: the fence's drain proof must currently STOP the DMS task,
+# because RecoveryCheckpoint is a stopped-task safepoint - it advances to the
+# true applied position only on stop, not while running. That stop, plus up to
+# 10 resume/stop drain cycles, sits inside the customer write freeze.
+#
+# The status control table is the one target-side progress view that needs no
+# stop: awsdms_status carries SOURCE_CURRENT_POSITION (how far DMS has READ from
+# the binlog) and SOURCE_TAIL_POSITION (the oldest transaction not yet
+# committed). If SOURCE_TAIL_POSITION is past the fenced source's final
+# coordinate then everything before it is committed on the target, which is the
+# same thing the stop-based proof establishes - but as a SELECT.
+#
+# NOT WIRED INTO THE FENCE, DELIBERATELY. Two things must be measured first:
+#   1. Update cadence. The row is refreshed on a timer, so a fresh-enough read
+#      is a precondition; STATUS_TIME skew is printed here for that reason.
+#   2. That SOURCE_TAIL_POSITION means what the AWS docs say on THIS engine
+#      pair. Read-vs-applied is exactly the confusion that made the old
+#      running-task checkpoint assertion wrong, and repeating that mistake with
+#      a different column would silently pass a fence over unapplied rows.
+# Run it repeatedly during soak, under write load, and compare the columns
+# against the source coordinate before anyone trusts it inside the barrier.
+proof-observe)
+  [ "$(status_table_enabled)" = "true" ] || die "status control table is off - run 'harden' first (it needs a task stop/resume)"
+  prep_cnfs
+  CS=$(control_schema)
+  say "source coordinate vs DMS checkpoint vs target status table (schema: $CS)"
+  SRCPOS=$(ssm_run 300 <<'EOF'
+mariadb --defaults-extra-file=/tmp/mig-src.cnf --batch --skip-column-names -e "SHOW MASTER STATUS" | awk '{print $1, $2}'
+EOF
+)
+  SRCPOS=$(echo "$SRCPOS" | grep . | head -1)
+  SF=$(echo "$SRCPOS" | awk '{print $1}' | grep -oE '[0-9]+$' || true); SP=$(echo "$SRCPOS" | awk '{print $2}')
+  say "  source SHOW MASTER STATUS : file-seq=${SF:-?} pos=${SP:-?}"
+  CK=$(checkpoint_coord || true)
+  say "  DMS RecoveryCheckpoint    : ${CK:-unparseable} $([ "$(task_status)" = "running" ] && echo '(task RUNNING - this value is a stale safepoint by design)')"
+  # The control table may legitimately not exist yet: DMS creates it on the
+  # target at the first CDC write after the setting is enabled.
+  ST=$(ssm_run 300 <<EOF
+mariadb --defaults-extra-file=/tmp/mig-tgt.cnf --batch --skip-column-names -e "SELECT TASK_NAME, TASK_STATUS, SOURCE_CURRENT_POSITION, SOURCE_TAIL_POSITION, STATUS_TIME, TIMESTAMPDIFF(SECOND, STATUS_TIME, UTC_TIMESTAMP()) FROM \`$CS\`.awsdms_status" 2>/dev/null || echo "NO_STATUS_TABLE"
+EOF
+)
+  if echo "$ST" | grep -q NO_STATUS_TABLE || [ -z "$(echo "$ST" | grep .)" ]; then
+    say "  target awsdms_status      : NOT PRESENT YET"
+    say "    DMS creates it at the first CDC write after the setting is enabled."
+    say "    If CDC has been moving and it is still absent, the target endpoint user"
+    say "    likely cannot CREATE the control schema - check the task log."
+  else
+    echo "$ST" | grep . | while IFS=$'\t' read -r tn ts cur tail stime age; do
+      say "  target awsdms_status      : task=$tn status=$ts"
+      say "    SOURCE_CURRENT_POSITION (read)      : $cur"
+      say "    SOURCE_TAIL_POSITION    (uncommitted): $tail"
+      say "    STATUS_TIME=$stime  age=${age}s  <- staleness; a fast proof needs this small and bounded"
+    done
+  fi
+  say ""
+  say "What to look for over repeated samples under write load:"
+  say "  - does SOURCE_TAIL_POSITION advance monotonically and stay <= the source coordinate?"
+  say "  - what is the worst STATUS_TIME age? that is the floor on any status-table-based proof"
+  say "  - after a deliberate quiet period, do tail and source coordinate converge exactly?"
   ;;
 
 preload)
@@ -763,8 +860,19 @@ harden)
   # apply conflict is logged and skipped, and the fence's positional drain proof
   # would pass over a row that never landed. Modify requires a stopped task;
   # resume-processing continues CDC from the checkpoint afterwards.
+  # Same create-time-only problem applies to the status control table, so it is
+  # merged in the same stop/modify/resume rather than costing a second one. It
+  # creates awsdms_control.awsdms_status on the TARGET, a single row updated on a
+  # timer, carrying SOURCE_CURRENT_POSITION (how far DMS has READ) and
+  # SOURCE_TAIL_POSITION (the oldest transaction not yet committed). That is the
+  # only target-side view of progress that does NOT require stopping the task -
+  # see the proof-observe phase for why that matters and why it is not yet
+  # trusted. The control schema is excluded from every mapping and object step
+  # already (awsdms% is filtered), so it cannot pollute the migrated set.
   WANT="STOP_TASK,STOP_TASK,STOP_TASK,STOP_TASK"
-  if [ "$(effective_apply_policies)" = "$WANT" ]; then say "apply-error policies already STOP_TASK - nothing to do"; exit 0; fi
+  if [ "$(effective_apply_policies)" = "$WANT" ] && [ "$(status_table_enabled)" = "true" ]; then
+    say "apply-error policies already STOP_TASK and the status control table is on - nothing to do"; exit 0
+  fi
   ST=$(task_status)
   case "$ST" in running|stopped) :;; *) die "task is '$ST' - harden expects running or stopped";; esac
   if [ "$ST" = "running" ]; then
@@ -772,13 +880,19 @@ harden)
     aws dms stop-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" >/dev/null
     wait_task_status stopped 900
   fi
-  say "merging STOP_TASK apply-error policies into the effective settings"
+  say "merging STOP_TASK apply-error policies + the status control table into the effective settings"
+  # ControlTablesSettings may be absent entirely on an old task, so build it with
+  # // {} rather than assuming the object exists. ControlSchema is only defaulted
+  # when unset - never overwrite an operator's existing choice, the tables live
+  # there and moving them orphans the old ones.
   NEWSET=$(aws dms describe-replication-tasks --region "$REGION" --filters "Name=replication-task-id,Values=$TASK_ID" \
     --query 'ReplicationTasks[0].ReplicationTaskSettings' --output text | \
     jq '.ErrorBehavior.ApplyErrorInsertPolicy = "STOP_TASK"
       | .ErrorBehavior.ApplyErrorUpdatePolicy = "STOP_TASK"
       | .ErrorBehavior.ApplyErrorDeletePolicy = "STOP_TASK"
       | .ErrorBehavior.ApplyErrorEscalationPolicy = "STOP_TASK"
+      | .ControlTablesSettings = ((.ControlTablesSettings // {}) | .StatusTableEnabled = true)
+      | .ControlTablesSettings.ControlSchema = (.ControlTablesSettings.ControlSchema // "awsdms_control")
       | del(.Logging.CloudWatchLogGroup, .Logging.CloudWatchLogStream)')
   aws dms modify-replication-task --replication-task-arn "$(task_arn)" --region "$REGION" \
     --replication-task-settings "$NEWSET" >/dev/null
@@ -786,12 +900,16 @@ harden)
   sleep 15; wait_task_status stopped 600
   GOT=$(effective_apply_policies)
   [ "$GOT" = "$WANT" ] || die "effective policies after modify are '$GOT', wanted '$WANT'"
+  GOTS=$(status_table_enabled)
+  [ "$GOTS" = "true" ] || die "status control table is '$GOTS' after modify, wanted true"
   if [ "$ST" = "running" ]; then
     say "resuming CDC"
     aws dms start-replication-task --replication-task-arn "$(task_arn)" --start-replication-task-type resume-processing --region "$REGION" >/dev/null
     wait_task_status running 300
   fi
-  say "HARDENED: effective apply-error policies are STOP_TASK"
+  say "HARDENED: apply-error policies STOP_TASK, status control table enabled"
+  say "  the control table is created on the target at the next CDC write, not"
+  say "  immediately - run 'proof-observe' once CDC has moved to confirm it lands"
   ;;
 
 fence)
