@@ -2,6 +2,23 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.8.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.7.0...v8.8.0) (2026-08-02)
+
+
+### Features
+
+* **logical:** let disposable stacks opt out of the fleet slack alert route ([#410](https://github.com/Dozuki/CloudPrem-Infra/issues/410)) ([c6dc2e5](https://github.com/Dozuki/CloudPrem-Infra/commit/c6dc2e526a47833438eea3bab7db3af2bdb86727))
+* **monitoring:** pod identity for the chart's cloudwatch exporter ([#409](https://github.com/Dozuki/CloudPrem-Infra/issues/409)) ([8365fab](https://github.com/Dozuki/CloudPrem-Infra/commit/8365fabb8581e1b2a62e5645517c6a2ebe093ad6))
+
+
+### Bug Fixes
+
+* **azure:** unify deploy kit on OpenTofu 1.11.8 ([#412](https://github.com/Dozuki/CloudPrem-Infra/issues/412)) ([066eabf](https://github.com/Dozuki/CloudPrem-Infra/commit/066eabf5d50dd02242b49cd73308edb9c8e51b07))
+* **logical:** floor the on-demand nodepool at &gt;4GiB of instance memory ([#408](https://github.com/Dozuki/CloudPrem-Infra/issues/408)) ([b13b310](https://github.com/Dozuki/CloudPrem-Infra/commit/b13b3101f47e4474dc11b272476c73fda7591f13))
+* **logical:** select the on-demand nodepool by name, not by capacity-type ([#407](https://github.com/Dozuki/CloudPrem-Infra/issues/407)) ([68e112d](https://github.com/Dozuki/CloudPrem-Infra/commit/68e112d9f3e2306635eb13404d7c03de13efd48b))
+* **monitoring:** stop alerting on routine DMS serverless scaling events ([#404](https://github.com/Dozuki/CloudPrem-Infra/issues/404)) ([965799d](https://github.com/Dozuki/CloudPrem-Infra/commit/965799dd6e45a10d7c032c37d082866dc5388277))
+* **physical:** stop pinning local_infile on the aurora cluster parameter groups ([#405](https://github.com/Dozuki/CloudPrem-Infra/issues/405)) ([c83e053](https://github.com/Dozuki/CloudPrem-Infra/commit/c83e053b74d6656264cbedb98f11be476943b5ab))
+
 ## [8.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.6.2...v8.7.0) (2026-08-01)
 
 
