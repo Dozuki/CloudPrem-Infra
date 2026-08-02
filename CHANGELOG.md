@@ -2,6 +2,19 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.10.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.9.0...v8.10.0) (2026-08-02)
+
+
+### Features
+
+* **alerts:** route DR pages to VictorOps ([#428](https://github.com/Dozuki/CloudPrem-Infra/issues/428)) ([b6ccb59](https://github.com/Dozuki/CloudPrem-Infra/commit/b6ccb59e038f20901d8e57124dac5961377d0409))
+* **flux:** relay golden Slack cards ([66357f5](https://github.com/Dozuki/CloudPrem-Infra/commit/66357f5704f227c83547b9461acdb60e93df981f))
+
+
+### Bug Fixes
+
+* **flux:** scope relay Vault access ([506c6e1](https://github.com/Dozuki/CloudPrem-Infra/commit/506c6e14a8eaef8d849d72a3a60225b6a7f4640b))
+
 ## [8.9.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.8.0...v8.9.0) (2026-08-02)
 
 
