@@ -242,11 +242,27 @@ locals {
         GF_DATABASE_CA_CERT_PATH = var.enable_dashboards ? "/etc/ssl/certs/ca-certificates.crt" : ""
       }
       envValueFrom = {
+        # dozuki-grafana-db is the release-owned runtime secret the chart renders
+        # when grafanaDbInit.enabled (chart >= 2.6.0); it replaced the TF-managed
+        # grafana-db-credentials secret + grafana-db-create job from bi.tf. The
+        # chart's contract: whoever points Grafana here must set
+        # grafanaDbInit.enabled from the same condition, which the block below
+        # does (enable_dashboards implies it).
         GF_DATABASE_PASSWORD = { secretKeyRef = {
-          name = var.enable_dashboards ? "grafana-db-credentials" : ""
+          name = var.enable_dashboards ? "dozuki-grafana-db" : ""
           key  = var.enable_dashboards ? "password" : ""
         } }
       }
+    }
+
+    # Creates the grafana_primary database before anything starts (pre-install/
+    # pre-upgrade hook in the chart). enabled covers the BI-only case; the chart
+    # also renders the hook whenever dashboards.enabled.
+    grafanaDbInit = {
+      enabled       = var.enable_bi || var.enable_dashboards
+      host          = local.db_master_host
+      adminUsername = local.db_master_username
+      adminPassword = local.db_master_password
     }
 
     googleTranslate = { token = var.google_translate_api_token } # (was set_sensitive)

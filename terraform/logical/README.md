@@ -66,10 +66,8 @@ No modules.
 | [kubernetes_cluster_role_binding_v1.vault_auth_delegator](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_v1.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_v1) | resource |
 | [kubernetes_config_map_v1.flux_values_diff](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1) | resource |
-| [kubernetes_config_map_v1.grafana_create_db_script](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1) | resource |
 | [kubernetes_deployment_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/deployment_v1) | resource |
 | [kubernetes_job_v1.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
-| [kubernetes_job_v1.grafana_db_create](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
 | [kubernetes_labels.ambient_dozuki](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/labels) | resource |
 | [kubernetes_labels.ambient_envoy_gateway](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/labels) | resource |
 | [kubernetes_labels.ambient_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/labels) | resource |
@@ -90,7 +88,6 @@ No modules.
 | [kubernetes_secret_v1.flux_values](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.gateway_tls](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.ghcr_pull](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
-| [kubernetes_secret_v1.grafana_db_credentials](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.redis_auth](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.redis_auth_eg](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.vault_auth_token](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/secret_v1) | resource |
@@ -199,7 +196,6 @@ No modules.
 | <a name="input_memcached_proxy_backend_replicas"></a> [memcached\_proxy\_backend\_replicas](#input\_memcached\_proxy\_backend\_replicas) | Number of memcached cache backends behind the proxy. One by default: a second backend buys capacity, not availability, and CHANGING THIS ON A LIVE ENV IS NOT SAFE - the pool hashes with JumpHash, so the count is part of every key's identity and a change moves ownership mid-rollout. Resharding requires a deliberate cold-cache procedure; see the chart's values.yaml. | `number` | `1` | no |
 | <a name="input_memcached_proxy_deploy"></a> [memcached\_proxy\_deploy](#input\_memcached\_proxy\_deploy) | Bring up the memcached backends StatefulSet and the proxy tier alongside the existing single memcached, taking no traffic. Phase A. | `bool` | `false` | no |
 | <a name="input_memcached_proxy_enabled"></a> [memcached\_proxy\_enabled](#input\_memcached\_proxy\_enabled) | Flip the dozuki-memcached Service selector to the proxy tier and remove the single memcached Deployment. Requires memcached\_proxy\_deploy and memcached\_ascii\_protocol. Phase C. | `bool` | `false` | no |
-| <a name="input_mysql_client_image"></a> [mysql\_client\_image](#input\_mysql\_client\_image) | Client image for one-shot DB admin jobs (grafana-db-create). Defaults to the internal mysql-client image in the dozukicloud ECR (~15MB MariaDB client, replaces the 1.2GB official mysql server image). GovCloud stacks cannot reach commercial ECR and must override this to a gov-mirrored copy. | `string` | `"069174876992.dkr.ecr.us-east-1.amazonaws.com/mysql-client:1.0.0@sha256:801c36cbb0638fd6fe38f4985a153fb391a3441ee76943859ac2eaf80c46aa0c"` | no |
 | <a name="input_nextjs_extra_env"></a> [nextjs\_extra\_env](#input\_nextjs\_extra\_env) | Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs. | `map(string)` | `{}` | no |
 | <a name="input_nextjs_service_jwt_private_key"></a> [nextjs\_service\_jwt\_private\_key](#input\_nextjs\_service\_jwt\_private\_key) | web-nextjs service JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'nextjs' secret, which chart >= 1.9.0 reads unconditionally. | `string` | `""` | no |
 | <a name="input_nextjs_tag"></a> [nextjs\_tag](#input\_nextjs\_tag) | Docker image tag for the Next.js frontend container. Changes with every deploy. | `string` | n/a | yes |

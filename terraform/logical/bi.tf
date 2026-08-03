@@ -22,8 +22,8 @@ resource "kubernetes_job_v1" "dms_start" {
   depends_on = [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding]
 
   metadata {
-    # Fold physical's replication generation into the name (same #4a pattern as
-    # grafana_db_create below). A static name meant the Completed Job never re-ran, so
+    # Fold physical's replication generation into the name (the #4a pattern the
+    # db-migrations Job uses). A static name meant the Completed Job never re-ran, so
     # any ModifyReplicationConfig - a DCU change, a mappings change, a compute_config
     # change such as a new security group - left the replication stopped by the provider
     # with nothing to start it again, against the 48h deprovision clock. The generation
@@ -205,126 +205,11 @@ resource "kubernetes_job_v1" "dms_start" {
   }
 }
 
-resource "kubernetes_config_map_v1" "grafana_create_db_script" {
-  # Also created when enable_dashboards: the dashboards Grafana points at this grafana_primary
-  # MySQL DB (see kubernetes.tf grafana.env.GF_DATABASE_*) instead of on-PVC SQLite. No-op where
-  # enable_bi is already on (e.g. all 3M envs).
-  count = (var.enable_bi || var.enable_dashboards) ? 1 : 0
-  metadata {
-    name      = "grafana-create-db-script"
-    namespace = kubernetes_namespace_v1.app.metadata[0].name
-  }
-
-  data = {
-    "grafana-db.sql" = file("static/grafana-db.sql")
-  }
-}
-
-resource "kubernetes_secret_v1" "grafana_db_credentials" {
-  count = (var.enable_bi || var.enable_dashboards) ? 1 : 0
-
-  metadata {
-    name      = "grafana-db-credentials"
-    namespace = kubernetes_namespace_v1.app.metadata[0].name
-  }
-  type = "Opaque"
-
-  data = {
-    host     = local.db_master_host
-    username = local.db_master_username
-    password = local.db_master_password
-  }
-}
-
-resource "kubernetes_job_v1" "grafana_db_create" {
-  count = (var.enable_bi || var.enable_dashboards) ? 1 : 0
-
-  metadata {
-    # Fold the primary DB's resourceId into the Job name (short sha256 suffix) so a database
-    # replacement (new db_resource_id, e.g. a snapshot re-restore to a new cluster) yields a new
-    # name and Terraform creates a fresh Job. The old static name meant the already-Completed Job
-    # was never recreated on later applies, so grafana_primary never got created on the replaced
-    # DB and the dashboards Grafana couldn't start. Same #4a fix the migration Job uses. When
-    # db_resource_id is empty (default) the name stays "grafana-db-create" - no diff for stacks not
-    # wiring it yet.
-    name      = var.db_resource_id == "" ? "grafana-db-create" : "grafana-db-create-${substr(sha256(var.db_resource_id), 0, 8)}"
-    namespace = kubernetes_namespace_v1.app.metadata[0].name
-  }
-  spec {
-    template {
-      metadata {}
-      spec {
-        container {
-          name = "grafana-db-create"
-          # Internal MariaDB-family client (infra-tf/mysql-client), not the official
-          # mysql server image. Renovate cannot see into the private ECR, so bumps
-          # are manual: build/push per the infra-tf README, then update the
-          # variable's default digest.
-          image = var.mysql_client_image
-          env {
-            name = "MYSQL_HOST"
-            value_from {
-              secret_key_ref {
-                name = kubernetes_secret_v1.grafana_db_credentials[0].metadata[0].name
-                key  = "host"
-              }
-            }
-          }
-          env {
-            name = "MYSQL_USER"
-            value_from {
-              secret_key_ref {
-                name = kubernetes_secret_v1.grafana_db_credentials[0].metadata[0].name
-                key  = "username"
-              }
-            }
-          }
-          env {
-            name = "MYSQL_PASSWORD"
-            value_from {
-              secret_key_ref {
-                name = kubernetes_secret_v1.grafana_db_credentials[0].metadata[0].name
-                key  = "password"
-              }
-            }
-          }
-          # --skip-ssl-verify-server-cert: the MariaDB client verifies the server
-          # cert by default (the old Oracle client never did); against RDS's CA
-          # that fails outright. The flag restores the exact risk posture this job
-          # always had (opportunistic TLS, no verification).
-          command = [
-            "sh",
-            "-c",
-            "mysql --skip-ssl-verify-server-cert --host=$MYSQL_HOST --user=$MYSQL_USER --password=$MYSQL_PASSWORD < /scripts/grafana-db.sql"
-          ]
-          volume_mount {
-            name       = "scripts"
-            mount_path = "/scripts"
-            read_only  = true
-          }
-        }
-        volume {
-          name = "scripts"
-          config_map {
-            name = kubernetes_config_map_v1.grafana_create_db_script[0].metadata[0].name
-          }
-        }
-        restart_policy = "OnFailure"
-      }
-    }
-    backoff_limit = 50
-  }
-  wait_for_completion = true
-
-  # Without this the provider's default create timeout applies, which a fresh
-  # deploy blows through: the pod has to pull mysql:9.3 from Docker Hub onto a
-  # just-provisioned node and then reach Aurora. Existing stacks never saw it —
-  # the job is only created once and isn't recreated on later applies — so it
-  # only bites brand-new BI-enabled deploys.
-  timeouts {
-    create = "15m"
-  }
-}
+# The grafana_primary DB bootstrap (configmap + credentials secret + one-shot job)
+# moved into the dozuki chart as the grafana-db-init pre-install/pre-upgrade hook
+# pair (chart >= 2.6.0); CPI only passes admin credentials via the grafanaDbInit
+# chart values (flux.tf). The hook re-runs on every upgrade, which also retires
+# the db_resource_id name-hashing this file needed to heal DB replacements.
 
 resource "random_password" "grafana_admin" {
   count = var.enable_bi ? 1 : 0

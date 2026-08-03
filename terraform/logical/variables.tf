@@ -343,12 +343,6 @@ variable "db_resource_id" {
   default     = ""
 }
 
-variable "mysql_client_image" {
-  description = "Client image for one-shot DB admin jobs (grafana-db-create). Defaults to the internal mysql-client image in the dozukicloud ECR (~15MB MariaDB client, replaces the 1.2GB official mysql server image). GovCloud stacks cannot reach commercial ECR and must override this to a gov-mirrored copy."
-  type        = string
-  default     = "069174876992.dkr.ecr.us-east-1.amazonaws.com/mysql-client:1.0.0@sha256:801c36cbb0638fd6fe38f4985a153fb391a3441ee76943859ac2eaf80c46aa0c"
-}
-
 # --- END Physical Module Passthrough Configuration (do not set or modify) --- #
 variable "cloud" {
   description = "Cloud the physical layer runs on."

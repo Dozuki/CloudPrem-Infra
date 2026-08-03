@@ -18,14 +18,16 @@ defaults:
 version_defaults:
   image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.11"   # what mpc-dev-min-logical runs; .8 was three builds stale
   nextjs_tag: "2.23.0"
-  chart_version: "2.2.2"  # Track the current chart so a run validates the pairing a real deploy
-                           # would get. The floor is 1.18.0: v7.17.0 moved the NLB
-                           # TargetGroupBindings (#278) and the frontegg DB-create + ztunnel
-                           # PodMonitor (#277) out of TF into the chart, and older charts silently
-                           # drop all three. Those templates are gated on values only CPI >= 7.17.0
-                           # passes, so a newer chart stays safe on pre-7.17 baseline refs.
-                           # Bump this when the chart releases, or the harness quietly tests a
-                           # pairing nobody actually runs.
+  chart_version: "2.6.0"  # Track the current chart so a run validates the pairing a real deploy
+                           # would get. The floor moved to 2.6.0 for CPI >= 8.12: the grafana_primary
+                           # DB bootstrap left bi.tf for the chart's grafana-db-init hook, and the
+                           # dashboards Grafana's password secret is now chart-rendered
+                           # (dozuki-grafana-db); an older chart on a newer CPI leaves both missing.
+                           # (Earlier floor for the same reason: 1.18.0 / v7.17.0 - NLB TGBs #278,
+                           # frontegg DB-create + ztunnel PodMonitor #277.) Hook templates are gated
+                           # on values only newer CPI passes, so this chart stays safe on older
+                           # baseline refs. Bump this when the chart releases, or the harness
+                           # quietly tests a pairing nobody actually runs.
   image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
 
 # Per-ref OVERRIDES — only keys that DIFFER from version_defaults need to be here.
