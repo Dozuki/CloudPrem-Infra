@@ -2,6 +2,23 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.12.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.11.1...v8.12.0) (2026-08-03)
+
+
+### Features
+
+* **mimir:** per-env consumer path for central metrics ([#438](https://github.com/Dozuki/CloudPrem-Infra/issues/438)) ([8cd9190](https://github.com/Dozuki/CloudPrem-Infra/commit/8cd91909340dcb6eca55f76c2fc37a608a28848e))
+* **physical:** performance insights on the bi writer, plus the cpu-alarm reading guide ([4a1f776](https://github.com/Dozuki/CloudPrem-Infra/commit/4a1f7764972d6e26543dd124c2cb6670deddeb36))
+
+
+### Bug Fixes
+
+* **bi:** grafana_primary bootstrap moves to the chart's grafana-db-init hooks (chart &gt;= 2.6.0) ([5839f3c](https://github.com/Dozuki/CloudPrem-Infra/commit/5839f3c112ff47e6326fb16d69788a145b1e0133))
+* **bi:** grafana-db-create uses the internal mysql-client image instead of the 1.2GB mysql server image ([d0526c4](https://github.com/Dozuki/CloudPrem-Infra/commit/d0526c4ce7c8fa97182176a12355a84e2c18d5e2))
+* **deps:** Update Helm release external-dns to v1.21.1 ([#433](https://github.com/Dozuki/CloudPrem-Infra/issues/433)) ([355dede](https://github.com/Dozuki/CloudPrem-Infra/commit/355dede7e21725bcae86aa9378dca3da580bb78a))
+* **deps:** Update mysql Docker tag to v9.6 ([#436](https://github.com/Dozuki/CloudPrem-Infra/issues/436)) ([2c229b8](https://github.com/Dozuki/CloudPrem-Infra/commit/2c229b88bb666468fb9e5740bca4d0887c918255))
+* **logical:** pin metrics-server and prometheus-adapter to the on-demand pool ([b656841](https://github.com/Dozuki/CloudPrem-Infra/commit/b65684122bf93b180faff9927d8da3bbf4ec1181))
+
 ## [8.11.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.11.0...v8.11.1) (2026-08-03)
 
 
