@@ -276,7 +276,7 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	// after the generic cluster-health gate so the app is already up and the only thing
 	// still settling is the feature tier itself.
 	if cfg.HarnessFlag("enable_bi") {
-		step("verifying BI tier in-cluster (grafana + grafana-db-create)")
+		step("verifying BI tier in-cluster (grafana + db bootstrap)")
 		if berr := validation.AssertBIHealthy(kc, rm.Namespace, 15*time.Minute); berr != nil {
 			return fmt.Errorf("bi validation: %w", berr)
 		}

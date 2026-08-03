@@ -188,8 +188,6 @@ spec:
             export VAULT_ADDR='{{workflow.parameters.vault-addr}}'
             vault login -method=aws role=deployer region=us-east-1 >/dev/null || { echo "vault login failed"; exit 0; }
             GH_TOKEN="$(vault kv get -field=github_token secret/dozuki/global/harness-notify 2>/dev/null)"
-            # Bot token + channel, not the incoming webhook: webhook posts have a
-            # synthetic author no token can delete/edit, and can't thread.
             SLACK_TOKEN="$(vault kv get -field=botToken secret/dozuki/global/slack 2>/dev/null)"
             # Channel comes from harness-config (deploy-pipeline channel); the shared
             # Vault channelId is only the fallback so a missing configmap key does not
@@ -200,8 +198,25 @@ spec:
             STATUS='{{workflow.status}}'
             [ "$STATUS" = Succeeded ] && GH_STATE=success || GH_STATE=failure
             [ "$STATUS" = Succeeded ] && EMOJI=':white_check_mark:' || EMOJI=':x:'
+            DUR='{{workflow.duration}}'; DUR="${DUR%%.*}"
+            case "$DUR" in ''|*[!0-9]*) DUR=0;; esac
+            DUR_H="$((DUR/60))m$(printf '%02d' $((DUR%60)))s"
 
             DESC="harness {{workflow.name}}: ${STATUS} (configs {{workflow.parameters.configs}}, to-ref {{workflow.parameters.to-ref}})"
+
+            # Child detail, gathered once and shared by the PR comment and the Slack
+            # post. For each child: config, phase, and its deepest failure message,
+            # which is where the actually useful line lives (the child's own message
+            # is just "child ... failed").
+            CHILD_JSON=$(kubectl -n argo get workflows -l 'harness/parent={{workflow.name}}' -o json 2>/dev/null               | jq '[.items[] | {
+                  name: .metadata.name,
+                  config: (.metadata.labels["harness/config"] // "-"),
+                  phase: (.status.phase // "-"),
+                  msg: (.status.message // ""),
+                  detail: ([.status.nodes // {} | .[] | select(.phase == "Failed" or .phase == "Error")
+                            | select(.type == "Pod") | "\(.displayName): \(.message // "")"] | join("; "))
+                }]' 2>/dev/null) || CHILD_JSON='[]'
+            [ -z "$CHILD_JSON" ] && CHILD_JSON='[]'
 
             if [ -n '{{workflow.parameters.pr-sha}}' ] && [ -n "$GH_TOKEN" ]; then
               curl -sf -X POST \
@@ -220,13 +235,10 @@ spec:
                 "https://api.github.com/repos/{{workflow.parameters.pr-repo}}/commits/{{workflow.parameters.pr-sha}}/pulls" \
                 | jq -r '.[0].number // empty') || PR_NUM=""
               if [ -n "$PR_NUM" ]; then
-                CHILDREN=$(kubectl -n argo get workflows -l 'harness/parent={{workflow.name}}' -o json 2>/dev/null \
-                  | jq -r '.items[] | "| `\(.metadata.name)` | \(.metadata.labels["harness/config"] // "-") | \(.status.phase // "-") | \(.status.message // "")"')
+                CHILDREN=$(printf '%s' "$CHILD_JSON" | jq -r '.[] | "| `\(.name)` | \(.config) | \(.phase) | \(if .detail != "" then .detail else .msg end) |"')
                 [ -z "$CHILDREN" ] && CHILDREN='| _no child workflows_ |  |  |  |'
-                DUR='{{workflow.duration}}'; DUR="${DUR%%.*}"
-                case "$DUR" in ''|*[!0-9]*) DUR=0;; esac
-                BODY=$(printf '### Upgrade harness: %s %s\n\nWorkflow `%s` finished in %dm%02ds.\n\n- configs `%s`, scenario `%s`\n- from `%s` to `%s`\n\n| child workflow | config | phase | message |\n|---|---|---|---|\n%s\n' \
-                  "$EMOJI" "$STATUS" '{{workflow.name}}' "$((DUR/60))" "$((DUR%60))" \
+                BODY=$(printf '### Upgrade harness: %s %s\n\nWorkflow `%s` finished in %s.\n\n- configs `%s`, scenario `%s`\n- from `%s` to `%s`\n\n| child workflow | config | phase | detail |\n|---|---|---|---|\n%s\n' \
+                  "$EMOJI" "$STATUS" '{{workflow.name}}' "$DUR_H" \
                   '{{workflow.parameters.configs}}' '{{workflow.parameters.scenario}}' \
                   '{{workflow.parameters.from-ref}}' '{{workflow.parameters.to-ref}}' "$CHILDREN")
                 jq -n --arg body "$BODY" '{body: $body}' \
@@ -241,9 +253,50 @@ spec:
             fi
 
             if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+              # Block Kit, same shape as the other MPC alert cards: headline, a
+              # fields row for the run coordinates, and one line per config with
+              # its phase and (on failure) the deepest failing step's message.
+              PR_LINE=""
+              if [ -n '{{workflow.parameters.pr-sha}}' ] && [ -n "${PR_NUM:-}" ]; then
+                PR_LINE="<https://github.com/{{workflow.parameters.pr-repo}}/pull/${PR_NUM}|PR #${PR_NUM}> \xc2\xb7 "
+              fi
+              PAYLOAD=$(printf '%s' "$CHILD_JSON" | jq \
+                --arg channel "$SLACK_CHANNEL" \
+                --arg emoji "$EMOJI" \
+                --arg status "$STATUS" \
+                --arg name '{{workflow.name}}' \
+                --arg text "$DESC" \
+                --arg configs '{{workflow.parameters.configs}}' \
+                --arg scenario '{{workflow.parameters.scenario}}' \
+                --arg fromref '{{workflow.parameters.from-ref}}' \
+                --arg toref '{{workflow.parameters.to-ref}}' \
+                --arg dur "$DUR_H" \
+                --arg prline "$(printf "$PR_LINE")" \
+                '{
+                  channel: $channel,
+                  text: ($emoji + " " + $text),
+                  blocks: ([
+                    {type: "section", text: {type: "mrkdwn",
+                      text: ($emoji + " *Upgrade harness " + $status + "* \u2014 `" + $name + "`")}},
+                    {type: "section", fields: [
+                      {type: "mrkdwn", text: ("*Scenario:*\n" + $scenario + " " + $configs)},
+                      {type: "mrkdwn", text: ("*Refs:*\n`" + $fromref + "` \u2192 `" + ($toref | .[0:12]) + "`")}
+                    ]}
+                  ] + (if length > 0 then [
+                    {type: "section", text: {type: "mrkdwn",
+                      text: (map("\u2022 `" + .config + "` \u2014 " + .phase
+                                 + (if .phase != "Succeeded" and ((.detail // "") != "" or (.msg // "") != "")
+                                    then ": _" + ((if .detail != "" then .detail else .msg end) | .[0:200]) + "_"
+                                    else "" end)) | join("\n"))}}
+                  ] else [] end) + [
+                    {type: "context", elements: [
+                      {type: "mrkdwn", text: ($prline + "took " + $dur)}
+                    ]}
+                  ])
+                }')
               curl -sf -X POST -H 'Content-type: application/json; charset=utf-8' \
                 -H "Authorization: Bearer ${SLACK_TOKEN}" \
-                --data "{\"channel\":\"${SLACK_CHANNEL}\",\"text\":\"${EMOJI} ${DESC}\"}" \
+                --data "$PAYLOAD" \
                 https://slack.com/api/chat.postMessage >/dev/null || echo "slack post failed"
             fi
             exit 0

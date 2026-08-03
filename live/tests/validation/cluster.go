@@ -144,3 +144,14 @@ func JobSucceeded(kubeconfig, namespace, name string) error {
 	}
 	return nil
 }
+
+// SecretExists checks that a named Secret exists. Used as a rendered-machinery
+// probe where the resource that did the work (a helm hook Job) deletes itself.
+func SecretExists(kubeconfig, namespace, name string) error {
+	cs, err := clientFor(kubeconfig)
+	if err != nil {
+		return err
+	}
+	_, err = cs.CoreV1().Secrets(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	return err
+}

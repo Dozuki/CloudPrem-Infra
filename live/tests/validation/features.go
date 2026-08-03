@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -22,8 +23,7 @@ import (
 // question is "did the feature flag actually produce a working tier".
 
 // BIWorkloads are the BI/dashboards deployments (enable_bi). The grafana database
-// itself is created by the TF-managed grafana-db-create Job, asserted separately via
-// JobSucceeded.
+// bootstrap is asserted separately in AssertBIHealthy, version-aware.
 func BIWorkloads() []string { return []string{"dozuki-grafana"} }
 
 // AssertWorkloadsReady requires every named workload to EXIST and have all replicas
@@ -139,15 +139,28 @@ func hasPrefixAny(name string, prefixes []string) bool {
 	return false
 }
 
-// AssertBIHealthy verifies the BI tier: grafana is Ready and the TF-managed
-// grafana-db-create Job completed (proving the app database accepted the CREATE
-// DATABASE, i.e. BI's Aurora credentials and connectivity actually work).
+// AssertBIHealthy verifies the BI tier: grafana is Ready and the grafana_primary
+// database bootstrap ran. Two generations of bootstrap exist:
+//   - CPI < 8.12: a TF-managed grafana-db-create Job; assert it completed
+//     (proving the app database accepted the CREATE DATABASE).
+//   - CPI >= 8.12 with chart >= 2.6.0: the chart's grafana-db-init pre-install/
+//     pre-upgrade hook. Its Job deletes itself on success, and its success is
+//     already implied by the HelmRelease reaching Ready (a failed hook fails the
+//     release, which fails the phase long before validation runs). What is left
+//     to assert is that the bootstrap machinery was rendered at all, which the
+//     release-owned dozuki-grafana-db Secret proves; without it a misconfigured
+//     env (grafanaDbInit disabled where BI is on) would pass silently.
 func AssertBIHealthy(kubeconfig, namespace string, timeout time.Duration) error {
 	if err := AssertWorkloadsReady(kubeconfig, namespace, "bi", BIWorkloads(), timeout); err != nil {
 		return err
 	}
 	if err := JobSucceeded(kubeconfig, namespace, "grafana-db-create"); err != nil {
-		return fmt.Errorf("bi: grafana-db-create job: %w", err)
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("bi: grafana-db-create job: %w", err)
+		}
+		if err := SecretExists(kubeconfig, namespace, "dozuki-grafana-db"); err != nil {
+			return fmt.Errorf("bi: neither the legacy grafana-db-create job nor the chart's dozuki-grafana-db secret exists; nothing bootstrapped grafana_primary: %w", err)
+		}
 	}
 	return AssertNoCrashLoops(kubeconfig, namespace, []string{"dozuki-grafana"}, 3)
 }
