@@ -252,51 +252,47 @@ spec:
               fi
             fi
 
-            if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
-              # Block Kit, same shape as the other MPC alert cards: headline, a
-              # fields row for the run coordinates, and one line per config with
-              # its phase and (on failure) the deepest failing step's message.
-              PR_LINE=""
-              if [ -n '{{workflow.parameters.pr-sha}}' ] && [ -n "${PR_NUM:-}" ]; then
-                PR_LINE="<https://github.com/{{workflow.parameters.pr-repo}}/pull/${PR_NUM}|PR #${PR_NUM}> \xc2\xb7 "
-              fi
-              PAYLOAD=$(printf '%s' "$CHILD_JSON" | jq \
-                --arg channel "$SLACK_CHANNEL" \
-                --arg emoji "$EMOJI" \
-                --arg status "$STATUS" \
-                --arg name '{{workflow.name}}' \
-                --arg text "$DESC" \
-                --arg configs '{{workflow.parameters.configs}}' \
-                --arg scenario '{{workflow.parameters.scenario}}' \
-                --arg fromref '{{workflow.parameters.from-ref}}' \
-                --arg toref '{{workflow.parameters.to-ref}}' \
-                --arg dur "$DUR_H" \
-                --arg prline "$(printf "$PR_LINE")" \
-                '{
-                  channel: $channel,
-                  text: ($emoji + " " + $text),
-                  blocks: ([
-                    {type: "section", text: {type: "mrkdwn",
-                      text: ($emoji + " *Upgrade harness " + $status + "* \u2014 `" + $name + "`")}},
-                    {type: "section", fields: [
-                      {type: "mrkdwn", text: ("*Scenario:*\n" + $scenario + " " + $configs)},
-                      {type: "mrkdwn", text: ("*Refs:*\n`" + $fromref + "` \u2192 `" + ($toref | .[0:12]) + "`")}
-                    ]}
-                  ] + (if length > 0 then [
-                    {type: "section", text: {type: "mrkdwn",
-                      text: (map("\u2022 `" + .config + "` \u2014 " + .phase
-                                 + (if .phase != "Succeeded" and ((.detail // "") != "" or (.msg // "") != "")
-                                    then ": _" + ((if .detail != "" then .detail else .msg end) | .[0:200]) + "_"
-                                    else "" end)) | join("\n"))}}
-                  ] else [] end) + [
-                    {type: "context", elements: [
-                      {type: "mrkdwn", text: ($prline + "took " + $dur)}
-                    ]}
-                  ])
-                }')
+            # Verdict card goes through the fleet relay (the same renderer that draws
+            # the Flux and Alertmanager cards), keeping one alert design. The direct
+            # bot-token post survives only as the fallback so a relay outage still
+            # produces a (plain) notification.
+            RELAY_URL="$(vault kv get -field=url secret/dozuki/global/alertmanager-slack-relay-endpoint 2>/dev/null)"
+            RELAY_TOKEN="$(vault kv get -field=token secret/dozuki/global/alertmanager-slack-relay 2>/dev/null)"
+            TRIGGER=$(printf '%s' '{{workflow.name}}' | sed -n 's/^harness-\(pr[0-9]*\)-.*/\1/p')
+            if [ -z "$TRIGGER" ]; then
+              case '{{workflow.name}}' in *nightly*) TRIGGER=nightly;; *) TRIGGER=manual;; esac
+            fi
+            PR_URL=""
+            [ -n "${PR_NUM:-}" ] && PR_URL="https://github.com/{{workflow.parameters.pr-repo}}/pull/${PR_NUM}"
+            RELAY_PAYLOAD=$(printf '%s' "$CHILD_JSON" | jq \
+              --arg name '{{workflow.name}}' \
+              --arg status "$STATUS" \
+              --arg scenario '{{workflow.parameters.scenario}}' \
+              --arg configs '{{workflow.parameters.configs}}' \
+              --arg fromref '{{workflow.parameters.from-ref}}' \
+              --arg toref '{{workflow.parameters.to-ref}}' \
+              --arg trigger "$TRIGGER" \
+              --arg prurl "$PR_URL" \
+              --argjson dur "$DUR" \
+              '{
+                source: "harness", name: $name, status: $status,
+                scenario: $scenario, configs: $configs,
+                from_ref: $fromref, to_ref: ($toref | .[0:64]),
+                duration_seconds: $dur, trigger: $trigger, pr_url: $prurl,
+                children: (map({config: .config, phase: .phase,
+                                detail: (if .detail != "" then .detail else .msg end | .[0:400])}))
+              }')
+            if [ -n "$RELAY_URL" ] && [ -n "$RELAY_TOKEN" ] && \
+               printf '%s' "$RELAY_PAYLOAD" | curl -sf -X POST \
+                 -H "Authorization: Bearer ${RELAY_TOKEN}" \
+                 -H 'Content-type: application/json' \
+                 --data @- "$RELAY_URL" >/dev/null; then
+              echo "verdict posted via relay"
+            elif [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+              echo "relay unavailable; falling back to a plain post"
               curl -sf -X POST -H 'Content-type: application/json; charset=utf-8' \
                 -H "Authorization: Bearer ${SLACK_TOKEN}" \
-                --data "$PAYLOAD" \
+                --data "{\"channel\":\"${SLACK_CHANNEL}\",\"text\":\"${EMOJI} ${DESC}\"}" \
                 https://slack.com/api/chat.postMessage >/dev/null || echo "slack post failed"
             fi
             exit 0
