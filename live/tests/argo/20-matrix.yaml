@@ -87,6 +87,11 @@ spec:
           configMapKeyRef:
             name: harness-config
             key: vault_addr
+      - name: slack-channel
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: slack_channel
       - name: image
         valueFrom:
           configMapKeyRef:
@@ -186,7 +191,11 @@ spec:
             # Bot token + channel, not the incoming webhook: webhook posts have a
             # synthetic author no token can delete/edit, and can't thread.
             SLACK_TOKEN="$(vault kv get -field=botToken secret/dozuki/global/slack 2>/dev/null)"
-            SLACK_CHANNEL="$(vault kv get -field=channelId secret/dozuki/global/slack 2>/dev/null)"
+            # Channel comes from harness-config (deploy-pipeline channel); the shared
+            # Vault channelId is only the fallback so a missing configmap key does not
+            # silence the notification entirely.
+            SLACK_CHANNEL='{{workflow.parameters.slack-channel}}'
+            [ -z "$SLACK_CHANNEL" ] && SLACK_CHANNEL="$(vault kv get -field=channelId secret/dozuki/global/slack 2>/dev/null)"
 
             STATUS='{{workflow.status}}'
             [ "$STATUS" = Succeeded ] && GH_STATE=success || GH_STATE=failure

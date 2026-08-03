@@ -34,6 +34,10 @@ data:
   # PrivateLink endpoint in the Argo VPC: no port-forward, unlike a laptop run.
   vault_addr: 'http://vault.internal.dozuki.com:8200'
   state_bucket: 'dozuki-terraform-state-us-east-1-076248559428'
+  # Where harness verdicts post. Deploy-pipeline signal, so #mpc-deploys, NOT the
+  # shared Vault channelId (that one points at #spacelift-alerts and other
+  # consumers read it). Channel IDs are not secrets; config lives here.
+  slack_channel: 'C0BMGD1KE8Z'
 ---
 # DDVtest has a hard ceiling of 10 VPCs per region and each test stack is about one VPC
 # (recovery is two). A nightly matrix plus a couple of PR runs will exhaust it mid-apply,
