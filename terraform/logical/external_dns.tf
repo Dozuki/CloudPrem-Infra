@@ -16,7 +16,7 @@ resource "helm_release" "external_dns" {
   namespace  = kubernetes_namespace_v1.app.metadata[0].name
   repository = "https://kubernetes-sigs.github.io/external-dns/"
   chart      = "external-dns"
-  version    = "1.15.2"
+  version    = "1.21.1"
   wait       = true
   timeout    = 300
 
