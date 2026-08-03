@@ -2,6 +2,15 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.11.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.11.0...v8.11.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **physical:** 30-minute cooldown on the dms restart lambda, a fast-failing replication must not be reload-targeted in a loop ([0c856ac](https://github.com/Dozuki/CloudPrem-Infra/commit/0c856ace422fdb0c679ec49087e6bad9dfbd2ffa))
+* **physical:** alarm on dms cpu saturation, capacity-utilization is blind to cpu-bound loads ([28f9aa5](https://github.com/Dozuki/CloudPrem-Infra/commit/28f9aa5bce657519f874994aa6ee9b901bfbaf60))
+* **physical:** treat the BI database as derived, not precious ([#434](https://github.com/Dozuki/CloudPrem-Infra/issues/434)) ([f4af35b](https://github.com/Dozuki/CloudPrem-Infra/commit/f4af35bf0366a04aaa72bfe8ee3993382b1e7215))
+
 ## [8.11.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.10.0...v8.11.0) (2026-08-03)
 
 
