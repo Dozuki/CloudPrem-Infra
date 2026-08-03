@@ -319,6 +319,21 @@ locals {
         nodeSelector = local.stateful_node_selector
         tolerations  = local.stateful_tolerations
       }
+      # Not EBS-backed, but the HPA control plane: metrics-server serves metrics.k8s.io
+      # and prometheus-adapter serves external.metrics.k8s.io, and both are single
+      # replica. On the spot pool their consolidation churn left every HPA computing on
+      # stale/absent metrics (m3-usac: FailedGetExternalMetric x45 over 5d, 30-min
+      # metric gaps). A PDB is the wrong tool at 1 replica (it only delays the eviction
+      # until the force-delete); rare-disruption placement is the protection, same as
+      # the volumes above. Deep-merged below - base sets args under metrics-server.
+      "metrics-server" = {
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
+      }
+      "prometheus-adapter" = {
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
+      }
     } : k => v if var.cloud == "aws"
   }
 
@@ -327,8 +342,9 @@ locals {
     { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" },
     { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
     { objectStorage = merge(local.app_base_values.objectStorage, try(local.app_azure_values.objectStorage, {})) },
-    { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" },
+    { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" && k != "metrics-server" },
     { grafana = merge(local.app_base_values.grafana, try(local.app_stateful_scheduling.grafana, {})) },
+    { "metrics-server" = merge(local.app_base_values["metrics-server"], try(local.app_stateful_scheduling["metrics-server"], {})) },
   )
 }
 
