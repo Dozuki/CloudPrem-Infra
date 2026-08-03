@@ -47,6 +47,15 @@ spec:
       # backstop.
       - name: keep-on-failure
         value: 'false'
+      # Set on PR-triggered runs (empty on cron/manual). The staleness gate uses them:
+      # every push to master rebuilds the release PR and submits a fresh harness run,
+      # so a run that queued behind the semaphore is often testing a superseded SHA by
+      # the time it is admitted. Skipping it then saves a 1-2h stack for nothing and
+      # the red-herring failure Slack posts when orphaned runs collide.
+      - name: pr-repo
+        value: ''
+      - name: pr-sha
+        value: ''
       - name: image
         valueFrom:
           configMapKeyRef:
@@ -129,7 +138,15 @@ spec:
   templates:
     - name: scenario
       steps:
+        # Runs AFTER the semaphore admits this child, which is the moment that matters:
+        # a queued run is current when submitted and stale when admitted. Asks whether
+        # to-ref is still the head of an open PR (unauthenticated; the repo is public).
+        # Fails OPEN on any API problem - wasting a run is recoverable, false-skipping
+        # a real one is not. Prints exactly "run" or "skip".
+        - - name: gate
+            template: staleness-gate
         - - name: provision
+            when: '{{steps.gate.outputs.result}} == run'
             templateRef:
               name: harness-phase
               template: run
@@ -153,7 +170,7 @@ spec:
 
         # Skipped for the fresh scenario, which has no baseline to upgrade from.
         - - name: upgrade
-            when: '{{workflow.parameters.scenario}} == upgrade'
+            when: '{{workflow.parameters.scenario}} == upgrade && {{steps.gate.outputs.result}} == run'
             templateRef:
               name: harness-phase
               template: run
@@ -171,6 +188,7 @@ spec:
                   value: '5400'
 
         - - name: validate
+            when: '{{steps.gate.outputs.result}} == run'
             templateRef:
               name: harness-phase
               template: run
@@ -186,6 +204,41 @@ spec:
                   value: '{{workflow.parameters.repo-ref}}'
                 - name: deadline
                   value: '2700'
+
+    # The staleness check itself. A script template so stdout is the step result the
+    # `when:` clauses above compare against. GET /commits/{sha}/pulls lists the open
+    # PRs whose head branch contains the SHA; if none of them has it as the CURRENT
+    # head, a newer submission exists for this PR and this run is superseded. A
+    # skipped run Succeeds (all phases skip), so it makes no failure noise; the
+    # superseding run owns the real verdict.
+    - name: staleness-gate
+      activeDeadlineSeconds: 120
+      script:
+        image: '{{workflow.parameters.image}}'
+        command: ['/bin/bash']
+        source: |
+          set -uo pipefail
+          PR_REPO='{{workflow.parameters.pr-repo}}'
+          PR_SHA='{{workflow.parameters.pr-sha}}'
+          if [ -z "$PR_REPO" ] || [ -z "$PR_SHA" ]; then
+            echo "not a PR run; proceeding" >&2; echo run; exit 0
+          fi
+          PULLS=$(curl -sf --max-time 20 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${PR_REPO}/commits/${PR_SHA}/pulls") \
+            || { echo "github api unreachable; failing open" >&2; echo run; exit 0; }
+          HEADS=$(printf '%s' "$PULLS" | jq -r '.[].head.sha' 2>/dev/null) \
+            || { echo "unparseable api response; failing open" >&2; echo run; exit 0; }
+          if [ -z "$HEADS" ]; then
+            echo "sha not on any open PR (closed or merged); failing open" >&2; echo run; exit 0
+          fi
+          if printf '%s\n' "$HEADS" | grep -qx "$PR_SHA"; then
+            echo "still the PR head" >&2; echo run
+          else
+            echo "superseded: PR head moved to $(printf '%s' "$HEADS" | head -1)" >&2; echo skip
+          fi
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits: { memory: 128Mi }
 
     - name: teardown
       steps:

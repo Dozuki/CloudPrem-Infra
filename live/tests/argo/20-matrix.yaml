@@ -156,6 +156,12 @@ spec:
                   value: '{{workflow.parameters.repo-ref}}'
                 - name: keep-on-failure
                   value: '{{workflow.parameters.keep-on-failure}}'
+                # For the child's staleness gate: a queued child checks at admission
+                # whether pr-sha is still the PR head and skips itself if superseded.
+                - name: pr-repo
+                  value: '{{workflow.parameters.pr-repo}}'
+                - name: pr-sha
+                  value: '{{workflow.parameters.pr-sha}}'
 
     - name: notify
       steps:
