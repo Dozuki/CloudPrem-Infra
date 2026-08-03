@@ -511,11 +511,13 @@ module "bi_aurora" {
     ]
   }
 
-  apply_immediately   = local.db_apply_immediately
-  deletion_protection = var.protect_resources
-  skip_final_snapshot = !var.protect_resources
-  # Same requirement as the primary cluster in aurora.tf; see the comment there
-  # for why its absence makes a cluster undestroyable through terraform.
+  apply_immediately = local.db_apply_immediately
+  # BI is a DMS target, so it defaults to derived treatment: no deletion protection, no final
+  # snapshot. See var.bi_treat_as_derived for the two ways the precious treatment bit.
+  deletion_protection = var.bi_treat_as_derived ? false : var.protect_resources
+  skip_final_snapshot = var.bi_treat_as_derived ? true : !var.protect_resources
+  # Still set, so flipping bi_treat_as_derived = false actually works. Without a name the
+  # provider refuses the delete when a final snapshot is required; see aurora.tf.
   final_snapshot_identifier    = "${local.identifier}-bi-final-${random_id.aurora_final_snapshot[0].hex}"
   copy_tags_to_snapshot        = true
   backup_retention_period      = var.rds_backup_retention_period
@@ -572,9 +574,11 @@ module "dms_replica_database" {
 
   vpc_security_group_ids = [module.bi_database_sg.security_group_id]
 
-  # Snapshot configuration
-  deletion_protection              = var.protect_resources
-  skip_final_snapshot              = !var.protect_resources
+  # Snapshot configuration. Derived treatment by default, matching
+  # module.rds_replica_database above, which has always skipped both. See
+  # var.bi_treat_as_derived.
+  deletion_protection              = var.bi_treat_as_derived ? false : var.protect_resources
+  skip_final_snapshot              = var.bi_treat_as_derived ? true : !var.protect_resources
   final_snapshot_identifier_prefix = "${local.identifier}-dms-replica" #Snapshot name upon DB deletion
   copy_tags_to_snapshot            = true
 
