@@ -9,9 +9,13 @@ name: release-please
 # types: a `feat:` -> minor bump, a `fix:` -> patch, and a `feat!:` / `fix!:` or
 # a `BREAKING CHANGE:` footer -> major bump.
 #
-# Uses the default GITHUB_TOKEN: release-please creates the release/tag directly
-# via the API, and nothing else fires on the v* tag (release-azure.yml is
-# azure-v* only), so no machine-user PAT is needed.
+# Token: must be a PAT (RELEASE_PAT), not the default GITHUB_TOKEN. PRs created
+# with GITHUB_TOKEN never trigger workflow runs (recursion guard), which leaves
+# the release PR's required checks (Terraform matrix + harness/upgrade-tests)
+# stuck at "Expected" forever and the release unmergeable. Same setup as the
+# helm repo. Falls back to GITHUB_TOKEN only so the job does not hard-fail if
+# the secret is missing; in that state release PRs need their workflow runs
+# approved by hand.
 
 on:
   push:
@@ -38,6 +42,6 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PAT != '' && secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # config-file + manifest-file use the default names
           # (release-please-config.json / .release-please-manifest.json).
