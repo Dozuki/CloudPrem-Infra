@@ -599,6 +599,17 @@ resource "aws_cloudwatch_metric_alarm" "bi_dms_capacity_saturated" {
 # treat_missing_data ignore for the same reason as the capacity alarm: the CDC latency
 # pair owns "stopped reporting", and notBreaching would post a fake OK for a dead
 # replication that had been in ALARM.
+#
+# This alarm WILL fire during a healthy mid-load scale-up, and that is a considered
+# trade, not an oversight (usac 2026-08-03 17:29Z, 25 minutes after the alarm was
+# created): the autoscaler itself needs ~15 min of pegged CPU before it reacts, plus
+# 5-10 to attach capacity, so a window quiet through scale-ups needs ~30 min - and the
+# one observed fatal ran peg-to-death in 25. There is no separating window. Read it as:
+# fires then self-resolves = load is hot and the autoscaler engaged; fires and stays
+# red = at the cap or the autoscaler is stuck, act. Steady-state CDC runs under 5% CPU
+# 92-100% of hours (see bi_dms_min_dcu), so this only pages during full loads or real
+# trouble. If self-resolving pages prove too noisy, go to 4/4 periods (20 min), never
+# 30 - that reopens the blind window this alarm exists to close.
 resource "aws_cloudwatch_metric_alarm" "bi_dms_cpu_saturated" {
   count               = local.dms_enabled ? 1 : 0
   alarm_name          = "${local.identifier}-dms-cpu-saturated"
