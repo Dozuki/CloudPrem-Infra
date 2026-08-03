@@ -36,12 +36,44 @@ Ensure the AWS Lambda function has the necessary IAM permissions to restart DMS 
 
 import json
 import os
+import time
 import boto3
+
+# A replication that fails again within this window of an auto-restart is fast-failing
+# for a persistent reason (usac 2026-08-03: CPU-bound at the DCU cap - every restart
+# re-ran the full load into the same wall, and each reload-target is a fresh full read
+# of the production source). First failure still restarts immediately; repeats wait for
+# a human. 30 minutes outlives one provision cycle (~15 min) plus enough runtime to
+# prove the restart took.
+RESTART_COOLDOWN_SECONDS = 1800
 
 
 def get_task_arn(message_json):
     # Extract the replication (or task) ARN from the message
     return message_json['resources'][0] if message_json['resources'] else None
+
+
+def recently_restarted(arn):
+    # Stateless cooldown: the marker line restart_replication() prints IS the state,
+    # queried back out of this function's own log group. No table, no tags (tags on
+    # the replication config are terraform-managed and a foreign tag would be mowed
+    # on the next apply). Fails open: if the log query itself errors, restart anyway -
+    # a missed cooldown is a repeat of today's noise, a false positive is a BI
+    # replication sitting failed toward the 48h deprovision deadline.
+    log_group = os.environ.get("AWS_LAMBDA_LOG_GROUP_NAME")
+    if not log_group:
+        return False
+    logs_client = boto3.client("logs", region_name=os.environ["AWS_REGION"])
+    try:
+        resp = logs_client.filter_log_events(
+            logGroupName=log_group,
+            startTime=int((time.time() - RESTART_COOLDOWN_SECONDS) * 1000),
+            filterPattern='"AUTO-RESTART"',
+        )
+        return any(arn in e.get("message", "") for e in resp.get("events", []))
+    except Exception as e:
+        print(f"Cooldown check failed ({e}) - failing open and restarting.")
+        return False
 
 
 def restart_replication(arn):
@@ -50,6 +82,16 @@ def restart_replication(arn):
     if not arn:
         print("No ARN provided.")
         return
+
+    if recently_restarted(arn):
+        print(f"AUTO-RESTART suppressed for {arn}: already restarted within "
+              f"{RESTART_COOLDOWN_SECONDS}s and failed again - fast-fail loop, a restart "
+              f"will not fix it. The CRITICAL state-change alert has already paged.")
+        return
+
+    # The marker recently_restarted() searches for. Printed before the start call so a
+    # start that itself errors still counts against the cooldown.
+    print(f"AUTO-RESTART {arn}")
 
     # ARN shape is the discriminator: serverless replications are
     # arn:aws:dms:<region>:<acct>:replication-config:<id>, tasks are :task:<id>.
