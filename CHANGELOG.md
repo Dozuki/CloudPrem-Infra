@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.11.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.10.0...v8.11.0) (2026-08-03)
+
+
+### Features
+
+* **physical:** shrink and harden the aurora migration cutover window ([#426](https://github.com/Dozuki/CloudPrem-Infra/issues/426)) ([979626f](https://github.com/Dozuki/CloudPrem-Infra/commit/979626f673294d23623b38d115f2bf965df3286f))
+
+
+### Bug Fixes
+
+* **physical:** set final_snapshot_identifier on both aurora clusters ([#431](https://github.com/Dozuki/CloudPrem-Infra/issues/431)) ([634c537](https://github.com/Dozuki/CloudPrem-Infra/commit/634c5377ce63b4840aab27a1e2401d4b433ce68a))
+
 ## [8.10.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.9.0...v8.10.0) (2026-08-02)
 
 
