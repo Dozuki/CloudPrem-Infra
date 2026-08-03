@@ -608,6 +608,18 @@ variable "cloudwatch_exporter_enabled" {
   default     = true
 }
 
+variable "mimir_remote_write_enabled" {
+  description = "Ship a copy of this cluster's metrics to the central Mimir with Prometheus remote_write. Purely additive: the local Prometheus keeps its full TSDB, its rules and its Alertmanager whether this is on or off, which makes flipping it back off a zero-impact revert. Needs two things first: enable_mimir on the physical layer for the network path, and this env's ingest key seeded at <customer>/<environment>/mimir in Vault. Off by default until an env is deliberately rolled out. Silently a no-op unless this env's chart_version is >= 2.7.0, the release that carries the remote_write support: an older chart ignores the values and reports nothing."
+  type        = bool
+  default     = false
+}
+
+variable "mimir_url" {
+  description = "Remote-write push endpoint. Commercial stacks resolve this name through the private hosted zone the physical layer creates over the PrivateLink endpoint; gov has no PrivateLink path and points at the public ingest name instead, so it overrides this."
+  type        = string
+  default     = "https://mimir-int.dozuki.dev/api/v1/push"
+}
+
 # ---------------------------------------------------------------------------
 # memcached proxy tier (chart >= 2.1.0). All default OFF - the rendered values
 # are unchanged from before these existed until an env opts in.

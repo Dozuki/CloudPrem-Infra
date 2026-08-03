@@ -208,6 +208,31 @@ locals {
       }
     }
 
+    # A second copy of every scraped sample, written to the central Mimir on
+    # the argo-ops cluster. Additive and reversible: nothing in this cluster's
+    # own monitoring depends on it, so setting this false leaves the local
+    # Prometheus, its rules and its Alertmanager exactly as they were.
+    #
+    # Under global, not monitoring, because the push is a field on the Prometheus
+    # the kube-prometheus-stack SUBCHART owns. A subchart only ever sees the
+    # parent's global block, so monitoring.mimir would render as nothing at all.
+    #
+    # No key value crosses Terraform. The chart's ExternalSecret reads the
+    # per-env ingest token from this env's own Vault path
+    # (<customer>/<environment>/mimir, property apiKey), which each env's Vault
+    # policy already scopes to itself. That is also why this is AWS only:
+    # Azure has no Vault to read it from, and no PrivateLink path to push over.
+    #
+    # The network half lives in physical under enable_mimir. Turning this on
+    # without it leaves Prometheus retrying a name that does not resolve, which
+    # the chart's own remote-write alerts catch.
+    global = {
+      mimir = {
+        enabled = var.cloud == "aws" && var.mimir_remote_write_enabled
+        url     = var.mimir_url
+      }
+    }
+
     # metrics-server ships in the chart (default on) as the single source of truth across
     # onprem+cloud; the EKS addon was retired (#297). args=[] drops the chart's onprem-oriented
     # --kubelet-insecure-tls default (cloud kubelets present proper serving certs), keeping the
@@ -270,16 +295,19 @@ locals {
     deployments = { webNextjs = { env = local.app_webnextjs_env } }
   }
 
-  # Final values = base, merged with the azure-only block. Two keys collide between the two and both
-  # need a one-level-deeper merge (a shallow spread would replace base's whole subtree):
+  # Final values = base, merged with the azure-only block. Three keys collide between the two and all
+  # three need a one-level-deeper merge (a shallow spread would replace base's whole subtree):
   #   - gateway: base sets hosts/clientIP/stableProxyService; azure adds service/dnsTarget.
   #   - objectStorage: base sets kmsKey/buckets/endpoint/credentials (the old set list); azure's
   #     seaweedfs_values adds publicBackend. Without the deep merge azure would keep only publicBackend
   #     and drop the buckets/credentials the app needs.
-  # Every other azure key (global, cert_manager, seaweedfs...) has no base collision and shallow-merges
+  #   - global: base sets mimir; azure adds imagePullSecrets/seaweedfs. Shallow, azure would drop
+  #     mimir - harmless today (mimir is aws-only) but it would silently break the moment anything
+  #     else lands under global on both sides.
+  # Every other azure key (cert_manager, seaweedfs...) has no base collision and shallow-merges
   # cleanly. helm_release.app got the same effect from helm's deep merge of its two values files + set
-  # list. Both deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values has
-  # neither key, so try(...,{}) yields {} and the merged result equals base.
+  # list. All three deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values
+  # has none of the keys, so try(...,{}) yields {} and the merged result equals base.
   # AWS-only: pin every EBS-backed subchart workload to the on-demand NodePool.
   #
   # These pods (opensearch, prometheus, alertmanager, dashboards-grafana) each own a
@@ -355,9 +383,10 @@ locals {
 
   app_values = merge(
     local.app_base_values,
-    { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" },
+    { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" && k != "global" },
     { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
     { objectStorage = merge(local.app_base_values.objectStorage, try(local.app_azure_values.objectStorage, {})) },
+    { global = merge(local.app_base_values.global, try(local.app_azure_values.global, {})) },
     { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" && k != "metrics-server" },
     { grafana = merge(local.app_base_values.grafana, try(local.app_stateful_scheduling.grafana, {})) },
     { "metrics-server" = merge(local.app_base_values["metrics-server"], try(local.app_stateful_scheduling["metrics-server"], {})) },

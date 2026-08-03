@@ -136,9 +136,11 @@
 | [aws_lambda_permission.sns_to_slack_permission](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_rds_cluster.dr_aurora_secondary](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster) | resource |
 | [aws_rds_global_cluster.aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_global_cluster) | resource |
+| [aws_route53_record.mimir](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.subsite_subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
+| [aws_route53_zone.mimir_private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_zone) | resource |
 | [aws_route53_zone.vault_private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_zone) | resource |
 | [aws_s3_bucket.dr_guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
@@ -174,6 +176,7 @@
 | [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group.mimir_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group_rule.aurora_migration_dms_to_rds](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
@@ -193,6 +196,7 @@
 | [aws_ssm_parameter.slack_bot_token](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [aws_subnet.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/subnet) | resource |
 | [aws_vpc.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc) | resource |
+| [aws_vpc_endpoint.mimir](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_vpc_endpoint.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [null_resource.create_dms_access_for_tasks_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
@@ -237,10 +241,12 @@
 | [aws_region.dr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_route53_zone.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route53_zone) | data source |
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/s3_bucket) | data source |
+| [aws_subnets.mimir_compatible](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_subnets.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_subnets.vault_compatible](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_vpc.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
+| [aws_vpc_endpoint_service.mimir](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc_endpoint_service) | data source |
 | [aws_vpc_endpoint_service.vault](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc_endpoint_service) | data source |
 
 ## Inputs
@@ -284,10 +290,13 @@
 | <a name="input_eks_kms_key_id"></a> [eks\_kms\_key\_id](#input\_eks\_kms\_key\_id) | AWS KMS key identifier for EKS encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN | `string` | `""` | no |
 | <a name="input_enable_bi"></a> [enable\_bi](#input\_enable\_bi) | This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users). | `bool` | `false` | no |
 | <a name="input_enable_dr"></a> [enable\_dr](#input\_enable\_dr) | Enable the always-on cross-region DR data-protection layer (RDS automated-backup replication + S3 CRR). On by default; ephemeral/dev stacks may set false. | `bool` | `true` | no |
+| <a name="input_enable_mimir"></a> [enable\_mimir](#input\_enable\_mimir) | Build the network path to the central Mimir: a VPC interface endpoint, its security group, and a private hosted zone for mimir\_ingest\_fqdn. Off by default so the code can land on every env with an infra\_version bump without creating anything. Turning it on is one physical plan of four resources. This flag only builds the path; the logical layer decides whether Prometheus actually pushes (mimir\_remote\_write\_enabled). Requires the infra release that ships mimir.tf: on an older infra\_version the variable does not exist and the plan fails on an unsupported argument. | `bool` | `false` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
+| <a name="input_mimir_endpoint_service_name"></a> [mimir\_endpoint\_service\_name](#input\_mimir\_endpoint\_service\_name) | VPC Endpoint Service name for the Mimir PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). A service in another region is fine, the endpoint switches to the cross-region form on its own, but that region must be in the service's supported\_regions list. Only read when enable\_mimir is true. | `string` | `""` | no |
+| <a name="input_mimir_ingest_fqdn"></a> [mimir\_ingest\_fqdn](#input\_mimir\_ingest\_fqdn) | Hostname this cluster uses to reach Mimir. A private hosted zone is created for exactly this name, so it overrides the public record inside this VPC and nothing else. Must match a name on the Mimir load balancer's certificate or the TLS handshake fails. | `string` | `"mimir-int.dozuki.dev"` | no |
 | <a name="input_operations_owner"></a> [operations\_owner](#input\_operations\_owner) | Which on-call owns this stack's DR page: 'dozuki' (Dozuki 24/7 on-call, the MPC posture) or 'customer' (the customer's named on-call runs the failover, Dozuki advisory). Empty derives it from managed\_private\_cloud. Stamped into the page so the receiver knows whether they are the actor or the advisor. | `string` | `""` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
 | <a name="input_rds_adopt_dr_cmk"></a> [rds\_adopt\_dr\_cmk](#input\_rds\_adopt\_dr\_cmk) | Whether the database is encrypted with a Terraform-managed customer KMS key. True is the<br/>default and there is no longer any other gate on it: DR does not have to be enabled, and<br/>there is no separate opt-in. A fresh stack gets a CMK.<br/><br/>The name is historical (the key was originally introduced for DR) and reads narrower than<br/>what this actually controls, which is the database's encryption key. Read it as "adopt a<br/>customer-managed key", not "only when DR is on".<br/><br/>Set false ONLY on a stack whose database already exists on the AWS-managed key. That is<br/>what the flag is for: the KMS key is immutable on RDS and Aurora, so such a database can<br/>adopt a CMK only by being REPLACED, and false is what holds it flat. Pinning<br/>rds\_kms\_key\_id to an already-adopted CMK has the same effect.<br/><br/>The db-replace-guard PLAN policy blocks an unintended replacement (its safe list is<br/>added/changed/moved and it requires the allow-db-replace stack label otherwise), so<br/>getting this wrong fails closed rather than losing data. | `bool` | `true` | no |

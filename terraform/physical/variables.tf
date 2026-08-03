@@ -517,6 +517,29 @@ variable "vault_endpoint_service_name" {
   type        = string
 }
 
+variable "enable_mimir" {
+  description = "Build the network path to the central Mimir: a VPC interface endpoint, its security group, and a private hosted zone for mimir_ingest_fqdn. Off by default so the code can land on every env with an infra_version bump without creating anything. Turning it on is one physical plan of four resources. This flag only builds the path; the logical layer decides whether Prometheus actually pushes (mimir_remote_write_enabled). Requires the infra release that ships mimir.tf: on an older infra_version the variable does not exist and the plan fails on an unsupported argument."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.enable_mimir || var.mimir_endpoint_service_name != ""
+    error_message = "enable_mimir is true but mimir_endpoint_service_name is empty. Set it to the PrivateLink service name published by the Mimir stack."
+  }
+}
+
+variable "mimir_endpoint_service_name" {
+  description = "VPC Endpoint Service name for the Mimir PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). A service in another region is fine, the endpoint switches to the cross-region form on its own, but that region must be in the service's supported_regions list. Only read when enable_mimir is true."
+  type        = string
+  default     = ""
+}
+
+variable "mimir_ingest_fqdn" {
+  description = "Hostname this cluster uses to reach Mimir. A private hosted zone is created for exactly this name, so it overrides the public record inside this VPC and nothing else. Must match a name on the Mimir load balancer's certificate or the TLS handshake fails."
+  type        = string
+  default     = "mimir-int.dozuki.dev"
+}
+
 variable "sso_admin_role_arn" {
   description = "Exact IAM role ARN for the SSO AdministratorAccess permission set in this account. Required for kubectl/Lens access from workstations. Find it via: aws iam list-roles --query \"Roles[?contains(RoleName,'AWSReservedSSO_AWSAdministratorAccess')].Arn\""
   type        = string
