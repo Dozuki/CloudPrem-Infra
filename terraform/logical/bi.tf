@@ -255,8 +255,12 @@ resource "kubernetes_job_v1" "grafana_db_create" {
       metadata {}
       spec {
         container {
-          name  = "grafana-db-create"
-          image = "mysql:9.6@sha256:c5df04bee1a42b74a5841c6409e669cf62126cd0416f00c1cea8ab933b9361b9"
+          name = "grafana-db-create"
+          # Internal MariaDB-family client (infra-tf/mysql-client), not the official
+          # mysql server image. Renovate cannot see into the private ECR, so bumps
+          # are manual: build/push per the infra-tf README, then update the
+          # variable's default digest.
+          image = var.mysql_client_image
           env {
             name = "MYSQL_HOST"
             value_from {
@@ -284,10 +288,14 @@ resource "kubernetes_job_v1" "grafana_db_create" {
               }
             }
           }
+          # --skip-ssl-verify-server-cert: the MariaDB client verifies the server
+          # cert by default (the old Oracle client never did); against RDS's CA
+          # that fails outright. The flag restores the exact risk posture this job
+          # always had (opportunistic TLS, no verification).
           command = [
             "sh",
             "-c",
-            "mysql --host=$MYSQL_HOST --user=$MYSQL_USER --password=$MYSQL_PASSWORD < /scripts/grafana-db.sql"
+            "mysql --skip-ssl-verify-server-cert --host=$MYSQL_HOST --user=$MYSQL_USER --password=$MYSQL_PASSWORD < /scripts/grafana-db.sql"
           ]
           volume_mount {
             name       = "scripts"
