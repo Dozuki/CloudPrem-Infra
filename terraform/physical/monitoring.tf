@@ -44,7 +44,12 @@ data "aws_iam_policy_document" "lambda_permissions" {
       # it the call returns AccessDenied, which that function deliberately swallows so an alert
       # still goes out - meaning the only symptom is every serverless alert naming an opaque
       # ARN instead of the replication, with nothing in the logs anyone reads.
-      "dms:DescribeReplicationConfigs"
+      "dms:DescribeReplicationConfigs",
+      # dms_restart.py's restart cooldown reads its own log group back for the AUTO-RESTART
+      # marker (stateless flap-breaker; usac 2026-08-03 restarted a CPU-walled full load in
+      # a loop). The check fails open, so missing this grant looks like the cooldown simply
+      # not working - restarts loop again - not like an error anyone gets paged for.
+      "logs:FilterLogEvents"
     ]
     resources = ["*"]
   }
@@ -542,6 +547,12 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
 # elsewhere rather than here: a full-load OOM emits "DMS replication has failed", which
 # pages via sns_to_slack.py and triggers the restart lambda.
 #
+# Bigger blind spot, proven on usac 2026-08-03: a DCU is a memory-denominated unit, and
+# this metric tracks memory occupancy of the provision. A CPU-bound replication (20.6k
+# small tables, validation on) died FATAL after 25 minutes of CPUUtilization at 89-94%
+# while THIS metric read 7-13% the whole time. This alarm cannot see that failure mode
+# at any threshold; that is what bi_dms_cpu_saturated below is for.
+#
 # ignore, not notBreaching, and not breaching. The CDC latency alarms above already own
 # "replication stopped reporting" (they are missing=breaching), so a second one here would
 # double-page every deprovision and every config replacement. But notBreaching is wrong in
@@ -563,6 +574,43 @@ resource "aws_cloudwatch_metric_alarm" "bi_dms_capacity_saturated" {
   namespace           = "AWS/DMS"
   metric_name         = "CapacityUtilization"
   statistic           = "Maximum"
+  treat_missing_data  = "ignore"
+  dimensions          = { ReplicationConfigId = local.bi_replication_config_id }
+  alarm_actions       = [module.sns.topic_arn]
+  ok_actions          = [module.sns.topic_arn]
+  tags                = local.tags
+}
+
+# CPU saturation - the failure mode CapacityUtilization is blind to. usac 2026-08-03:
+# the first BI full load at max 32 DCU held CPUUtilization at 89-94% from 15:55Z, the
+# autoscaler logged "cannot scale up as the replication is already at the provided
+# Maximum" at 16:03Z, and the replication died at ~16:20Z with an empty Last Error
+# ("Internal failure"), nothing in the task log, and CapacityUtilization never leaving
+# 13%. The restart lambda then reload-targeted it into the same wall (no backoff), so
+# the first alarm-worthy signal a human got was the CRITICAL failure page.
+#
+# Average, not Maximum: a CPU-bound replication pegs continuously (five straight 5-min
+# averages of 89-93 observed), it does not oscillate. 3x300s at >= 90 would have fired
+# at 16:10Z, ten minutes before the death. Full loads are rare, operator-adjacent
+# events; paging ten minutes early on a healthy-but-hot load is the acceptable cost.
+# The fix this alarm names is raising bi_dms_max_dcu (memory-shaped stalls belong to
+# bi_dms_capacity_saturated above).
+#
+# treat_missing_data ignore for the same reason as the capacity alarm: the CDC latency
+# pair owns "stopped reporting", and notBreaching would post a fake OK for a dead
+# replication that had been in ALARM.
+resource "aws_cloudwatch_metric_alarm" "bi_dms_cpu_saturated" {
+  count               = local.dms_enabled ? 1 : 0
+  alarm_name          = "${local.identifier}-dms-cpu-saturated"
+  alarm_description   = "BI serverless replication ${local.identifier}: CPUUtilization averaged >= 90% for 15 min - CPU-bound at the DCU cap, raise bi_dms_max_dcu before it dies (CapacityUtilization stays low in this mode, do not trust it)"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 90
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  period              = 300
+  namespace           = "AWS/DMS"
+  metric_name         = "CPUUtilization"
+  statistic           = "Average"
   treat_missing_data  = "ignore"
   dimensions          = { ReplicationConfigId = local.bi_replication_config_id }
   alarm_actions       = [module.sns.topic_arn]
