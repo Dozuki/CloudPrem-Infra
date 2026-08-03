@@ -256,7 +256,7 @@ resource "kubernetes_job_v1" "grafana_db_create" {
       spec {
         container {
           name  = "grafana-db-create"
-          image = "mysql:9.3@sha256:b9d8b7ec6e6aced08b1cfe50776f8e323c0a625adf4e10e69f90fc686ea10807"
+          image = "mysql:9.6@sha256:c5df04bee1a42b74a5841c6409e669cf62126cd0416f00c1cea8ab933b9361b9"
           env {
             name = "MYSQL_HOST"
             value_from {
