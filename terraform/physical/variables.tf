@@ -408,6 +408,38 @@ variable "bi_aurora_max_acu" {
 }
 
 
+variable "bi_treat_as_derived" {
+  description = <<-EOT
+    Treat the BI database as regenerable rather than precious: no deletion protection and no
+    final snapshot when it is destroyed. Applies to the DMS target only (the provisioned
+    instance and the Aurora cluster), never to the primary.
+
+    Default true, because BI *is* derived. It holds nothing the primary does not; a DMS full
+    load rebuilds it from scratch, which is what already happens on the rds -> aurora switch.
+    The legacy read-replica path (module.rds_replica_database) has always set
+    deletion_protection = false and skip_final_snapshot = true for exactly this reason. The
+    DMS paths were the inconsistent ones.
+
+    Two concrete costs of the old behaviour, both hit on 2026-08-03:
+
+      1. A final snapshot of a 115 GB BI instance took over an hour, and the destroy waits on
+         it. Spacelift's AWS credentials are capped at 1 hour by role chaining (assuming
+         spacelift-deployer and then chaining into the member account's
+         OrganizationAccountAccessRole), a limit that cannot be raised on either role. So a
+         snapshot nobody wanted can outlive the session and fail the apply.
+      2. deletion_protection = var.protect_resources meant the rds -> aurora switch needed an
+         out-of-band `modify-db-instance --no-deletion-protection` first, because the same
+         apply that removes the instance from config can never apply the cleared flag before
+         the delete. Miss it and the apply dies mid-way, after the Aurora cluster exists and
+         with replication already stopped against the 48h deprovision clock.
+
+    Set false to keep the old behaviour on a stack where BI has been loaded with something
+    that is genuinely not reproducible from the primary.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "enable_bi" {
   description = "This option will spin up a BI slave of your master database and enable conditional replication (everything but the mysql table will be replicated so you can have custom users)."
   type        = bool
