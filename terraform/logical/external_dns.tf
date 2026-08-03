@@ -16,9 +16,14 @@ resource "helm_release" "external_dns" {
   namespace  = kubernetes_namespace_v1.app.metadata[0].name
   repository = "https://kubernetes-sigs.github.io/external-dns/"
   chart      = "external-dns"
-  version    = "1.21.1"
-  wait       = true
-  timeout    = 300
+  # Chart 1.16+ ships external-dns v0.18+, which made the new TXT registry format
+  # mandatory (the legacy prefix-less ownership records are no longer read). Free
+  # today because count = 0 fleet-wide; the first env to set
+  # aws_external_dns_role_arn must start with clean TXT records or migrate any
+  # ownership records written by chart <= 1.15.x before enabling.
+  version = "1.21.1"
+  wait    = true
+  timeout = 300
 
   # Use the chart's native value keys (it generates --registry/--policy/--source/
   # --domain-filter/--txt-owner-id/--aws-zone-type itself). Do NOT also pass these
