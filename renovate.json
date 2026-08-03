@@ -72,6 +72,12 @@
       "enabled": false
     },
     {
+      "description": "helm_release chart bumps install into customer clusters and CI never exercises them (validate, not plan). Park them on the Dependency Dashboard until a human ticks the box - this is how external-dns jumped six minors as a routine-looking PR. infra-tf has had the same gate on the Vault chart for a while.",
+      "matchManagers": ["terraform"],
+      "matchDepTypes": ["helm_release"],
+      "dependencyDashboardApproval": true
+    },
+    {
       "description": "The Go harness in live/tests ships to nobody and release-please excludes it, so its dependencies can move on a shorter soak.",
       "matchManagers": ["gomod"],
       "matchFileNames": ["live/tests/**"],

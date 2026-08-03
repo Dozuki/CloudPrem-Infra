@@ -1,0 +1,63 @@
+# Release gate: a release cannot ship without a passing upgrade-test run on the
+# exact content being released.
+#
+# Mechanics: branch protection requires the `harness/upgrade-tests` commit status
+# on master. The harness (upgrade-tests.yml -> argo-ops) owns that status on any
+# PR carrying the run-upgrade-tests label. This workflow closes the two gaps:
+#   - release-please PRs get the label added automatically, so the harness runs
+#     on every release candidate and the release PR stays blocked until it passes.
+#   - every other PR gets an immediate auto-success, so routine PRs (renovate,
+#     features) are not slowed by a 1-2 hour harness run. Labeling one of those
+#     PRs by hand hands the status to the harness and makes its result binding.
+#
+# Note the cost profile: release-please force-pushes its PR on every master
+# merge, and each push resubmits the harness (statuses are per-SHA, so the gate
+# genuinely needs a run on the final SHA). A burst of merges queues several
+# harness runs; the argo semaphore serializes them.
+name: Release gate
+
+# pull_request_target, deliberately: fork PRs need the write-scoped base token to
+# receive their auto-pass status (the pull_request token is read-only for forks).
+# Safe because this job NEVER checks out or executes PR code - it only reads
+# event metadata via env and posts a label/status. Keep it that way: adding a
+# checkout of the PR head here would be a code-execution hole.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, unlabeled]
+
+permissions:
+  statuses: write
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # Branch names are attacker-chosen on fork PRs (public repo): only ever
+      # touch them through env, and only trust release-please-- from this repo.
+      HEAD_REF: ${{ github.head_ref }}
+      SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'run-upgrade-tests') }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Label release PRs, auto-pass the rest
+        run: |
+          set -euo pipefail
+          if [[ "$SAME_REPO" == "true" && "$HEAD_REF" == release-please--* ]]; then
+            # Adding the label fires upgrade-tests.yml (labeled); on later pushes
+            # its own synchronize trigger resubmits. Either way the harness owns
+            # the status from here.
+            gh pr edit "$PR_NUMBER" \
+              --repo "${{ github.repository }}" --add-label run-upgrade-tests
+            echo "release PR: harness required, label ensured" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$HAS_LABEL" == "true" ]]; then
+            echo "labeled PR: harness owns the status" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh api "repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
+              -f state=success \
+              -f context=harness/upgrade-tests \
+              -f description="not required: not a release PR"
+            echo "auto-pass posted" >> "$GITHUB_STEP_SUMMARY"
+          fi
