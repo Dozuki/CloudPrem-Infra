@@ -511,9 +511,12 @@ module "bi_aurora" {
     ]
   }
 
-  apply_immediately            = local.db_apply_immediately
-  deletion_protection          = var.protect_resources
-  skip_final_snapshot          = !var.protect_resources
+  apply_immediately   = local.db_apply_immediately
+  deletion_protection = var.protect_resources
+  skip_final_snapshot = !var.protect_resources
+  # Same requirement as the primary cluster in aurora.tf; see the comment there
+  # for why its absence makes a cluster undestroyable through terraform.
+  final_snapshot_identifier    = "${local.identifier}-bi-final-${random_id.aurora_final_snapshot[0].hex}"
   copy_tags_to_snapshot        = true
   backup_retention_period      = var.rds_backup_retention_period
   preferred_backup_window      = "17:00-19:00"
