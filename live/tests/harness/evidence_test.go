@@ -169,6 +169,11 @@ func TestScrubKeepsDiagnosticSurvivors(t *testing.T) {
 		"arn:aws:dms:us-east-1:000000000000:replication-config:REPLICATIONCONFIGID",
 		"dozuki-argo-artifacts-010601635461",
 		"smokef9b3-bi-reader",
+		// KMS diagnostics are the most common real failure shape; a bare "key"
+		// alternation redacted all three of these.
+		"kms_key_id = arn:aws:kms:us-east-1:000000000000:key/abc-def-1234",
+		"Error: creating KMS Key: AccessDeniedException: User is not authorized",
+		"keyspace: production",
 	}
 	for _, s := range survivors {
 		t.Run(s, func(t *testing.T) {

@@ -392,7 +392,11 @@ var scrubRules = []scrubRule{
 	// token]", "[redacted-slack-token]", "[redacted-github-token]") contain the word
 	// "token", and without this guard this rule would run over its own output and
 	// flatten those specific labels down to a bare "[redacted]".
-	{regexp.MustCompile(`(?i)([A-Za-z_]*(?:secret|password|passwd|token|key)[A-Za-z_]*\s*[:=]\s*)[^\s\[]\S*`), "$1[redacted]"},
+	// Bare "key" is deliberately absent from the alternation: it would redact
+	// kms_key_id ARNs and "creating KMS Key:" lines out of exactly the tofu
+	// errors this excerpt exists to show. Only qualified key forms are
+	// credential-shaped.
+	{regexp.MustCompile(`(?i)([A-Za-z_]*(?:secret|password|passwd|token|(?:api|access|private|signing|secret)[_-]?key)[A-Za-z_]*\s*[:=]\s*)[^\s\[]\S*`), "$1[redacted]"},
 	// URL-embedded credentials: scheme://user:password@host - the password never
 	// matches the keyword rule above (nothing there looks like "secret"/"token"/
 	// etc), so it needs its own rule. The username is left visible for context.
