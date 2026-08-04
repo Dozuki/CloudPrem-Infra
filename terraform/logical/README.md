@@ -116,7 +116,6 @@ No modules.
 | [vault_kv_secret_v2.db](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.google_translate](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.grafana](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
-| [vault_kv_secret_v2.smtp](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.tls](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_policy.eso_readonly](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [vault_policy.flux_relay_readonly](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
@@ -220,7 +219,7 @@ No modules.
 | <a name="input_smtp_enabled"></a> [smtp\_enabled](#input\_smtp\_enabled) | Whether to enable SMTP email sending. | `bool` | `true` | no |
 | <a name="input_smtp_from_address"></a> [smtp\_from\_address](#input\_smtp\_from\_address) | SMTP from email address. | `string` | `"noreply@dozuki.com"` | no |
 | <a name="input_smtp_host"></a> [smtp\_host](#input\_smtp\_host) | SMTP server hostname (and port if necessary). | `string` | `"smtp.sendgrid.net:587"` | no |
-| <a name="input_smtp_password"></a> [smtp\_password](#input\_smtp\_password) | SMTP authentication password. | `string` | `""` | no |
+| <a name="input_smtp_password"></a> [smtp\_password](#input\_smtp\_password) | SMTP authentication password. Feeds the Azure Key Vault path (keyvault.tf) and the plain/onprem Flux values (flux.tf) only - the AWS Vault path no longer writes this to secret/<customer>/<env>/smtp (see the `removed` block in vault.tf). That change requires the dozuki chart release carrying the ExternalSecret null-safe smtp\_password guard (dozuki/helm#221) to be live fleet-wide before any env's Vault smtp path is deleted; on older chart versions an absent path aborts the whole dozuki-infra-credentials sync. | `string` | `""` | no |
 | <a name="input_smtp_username"></a> [smtp\_username](#input\_smtp\_username) | SMTP authentication username. | `string` | `"apikey"` | no |
 | <a name="input_spacelift"></a> [spacelift](#input\_spacelift) | Set to true when running in Spacelift. Enables IAM auth for the Vault provider. | `bool` | `false` | no |
 | <a name="input_subsite_gateway_api_enabled"></a> [subsite\_gateway\_api\_enabled](#input\_subsite\_gateway\_api\_enabled) | Switches subsite routing to Gateway API HTTPRoutes: the dozuki-operator reconciles one HTTPRoute per subsite off the chart's dozuki-gateway instead of the legacy nginx Ingress, so subsites route automatically on Envoy Gateway installs (no hand-created wildcard HTTPRoutes). Off by default - it changes subsite routing behavior, so enable per-env after validating. Requires a bundled dozuki-operator >= the version that ships gatewayAPI.enabled (older pins silently ignore it). Safe on GovCloud's exact-host gateway layout (the operator no-ops there). | `bool` | `false` | no |

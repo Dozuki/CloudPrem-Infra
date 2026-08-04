@@ -174,7 +174,7 @@ variable "smtp_username" {
 
 #tfsec:ignore:general-secrets-no-plaintext-exposure
 variable "smtp_password" {
-  description = "SMTP authentication password."
+  description = "SMTP authentication password. Feeds the Azure Key Vault path (keyvault.tf) and the plain/onprem Flux values (flux.tf) only - the AWS Vault path no longer writes this to secret/<customer>/<env>/smtp (see the `removed` block in vault.tf). That change requires the dozuki chart release carrying the ExternalSecret null-safe smtp_password guard (dozuki/helm#221) to be live fleet-wide before any env's Vault smtp path is deleted; on older chart versions an absent path aborts the whole dozuki-infra-credentials sync."
   type        = string
   default     = ""
   sensitive   = true
