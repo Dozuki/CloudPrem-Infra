@@ -1,6 +1,11 @@
 package harness
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,5 +31,105 @@ func TestTGEnv(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("env missing %q", want)
 		}
+	}
+}
+
+// writeFakeTerragrunt drops an executable named "terragrunt" on the front of PATH
+// that prints script (a tofu-shaped error block, none of which matches any of the
+// retry regexes above) and exits 1. Tests use this instead of the real binary so
+// Apply/destroyModule fail on the first attempt, deterministically and fast.
+func writeFakeTerragrunt(t *testing.T, script string) {
+	t.Helper()
+	bin := t.TempDir()
+	body := "#!/bin/sh\n" + script + "\nexit 1\n"
+	path := filepath.Join(bin, "terragrunt")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake terragrunt: %v", err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+const fakeTofuErrorScript = `echo 'module.foo: Still destroying... [id=x, 1s elapsed]'
+echo 'Error: stopping widget (arn:aws:widget:us-east-1:000000000000:thing/abc): cannot proceed'
+echo 'exit status 1'`
+
+func TestApplyErrorCarriesOutputTail(t *testing.T) {
+	writeFakeTerragrunt(t, fakeTofuErrorScript)
+	o := TGOptions{WorkingDir: t.TempDir(), Region: "us-east-1"}
+
+	err := o.Apply()
+	if err == nil {
+		t.Fatal("Apply() = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "stopping widget") || !strings.Contains(err.Error(), "cannot proceed") {
+		t.Errorf("Apply() error = %q, want it to carry the tofu error text", err.Error())
+	}
+	if len(err.Error()) > 500 {
+		t.Errorf("Apply() error is %d chars, want it capped near 400", len(err.Error()))
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Errorf("Apply() error does not unwrap to *exec.ExitError: %v", err)
+	}
+}
+
+// fakeNoErrorLineScript intentionally emits no Error:-prefixed line - only noise
+// and a bare exit code - so lastErrorLine(out) has nothing to append.
+const fakeNoErrorLineScript = `echo 'module.foo: Still destroying... [id=x, 1s elapsed]'
+echo 'some unrelated status line, not an Error:'
+echo 'exit status 1'`
+
+// TestApplyErrorHasNoDanglingColonWithoutErrorLine covers the P1 wrap bug: when the
+// captured output has no error-shaped line, wrapping unconditionally with "%w: %s"
+// leaves a dangling "exit status 1: " (trailing colon, nothing after it). That
+// breaks thinVerdictRE's anchored-on-$ match once main.go turns this error into a
+// "<phase> failed: ..." verdict line, which then makes ExtractError treat the bare
+// verdict as already explained instead of preferring a real Error: line elsewhere in
+// the log window.
+func TestApplyErrorHasNoDanglingColonWithoutErrorLine(t *testing.T) {
+	writeFakeTerragrunt(t, fakeNoErrorLineScript)
+	o := TGOptions{WorkingDir: t.TempDir(), Region: "us-east-1"}
+
+	err := o.Apply()
+	if err == nil {
+		t.Fatal("Apply() = nil, want an error")
+	}
+	if strings.HasSuffix(err.Error(), ":") || strings.HasSuffix(err.Error(), ": ") {
+		t.Fatalf("Apply() error has a dangling colon with nothing after it: %q", err.Error())
+	}
+
+	// Reproduce the shape a real failed run's captured log takes: main.go's verdict
+	// line sitting below the real tofu Error: line, separated by whatever noise fell
+	// in between.
+	verdict := fmt.Sprintf("teardown failed: %s", err)
+	log := "Error: the real explanation, from earlier in the run\n" + verdict + "\n"
+
+	got := ExtractError(log)
+	if !strings.Contains(got, "the real explanation") {
+		t.Errorf("ExtractError() = %q, want it to prefer the real Error: line over the thin verdict %q", got, verdict)
+	}
+}
+
+func TestDestroyModuleErrorCarriesOutputTail(t *testing.T) {
+	writeFakeTerragrunt(t, fakeTofuErrorScript)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "logical"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o := TGOptions{WorkingDir: dir, Region: "us-east-1"}
+
+	err := o.destroyModule("logical")
+	if err == nil {
+		t.Fatal("destroyModule() = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "stopping widget") || !strings.Contains(err.Error(), "cannot proceed") {
+		t.Errorf("destroyModule() error = %q, want it to carry the tofu error text", err.Error())
+	}
+	if len(err.Error()) > 500 {
+		t.Errorf("destroyModule() error is %d chars, want it capped near 400", len(err.Error()))
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Errorf("destroyModule() error does not unwrap to *exec.ExitError: %v", err)
 	}
 }

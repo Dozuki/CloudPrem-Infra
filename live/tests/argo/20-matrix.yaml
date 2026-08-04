@@ -186,6 +186,7 @@ spec:
           - |
             set -uo pipefail
             export VAULT_ADDR='{{workflow.parameters.vault-addr}}'
+            export AWS_REGION=us-east-1
             vault login -method=aws role=deployer region=us-east-1 >/dev/null || { echo "vault login failed"; exit 0; }
             GH_TOKEN="$(vault kv get -field=github_token secret/dozuki/global/harness-notify 2>/dev/null)"
             SLACK_TOKEN="$(vault kv get -field=botToken secret/dozuki/global/slack 2>/dev/null)"
@@ -205,17 +206,29 @@ spec:
             DESC="harness {{workflow.name}}: ${STATUS} (configs {{workflow.parameters.configs}}, to-ref {{workflow.parameters.to-ref}})"
 
             # Child detail, gathered once and shared by the PR comment and the Slack
-            # post. For each child: config, phase, and its deepest failure message,
-            # which is where the actually useful line lives (the child's own message
-            # is just "child ... failed").
-            CHILD_JSON=$(kubectl -n argo get workflows -l 'harness/parent={{workflow.name}}' -o json 2>/dev/null               | jq '[.items[] | {
-                  name: .metadata.name,
-                  config: (.metadata.labels["harness/config"] // "-"),
-                  phase: (.status.phase // "-"),
-                  msg: (.status.message // ""),
-                  detail: ([.status.nodes // {} | .[] | select(.phase == "Failed" or .phase == "Error")
-                            | select(.type == "Pod") | "\(.displayName): \(.message // "")"] | join("; "))
-                }]' 2>/dev/null) || CHILD_JSON='[]'
+            # post. For each child: config, phase, the plain Argo node summary
+            # (detail), and - when `harness evidence` is present in the image and a
+            # log fetch succeeds - the actual proximate tofu/terragrunt/helm error
+            # pulled from that node's archived container log (log_excerpt). The
+            # renderer prefers log_excerpt and falls back to detail, so a stale image
+            # (missing the evidence subcommand) or an S3 hiccup just means the card
+            # reads today's node summary instead of the extracted error - never
+            # nothing.
+            WF_JSON=$(kubectl -n argo get workflows -l 'harness/parent={{workflow.name}}' -o json 2>/dev/null)
+            CHILD_JSON=$(printf '%s' "$WF_JSON" | timeout 60 harness evidence --region us-east-1 2>/dev/null)
+            # Fall back to the plain jq summary on anything that isn't usable JSON -
+            # empty output, a literal "null", or a truncated/malformed body (a killed
+            # `harness evidence` process can leave a partial write behind).
+            if [ -z "$CHILD_JSON" ] || [ "$CHILD_JSON" = "null" ] || ! printf '%s' "$CHILD_JSON" | jq -e . >/dev/null 2>&1; then
+              CHILD_JSON=$(printf '%s' "$WF_JSON" | jq '[.items[] | {
+                    name: .metadata.name,
+                    config: (.metadata.labels["harness/config"] // "-"),
+                    phase: (.status.phase // "-"),
+                    msg: (.status.message // ""),
+                    detail: ([.status.nodes // {} | .[] | select(.phase == "Failed" or .phase == "Error")
+                              | select(.type == "Pod") | "\(.displayName): \(.message // "")"] | join("; "))
+                  }]' 2>/dev/null) || CHILD_JSON='[]'
+            fi
             [ -z "$CHILD_JSON" ] && CHILD_JSON='[]'
 
             if [ -n '{{workflow.parameters.pr-sha}}' ] && [ -n "$GH_TOKEN" ]; then
@@ -235,7 +248,7 @@ spec:
                 "https://api.github.com/repos/{{workflow.parameters.pr-repo}}/commits/{{workflow.parameters.pr-sha}}/pulls" \
                 | jq -r '.[0].number // empty') || PR_NUM=""
               if [ -n "$PR_NUM" ]; then
-                CHILDREN=$(printf '%s' "$CHILD_JSON" | jq -r '.[] | "| `\(.name)` | \(.config) | \(.phase) | \(if .detail != "" then .detail else .msg end) |"')
+                CHILDREN=$(printf '%s' "$CHILD_JSON" | jq -r '.[] | "| `\(.name)` | \(.config) | \(.phase) | \((.log_excerpt // "") | if . != "" then . else (if .detail != "" then .detail else .msg end) end) |"')
                 [ -z "$CHILDREN" ] && CHILDREN='| _no child workflows_ |  |  |  |'
                 BODY=$(printf '### Upgrade harness: %s %s\n\nWorkflow `%s` finished in %s.\n\n- configs `%s`, scenario `%s`\n- from `%s` to `%s`\n\n| child workflow | config | phase | detail |\n|---|---|---|---|\n%s\n' \
                   "$EMOJI" "$STATUS" '{{workflow.name}}' "$DUR_H" \
@@ -280,7 +293,8 @@ spec:
                 from_ref: $fromref, to_ref: ($toref | .[0:64]),
                 duration_seconds: $dur, trigger: $trigger, pr_url: $prurl,
                 children: (map({config: .config, phase: .phase,
-                                detail: (if .detail != "" then .detail else .msg end | .[0:400])}))
+                                detail: (if .detail != "" then .detail else .msg end | .[0:400]),
+                                log_excerpt: (.log_excerpt // "" | .[0:460])}))
               }')
             if [ -n "$RELAY_URL" ] && [ -n "$RELAY_TOKEN" ] && \
                printf '%s' "$RELAY_PAYLOAD" | curl -sf -X POST \

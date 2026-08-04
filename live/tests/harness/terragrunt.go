@@ -109,14 +109,28 @@ func (o TGOptions) execCapture(args ...string) (string, error) {
 	return buf.String(), err
 }
 
+// wrapTGError wraps err with the last error-shaped line of out, if there is one.
+// lastErrorLine returns "" when the captured output has no line that looks like a
+// real error (only noise, or nothing at all) - unconditionally formatting "%w: %s"
+// in that case leaves a dangling "exit status 1: " with nothing after the colon,
+// which breaks thinVerdictRE's anchored-on-$ match downstream in evidence.go and
+// makes ExtractError treat the bare verdict as already explained instead of falling
+// through to a real Error: line elsewhere in the log window.
+func wrapTGError(err error, out string) error {
+	if line := lastErrorLine(out); line != "" {
+		return fmt.Errorf("%w: %s", err, line)
+	}
+	return err
+}
+
 func (o TGOptions) Apply() error {
 	// Retry only the EKS access-entry propagation race (see kubeAuthRaceRE);
 	// terraform apply is idempotent, so a re-apply just finishes the remaining
 	// resources once the access entry is effective.
 	const maxAttempts = 4
 	var err error
+	var out string
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		var out string
 		// No -auto-approve: terragrunt appends it itself for `run --all apply`, and
 		// passing it unforwarded is a hard error on 1.x ("flag -auto-approve is not a
 		// Terragrunt flag ... use -- to forward it"). `run -- apply -auto-approve` also
@@ -148,7 +162,7 @@ func (o TGOptions) Apply() error {
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "\n>> harness: Vault token expired and re-login failed — not retrying\n\n")
-			return err
+			return wrapTGError(err, out)
 		}
 		if attempt < maxAttempts && transientNetRE.MatchString(out) {
 			wait := time.Duration(attempt*30) * time.Second
@@ -156,9 +170,9 @@ func (o TGOptions) Apply() error {
 			time.Sleep(wait)
 			continue
 		}
-		return err
+		return wrapTGError(err, out)
 	}
-	return err
+	return wrapTGError(err, out)
 }
 
 // destroyModule destroys a single layer in its own directory (not run --all), so
@@ -176,6 +190,7 @@ func (o TGOptions) Apply() error {
 func (o TGOptions) destroyModule(module string) error {
 	const maxAttempts = 4
 	var err error
+	var lastOut string
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		cmd := exec.Command("terragrunt", "destroy", "--non-interactive", "-auto-approve")
 		cmd.Dir = filepath.Join(o.WorkingDir, module)
@@ -188,6 +203,7 @@ func (o TGOptions) destroyModule(module string) error {
 			return nil
 		}
 		out := buf.String()
+		lastOut = out
 		if attempt < maxAttempts && vaultTokenExpiredRE.MatchString(out) && refreshVaultToken() {
 			fmt.Fprintf(os.Stderr, "\n>> teardown: Vault token had expired; re-logged in and retrying %s destroy (attempt %d/%d)\n\n", module, attempt+1, maxAttempts)
 			continue
@@ -198,9 +214,9 @@ func (o TGOptions) destroyModule(module string) error {
 			time.Sleep(wait)
 			continue
 		}
-		return err
+		return wrapTGError(err, out)
 	}
-	return err
+	return wrapTGError(err, lastOut)
 }
 
 // Destroy tears the stack down resiliently. `run --all destroy` aborts the whole

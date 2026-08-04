@@ -1,0 +1,11 @@
+>> [entrypoint] repo present at /workspace/repo; fetching
+>> [entrypoint] repo at 2942fc5 (master)
+>> [entrypoint] TLS: generated a self-signed cert for the manual-TLS path
+>> [entrypoint] Vault: aws login (addr=http://vault.internal.dozuki.com:8200 role=deployer)
+>> [entrypoint] Vault: token acquired
+>> [entrypoint] AWS: profile ddvtest chains into arn:aws:iam::000000000000:role/cloudprem-upgrade-tests
+>> [entrypoint] AWS: assumed arn:aws:sts::000000000000:assumed-role/cloudprem-upgrade-tests/harness-harness-min-default-mdgxp
+>> [entrypoint] toolchain: OpenTofu v1.11.8 | terragrunt 0.99.4 | v4.2.3+g43e8b7f | kubectl v1.36.3
+>> [entrypoint] provider cache: /opt/tofu-plugin-cache
+fatal: invalid reference: 8f347c78fb11039a9737c30e956fa16e5f57cd78
+upgrade failed: worktree add 8f347c78fb11039a9737c30e956fa16e5f57cd78 (8f347c78fb11039a9737c30e956fa16e5f57cd78): exit status 128
