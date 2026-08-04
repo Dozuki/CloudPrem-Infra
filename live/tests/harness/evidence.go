@@ -95,7 +95,10 @@ func artifactKey(n Node) string {
 }
 
 // failedPodNodes returns a child's failed Pod nodes, sorted by FinishedAt then
-// DisplayName for determinism, optionally capped at maxNodes (0 = unlimited).
+// DisplayName for determinism. When capped at maxNodes (0 = unlimited), it keeps the
+// LATEST maxNodes by FinishedAt, not the earliest - the most recent failures are the
+// ones relevant to why the run is currently red; an early failure that later ones
+// piled on top of is the least useful one to spend the node budget on.
 //
 // Filtering on Type == "Pod" is what excludes the duplicate Retry node Argo also
 // marks Failed for the same phase - Retry nodes carry no artifact of their own, and
@@ -119,7 +122,7 @@ func failedPodNodes(wf Workflow, maxNodes int) []Node {
 		return nodes[i].DisplayName < nodes[j].DisplayName
 	})
 	if maxNodes > 0 && len(nodes) > maxNodes {
-		nodes = nodes[:maxNodes]
+		nodes = nodes[len(nodes)-maxNodes:]
 	}
 	return nodes
 }
@@ -164,13 +167,36 @@ func (t *S3LogTail) Tail(ctx context.Context, bucket, key string) (string, error
 		return "", err
 	}
 	s := string(b)
-	// A suffix range starts mid-file, so the first line is possibly a partial
-	// line cut in half. Drop it rather than risk it reading like a truncated
-	// error.
-	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-		return s[idx+1:], nil
+	// A suffix range that lands mid-file starts partway through a line, so line 1 is
+	// possibly cut in half - drop it rather than risk it reading like a truncated
+	// error. But when the object is smaller than tailRangeBytes, S3 answers the
+	// suffix request with the WHOLE object (still 206 Partial Content, but
+	// Content-Range's start offset is 0): line 1 is then intact, and dropping it
+	// would wrongly discard a short log's only content - including turning a
+	// single-line log with no trailing newline into "" instead of its real text.
+	if s3PartialStart(out.ContentRange) {
+		if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+			return s[idx+1:], nil
+		}
+		return "", nil
 	}
-	return "", nil
+	return s, nil
+}
+
+// s3PartialStart reports whether an S3 Content-Range response header ("bytes
+// start-end/total") indicates the returned bytes begin after offset 0 - i.e. this is
+// a genuine partial read and its first line may be a fragment. A missing or
+// unparsable header is treated as a whole-object read (the safer default: it keeps
+// content rather than risking silently dropping line 1 of a short log).
+func s3PartialStart(contentRange *string) bool {
+	if contentRange == nil {
+		return false
+	}
+	var start int64
+	if _, err := fmt.Sscanf(*contentRange, "bytes %d-", &start); err != nil {
+		return false
+	}
+	return start > 0
 }
 
 // ---- error extraction ----
@@ -185,6 +211,15 @@ var (
 	verdictPrefixRE = regexp.MustCompile(`^(?:provision|upgrade|validate|teardown) failed: `)
 	thinVerdictRE   = regexp.MustCompile(`^([\w./-]+: )?exit (status|code) \d+$`)
 
+	// awsSDKBoilerplateRE matches the aws-sdk-go-v2 error wrapper that every service
+	// error carries ("operation error <Service>: <Operation>, https response error
+	// StatusCode: <NNN>, RequestID: <uuid>, ") ahead of the actual diagnostic (e.g.
+	// "InvalidResourceStateFault: ... cannot be stopped."). It is pure noise - the
+	// service/operation/status code/request id never explain the failure - and at
+	// ~150 runes it is often the difference between the real diagnostic surviving
+	// the per-line excerpt cap or being truncated away before it appears.
+	awsSDKBoilerplateRE = regexp.MustCompile(`operation error [^,]+, https response error StatusCode: \d+, RequestID: [0-9a-fA-F-]+, `)
+
 	// errLineRE deliberately does NOT get its leading "* " stripped by
 	// normalizeLine (see there) - stripping it would make this pattern
 	// unmatchable against terragrunt's own "* Failed to execute ..." banner.
@@ -194,8 +229,8 @@ var (
 )
 
 // normalizeLine strips ANSI color codes, terragrunt's "HH:MM:SS.mmm LEVEL"
-// timestamp prefix and repeated "tofu: " markers, and leading box-drawing
-// decoration, then trims whitespace.
+// timestamp prefix, a repeated leading "tofu: " marker, the aws-sdk-go-v2 error
+// wrapper boilerplate, and leading box-drawing decoration, then trims whitespace.
 //
 // The leading-decoration strip intentionally leaves a bare "*" alone: that is the
 // bullet on terragrunt's own "* Failed to execute ..." error banner, which errLineRE
@@ -204,7 +239,14 @@ func normalizeLine(line string) string {
 	line = strings.TrimRight(line, "\r")
 	line = ansiRE.ReplaceAllString(line, "")
 	line = tsPrefixRE.ReplaceAllString(line, "")
-	line = strings.ReplaceAll(line, "tofu: ", "")
+	// Prefix-anchored only: "tofu: " can legitimately appear mid-line (e.g. an error
+	// message that itself mentions running tofu), and stripping it wherever it
+	// occurs would silently mangle that text. terragrunt can repeat the marker
+	// ("tofu: tofu: ..."), so trim it off the front in a loop.
+	for strings.HasPrefix(line, "tofu: ") {
+		line = strings.TrimPrefix(line, "tofu: ")
+	}
+	line = awsSDKBoilerplateRE.ReplaceAllString(line, "")
 	line = strings.TrimLeft(line, "│╷╵ \t")
 	return strings.TrimSpace(line)
 }
@@ -310,7 +352,10 @@ func truncateRunes(s string, n int) string {
 
 // ---- secret scrubbing ----
 
-var privateKeyLineRE = regexp.MustCompile(`-----BEGIN [A-Z ]+ PRIVATE KEY-----`)
+// privateKeyLineRE matches both the classic PKCS#1-style headers ("-----BEGIN RSA
+// PRIVATE KEY-----") and the algorithm-less PKCS#8 header ("-----BEGIN PRIVATE
+// KEY-----").
+var privateKeyLineRE = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
 
 // scrubRule applies re, replacing matches with repl (which may reference capture
 // groups, e.g. "$1$2[redacted]").
@@ -336,7 +381,22 @@ var scrubRules = []scrubRule{
 	{regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{20,}`), "[redacted-github-token]"},
 	{regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`), "[redacted-github-token]"},
 	{regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), "[redacted-jwt]"},
-	{regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|session[_-]?token)(["']?\s*[:=]\s*["']?)[^\s"',]{6,}`), "$1$2[redacted]"},
+	// Embedded keyword rule: the keyword can sit anywhere inside a longer
+	// identifier (AWS_SECRET_ACCESS_KEY, DB_PASSWORD, ...), not just stand alone -
+	// the old alternation (password|passwd|secret|token|api[_-]?key|session[_-]?key)
+	// required the keyword to butt directly against the separator, so
+	// "AWS_SECRET_ACCESS_KEY=..." never matched (the "_ACCESS_KEY" in between broke
+	// it). Only the value is replaced, so the variable name stays for context.
+	//
+	// The value must not start with "[" - several labels above ("[redacted-vault-
+	// token]", "[redacted-slack-token]", "[redacted-github-token]") contain the word
+	// "token", and without this guard this rule would run over its own output and
+	// flatten those specific labels down to a bare "[redacted]".
+	{regexp.MustCompile(`(?i)([A-Za-z_]*(?:secret|password|passwd|token|key)[A-Za-z_]*\s*[:=]\s*)[^\s\[]\S*`), "$1[redacted]"},
+	// URL-embedded credentials: scheme://user:password@host - the password never
+	// matches the keyword rule above (nothing there looks like "secret"/"token"/
+	// etc), so it needs its own rule. The username is left visible for context.
+	{regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)[^\s@]+(@)`), "$1[redacted]$2"},
 	{regexp.MustCompile(`[A-Za-z0-9+/]{60,}={0,2}`), "[redacted-blob]"},
 }
 
@@ -363,8 +423,17 @@ func Scrub(s string) string {
 // ---- assembling the per-child evidence payload ----
 
 const (
-	maxLineExcerptRunes     = 220 // per extracted line, before the "; " join
-	maxChildExcerptRunes    = 400 // per child, after the join - matches the relay's existing per-child slice
+	// maxLineExcerptRunes and maxChildExcerptRunes both got bumped (220->300,
+	// 400->460) alongside the aws-sdk-go-v2 boilerplate strip above: a real DMS
+	// specimen's diagnostic ("Error: stopping DMS Serverless Replication (arn:...):
+	// InvalidResourceStateFault: ... cannot be stopped.") is still ~270 runes once
+	// the boilerplate is gone, and a two-node child joining an upgrade + a destroy
+	// failure runs ~425 runes total - both would still get truncated away under the
+	// old caps. 20-matrix.yaml's jq slice on log_excerpt must stay in sync with
+	// maxChildExcerptRunes (the "relay's existing per-child slice" this comment
+	// refers to).
+	maxLineExcerptRunes     = 300 // per extracted line, before the "; " join
+	maxChildExcerptRunes    = 460 // per child, after the join - matches the relay's existing per-child slice
 	defaultMaxNodesPerChild = 3
 	defaultWorkers          = 4
 	defaultPerObjectTimeout = 5 * time.Second

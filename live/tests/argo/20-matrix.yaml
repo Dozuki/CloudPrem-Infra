@@ -216,7 +216,10 @@ spec:
             # nothing.
             WF_JSON=$(kubectl -n argo get workflows -l 'harness/parent={{workflow.name}}' -o json 2>/dev/null)
             CHILD_JSON=$(printf '%s' "$WF_JSON" | timeout 60 harness evidence --region us-east-1 2>/dev/null)
-            if [ -z "$CHILD_JSON" ] || [ "$CHILD_JSON" = "null" ]; then
+            # Fall back to the plain jq summary on anything that isn't usable JSON -
+            # empty output, a literal "null", or a truncated/malformed body (a killed
+            # `harness evidence` process can leave a partial write behind).
+            if [ -z "$CHILD_JSON" ] || [ "$CHILD_JSON" = "null" ] || ! printf '%s' "$CHILD_JSON" | jq -e . >/dev/null 2>&1; then
               CHILD_JSON=$(printf '%s' "$WF_JSON" | jq '[.items[] | {
                     name: .metadata.name,
                     config: (.metadata.labels["harness/config"] // "-"),
@@ -291,7 +294,7 @@ spec:
                 duration_seconds: $dur, trigger: $trigger, pr_url: $prurl,
                 children: (map({config: .config, phase: .phase,
                                 detail: (if .detail != "" then .detail else .msg end | .[0:400]),
-                                log_excerpt: (.log_excerpt // "" | .[0:400])}))
+                                log_excerpt: (.log_excerpt // "" | .[0:460])}))
               }')
             if [ -n "$RELAY_URL" ] && [ -n "$RELAY_TOKEN" ] && \
                printf '%s' "$RELAY_PAYLOAD" | curl -sf -X POST \

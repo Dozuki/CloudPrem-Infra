@@ -109,6 +109,20 @@ func (o TGOptions) execCapture(args ...string) (string, error) {
 	return buf.String(), err
 }
 
+// wrapTGError wraps err with the last error-shaped line of out, if there is one.
+// lastErrorLine returns "" when the captured output has no line that looks like a
+// real error (only noise, or nothing at all) - unconditionally formatting "%w: %s"
+// in that case leaves a dangling "exit status 1: " with nothing after the colon,
+// which breaks thinVerdictRE's anchored-on-$ match downstream in evidence.go and
+// makes ExtractError treat the bare verdict as already explained instead of falling
+// through to a real Error: line elsewhere in the log window.
+func wrapTGError(err error, out string) error {
+	if line := lastErrorLine(out); line != "" {
+		return fmt.Errorf("%w: %s", err, line)
+	}
+	return err
+}
+
 func (o TGOptions) Apply() error {
 	// Retry only the EKS access-entry propagation race (see kubeAuthRaceRE);
 	// terraform apply is idempotent, so a re-apply just finishes the remaining
@@ -148,7 +162,7 @@ func (o TGOptions) Apply() error {
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "\n>> harness: Vault token expired and re-login failed — not retrying\n\n")
-			return fmt.Errorf("%w: %s", err, lastErrorLine(out))
+			return wrapTGError(err, out)
 		}
 		if attempt < maxAttempts && transientNetRE.MatchString(out) {
 			wait := time.Duration(attempt*30) * time.Second
@@ -156,9 +170,9 @@ func (o TGOptions) Apply() error {
 			time.Sleep(wait)
 			continue
 		}
-		return fmt.Errorf("%w: %s", err, lastErrorLine(out))
+		return wrapTGError(err, out)
 	}
-	return fmt.Errorf("%w: %s", err, lastErrorLine(out))
+	return wrapTGError(err, out)
 }
 
 // destroyModule destroys a single layer in its own directory (not run --all), so
@@ -200,9 +214,9 @@ func (o TGOptions) destroyModule(module string) error {
 			time.Sleep(wait)
 			continue
 		}
-		return fmt.Errorf("%w: %s", err, lastErrorLine(out))
+		return wrapTGError(err, out)
 	}
-	return fmt.Errorf("%w: %s", err, lastErrorLine(lastOut))
+	return wrapTGError(err, lastOut)
 }
 
 // Destroy tears the stack down resiliently. `run --all destroy` aborts the whole

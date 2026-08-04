@@ -2,6 +2,7 @@ package harness
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,6 +70,43 @@ func TestApplyErrorCarriesOutputTail(t *testing.T) {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		t.Errorf("Apply() error does not unwrap to *exec.ExitError: %v", err)
+	}
+}
+
+// fakeNoErrorLineScript intentionally emits no Error:-prefixed line - only noise
+// and a bare exit code - so lastErrorLine(out) has nothing to append.
+const fakeNoErrorLineScript = `echo 'module.foo: Still destroying... [id=x, 1s elapsed]'
+echo 'some unrelated status line, not an Error:'
+echo 'exit status 1'`
+
+// TestApplyErrorHasNoDanglingColonWithoutErrorLine covers the P1 wrap bug: when the
+// captured output has no error-shaped line, wrapping unconditionally with "%w: %s"
+// leaves a dangling "exit status 1: " (trailing colon, nothing after it). That
+// breaks thinVerdictRE's anchored-on-$ match once main.go turns this error into a
+// "<phase> failed: ..." verdict line, which then makes ExtractError treat the bare
+// verdict as already explained instead of preferring a real Error: line elsewhere in
+// the log window.
+func TestApplyErrorHasNoDanglingColonWithoutErrorLine(t *testing.T) {
+	writeFakeTerragrunt(t, fakeNoErrorLineScript)
+	o := TGOptions{WorkingDir: t.TempDir(), Region: "us-east-1"}
+
+	err := o.Apply()
+	if err == nil {
+		t.Fatal("Apply() = nil, want an error")
+	}
+	if strings.HasSuffix(err.Error(), ":") || strings.HasSuffix(err.Error(), ": ") {
+		t.Fatalf("Apply() error has a dangling colon with nothing after it: %q", err.Error())
+	}
+
+	// Reproduce the shape a real failed run's captured log takes: main.go's verdict
+	// line sitting below the real tofu Error: line, separated by whatever noise fell
+	// in between.
+	verdict := fmt.Sprintf("teardown failed: %s", err)
+	log := "Error: the real explanation, from earlier in the run\n" + verdict + "\n"
+
+	got := ExtractError(log)
+	if !strings.Contains(got, "the real explanation") {
+		t.Errorf("ExtractError() = %q, want it to prefer the real Error: line over the thin verdict %q", got, verdict)
 	}
 }
 

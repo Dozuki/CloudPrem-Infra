@@ -92,12 +92,72 @@ func TestScrubRedactsSecrets(t *testing.T) {
 		{"password kv", `password="hunter2hunter"`},
 		{"base64 blob", strings.Repeat("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5", 2)},
 		{"private key", "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJ...\n-----END RSA PRIVATE KEY-----"},
+		{"private key pkcs8", "-----BEGIN PRIVATE KEY-----\nMIIBogIBAAJ...\n-----END PRIVATE KEY-----"},
+		{"embedded keyword env var", "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+		{"url credentials", "mysql://root:SuperSecretPw1@host/db"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := Scrub(c.input)
 			if got == c.input {
 				t.Errorf("Scrub(%q) left input unchanged", c.input)
+			}
+		})
+	}
+}
+
+func TestScrubRedactsEmbeddedKeywordAndURLCredentials(t *testing.T) {
+	cases := []struct {
+		name        string
+		input       string
+		mustNotHave string
+		mustHave    string
+	}{
+		{
+			name:        "aws secret access key",
+			input:       "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+			mustNotHave: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+			mustHave:    "AWS_SECRET_ACCESS_KEY=[redacted]",
+		},
+		{
+			name:        "mysql url password",
+			input:       "mysql://root:SuperSecretPw1@host/db",
+			mustNotHave: "SuperSecretPw1",
+			mustHave:    "mysql://root:[redacted]@host/db",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Scrub(c.input)
+			if strings.Contains(got, c.mustNotHave) {
+				t.Errorf("Scrub(%q) = %q, must not contain the raw secret %q", c.input, got, c.mustNotHave)
+			}
+			if !strings.Contains(got, c.mustHave) {
+				t.Errorf("Scrub(%q) = %q, want it to contain %q", c.input, got, c.mustHave)
+			}
+		})
+	}
+}
+
+// TestScrubKeywordRuleDoesNotFlattenSpecificLabels guards against the widened
+// keyword rule running over its own output: several specific labels above
+// ("[redacted-vault-token]", "[redacted-slack-token]", "[redacted-github-token]")
+// contain the word "token", which the generic keyword rule also matches on.
+func TestScrubKeywordRuleDoesNotFlattenSpecificLabels(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"vault token", "VAULT_TOKEN=hvs.CAESIJf8vN3vN3vN3vN3vN3vN3vN3vN3vN3vN3vN3vN3vN3", "[redacted-vault-token]"},
+		{"slack token", "SLACK_TOKEN=xoxb-1234567890-abcdefghij", "[redacted-slack-token]"},
+		{"github token", "GH_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "[redacted-github-token]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Scrub(c.input)
+			if !strings.Contains(got, c.want) {
+				t.Errorf("Scrub(%q) = %q, want the specific label %q preserved (not flattened to a bare [redacted])", c.input, got, c.want)
 			}
 		})
 	}
@@ -207,14 +267,35 @@ func TestBuildCapsAtThreeNodesPerChild(t *testing.T) {
 	_ = Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
 
 	stub.mu.Lock()
-	n := len(stub.requested)
+	got := append([]string(nil), stub.requested...)
 	stub.mu.Unlock()
-	if n != 3 {
-		t.Errorf("requested %d objects, want 3 (the per-child node cap)", n)
+	if len(got) != 3 {
+		t.Errorf("requested %d objects, want 3 (the per-child node cap)", len(got))
 	}
-	for _, r := range stub.requested {
+	for _, r := range got {
 		if strings.Contains(r, "retry-a") {
-			t.Errorf("Retry node was fetched: %v", stub.requested)
+			t.Errorf("Retry node was fetched: %v", got)
+		}
+	}
+	// The cap must keep the LATEST 3 by FinishedAt (c, d, e), not the earliest (a,
+	// b, c) - the most recent failures are the ones relevant to a currently-red run.
+	for _, want := range []string{"c/main.log", "d/main.log", "e/main.log"} {
+		found := false
+		for _, r := range got {
+			if strings.Contains(r, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("requested %v, want it to include the latest node %q", got, want)
+		}
+	}
+	for _, notWant := range []string{"a/main.log", "b/main.log"} {
+		for _, r := range got {
+			if strings.Contains(r, notWant) {
+				t.Errorf("requested %v, want the earliest nodes dropped in favor of the latest", got)
+			}
 		}
 	}
 }
@@ -273,6 +354,37 @@ func TestBuildRespectsWireBudget(t *testing.T) {
 		}
 		if c.LogExcerpt != "" && !strings.HasSuffix(c.LogExcerpt, "…") {
 			t.Errorf("child %q: log_excerpt = %q, want it truncated with an ellipsis", c.Name, c.LogExcerpt)
+		}
+	}
+}
+
+// TestBuildDMSDiagnosticSurvivesTruncation is the CRITICAL regression for the
+// aws-sdk-go-v2 boilerplate strip: it asserts on Build's actual card-visible output
+// (ChildEvidence.LogExcerpt), not just ExtractError's return value, since Build
+// applies its own truncation on top of ExtractError and that is where the
+// diagnostic was getting cut off before the fix.
+func TestBuildDMSDiagnosticSurvivesTruncation(t *testing.T) {
+	list := loadWorkflowList(t, "workflows-list.json")
+	logs := map[string]string{
+		"dozuki-argo-artifacts-010601635461/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log": readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log":             readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log":              readTestdata(t, "bi-ha-destroy-tail.log"),
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), list, stub, BuildOptions{})
+
+	var biHa *ChildEvidence
+	for i := range children {
+		if children[i].Config == "bi_ha" {
+			biHa = &children[i]
+		}
+	}
+	if biHa == nil {
+		t.Fatal("no bi_ha child in Build() output")
+	}
+	for _, want := range []string{"InvalidResourceStateFault", "cannot be stopped"} {
+		if !strings.Contains(biHa.LogExcerpt, want) {
+			t.Errorf("bi_ha LogExcerpt = %q, want it to contain %q (the DMS diagnostic must survive both the per-line and per-child truncation)", biHa.LogExcerpt, want)
 		}
 	}
 }
