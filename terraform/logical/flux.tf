@@ -288,6 +288,14 @@ locals {
       host          = local.db_master_host
       adminUsername = local.db_master_username
       adminPassword = local.db_master_password
+      # The chart's default repository is the commercial dozukicloud ECR, which gov
+      # cannot reach (found live on sharedgov 2026-08-03: the first hook run sat in
+      # ImagePullBackOff and wedged the 2.7.1 upgrade in a fail/rollback loop). Derive
+      # the host from the env's own registry instead: identical to the default on
+      # commercial, the haul-mirrored copy on gov. Tag stays the chart default.
+      image = {
+        repository = "${split("/", var.image_repository)[0]}/mysql-client"
+      }
     }
 
     googleTranslate = { token = var.google_translate_api_token } # (was set_sensitive)
