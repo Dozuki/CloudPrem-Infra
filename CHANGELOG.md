@@ -2,6 +2,19 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.13.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.12.1...v8.13.0) (2026-08-04)
+
+
+### Features
+
+* **logical:** floor spot node memory and right-size mesh dataplane requests ([#445](https://github.com/Dozuki/CloudPrem-Infra/issues/445)) ([d4d7b1f](https://github.com/Dozuki/CloudPrem-Infra/commit/d4d7b1f6f76a53a550510356c99c4999bea169dd))
+* **physical:** alarm on NLB target group healthy-host count ([#443](https://github.com/Dozuki/CloudPrem-Infra/issues/443)) ([907d931](https://github.com/Dozuki/CloudPrem-Infra/commit/907d9315820bd800eb911d52722abcbb6b0680b4))
+
+
+### Bug Fixes
+
+* **physical:** critical nlb alarm reads per-az minimum as full outage during partial degradation ([57ef73f](https://github.com/Dozuki/CloudPrem-Infra/commit/57ef73f8afb515599ba2b8a314c20207a545a13f))
+
 ## [8.12.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.12.0...v8.12.1) (2026-08-04)
 
 
