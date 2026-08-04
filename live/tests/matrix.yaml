@@ -66,6 +66,16 @@ versions:
     chart_version: "2.2.0"
 
 configs:
+  # PR scenario gating (.github/workflows/upgrade-tests.yml, "Select PR scenarios" step) reads
+  # the `paths:` list below per scenario: a scenario runs on a PR only if the relevant diff
+  # touches one of its globs. A config with NO `paths:` key (min_default) always runs - that is
+  # the baseline every PR pays for, and it is why a new scenario added without a paths list
+  # runs everywhere until someone writes one. This list is the single source of truth for
+  # "what counts as BI"; keep it in sync with what bi_ha's feature flags actually turn on.
+  # The gate also has two escapes that ignore this list entirely: any PR touching live/tests/**
+  # or the workflow file itself runs every PR scenario (a harness change has to prove the whole
+  # matrix still works), and the `harness-full` PR label forces the same. The workflow step's
+  # own comments carry the rest of the rule, including the diff basis per PR type.
   - name: min_default
     env: min
     feature_flags:
@@ -110,6 +120,41 @@ configs:
       # harness needs no explicit entry; leaving it unset works for local + CI.
   - name: bi_ha
     env: bi
+    # What this scenario actually exercises: DMS Serverless replication (physical/bi.tf),
+    # the BI target database on either engine path (aws_db_instance dms_replica_database /
+    # module.bi_aurora) and its parameter groups, the bi_* variables that steer them, the
+    # logical-layer dms-start Job, and the bi/ env dirs the scenario's `env: bi` resolves to.
+    #
+    # The test for a file belonging here is not "is it named bi": it is "can breaking this
+    # be invisible to min_default". min_default runs with enable_bi false, so everything
+    # gated on enable_bi/dms_enabled is only ever proven by this scenario, including the
+    # physical outputs that hand DMS to the logical layer, the logical locals and Vault
+    # write that consume them, and the DMS IAM the dms-start Job assumes.
+    #
+    # variables.tf/main.tf/monitoring.tf/db.tf/eks.tf/aurora.tf/outputs.tf and the logical
+    # main.tf/vault.tf/flux.tf are shared files (not BI-only), so a change anywhere in them
+    # over-triggers this scenario rather than risk missing a real bi_* toggle edit - cheap
+    # insurance, since the alternative is finding out on the release PR.
+    paths:
+      - "terraform/physical/bi.tf"
+      - "terraform/physical/static/dms_config.json"
+      - "terraform/physical/static/dms_mapping.json"
+      - "terraform/physical/util/dms_restart.py"
+      - "terraform/physical/util/dms-stop.sh"
+      - "terraform/physical/variables.tf"
+      - "terraform/physical/main.tf"        # bi_uses_aurora + every bi_db_* local
+      - "terraform/physical/monitoring.tf"  # DMS alarm wiring
+      - "terraform/physical/outputs.tf"     # dms_task_arn, dms_replication_generation, bi_*
+      - "terraform/physical/db.tf"          # locals the DMS source endpoint reads
+      - "terraform/physical/eks.tf"         # dms:Start*/Describe* for the dms-start Job
+      - "terraform/physical/aurora.tf"      # bi_uses_aurora shares its final-snapshot suffix
+      - "terraform/logical/bi.tf"
+      - "terraform/logical/variables.tf"
+      - "terraform/logical/main.tf"         # db_bi_* locals + the BI credentials secret
+      - "terraform/logical/vault.tf"        # the BI database credentials write
+      - "terraform/logical/flux.tf"         # grafanaDbInit + the enable_bi precondition
+      - "live/.skel/environments/bi/**"
+      - "live/*/*/bi/**"
     feature_flags:
       enable_bi: true
       db_engine: aurora
