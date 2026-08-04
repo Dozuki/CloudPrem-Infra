@@ -468,9 +468,10 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         #
         # Consequence worth stating plainly: a do-not-disrupt pod's node is
         # ineligible for VOLUNTARY consolidation for as long as that pod lives
-        # there (same boundary as helm-controller below - drift and expiry
-        # still force through eventually, bounded by the NodeClaim's
-        # terminationGracePeriod; only spot interruption/repair/manual delete
+        # there (same boundary as helm-controller below - drift still forces
+        # through eventually, bounded by the NodeClaim's terminationGracePeriod;
+        # no expireAfter is set on this pool, so age alone never recycles it;
+        # only spot interruption/repair/manual delete
         # are irrelevant here since this is the on-demand pool). The six
         # annotated workloads pack onto roughly two nodes per env at current
         # request sizes (opensearch's 3Gi request alone fills most of one
@@ -479,6 +480,10 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         # pool, but it cannot repack those six onto fewer nodes on its own.
         consolidationPolicy = "WhenEmptyOrUnderutilized"
         consolidateAfter    = "5m"
+        # One node at a time regardless of pool size. The CRD default is 10% which
+        # rounds up to 1 at today's 4-7 nodes/env, but that scales invisibly with
+        # the pool; pin it so a repack wave can never take two nodes at once.
+        budgets = [{ nodes = "1" }]
       }
       weight = 10
     }

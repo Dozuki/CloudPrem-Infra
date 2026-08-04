@@ -430,7 +430,7 @@ locals {
         resources = {
           requests = {
             cpu    = "25m"
-            memory = "128Mi"
+            memory = "64Mi"
           }
         }
       }
