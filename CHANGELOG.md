@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.12.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.12.0...v8.12.1) (2026-08-04)
+
+
+### Bug Fixes
+
+* **logical:** grafana-db-init hook image follows the env registry ([#439](https://github.com/Dozuki/CloudPrem-Infra/issues/439)) ([a8c3b2f](https://github.com/Dozuki/CloudPrem-Infra/commit/a8c3b2fa8a885099ef90d83b243282cc56b28b49))
+
 ## [8.12.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.11.1...v8.12.0) (2026-08-03)
 
 
