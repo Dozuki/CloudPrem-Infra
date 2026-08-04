@@ -28,6 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  contents: read
   id-token: write
   statuses: write
 
@@ -38,12 +39,17 @@ env:
   # PR runs test min + bi in parallel (semaphore is 2, so wall clock = bi_ha alone,
   # and two upgrade paths get covered). full stays nightly-only: it is the slowest
   # stack and its extra coverage (provisioned-RDS BI, istio strict) is not worth the
-  # PR wait. Dispatch runs take the inputs (defaults = the nightly shape).
+  # PR wait. Dispatch runs take the inputs (defaults = the nightly shape). This is the
+  # ceiling for a PR run; the "Select PR scenarios" step below narrows it further by
+  # dropping any non-baseline scenario whose matrix.yaml paths the relevant diff never
+  # touches. min_default has no paths entry, so it is never dropped.
   CONFIGS: ${{ github.event_name == 'pull_request' && '["min_default","bi_ha"]' || inputs.configs }}
   FROM_REF: ${{ github.event_name == 'pull_request' && 'auto:latest' || inputs.from-ref }}
   TO_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.to-ref }}
   PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || '' }}
   PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
+  PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+  PR_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
   NAME_HINT: ${{ github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || 'manual' }}
 
 jobs:
@@ -51,6 +57,117 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-upgrade-tests')
     runs-on: ubuntu-latest
     steps:
+      # Only PR runs need the repo: the scenario-selection step below diffs it. Dispatch
+      # runs take configs verbatim from the input and never touch git.
+      - name: Check out the repo
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      # Narrows CONFIGS for a PR run so it doesn't pay for a scenario nothing relevant
+      # changed. min_default always survives (it carries no paths list). Every other PR
+      # scenario runs iff:
+      #   - the relevant diff touches one of its live/tests/matrix.yaml `paths:` globs, or
+      #   - the relevant diff touches the harness itself (live/tests/** or this workflow
+      #     file) — a harness change has to prove the WHOLE matrix still passes, or
+      #   - the PR carries the `harness-full` label (manual escape hatch).
+      #
+      # "Relevant diff" depends on what kind of PR this is. A normal PR: base...head of the
+      # PR (three-dot — merge-base to head, so unrelated master history that landed after
+      # the branch forked doesn't count). A release-please PR (branch release-please--*):
+      # the PR's own diff is just the changelog/manifest bump, so the diff that matters is
+      # everything the release will actually ship — last tag..current base-branch HEAD
+      # (two-dot, direct diff), covering every commit merged since the last release.
+      - name: Select PR scenarios
+        if: github.event_name == 'pull_request'
+        env:
+          HARNESS_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'harness-full') }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_HEAD_REF" == release-please--* ]]; then
+            echo "release-please PR ($GITHUB_HEAD_REF): diff basis = last tag..${PR_BASE_REF} HEAD"
+            git fetch --quiet origin "$PR_BASE_REF"
+            BASE_TIP=$(git rev-parse FETCH_HEAD)
+            LAST_TAG=$(git describe --tags --abbrev=0 "$BASE_TIP")
+            echo "last tag: $LAST_TAG, base tip: $BASE_TIP"
+            CHANGED=$(git diff --name-only "$LAST_TAG" "$BASE_TIP")
+          else
+            echo "normal PR: diff basis = ${PR_BASE_SHA}...${PR_SHA}"
+            CHANGED=$(git diff --name-only "${PR_BASE_SHA}...${PR_SHA}")
+          fi
+
+          echo "relevant diff (${#CHANGED} bytes):"
+          echo "$CHANGED"
+
+          HARNESS_CHANGED=false
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            if [[ "$f" == live/tests/* || "$f" == .github/workflows/upgrade-tests.yml ]]; then
+              HARNESS_CHANGED=true
+              break
+            fi
+          done <<< "$CHANGED"
+
+          # live/tests/matrix.yaml is itself under live/tests/**, so any edit to the path
+          # map below is already covered by HARNESS_CHANGED and never needs its own entry.
+          SCENARIO_PATHS=$(python3 - <<'PY'
+          import json
+          try:
+              import yaml
+          except ImportError:
+              import subprocess, sys
+              subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pyyaml"], check=True)
+              import yaml
+          with open("live/tests/matrix.yaml") as f:
+              data = yaml.safe_load(f)
+          print(json.dumps({c["name"]: c.get("paths", []) for c in data["configs"]}))
+          PY
+          )
+
+          SELECTED=()
+          for name in $(echo "$CONFIGS" | jq -r '.[]'); do
+            if [[ "$name" == "min_default" ]]; then
+              SELECTED+=("$name")
+              continue
+            fi
+            if [[ "$HARNESS_CHANGED" == true ]]; then
+              echo "keeping $name: harness changed"
+              SELECTED+=("$name")
+              continue
+            fi
+            if [[ "$HARNESS_FULL_LABEL" == "true" ]]; then
+              echo "keeping $name: harness-full label"
+              SELECTED+=("$name")
+              continue
+            fi
+            MATCHED=false
+            PATTERNS=$(echo "$SCENARIO_PATHS" | jq -r --arg n "$name" '.[$n][]? ')
+            while IFS= read -r pat; do
+              [[ -z "$pat" ]] && continue
+              while IFS= read -r f; do
+                [[ -z "$f" ]] && continue
+                if [[ "$f" == $pat ]]; then
+                  MATCHED=true
+                fi
+              done <<< "$CHANGED"
+            done <<< "$PATTERNS"
+            if [[ "$MATCHED" == true ]]; then
+              echo "keeping $name: diff matches its paths"
+              SELECTED+=("$name")
+            else
+              echo "dropping $name: no path match in the relevant diff"
+            fi
+          done
+
+          NEW_CONFIGS=$(printf '%s\n' "${SELECTED[@]}" | jq -R . | jq -s -c .)
+          echo "CONFIGS=$NEW_CONFIGS" >> "$GITHUB_ENV"
+          echo "selected PR scenarios: $NEW_CONFIGS" >> "$GITHUB_STEP_SUMMARY"
+
       # The submit heredoc expands these; refuse anything that could smuggle shell or
       # YAML through a dispatch input. PR-path values are a hex SHA and org/repo, which
       # pass these same shapes.
