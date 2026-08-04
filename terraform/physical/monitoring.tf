@@ -1000,8 +1000,13 @@ resource "aws_cloudwatch_metric_alarm" "nlb_healthy_hosts_critical" {
   period              = 60
   namespace           = "AWS/NetworkELB"
   metric_name         = "HealthyHostCount"
-  statistic           = "Minimum"
-  treat_missing_data  = "missing"
+  # Maximum, not Minimum: the metric is per-AZ and an AZ can publish 0 during a
+  # partial degradation while another AZ still serves (measured live: min=0
+  # max=1 with one replica up). Maximum reads 0 only when no AZ sees a healthy
+  # target, which is the actual full-outage condition this alarm means. Partial
+  # degradation is the warning alarm's job.
+  statistic          = "Maximum"
+  treat_missing_data = "missing"
 
   dimensions = {
     LoadBalancer = module.nlb.arn_suffix
