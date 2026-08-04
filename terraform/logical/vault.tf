@@ -236,15 +236,28 @@ resource "vault_kv_secret_v2" "google_translate" {
   })
 }
 
-resource "vault_kv_secret_v2" "smtp" {
-  count               = var.cloud == "aws" ? 1 : 0
-  mount               = "secret"
-  name                = "${local.vault_env_prefix}/smtp"
-  delete_all_versions = !var.protect_resources
+# The env smtp password is no longer Terraform-managed. The dozuki chart's
+# ExternalSecret reads this Vault path with a null-safe template guard and
+# falls back to the fleet-wide SendGrid password when the path is absent, so
+# an env that wants its own password gets it hand-written to Vault (or synced
+# from 1Password later) instead of arriving through a stack variable.
+# destroy = false: forget the resource, leave whatever value is in Vault
+# today untouched. Deleting the path per env is a separate, deliberate step
+# gated on that env running the chart release with the ExternalSecret fix
+# (dozuki/helm#221) - see terraform/logical/README.md's smtp_password entry.
+#
+# Requires the chart release from dozuki/helm#221 fleet-wide FIRST: on the
+# old chart, an absent smtp path aborts the whole dozuki-infra-credentials
+# ExternalSecret sync (db/cache/sentry stop refreshing too). This `removed`
+# block only forgets Terraform state, it does not touch Vault, so it is safe
+# to merge and apply before every env is upgraded - the actual deletion of
+# each env's Vault path is a manual, per-env, post-upgrade step.
+removed {
+  from = vault_kv_secret_v2.smtp
 
-  data_json = jsonencode({
-    password = var.smtp_password
-  })
+  lifecycle {
+    destroy = false
+  }
 }
 
 # --- Dashboards (shared Grafana) --- #
@@ -326,11 +339,6 @@ moved {
 moved {
   from = vault_kv_secret_v2.google_translate
   to   = vault_kv_secret_v2.google_translate[0]
-}
-
-moved {
-  from = vault_kv_secret_v2.smtp
-  to   = vault_kv_secret_v2.smtp[0]
 }
 
 moved {
