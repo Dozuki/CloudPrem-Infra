@@ -314,6 +314,20 @@ resource "kubernetes_manifest" "nodepool_spot" {
                 key      = "eks.amazonaws.com/instance-generation"
                 operator = "Gt"
                 values   = ["4"]
+              },
+              # Memory floor, spot pool only: requests-based bin packing can
+              # otherwise land Karpenter on a ~4GiB instance class (~3.1GiB
+              # allocatable), and one unbounded app pod on a node that small
+              # starves everything else scheduled there - including the
+              # per-node ztunnel dataplane pod (see istio.tf for the other
+              # half of this fix). eks.amazonaws.com/instance-memory is in
+              # MiB (ground-truthed against a live NodePool). Gt "6144" (6GiB)
+              # excludes 4GiB classes and admits 8GiB classes without
+              # excluding an instance that happens to report exactly 8192.
+              {
+                key      = "eks.amazonaws.com/instance-memory"
+                operator = "Gt"
+                values   = ["6144"]
               }
             ]
           },
