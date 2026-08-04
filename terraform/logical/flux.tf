@@ -323,9 +323,11 @@ locals {
   # no legal fallback - the volume pins the zone, the on-demand pool's taint blocked
   # entry, and that is the old spot-fleet stranding incident reproduced (adversarial
   # AZ/PVC review, 2026-07-28; observed live: all three volumes on one spot c4.xlarge).
-  # On-demand placement plus the on-demand pool's WhenEmpty consolidation makes their
-  # disruptions rare and their replacement capacity reliably provisionable in the
-  # volume's AZ.
+  # On-demand placement plus the pod-level do-not-disrupt annotation set below
+  # (local.do_not_disrupt_annotation) makes their disruptions rare and their
+  # replacement capacity reliably provisionable in the volume's AZ. The pool
+  # itself no longer carries a pool-wide WhenEmpty policy for this - see the
+  # disruption block on kubernetes.tf's on-demand NodePool.
   #
   # Lives HERE and not in chart defaults on purpose: the selector/toleration reference
   # Karpenter/EKS labels that do not exist on onprem or AKS clusters - baked into the
@@ -340,7 +342,7 @@ locals {
   # on-demand pool never launched a node at all, and its NoSchedule taint therefore never
   # kept anything off these nodes - opensearch shared a node with untainted workloads until
   # the node ran out of page cache. Naming the pool is what actually engages both the taint
-  # and the pool's WhenEmpty disruption policy (2026-08-01).
+  # and the pool's disruption policy (2026-08-01).
   stateful_node_selector = { "karpenter.sh/nodepool" = "on-demand" }
   stateful_tolerations = [{
     key      = "eks.amazonaws.com/capacity-type"
@@ -348,43 +350,89 @@ locals {
     value    = "on-demand"
     effect   = "NoSchedule"
   }]
+  # karpenter.sh/do-not-disrupt="true" on every pod below, quoted string per the
+  # helm-controller precedent (this file, helm_release.flux, further down) -
+  # Kubernetes annotation values are strings and an unquoted true is rejected at
+  # apply time. This is what lets kubernetes.tf's on-demand NodePool run
+  # WhenEmptyOrUnderutilized: the annotation exempts these specific pods' nodes
+  # from voluntary consolidation instead of exempting the whole pool the way
+  # WhenEmpty used to. Verified against the vendored subchart values (helm/chart
+  # Chart.yaml pins): opensearch 3.4.0 has a top-level `podAnnotations`, kube-
+  # prometheus-stack 82.8.0's Prometheus/Alertmanager CRs take
+  # `{prometheus,alertmanager}Spec.podMetadata.annotations`, grafana 11.2.3 and
+  # metrics-server 3.13.1 and prometheus-adapter 5.3.0 all have a top-level
+  # `podAnnotations` consumed by their Deployment templates.
+  #
+  # Rollout note: this changes every one of these pod templates, so each env
+  # rolls opensearch, prometheus, alertmanager and the customer grafana once -
+  # a real EBS detach/reattach and a search/metrics gap, the same event the
+  # annotation exists to stop happening again - the first time that env takes
+  # the infra_version bump carrying this change. Not a background no-op;
+  # sequence it per env like any other stateful rollout (dev-min/qa first).
+  #
+  # Floor: a pod carrying this annotation pins its node against consolidation
+  # for as long as the pod lives there, so these six workloads set a practical
+  # floor of roughly 2 on-demand nodes per env - consolidation can shrink
+  # everything else on the pool, it cannot repack these onto fewer nodes.
+  do_not_disrupt_annotation = { "karpenter.sh/do-not-disrupt" = "true" }
   app_stateful_scheduling = {
     for k, v in {
       opensearch = {
-        nodeSelector = local.stateful_node_selector
-        tolerations  = local.stateful_tolerations
+        nodeSelector   = local.stateful_node_selector
+        tolerations    = local.stateful_tolerations
+        podAnnotations = local.do_not_disrupt_annotation
       }
       "kube-prometheus-stack" = {
         prometheus = { prometheusSpec = {
           nodeSelector = local.stateful_node_selector
           tolerations  = local.stateful_tolerations
+          podMetadata  = { annotations = local.do_not_disrupt_annotation }
         } }
         alertmanager = { alertmanagerSpec = {
           nodeSelector = local.stateful_node_selector
           tolerations  = local.stateful_tolerations
+          podMetadata  = { annotations = local.do_not_disrupt_annotation }
         } }
       }
       # The customer dashboards Grafana (top-level `grafana` key; the kps ops grafana
       # is emptyDir-only and stays on spot). Deep-merged below - base sets env and
       # secret mounts under the same key.
       grafana = {
-        nodeSelector = local.stateful_node_selector
-        tolerations  = local.stateful_tolerations
+        nodeSelector   = local.stateful_node_selector
+        tolerations    = local.stateful_tolerations
+        podAnnotations = local.do_not_disrupt_annotation
       }
       # Not EBS-backed, but the HPA control plane: metrics-server serves metrics.k8s.io
       # and prometheus-adapter serves external.metrics.k8s.io, and both are single
       # replica. On the spot pool their consolidation churn left every HPA computing on
       # stale/absent metrics (m3-usac: FailedGetExternalMetric x45 over 5d, 30-min
       # metric gaps). A PDB is the wrong tool at 1 replica (it only delays the eviction
-      # until the force-delete); rare-disruption placement is the protection, same as
-      # the volumes above. Deep-merged below - base sets args under metrics-server.
+      # until the force-delete); do-not-disrupt is the protection, same as the volumes
+      # above - now that the pool itself is WhenEmptyOrUnderutilized, these two need
+      # their own pod-level exclusion or the exact m3-usac incident reproduces on
+      # every consolidation pass. Deep-merged below - base sets args under metrics-server.
       "metrics-server" = {
-        nodeSelector = local.stateful_node_selector
-        tolerations  = local.stateful_tolerations
+        nodeSelector   = local.stateful_node_selector
+        tolerations    = local.stateful_tolerations
+        podAnnotations = local.do_not_disrupt_annotation
       }
       "prometheus-adapter" = {
-        nodeSelector = local.stateful_node_selector
-        tolerations  = local.stateful_tolerations
+        nodeSelector   = local.stateful_node_selector
+        tolerations    = local.stateful_tolerations
+        podAnnotations = local.do_not_disrupt_annotation
+        # Was running with zero requests fleet-wide (5+ envs confirmed live), which
+        # put it in BestEffort QoS and made it invisible to Karpenter's bin-packing
+        # math - it occupied a node slot for free and was first in line for
+        # eviction under node pressure, the opposite of what the on-demand pin was
+        # for. Values are modest and honest: measured actual usage across the
+        # fleet is well under this, so the request just makes the pod visible to
+        # bin-packing rather than reserving real headroom.
+        resources = {
+          requests = {
+            cpu    = "25m"
+            memory = "128Mi"
+          }
+        }
       }
     } : k => v if var.cloud == "aws"
   }

@@ -446,15 +446,39 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         )
       }
       disruption = {
-        # WhenEmpty, not WhenEmptyOrUnderutilized: this pool exists for workloads
-        # that are expensive to move - the on-demand-pinned app tier and (via the
-        # values CPI sets on the monitoring/search subcharts) every EBS-backed
-        # singleton. Underutilization-driven bin-packing was detaching and
-        # re-attaching 50Gi volumes on routine 60-second consolidation passes,
-        # and every forced reschedule re-rolls the AZ-capacity dice. These nodes
-        # now go away only when empty, on AMI drift, or at the 336h expiry.
-        consolidationPolicy = "WhenEmpty"
-        consolidateAfter    = "1m"
+        # Was WhenEmpty pool-wide: this pool hosts the on-demand-pinned app tier
+        # and (via the values CPI sets on the monitoring/search subcharts) every
+        # EBS-backed singleton. Underutilization-driven bin-packing was detaching
+        # and re-attaching 50Gi volumes on routine 60-second consolidation
+        # passes, and every forced reschedule re-rolled the AZ-capacity dice for
+        # zone-pinned PVCs - so the whole pool was exempted from bin-packing to
+        # protect four pods.
+        #
+        # That protection now lives on the pods instead of the pool: opensearch,
+        # prometheus, alertmanager, the customer grafana, metrics-server and
+        # prometheus-adapter all carry `karpenter.sh/do-not-disrupt: "true"`
+        # (flux.tf, local.app_stateful_scheduling), the same mechanism already
+        # proven on helm-controller below. A node hosting one of those pods is
+        # still skipped by consolidation; every other node in the pool - the
+        # ones with no such pod, sitting empty or near-empty - is repacked
+        # normally. consolidateAfter=5m (not the spot pool's 1m) so a pod that's
+        # mid-reschedule doesn't trigger a repack on the churn itself; the 1m
+        # cadence on spot was part of what made the first WhenEmptyOrUnderutilized
+        # attempt on this pool noisy.
+        #
+        # Consequence worth stating plainly: a do-not-disrupt pod's node is
+        # ineligible for VOLUNTARY consolidation for as long as that pod lives
+        # there (same boundary as helm-controller below - drift and expiry
+        # still force through eventually, bounded by the NodeClaim's
+        # terminationGracePeriod; only spot interruption/repair/manual delete
+        # are irrelevant here since this is the on-demand pool). The six
+        # annotated workloads pack onto roughly two nodes per env at current
+        # request sizes (opensearch's 3Gi request alone fills most of one
+        # 8GiB node), so that sets a practical floor of about 2 on-demand
+        # nodes per env - consolidation can shrink everything else on the
+        # pool, but it cannot repack those six onto fewer nodes on its own.
+        consolidationPolicy = "WhenEmptyOrUnderutilized"
+        consolidateAfter    = "5m"
       }
       weight = 10
     }
