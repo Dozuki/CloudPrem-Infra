@@ -1,0 +1,1240 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "harness-bi-ha-8dps9",
+        "labels": {
+          "harness/config": "bi_ha",
+          "harness/parent": "harness-pr440-fkm85",
+          "harness/scenario": "upgrade",
+          "workflows.argoproj.io/completed": "true",
+          "workflows.argoproj.io/phase": "Failed"
+        }
+      },
+      "status": {
+        "phase": "Failed",
+        "message": "child 'harness-bi-ha-8dps9-3308889610' failed",
+        "artifactRepositoryRef": {
+          "artifactRepository": {
+            "s3": {
+              "bucket": "dozuki-argo-artifacts-010601635461",
+              "endpoint": "s3.amazonaws.com",
+              "region": "us-east-1",
+              "useSDKCreds": true
+            }
+          },
+          "default": true
+        },
+        "nodes": {
+          "harness-bi-ha-8dps9": {
+            "children": [
+              "harness-bi-ha-8dps9-4095453574"
+            ],
+            "displayName": "harness-bi-ha-8dps9",
+            "finishedAt": "2026-08-04T01:07:38Z",
+            "id": "harness-bi-ha-8dps9",
+            "message": "child 'harness-bi-ha-8dps9-3308889610' failed",
+            "name": "harness-bi-ha-8dps9",
+            "outboundNodes": [
+              "harness-bi-ha-8dps9-3742410289"
+            ],
+            "phase": "Failed",
+            "progress": "2/3",
+            "resourcesDuration": {
+              "cpu": 2114,
+              "memory": 80651
+            },
+            "startedAt": "2026-08-04T00:33:48Z",
+            "templateName": "scenario",
+            "templateScope": "local/",
+            "type": "Steps"
+          },
+          "harness-bi-ha-8dps9-1058228422": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "children": [
+              "harness-bi-ha-8dps9-2572215237"
+            ],
+            "displayName": "provision",
+            "finishedAt": "2026-08-04T01:06:38Z",
+            "id": "harness-bi-ha-8dps9-1058228422",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "provision"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-bi-ha-8dps9"
+                },
+                {
+                  "name": "config",
+                  "value": "bi_ha"
+                },
+                {
+                  "name": "extra-args",
+                  "value": "--scenario upgrade --from-ref auto:latest --to-ref 8f347c78fb11039a9737c30e956fa16e5f57cd78"
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "name": "harness-bi-ha-8dps9[1].provision",
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-2572215237/main.log"
+                  }
+                }
+              ],
+              "exitCode": "0"
+            },
+            "phase": "Succeeded",
+            "progress": "1/2",
+            "resourcesDuration": {
+              "cpu": 2114,
+              "memory": 80649
+            },
+            "startedAt": "2026-08-04T00:34:08Z",
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Retry"
+          },
+          "harness-bi-ha-8dps9-1404467215": {
+            "boundaryID": "harness-bi-ha-8dps9-2319326335",
+            "children": [
+              "harness-bi-ha-8dps9-945485330"
+            ],
+            "displayName": "destroy",
+            "finishedAt": "2026-08-04T01:30:34Z",
+            "id": "harness-bi-ha-8dps9-1404467215",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "teardown"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-bi-ha-8dps9"
+                },
+                {
+                  "name": "config",
+                  "value": "bi_ha"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "10800"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": "Failed"
+                }
+              ]
+            },
+            "message": "Max duration limit exceeded",
+            "name": "harness-bi-ha-8dps9.onExit[0].destroy",
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log"
+                  }
+                }
+              ],
+              "exitCode": "1"
+            },
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 1488,
+              "memory": 56772
+            },
+            "startedAt": "2026-08-04T01:07:38Z",
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Retry"
+          },
+          "harness-bi-ha-8dps9-2319326335": {
+            "children": [
+              "harness-bi-ha-8dps9-3272611691"
+            ],
+            "displayName": "harness-bi-ha-8dps9.onExit",
+            "finishedAt": "2026-08-04T01:30:34Z",
+            "id": "harness-bi-ha-8dps9-2319326335",
+            "message": "child 'harness-bi-ha-8dps9-1404467215' failed",
+            "name": "harness-bi-ha-8dps9.onExit",
+            "nodeFlag": {
+              "hooked": true
+            },
+            "outboundNodes": [
+              "harness-bi-ha-8dps9-945485330"
+            ],
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 1488,
+              "memory": 56772
+            },
+            "startedAt": "2026-08-04T01:07:38Z",
+            "templateName": "teardown",
+            "templateScope": "local/",
+            "type": "Steps"
+          },
+          "harness-bi-ha-8dps9-2572215237": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "children": [
+              "harness-bi-ha-8dps9-4028740456"
+            ],
+            "displayName": "provision(0)",
+            "finishedAt": "2026-08-04T01:06:29Z",
+            "hostNodeName": "i-03cfe00b9dd900ec1",
+            "id": "harness-bi-ha-8dps9-2572215237",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "provision"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-bi-ha-8dps9"
+                },
+                {
+                  "name": "config",
+                  "value": "bi_ha"
+                },
+                {
+                  "name": "extra-args",
+                  "value": "--scenario upgrade --from-ref auto:latest --to-ref 8f347c78fb11039a9737c30e956fa16e5f57cd78"
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "name": "harness-bi-ha-8dps9[1].provision(0)",
+            "nodeFlag": {
+              "retried": true
+            },
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-2572215237/main.log"
+                  }
+                }
+              ],
+              "exitCode": "0"
+            },
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 2110,
+              "memory": 80481
+            },
+            "startedAt": "2026-08-04T00:34:08Z",
+            "taskResultSynced": true,
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Pod"
+          },
+          "harness-bi-ha-8dps9-2875709487": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "children": [
+              "harness-bi-ha-8dps9-4028196003"
+            ],
+            "displayName": "gate",
+            "finishedAt": "2026-08-04T00:33:59Z",
+            "hostNodeName": "i-03cfe00b9dd900ec1",
+            "id": "harness-bi-ha-8dps9-2875709487",
+            "name": "harness-bi-ha-8dps9[0].gate",
+            "outputs": {
+              "exitCode": "0",
+              "result": "run"
+            },
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 0,
+              "memory": 2
+            },
+            "startedAt": "2026-08-04T00:33:48Z",
+            "taskResultSynced": true,
+            "templateName": "staleness-gate",
+            "templateScope": "local/",
+            "type": "Pod"
+          },
+          "harness-bi-ha-8dps9-3272611691": {
+            "boundaryID": "harness-bi-ha-8dps9-2319326335",
+            "children": [
+              "harness-bi-ha-8dps9-1404467215"
+            ],
+            "displayName": "[0]",
+            "finishedAt": "2026-08-04T01:30:34Z",
+            "id": "harness-bi-ha-8dps9-3272611691",
+            "message": "child 'harness-bi-ha-8dps9-1404467215' failed",
+            "name": "harness-bi-ha-8dps9.onExit[0]",
+            "nodeFlag": {},
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 1488,
+              "memory": 56772
+            },
+            "startedAt": "2026-08-04T01:07:38Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-bi-ha-8dps9-3308889610": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "children": [
+              "harness-bi-ha-8dps9-3742410289"
+            ],
+            "displayName": "upgrade",
+            "finishedAt": "2026-08-04T01:07:38Z",
+            "id": "harness-bi-ha-8dps9-3308889610",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "upgrade"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-bi-ha-8dps9"
+                },
+                {
+                  "name": "config",
+                  "value": "bi_ha"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "message": "main: Error (exit code 1)",
+            "name": "harness-bi-ha-8dps9[2].upgrade",
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log"
+                  }
+                }
+              ],
+              "exitCode": "1"
+            },
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 4,
+              "memory": 168
+            },
+            "startedAt": "2026-08-04T01:06:38Z",
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Retry"
+          },
+          "harness-bi-ha-8dps9-3742410289": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "displayName": "upgrade(0)",
+            "finishedAt": "2026-08-04T01:06:53Z",
+            "hostNodeName": "i-03cfe00b9dd900ec1",
+            "id": "harness-bi-ha-8dps9-3742410289",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "upgrade"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-bi-ha-8dps9"
+                },
+                {
+                  "name": "config",
+                  "value": "bi_ha"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "message": "main: Error (exit code 1)",
+            "name": "harness-bi-ha-8dps9[2].upgrade(0)",
+            "nodeFlag": {
+              "retried": true
+            },
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log"
+                  }
+                }
+              ],
+              "exitCode": "1"
+            },
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 4,
+              "memory": 168
+            },
+            "startedAt": "2026-08-04T01:06:38Z",
+            "taskResultSynced": true,
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Pod"
+          },
+          "harness-bi-ha-8dps9-4028196003": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "children": [
+              "harness-bi-ha-8dps9-1058228422"
+            ],
+            "displayName": "[1]",
+            "finishedAt": "2026-08-04T01:06:38Z",
+            "id": "harness-bi-ha-8dps9-4028196003",
+            "name": "harness-bi-ha-8dps9[1]",
+            "nodeFlag": {},
+            "phase": "Succeeded",
+            "progress": "1/2",
+            "resourcesDuration": {
+              "cpu": 2114,
+              "memory": 80649
+            },
+            "startedAt": "2026-08-04T00:34:08Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-bi-ha-8dps9-4028740456": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "children": [
+              "harness-bi-ha-8dps9-3308889610"
+            ],
+            "displayName": "[2]",
+            "finishedAt": "2026-08-04T01:07:38Z",
+            "id": "harness-bi-ha-8dps9-4028740456",
+            "message": "child 'harness-bi-ha-8dps9-3308889610' failed",
+            "name": "harness-bi-ha-8dps9[2]",
+            "nodeFlag": {},
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 4,
+              "memory": 168
+            },
+            "startedAt": "2026-08-04T01:06:38Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-bi-ha-8dps9-4095453574": {
+            "boundaryID": "harness-bi-ha-8dps9",
+            "children": [
+              "harness-bi-ha-8dps9-2875709487"
+            ],
+            "displayName": "[0]",
+            "finishedAt": "2026-08-04T00:34:08Z",
+            "id": "harness-bi-ha-8dps9-4095453574",
+            "name": "harness-bi-ha-8dps9[0]",
+            "nodeFlag": {},
+            "phase": "Succeeded",
+            "progress": "2/3",
+            "resourcesDuration": {
+              "cpu": 2114,
+              "memory": 80651
+            },
+            "startedAt": "2026-08-04T00:33:48Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-bi-ha-8dps9-945485330": {
+            "boundaryID": "harness-bi-ha-8dps9-2319326335",
+            "displayName": "destroy(0)",
+            "finishedAt": "2026-08-04T01:30:24Z",
+            "hostNodeName": "i-03cfe00b9dd900ec1",
+            "id": "harness-bi-ha-8dps9-945485330",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "teardown"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-bi-ha-8dps9"
+                },
+                {
+                  "name": "config",
+                  "value": "bi_ha"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "10800"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": "Failed"
+                }
+              ]
+            },
+            "message": "main: Error (exit code 1)",
+            "name": "harness-bi-ha-8dps9.onExit[0].destroy(0)",
+            "nodeFlag": {
+              "retried": true
+            },
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log"
+                  }
+                }
+              ],
+              "exitCode": "1"
+            },
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 1488,
+              "memory": 56772
+            },
+            "startedAt": "2026-08-04T01:07:38Z",
+            "taskResultSynced": true,
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Pod"
+          }
+        }
+      }
+    },
+    {
+      "metadata": {
+        "name": "harness-min-default-mdgxp",
+        "labels": {
+          "harness/config": "min_default",
+          "harness/parent": "harness-pr440-fkm85",
+          "harness/scenario": "upgrade",
+          "workflows.argoproj.io/completed": "true",
+          "workflows.argoproj.io/phase": "Failed"
+        }
+      },
+      "status": {
+        "phase": "Failed",
+        "message": "child 'harness-min-default-mdgxp-1377804381' failed",
+        "artifactRepositoryRef": {
+          "artifactRepository": {
+            "s3": {
+              "bucket": "dozuki-argo-artifacts-010601635461",
+              "endpoint": "s3.amazonaws.com",
+              "region": "us-east-1",
+              "useSDKCreds": true
+            }
+          },
+          "default": true
+        },
+        "nodes": {
+          "harness-min-default-mdgxp": {
+            "children": [
+              "harness-min-default-mdgxp-1618521269"
+            ],
+            "displayName": "harness-min-default-mdgxp",
+            "finishedAt": "2026-08-04T00:46:20Z",
+            "id": "harness-min-default-mdgxp",
+            "message": "child 'harness-min-default-mdgxp-1377804381' failed",
+            "name": "harness-min-default-mdgxp",
+            "outboundNodes": [
+              "harness-min-default-mdgxp-1651265260"
+            ],
+            "phase": "Failed",
+            "progress": "2/3",
+            "resourcesDuration": {
+              "cpu": 1790,
+              "memory": 68315
+            },
+            "startedAt": "2026-08-04T00:17:20Z",
+            "templateName": "scenario",
+            "templateScope": "local/",
+            "type": "Steps"
+          },
+          "harness-min-default-mdgxp-1068304776": {
+            "children": [
+              "harness-min-default-mdgxp-3724164466"
+            ],
+            "displayName": "harness-min-default-mdgxp.onExit",
+            "finishedAt": "2026-08-04T01:07:13Z",
+            "id": "harness-min-default-mdgxp-1068304776",
+            "name": "harness-min-default-mdgxp.onExit",
+            "nodeFlag": {
+              "hooked": true
+            },
+            "outboundNodes": [
+              "harness-min-default-mdgxp-3396737381"
+            ],
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 1354,
+              "memory": 51655
+            },
+            "startedAt": "2026-08-04T00:46:20Z",
+            "templateName": "teardown",
+            "templateScope": "local/",
+            "type": "Steps"
+          },
+          "harness-min-default-mdgxp-1377804381": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "children": [
+              "harness-min-default-mdgxp-1651265260"
+            ],
+            "displayName": "upgrade",
+            "finishedAt": "2026-08-04T00:46:20Z",
+            "id": "harness-min-default-mdgxp-1377804381",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "upgrade"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-min-default-mdgxp"
+                },
+                {
+                  "name": "config",
+                  "value": "min_default"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "message": "main: Error (exit code 1)",
+            "name": "harness-min-default-mdgxp[2].upgrade",
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log"
+                  }
+                }
+              ],
+              "exitCode": "1"
+            },
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 4,
+              "memory": 168
+            },
+            "startedAt": "2026-08-04T00:45:10Z",
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Retry"
+          },
+          "harness-min-default-mdgxp-145041638": {
+            "boundaryID": "harness-min-default-mdgxp-1068304776",
+            "children": [
+              "harness-min-default-mdgxp-3396737381"
+            ],
+            "displayName": "destroy",
+            "finishedAt": "2026-08-04T01:07:13Z",
+            "id": "harness-min-default-mdgxp-145041638",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "teardown"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-min-default-mdgxp"
+                },
+                {
+                  "name": "config",
+                  "value": "min_default"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "10800"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": "Failed"
+                }
+              ]
+            },
+            "name": "harness-min-default-mdgxp.onExit[0].destroy",
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-min-default-mdgxp/harness-min-default-mdgxp-run-3396737381/main.log"
+                  }
+                }
+              ],
+              "exitCode": "0"
+            },
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 1354,
+              "memory": 51655
+            },
+            "startedAt": "2026-08-04T00:46:20Z",
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Retry"
+          },
+          "harness-min-default-mdgxp-1551557888": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "children": [
+              "harness-min-default-mdgxp-2472796141"
+            ],
+            "displayName": "[1]",
+            "finishedAt": "2026-08-04T00:45:10Z",
+            "id": "harness-min-default-mdgxp-1551557888",
+            "name": "harness-min-default-mdgxp[1]",
+            "nodeFlag": {},
+            "phase": "Succeeded",
+            "progress": "1/2",
+            "resourcesDuration": {
+              "cpu": 1790,
+              "memory": 68313
+            },
+            "startedAt": "2026-08-04T00:17:40Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-min-default-mdgxp-1618521269": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "children": [
+              "harness-min-default-mdgxp-2045085062"
+            ],
+            "displayName": "[0]",
+            "finishedAt": "2026-08-04T00:17:40Z",
+            "id": "harness-min-default-mdgxp-1618521269",
+            "name": "harness-min-default-mdgxp[0]",
+            "nodeFlag": {},
+            "phase": "Succeeded",
+            "progress": "2/3",
+            "resourcesDuration": {
+              "cpu": 1790,
+              "memory": 68315
+            },
+            "startedAt": "2026-08-04T00:17:20Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-min-default-mdgxp-1651265260": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "displayName": "upgrade(0)",
+            "finishedAt": "2026-08-04T00:45:34Z",
+            "hostNodeName": "i-04c9ce08e9cec77cb",
+            "id": "harness-min-default-mdgxp-1651265260",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "upgrade"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-min-default-mdgxp"
+                },
+                {
+                  "name": "config",
+                  "value": "min_default"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "message": "main: Error (exit code 1)",
+            "name": "harness-min-default-mdgxp[2].upgrade(0)",
+            "nodeFlag": {
+              "retried": true
+            },
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log"
+                  }
+                }
+              ],
+              "exitCode": "1"
+            },
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 4,
+              "memory": 168
+            },
+            "startedAt": "2026-08-04T00:45:10Z",
+            "taskResultSynced": true,
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Pod"
+          },
+          "harness-min-default-mdgxp-2045085062": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "children": [
+              "harness-min-default-mdgxp-1551557888"
+            ],
+            "displayName": "gate",
+            "finishedAt": "2026-08-04T00:17:31Z",
+            "hostNodeName": "i-04c9ce08e9cec77cb",
+            "id": "harness-min-default-mdgxp-2045085062",
+            "name": "harness-min-default-mdgxp[0].gate",
+            "outputs": {
+              "exitCode": "0",
+              "result": "run"
+            },
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 0,
+              "memory": 2
+            },
+            "startedAt": "2026-08-04T00:17:20Z",
+            "taskResultSynced": true,
+            "templateName": "staleness-gate",
+            "templateScope": "local/",
+            "type": "Pod"
+          },
+          "harness-min-default-mdgxp-2472796141": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "children": [
+              "harness-min-default-mdgxp-4225676220"
+            ],
+            "displayName": "provision",
+            "finishedAt": "2026-08-04T00:45:10Z",
+            "id": "harness-min-default-mdgxp-2472796141",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "provision"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-min-default-mdgxp"
+                },
+                {
+                  "name": "config",
+                  "value": "min_default"
+                },
+                {
+                  "name": "extra-args",
+                  "value": "--scenario upgrade --from-ref auto:latest --to-ref 8f347c78fb11039a9737c30e956fa16e5f57cd78"
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "name": "harness-min-default-mdgxp[1].provision",
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-min-default-mdgxp/harness-min-default-mdgxp-run-4225676220/main.log"
+                  }
+                }
+              ],
+              "exitCode": "0"
+            },
+            "phase": "Succeeded",
+            "progress": "1/2",
+            "resourcesDuration": {
+              "cpu": 1790,
+              "memory": 68313
+            },
+            "startedAt": "2026-08-04T00:17:40Z",
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Retry"
+          },
+          "harness-min-default-mdgxp-2624884219": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "children": [
+              "harness-min-default-mdgxp-1377804381"
+            ],
+            "displayName": "[2]",
+            "finishedAt": "2026-08-04T00:46:20Z",
+            "id": "harness-min-default-mdgxp-2624884219",
+            "message": "child 'harness-min-default-mdgxp-1377804381' failed",
+            "name": "harness-min-default-mdgxp[2]",
+            "nodeFlag": {},
+            "phase": "Failed",
+            "progress": "0/1",
+            "resourcesDuration": {
+              "cpu": 4,
+              "memory": 168
+            },
+            "startedAt": "2026-08-04T00:45:10Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-min-default-mdgxp-3396737381": {
+            "boundaryID": "harness-min-default-mdgxp-1068304776",
+            "displayName": "destroy(0)",
+            "finishedAt": "2026-08-04T01:07:04Z",
+            "hostNodeName": "i-04c9ce08e9cec77cb",
+            "id": "harness-min-default-mdgxp-3396737381",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "teardown"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-min-default-mdgxp"
+                },
+                {
+                  "name": "config",
+                  "value": "min_default"
+                },
+                {
+                  "name": "extra-args",
+                  "value": ""
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "10800"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": "Failed"
+                }
+              ]
+            },
+            "name": "harness-min-default-mdgxp.onExit[0].destroy(0)",
+            "nodeFlag": {
+              "retried": true
+            },
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-min-default-mdgxp/harness-min-default-mdgxp-run-3396737381/main.log"
+                  }
+                }
+              ],
+              "exitCode": "0"
+            },
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 1354,
+              "memory": 51655
+            },
+            "startedAt": "2026-08-04T00:46:20Z",
+            "taskResultSynced": true,
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Pod"
+          },
+          "harness-min-default-mdgxp-3724164466": {
+            "boundaryID": "harness-min-default-mdgxp-1068304776",
+            "children": [
+              "harness-min-default-mdgxp-145041638"
+            ],
+            "displayName": "[0]",
+            "finishedAt": "2026-08-04T01:07:13Z",
+            "id": "harness-min-default-mdgxp-3724164466",
+            "name": "harness-min-default-mdgxp.onExit[0]",
+            "nodeFlag": {},
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 1354,
+              "memory": 51655
+            },
+            "startedAt": "2026-08-04T00:46:20Z",
+            "templateScope": "local/",
+            "type": "StepGroup"
+          },
+          "harness-min-default-mdgxp-4225676220": {
+            "boundaryID": "harness-min-default-mdgxp",
+            "children": [
+              "harness-min-default-mdgxp-2624884219"
+            ],
+            "displayName": "provision(0)",
+            "finishedAt": "2026-08-04T00:45:00Z",
+            "hostNodeName": "i-04c9ce08e9cec77cb",
+            "id": "harness-min-default-mdgxp-4225676220",
+            "inputs": {
+              "parameters": [
+                {
+                  "name": "phase",
+                  "value": "provision"
+                },
+                {
+                  "name": "run-id",
+                  "value": "harness-min-default-mdgxp"
+                },
+                {
+                  "name": "config",
+                  "value": "min_default"
+                },
+                {
+                  "name": "extra-args",
+                  "value": "--scenario upgrade --from-ref auto:latest --to-ref 8f347c78fb11039a9737c30e956fa16e5f57cd78"
+                },
+                {
+                  "name": "repo-ref",
+                  "value": "master"
+                },
+                {
+                  "name": "deadline",
+                  "value": "5400"
+                },
+                {
+                  "name": "keep-on-failure",
+                  "value": "false"
+                },
+                {
+                  "name": "workflow-status",
+                  "value": ""
+                }
+              ]
+            },
+            "name": "harness-min-default-mdgxp[1].provision(0)",
+            "nodeFlag": {
+              "retried": true
+            },
+            "outputs": {
+              "artifacts": [
+                {
+                  "name": "main-logs",
+                  "s3": {
+                    "key": "harness-min-default-mdgxp/harness-min-default-mdgxp-run-4225676220/main.log"
+                  }
+                }
+              ],
+              "exitCode": "0"
+            },
+            "phase": "Succeeded",
+            "progress": "1/1",
+            "resourcesDuration": {
+              "cpu": 1786,
+              "memory": 68145
+            },
+            "startedAt": "2026-08-04T00:17:40Z",
+            "taskResultSynced": true,
+            "templateRef": {
+              "name": "harness-phase",
+              "template": "run"
+            },
+            "templateScope": "local/",
+            "type": "Pod"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/harness"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,19 +16,28 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-const usage = `usage: harness <provision|upgrade|validate|teardown> [flags]
+const usage = `usage: harness <provision|upgrade|validate|teardown|evidence> [flags]
   common: --run-id --config --repo-dir --account-id --profile --region --matrix --state-bucket [--mem-store]
   provision: --scenario <upgrade|fresh> --from-ref --to-ref --namespace
-  teardown:  --keep-on-failure --failed`
+  teardown:  --keep-on-failure --failed
+  evidence:  --region --max-nodes --timeout (reads a WorkflowList json on stdin,
+             writes the CHILD_JSON array on stdout; needs neither --run-id nor --config)`
 
-func main() { os.Exit(dispatch(os.Args[1:], os.Stderr)) }
+func main() { os.Exit(dispatch(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
-func dispatch(args []string, stderr io.Writer) int {
+func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
 	}
 	sub, rest := args[0], args[1:]
+
+	// evidence has its own flags (no --run-id/--config) and no matrix, so it
+	// branches out before the shared flagset below demands either.
+	if sub == "evidence" {
+		return runEvidence(rest, stdin, stdout, stderr)
+	}
+
 	fs := flag.NewFlagSet(sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -120,4 +132,68 @@ func loadAWS(ctx context.Context, profile, region string) (aws.Config, error) {
 		opts = append(opts, config.WithSharedConfigProfile(profile))
 	}
 	return config.LoadDefaultConfig(ctx, opts...)
+}
+
+// runEvidence reads a `kubectl get workflows -o json` WorkflowList from stdin and
+// writes the CHILD_JSON array (the existing name/config/phase/msg/detail fields
+// plus the new log_excerpt) to stdout.
+//
+// This can never silence the failure card: 20-matrix.yaml's post-status step falls
+// back to its own jq expression on anything but a clean exit 0 with non-empty
+// output, so any failure here just means the card reads today's node summary
+// instead of the extracted error - never nothing.
+func runEvidence(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("evidence", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	region := fs.String("region", "us-east-1", "AWS region for the S3 log fetch")
+	maxNodes := fs.Int("max-nodes", 3, "max failed Pod nodes fetched per child")
+	timeout := fs.Duration("timeout", 45*time.Second, "overall S3 fetch budget")
+	if err := fs.Parse(rest); err != nil {
+		return 2
+	}
+
+	body, err := io.ReadAll(stdin)
+	if err != nil {
+		fmt.Fprintf(stderr, "evidence: read stdin: %v\n", err)
+		return 1
+	}
+
+	var list harness.WorkflowList
+	if trimmed := bytes.TrimSpace(body); len(trimmed) > 0 {
+		if err := json.Unmarshal(trimmed, &list); err != nil {
+			fmt.Fprintf(stderr, "evidence: parse workflows json: %v\n", err)
+			return 1
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout+10*time.Second)
+	defer cancel()
+
+	// Skip AWS entirely when there is nothing to fetch (no children, e.g. the
+	// query raced the children existing yet) - keeps the common no-op case fast
+	// and avoids depending on AWS creds being reachable at all.
+	var fetcher harness.LogTail
+	if len(list.Items) > 0 {
+		awsCfg, err := loadAWS(ctx, "", *region)
+		if err != nil {
+			fmt.Fprintf(stderr, "evidence: aws config: %v\n", err)
+			return 1
+		}
+		fetcher = harness.NewS3LogTail(s3.NewFromConfig(awsCfg))
+	} else {
+		fetcher = harness.NewS3LogTail(nil)
+	}
+
+	children := harness.Build(ctx, list, fetcher, harness.BuildOptions{
+		MaxNodesPerChild: *maxNodes,
+		OverallBudget:    *timeout,
+	})
+
+	out, err := json.Marshal(children)
+	if err != nil {
+		fmt.Fprintf(stderr, "evidence: marshal output: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(out))
+	return 0
 }

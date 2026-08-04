@@ -1,0 +1,18 @@
+[
+  {
+    "name": "harness-bi-ha-8dps9",
+    "config": "bi_ha",
+    "phase": "Failed",
+    "msg": "child 'harness-bi-ha-8dps9-3308889610' failed",
+    "detail": "upgrade(0): main: Error (exit code 1); destroy(0): main: Error (exit code 1)",
+    "log_excerpt": "upgrade(0): upgrade failed: worktree add 8f347c78fb11039a9737c30e956fa16e5f57cd78 (8f347c78fb11039a9737c30e956fa16e5f57cd78): exit status 128; destroy(0): Error: stopping DMS Serverless Replication (arn:aws:dms:us-east-1:000000000000:replication-config:REPLICATIONCONFIGID): operation error Database Migration Service: StopReplication, https response error StatusCode: 400, \u2026"
+  },
+  {
+    "name": "harness-min-default-mdgxp",
+    "config": "min_default",
+    "phase": "Failed",
+    "msg": "child 'harness-min-default-mdgxp-1377804381' failed",
+    "detail": "upgrade(0): main: Error (exit code 1)",
+    "log_excerpt": "upgrade(0): upgrade failed: worktree add 8f347c78fb11039a9737c30e956fa16e5f57cd78 (8f347c78fb11039a9737c30e956fa16e5f57cd78): exit status 128"
+  }
+]

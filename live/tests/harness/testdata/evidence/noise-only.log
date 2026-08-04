@@ -1,0 +1,97 @@
+[0;90m01:18:26.723[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.vpc[0].aws_internet_gateway.this[0]: Still destroying... [id=igw-0611aa19bbe91699b, 20s elapsed][0m[0m[0m
+[0;90m01:18:28.064[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 1m30s elapsed][0m[0m[0m
+[0;90m01:18:28.456[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_route53_zone.vault_private: Still destroying... [id=Z09762332S9H9AP59BM6P, 1m10s elapsed][0m[0m[0m
+[0;90m01:18:29.721[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_cluster.dr_aurora_secondary[0]: Still destroying... [id=smokef9b3-bi-dr, 1m20s elapsed][0m[0m[0m
+[0;90m01:18:31.008[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_vpc_endpoint.vault: Still destroying... [id=vpce-02e02f38c9bacdf5c, 1m0s elapsed][0m[0m[0m
+[0;90m01:18:31.196[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 1m0s elapsed][0m[0m[0m
+[0;90m01:18:36.723[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.vpc[0].aws_internet_gateway.this[0]: Still destroying... [id=igw-0611aa19bbe91699b, 30s elapsed][0m[0m[0m
+[0;90m01:18:38.064[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 1m40s elapsed][0m[0m[0m
+[0;90m01:18:38.457[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_route53_zone.vault_private: Still destroying... [id=Z09762332S9H9AP59BM6P, 1m20s elapsed][0m[0m[0m
+[0;90m01:18:39.722[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_cluster.dr_aurora_secondary[0]: Still destroying... [id=smokef9b3-bi-dr, 1m30s elapsed][0m[0m[0m
+[0;90m01:18:41.010[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_vpc_endpoint.vault: Still destroying... [id=vpce-02e02f38c9bacdf5c, 1m10s elapsed][0m[0m[0m
+[0;90m01:18:41.196[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 1m10s elapsed][0m[0m[0m
+[0;90m01:18:46.724[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.vpc[0].aws_internet_gateway.this[0]: Still destroying... [id=igw-0611aa19bbe91699b, 40s elapsed][0m[0m[0m
+[0;90m01:18:48.065[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 1m50s elapsed][0m[0m[0m
+[0;90m01:18:48.457[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_route53_zone.vault_private: Still destroying... [id=Z09762332S9H9AP59BM6P, 1m30s elapsed][0m[0m[0m
+[0;90m01:18:48.714[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_route53_zone.vault_private: Destruction complete after 1m31s[0m[0m
+[0;90m01:18:49.723[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_cluster.dr_aurora_secondary[0]: Still destroying... [id=smokef9b3-bi-dr, 1m40s elapsed][0m[0m[0m
+[0;90m01:18:51.011[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_vpc_endpoint.vault: Still destroying... [id=vpce-02e02f38c9bacdf5c, 1m20s elapsed][0m[0m[0m
+[0;90m01:18:51.197[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 1m20s elapsed][0m[0m[0m
+[0;90m01:18:51.567[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_vpc_endpoint.vault: Destruction complete after 1m21s[0m[0m
+[0;90m01:18:51.569[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_security_group.vault_endpoint: Destroying... [id=sg-0edab5540abc08351][0m[0m[0m
+[0;90m01:18:52.178[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_security_group.vault_endpoint: Destruction complete after 0s[0m[0m
+[0;90m01:18:56.725[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.vpc[0].aws_internet_gateway.this[0]: Still destroying... [id=igw-0611aa19bbe91699b, 50s elapsed][0m[0m[0m
+[0;90m01:18:58.065[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 2m0s elapsed][0m[0m[0m
+[0;90m01:18:58.301[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.vpc[0].aws_internet_gateway.this[0]: Destruction complete after 51s[0m[0m
+[0;90m01:18:59.723[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_cluster.dr_aurora_secondary[0]: Still destroying... [id=smokef9b3-bi-dr, 1m50s elapsed][0m[0m[0m
+[0;90m01:19:01.197[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 1m30s elapsed][0m[0m[0m
+[0;90m01:19:08.066[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 2m10s elapsed][0m[0m[0m
+[0;90m01:19:09.729[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_cluster.dr_aurora_secondary[0]: Still destroying... [id=smokef9b3-bi-dr, 2m0s elapsed][0m[0m[0m
+[0;90m01:19:11.197[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 1m40s elapsed][0m[0m[0m
+[0;90m01:19:12.644[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_cluster.dr_aurora_secondary[0]: Destruction complete after 2m3s[0m[0m
+[0;90m01:19:12.788[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_global_cluster.aurora[0]: Destroying... [id=smokef9b3-bi-global][0m[0m[0m
+[0;90m01:19:12.789[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_kms_key.dr_aurora[0]: Destroying... [id=6f9be8e5-3dae-4a17-b43d-e5a96a216b45][0m[0m[0m
+[0;90m01:19:12.792[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["general"]: Destroying... [id=/aws/rds/cluster/smokef9b3-bi-dr/general][0m[0m[0m
+[0;90m01:19:12.793[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_db_subnet_group.dr_aurora[0]: Destroying... [id=smokef9b3-bi-dr-aurora-e08355a639e8ac1b609b6c90b3][0m[0m[0m
+[0;90m01:19:12.793[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["error"]: Destroying... [id=/aws/rds/cluster/smokef9b3-bi-dr/error][0m[0m[0m
+[0;90m01:19:12.793[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["audit"]: Destroying... [id=/aws/rds/cluster/smokef9b3-bi-dr/audit][0m[0m[0m
+[0;90m01:19:12.798[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_security_group.dr_aurora[0]: Destroying... [id=sg-01272e9ef7f9545c2][0m[0m[0m
+[0;90m01:19:12.800[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Destroying... [id=smokef9b3-bi-reader][0m[0m[0m
+[0;90m01:19:13.074[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_db_subnet_group.dr_aurora[0]: Destruction complete after 0s[0m[0m
+[0;90m01:19:13.077[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Destroying... [id=smokef9b3-bi-writer][0m[0m[0m
+[0;90m01:19:13.113[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_kms_key.dr_aurora[0]: Destruction complete after 0s[0m[0m
+[0;90m01:19:13.115[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["slowquery"]: Destroying... [id=/aws/rds/cluster/smokef9b3-bi-dr/slowquery][0m[0m[0m
+[0;90m01:19:13.135[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["audit"]: Destruction complete after 0s[0m[0m
+[0;90m01:19:13.139[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_subnet.dr_aurora["us-west-2a"]: Destroying... [id=subnet-023c67e6abd6d6e6e][0m[0m[0m
+[0;90m01:19:13.157[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["general"]: Destruction complete after 0s[0m[0m
+[0;90m01:19:13.160[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_subnet.dr_aurora["us-west-2c"]: Destroying... [id=subnet-034c58b2eeed76dd2][0m[0m[0m
+[0;90m01:19:13.212[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["error"]: Destruction complete after 0s[0m[0m
+[0;90m01:19:13.216[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_subnet.dr_aurora["us-west-2b"]: Destroying... [id=subnet-0d400e2792fffe89e][0m[0m[0m
+[0;90m01:19:13.249[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_cloudwatch_log_group.dr_aurora["slowquery"]: Destruction complete after 0s[0m[0m
+[0;90m01:19:13.701[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_security_group.dr_aurora[0]: Destruction complete after 1s[0m[0m
+[0;90m01:19:13.945[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_subnet.dr_aurora["us-west-2c"]: Destruction complete after 1s[0m[0m
+[0;90m01:19:13.985[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_subnet.dr_aurora["us-west-2a"]: Destruction complete after 1s[0m[0m
+[0;90m01:19:14.034[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_rds_global_cluster.aurora[0]: Destruction complete after 1s[0m[0m
+[0;90m01:19:14.067[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_subnet.dr_aurora["us-west-2b"]: Destruction complete after 1s[0m[0m
+[0;90m01:19:14.070[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_vpc.dr_aurora[0]: Destroying... [id=vpc-046c0e3d4627616d2][0m[0m[0m
+[0;90m01:19:14.724[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1maws_vpc.dr_aurora[0]: Destruction complete after 1s[0m[0m
+[0;90m01:19:18.066[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 2m20s elapsed][0m[0m[0m
+[0;90m01:19:21.198[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 1m50s elapsed][0m[0m[0m
+[0;90m01:19:22.801[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 10s elapsed][0m[0m[0m
+[0;90m01:19:23.078[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 10s elapsed][0m[0m[0m
+[0;90m01:19:28.069[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 2m30s elapsed][0m[0m[0m
+[0;90m01:19:31.198[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 2m0s elapsed][0m[0m[0m
+[0;90m01:19:32.802[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 20s elapsed][0m[0m[0m
+[0;90m01:19:33.079[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 20s elapsed][0m[0m[0m
+[0;90m01:19:38.072[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 2m40s elapsed][0m[0m[0m
+[0;90m01:19:41.200[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 2m10s elapsed][0m[0m[0m
+[0;90m01:19:42.803[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 30s elapsed][0m[0m[0m
+[0;90m01:19:43.080[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 30s elapsed][0m[0m[0m
+[0;90m01:19:48.075[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 2m50s elapsed][0m[0m[0m
+[0;90m01:19:51.200[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 2m20s elapsed][0m[0m[0m
+[0;90m01:19:52.804[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 40s elapsed][0m[0m[0m
+[0;90m01:19:53.081[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 40s elapsed][0m[0m[0m
+[0;90m01:19:58.075[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 3m0s elapsed][0m[0m[0m
+[0;90m01:20:01.200[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 2m30s elapsed][0m[0m[0m
+[0;90m01:20:02.805[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 50s elapsed][0m[0m[0m
+[0;90m01:20:03.081[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 50s elapsed][0m[0m[0m
+[0;90m01:20:08.076[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 3m10s elapsed][0m[0m[0m
+[0;90m01:20:11.200[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 2m40s elapsed][0m[0m[0m
+[0;90m01:20:12.805[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 1m0s elapsed][0m[0m[0m
+[0;90m01:20:13.082[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 1m0s elapsed][0m[0m[0m
+[0;90m01:20:18.076[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 3m20s elapsed][0m[0m[0m
+[0;90m01:20:21.201[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 2m50s elapsed][0m[0m[0m
+[0;90m01:20:22.806[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 1m10s elapsed][0m[0m[0m
+[0;90m01:20:23.082[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 1m10s elapsed][0m[0m[0m
+[0;90m01:20:28.076[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 3m30s elapsed][0m[0m[0m
+[0;90m01:20:31.202[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 3m0s elapsed][0m[0m[0m
+[0;90m01:20:32.806[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 1m20s elapsed][0m[0m[0m
+[0;90m01:20:33.083[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 1m20s elapsed][0m[0m[0m
+[0;90m01:20:38.076[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 3m40s elapsed][0m[0m[0m
+[0;90m01:20:41.202[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 3m10s elapsed][0m[0m[0m
+[0;90m01:20:42.807[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 1m30s elapsed][0m[0m[0m
+[0;90m01:20:43.084[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 1m30s elapsed][0m[0m[0m
+[0;90m01:20:48.076[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.bi_aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-bi-writer, 3m50s elapsed][0m[0m[0m
+[0;90m01:20:51.203[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.eks_cluster.aws_eks_cluster.this[0]: Still destroying... [id=smokef9b3-bi, 3m20s elapsed][0m[0m[0m
+[0;90m01:20:52.807[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["reader"]: Still destroying... [id=smokef9b3-bi-reader, 1m40s elapsed][0m[0m[0m
+[0;90m01:20:53.084[0m [0;37mSTDOUT[0m [0;36mtofu: [0m[0m[1mmodule.aurora[0].aws_rds_cluster_instance.this["writer"]: Still destroying... [id=smokef9b3-bi-writer, 1m40s elapsed][0m[0m[0m
