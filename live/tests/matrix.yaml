@@ -137,6 +137,10 @@ configs:
     # insurance, since the alternative is finding out on the release PR.
     paths:
       - "terraform/physical/bi.tf"
+      # rds.tf carries the BI database security group and the RDS
+      # parameter-group/replica path this scenario's older baseline runs on;
+      # min_default is aurora-only and never exercises them.
+      - "terraform/physical/rds.tf"
       - "terraform/physical/static/dms_config.json"
       - "terraform/physical/static/dms_mapping.json"
       - "terraform/physical/util/dms_restart.py"
