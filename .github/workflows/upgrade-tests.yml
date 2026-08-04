@@ -48,7 +48,6 @@ env:
   TO_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.to-ref }}
   PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || '' }}
   PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
-  PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
   PR_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
   NAME_HINT: ${{ github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || 'manual' }}
 
@@ -59,49 +58,88 @@ jobs:
     steps:
       # Only PR runs need the repo: the scenario-selection step below diffs it. Dispatch
       # runs take configs verbatim from the input and never touch git.
+      #
+      # fetch-depth 0 so the merge base is reachable. No fetch-tags here on purpose: with a
+      # bare SHA as the ref, checkout fetches that one commit's history with no destination
+      # refspec, and fetch-tags only drops --no-tags, which follows nothing in that shape.
+      # The selection step fetches the base branch and the tags itself.
       - name: Check out the repo
         if: github.event_name == 'pull_request'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-          fetch-tags: true
           persist-credentials: false
 
       # Narrows CONFIGS for a PR run so it doesn't pay for a scenario nothing relevant
-      # changed. min_default always survives (it carries no paths list). Every other PR
-      # scenario runs iff:
+      # changed. A scenario with no `paths:` list in live/tests/matrix.yaml is the always-on
+      # baseline (min_default today) and always survives. Every other PR scenario runs iff:
       #   - the relevant diff touches one of its live/tests/matrix.yaml `paths:` globs, or
       #   - the relevant diff touches the harness itself (live/tests/** or this workflow
-      #     file) — a harness change has to prove the WHOLE matrix still passes, or
+      #     file) - a harness change has to prove the WHOLE matrix still passes, or
       #   - the PR carries the `harness-full` label (manual escape hatch).
       #
-      # "Relevant diff" depends on what kind of PR this is. A normal PR: base...head of the
-      # PR (three-dot — merge-base to head, so unrelated master history that landed after
-      # the branch forked doesn't count). A release-please PR (branch release-please--*):
-      # the PR's own diff is just the changelog/manifest bump, so the diff that matters is
-      # everything the release will actually ship — last tag..current base-branch HEAD
+      # "Relevant diff" depends on what kind of PR this is. A normal PR: merge-base(base
+      # branch tip, head)..head, so unrelated base-branch history that landed after the
+      # branch forked doesn't count. A release-please PR (branch release-please--*): the
+      # PR's own diff is just the changelog/manifest bump, so the diff that matters is
+      # everything the release will actually ship - last tag..current base-branch HEAD
       # (two-dot, direct diff), covering every commit merged since the last release.
+      #
+      # Narrowing is an optimisation. Losing coverage on the PR that needed it is not an
+      # acceptable failure mode, so every error path here keeps the full PR set and says
+      # so in the job summary instead of exiting non-zero: a step failure would abort the
+      # job before it submits anything, and the commit status the PR gates on is only
+      # written after the submit.
       - name: Select PR scenarios
         if: github.event_name == 'pull_request'
         env:
           HARNESS_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'harness-full') }}
         run: |
-          set -euo pipefail
+          # Deliberately no -e: see the fail-safe note above. Errors are handled per command.
+          set -uo pipefail
+
+          keep_everything() {
+            echo "scenario gating unavailable ($1); keeping the full PR set $CONFIGS"
+            echo "scenario gating unavailable ($1); kept the full PR set \`$CONFIGS\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+
+          # The checkout above was given a bare SHA, so git created no remote-tracking refs
+          # and fetched no tags: fetch-tags only drops --no-tags, and a refspec with no
+          # destination follows no tags anyway. Both have to be asked for explicitly, or
+          # `git describe` below finds nothing and the base tip is not a resolvable name.
+          git fetch --quiet --tags origin "+refs/heads/${PR_BASE_REF}:refs/remotes/origin/${PR_BASE_REF}" \
+            || keep_everything "cannot fetch ${PR_BASE_REF}"
+          BASE_TIP=$(git rev-parse "refs/remotes/origin/${PR_BASE_REF}") \
+            || keep_everything "cannot resolve ${PR_BASE_REF}"
 
           if [[ "$GITHUB_HEAD_REF" == release-please--* ]]; then
             echo "release-please PR ($GITHUB_HEAD_REF): diff basis = last tag..${PR_BASE_REF} HEAD"
-            git fetch --quiet origin "$PR_BASE_REF"
-            BASE_TIP=$(git rev-parse FETCH_HEAD)
-            LAST_TAG=$(git describe --tags --abbrev=0 "$BASE_TIP")
+            LAST_TAG=$(git describe --tags --abbrev=0 "$BASE_TIP") \
+              || keep_everything "no tag reachable from ${PR_BASE_REF}"
             echo "last tag: $LAST_TAG, base tip: $BASE_TIP"
-            CHANGED=$(git diff --name-only "$LAST_TAG" "$BASE_TIP")
+            CHANGED=$(git diff --name-only "$LAST_TAG" "$BASE_TIP") \
+              || keep_everything "diff ${LAST_TAG}..${BASE_TIP} failed"
           else
-            echo "normal PR: diff basis = ${PR_BASE_SHA}...${PR_SHA}"
-            CHANGED=$(git diff --name-only "${PR_BASE_SHA}...${PR_SHA}")
+            # NOT github.event.pull_request.base.sha: that is the base branch tip at event
+            # time, not the merge base, and once the base branch moves ahead of the branch
+            # it is not in the history a bare-SHA checkout fetched - `git diff base...head`
+            # then dies with "Invalid symmetric difference expression". The merge base of
+            # the freshly fetched base tip and the head gives the same three-dot semantics
+            # without depending on an object the runner may not have.
+            MERGE_BASE=$(git merge-base "$BASE_TIP" "$PR_SHA") \
+              || keep_everything "no merge base between ${PR_BASE_REF} and the head"
+            echo "normal PR: diff basis = ${MERGE_BASE}..${PR_SHA}"
+            CHANGED=$(git diff --name-only "$MERGE_BASE" "$PR_SHA") \
+              || keep_everything "diff ${MERGE_BASE}..${PR_SHA} failed"
           fi
 
-          echo "relevant diff (${#CHANGED} bytes):"
+          # A PR always changes something. Nothing here means the diff basis is wrong, not
+          # that the PR is empty, so it takes the safe branch rather than dropping scenarios.
+          [[ -n "$CHANGED" ]] || keep_everything "the relevant diff is empty"
+
+          echo "relevant diff:"
           echo "$CHANGED"
 
           HARNESS_CHANGED=false
@@ -116,22 +154,34 @@ jobs:
           # live/tests/matrix.yaml is itself under live/tests/**, so any edit to the path
           # map below is already covered by HARNESS_CHANGED and never needs its own entry.
           SCENARIO_PATHS=$(python3 - <<'PY'
-          import json
+          import json, subprocess, sys
           try:
               import yaml
           except ImportError:
-              import subprocess, sys
-              subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pyyaml"], check=True)
+              # The runner image normally ships PyYAML. If it ever doesn't, try both the
+              # plain install and the PEP 668 one a system-managed python needs.
+              for extra in ([], ["--break-system-packages"]):
+                  if subprocess.run([sys.executable, "-m", "pip", "install", "-q", *extra, "pyyaml"]).returncode == 0:
+                      break
               import yaml
           with open("live/tests/matrix.yaml") as f:
               data = yaml.safe_load(f)
           print(json.dumps({c["name"]: c.get("paths", []) for c in data["configs"]}))
           PY
-          )
+          ) || keep_everything "cannot read the path map out of live/tests/matrix.yaml"
+          [[ -n "$SCENARIO_PATHS" ]] || keep_everything "the matrix.yaml path map came back empty"
+
+          NAMES=$(printf '%s' "$CONFIGS" | jq -r '.[]') || keep_everything "cannot parse CONFIGS"
 
           SELECTED=()
-          for name in $(echo "$CONFIGS" | jq -r '.[]'); do
-            if [[ "$name" == "min_default" ]]; then
+          for name in $NAMES; do
+            # No paths list at all (or a name matrix.yaml doesn't know) means always-on:
+            # this is what makes min_default the baseline, and a new scenario added without
+            # a paths list gets the same treatment rather than being silently dropped.
+            PATTERNS=$(echo "$SCENARIO_PATHS" | jq -r --arg n "$name" '.[$n][]?') \
+              || keep_everything "cannot read the paths list for $name"
+            if [[ -z "$PATTERNS" ]]; then
+              echo "keeping $name: no paths list, so it is an always-on baseline"
               SELECTED+=("$name")
               continue
             fi
@@ -146,7 +196,6 @@ jobs:
               continue
             fi
             MATCHED=false
-            PATTERNS=$(echo "$SCENARIO_PATHS" | jq -r --arg n "$name" '.[$n][]? ')
             while IFS= read -r pat; do
               [[ -z "$pat" ]] && continue
               while IFS= read -r f; do
@@ -164,7 +213,10 @@ jobs:
             fi
           done
 
-          NEW_CONFIGS=$(printf '%s\n' "${SELECTED[@]}" | jq -R . | jq -s -c .)
+          [[ ${#SELECTED[@]} -gt 0 ]] || keep_everything "no scenario survived selection"
+
+          NEW_CONFIGS=$(printf '%s\n' "${SELECTED[@]}" | jq -R . | jq -s -c .) \
+            || keep_everything "cannot rebuild the configs array"
           echo "CONFIGS=$NEW_CONFIGS" >> "$GITHUB_ENV"
           echo "selected PR scenarios: $NEW_CONFIGS" >> "$GITHUB_STEP_SUMMARY"
 
