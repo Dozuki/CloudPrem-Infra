@@ -95,6 +95,10 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           HARNESS_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'harness-full') }}
+          # The checkout runs with persist-credentials: false, so the fetch below
+          # must authenticate itself or it fails on this private repo and the
+          # fail-safe keeps the full set forever - gating that never narrows.
+          SELECTION_FETCH_TOKEN: ${{ github.token }}
         run: |
           # Deliberately no -e: see the fail-safe note above. Errors are handled per command.
           set -uo pipefail
@@ -109,7 +113,8 @@ jobs:
           # and fetched no tags: fetch-tags only drops --no-tags, and a refspec with no
           # destination follows no tags anyway. Both have to be asked for explicitly, or
           # `git describe` below finds nothing and the base tip is not a resolvable name.
-          git fetch --quiet --tags origin "+refs/heads/${PR_BASE_REF}:refs/remotes/origin/${PR_BASE_REF}" \
+          git -c http.extraheader="Authorization: Basic $(printf 'x-access-token:%s' "$SELECTION_FETCH_TOKEN" | base64 | tr -d '\n')" \
+            fetch --quiet --tags origin "+refs/heads/${PR_BASE_REF}:refs/remotes/origin/${PR_BASE_REF}" \
             || keep_everything "cannot fetch ${PR_BASE_REF}"
           BASE_TIP=$(git rev-parse "refs/remotes/origin/${PR_BASE_REF}") \
             || keep_everything "cannot resolve ${PR_BASE_REF}"
