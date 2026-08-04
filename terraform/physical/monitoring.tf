@@ -955,3 +955,85 @@ resource "aws_cloudwatch_metric_alarm" "aurora_acu" {
   ok_actions          = [module.sns.topic_arn]
   tags                = local.tags
 }
+
+# --- NLB target-group healthy-host alarms --- #
+#
+# module.nlb (nlb.tf) creates the app NLB and its two target groups (app: 443, acme: 80)
+# directly in this stack - they are NOT looked up dynamically. Only target *registration*
+# is dynamic: the logical layer's TargetGroupBindings (shipped in the dozuki chart) bind
+# Envoy pod IPs into these target groups at runtime. So no data-source discovery is needed
+# here - for_each just walks module.nlb.target_groups, the same map outputs.tf already
+# reads for nlb_https_target_group_arn / nlb_http_target_group_arn. Because the alarms are
+# created in the same apply as the NLB, a fresh install has no ordering hazard: there is no
+# window where the alarms exist but the target groups do not (or vice versa).
+#
+# treat_missing_data = "missing" on both: AWS/NetworkELB HealthyHostCount is only reported
+# while the target group has registered targets (see the "Reporting criteria" column for
+# HealthyHostCount at
+# https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-cloudwatch-metrics.html).
+# module.nlb creates the target groups in this (physical) apply, but pod-IP registration
+# only happens later when the logical layer installs the chart's TargetGroupBinding - so on
+# every fresh install this metric has no datapoints at all for the whole physical -> logical
+# -> chart-install window. "breaching" would page for that entire window on every new
+# install; "missing" still catches the incident this alarm exists for (targets registered
+# and publishing 0) identically, since that case reports real 0-valued datapoints, not an
+# absence.
+locals {
+  nlb_alarm_target_groups = var.nlb_alarms_enabled ? module.nlb.target_groups : {}
+
+  # No per-env envoy replica count variable exists in this stack (physical or logical) to
+  # derive a warning threshold from. 2 mirrors the chart's steady-state envoy-gateway proxy
+  # replica count. If a real variable for that count is ever added here, wire the warning
+  # alarm's threshold to it instead of this constant.
+  nlb_alarm_desired_healthy_hosts = 2
+}
+
+resource "aws_cloudwatch_metric_alarm" "nlb_healthy_hosts_critical" {
+  for_each = local.nlb_alarm_target_groups
+
+  alarm_name          = "${local.identifier}-nlb-${each.key}-healthy-hosts-critical"
+  alarm_description   = "CRITICAL: ${local.identifier} NLB target group '${each.key}' (port ${each.value.port}) has zero healthy hosts - traffic on this listener is failing"
+  comparison_operator = "LessThanOrEqualToThreshold"
+  threshold           = 0
+  evaluation_periods  = 2
+  datapoints_to_alarm = 2
+  period              = 60
+  namespace           = "AWS/NetworkELB"
+  metric_name         = "HealthyHostCount"
+  statistic           = "Minimum"
+  treat_missing_data  = "missing"
+
+  dimensions = {
+    LoadBalancer = module.nlb.arn_suffix
+    TargetGroup  = each.value.arn_suffix
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+  tags          = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "nlb_healthy_hosts_warning" {
+  for_each = local.nlb_alarm_target_groups
+
+  alarm_name          = "${local.identifier}-nlb-${each.key}-healthy-hosts-warning"
+  alarm_description   = "WARNING: ${local.identifier} NLB target group '${each.key}' (port ${each.value.port}) has fewer than ${local.nlb_alarm_desired_healthy_hosts} healthy hosts for 5 straight minutes - degraded capacity, not yet a full outage"
+  comparison_operator = "LessThanThreshold"
+  threshold           = local.nlb_alarm_desired_healthy_hosts
+  evaluation_periods  = 5
+  datapoints_to_alarm = 5
+  period              = 60
+  namespace           = "AWS/NetworkELB"
+  metric_name         = "HealthyHostCount"
+  statistic           = "Minimum"
+  treat_missing_data  = "missing"
+
+  dimensions = {
+    LoadBalancer = module.nlb.arn_suffix
+    TargetGroup  = each.value.arn_suffix
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+  tags          = local.tags
+}
