@@ -49,6 +49,24 @@ resource "helm_release" "istio_base" {
   # Helm deliberately retains these CRDs on uninstall; teardown leaves them.
 }
 
+# Resource requests, no limits, on all three mesh components below (istiod,
+# istio-cni, ztunnel). This is deliberate, not an oversight:
+#
+# ztunnel and istio-cni run as DaemonSets - one pod per node, in the pod's
+# ambient dataplane path. An OOMKill on either drops the dataplane for every
+# ambient pod on that node at once (ztunnel) or breaks CNI attach for new pods
+# (istio-cni), so a limit that trips under a load spike is strictly worse than
+# no limit: it turns a transient spike into a hard, self-inflicted outage.
+# istiod is grouped here for the same reasoning even though it is not
+# per-node: it is the mesh control plane, and an OOMKill there stalls cert
+# rotation and config push cluster-wide until the replacement pod is ready.
+#
+# The actual protection is honest requests (sized to observed usage plus
+# headroom below, so eviction ranking - which scores by usage over request -
+# never picks these first) plus the spot NodePool's instance-memory floor
+# (kubernetes.tf), which keeps any single node from being small enough that
+# one hungry pod can starve everything else on it. Do not add limits here;
+# that reintroduces the exact failure mode this PR closes.
 resource "helm_release" "istiod" {
   count = local.mesh_installed ? 1 : 0
 
@@ -86,6 +104,17 @@ resource "helm_release" "istiod" {
         whenUnsatisfiable = "ScheduleAnyway"
         labelSelector     = { matchLabels = { app = "istiod" } }
       }]
+      # Chart defaults are 500m/2Gi requests. Observed usage across 5 healthy
+      # meshed envs tops out around 3m CPU / 59Mi memory (control-plane XDS
+      # push load, not per-request traffic) - the default left roughly 30-150x
+      # headroom over that. Right-sized to still keep several times observed
+      # peak in reserve without reserving capacity nothing ever claims back.
+      resources = {
+        requests = {
+          cpu    = "100m"
+          memory = "256Mi"
+        }
+      }
     }
     # 1.30.3 defaults this on; pinned so a future chart default change cannot
     # drop istiod's PDB.
@@ -111,6 +140,16 @@ resource "helm_release" "istio_cni" {
   # /opt/cni/bin + /etc/cni/net.d and istio-cni chains onto the managed VPC CNI.
   values = [yamlencode(merge(
     { profile = "ambient" },
+    # Chart defaults (100m/100Mi requests, no limits - see the comment on
+    # istiod above for why no limits). Observed usage across 5 healthy meshed
+    # envs peaked around 37Mi memory with CPU pinned at the kubectl-top
+    # rounding floor (1m) throughout, which undersells istio-cni's real
+    # ceiling: its work is bursty node-attach/detach churn, not steady state,
+    # so a quiet snapshot isn't a safe signal to size CPU down from. Memory
+    # headroom is already several times observed peak. Pinned explicitly
+    # (rather than left as an implicit chart default) so the value is a
+    # deliberate, reviewed choice.
+    { resources = { requests = { cpu = "100m", memory = "100Mi" } } },
     local.istio_image_hub == "" ? {} : { global = { hub = local.istio_image_hub } }
   ))]
 }
@@ -128,7 +167,22 @@ resource "helm_release" "ztunnel" {
 
   # The ztunnel chart takes hub/tag at TOP level, not under global (verify in
   # Step 2; adjust if the rendered image is wrong).
-  values = local.istio_image_hub == "" ? [] : [yamlencode({ hub = local.istio_image_hub })]
+  #
+  # Chart default is 200m/512Mi requests, no limits (see the comment on
+  # istiod above for why no limits - this is the component that comment is
+  # mainly about: today's incident was an unbounded app pod starving a small
+  # spot node and taking its ztunnel down with it). Observed usage across 5
+  # healthy meshed envs peaked around 102m CPU / 32Mi memory. CPU is left at
+  # the chart default (already close to 2x peak, a sane margin). Memory is
+  # brought down from 512Mi to 128Mi - still ~4x observed peak, but the
+  # as-shipped 512Mi was reserving far more allocatable memory per spot node
+  # than this workload has ever used, which works against the goal of this
+  # PR (more usable headroom per small node for everything else scheduled
+  # there).
+  values = [yamlencode(merge(
+    { resources = { requests = { cpu = "200m", memory = "128Mi" } } },
+    local.istio_image_hub == "" ? {} : { hub = local.istio_image_hub }
+  ))]
 }
 
 resource "kubernetes_labels" "ambient_dozuki" {
@@ -287,8 +341,10 @@ resource "kubectl_manifest" "peer_auth_carveouts" {
   server_side_apply = true
 }
 
-# The ztunnel PodMonitor moved into the dozuki chart (templates/istio/ztunnel-podmonitor.yaml),
-# gated on istio.ztunnelMonitor.enabled (set from local.mesh_enrolled in kubernetes.tf). It
-# belongs with its CRD, which ships in the chart's kube-prometheus-stack subchart - co-locating
+# The ztunnel PodMonitor moved into the dozuki chart (templates/istio/ztunnel-podmonitor.yaml).
+# There is no istio.ztunnelMonitor.enabled key anywhere in the chart. It renders on
+# monitoring.enabled plus a Capabilities check for the istio ServiceEntry API, so it follows
+# the mesh rollout on its own with no per-env flag from this layer. It belongs with its CRD,
+# which ships in the chart's kube-prometheus-stack subchart - co-locating
 # them removes the ordering hazard where this layer applied the PodMonitor before the app
 # release had created the CRD.
