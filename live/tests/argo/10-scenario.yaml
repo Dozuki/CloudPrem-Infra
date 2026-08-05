@@ -203,7 +203,7 @@ spec:
                 - name: repo-ref
                   value: '{{workflow.parameters.repo-ref}}'
                 - name: deadline
-                  value: '2700'
+                  value: '5400'
 
     # The staleness check itself. A script template so stdout is the step result the
     # `when:` clauses above compare against. GET /commits/{sha}/pulls lists the open
