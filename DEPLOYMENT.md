@@ -27,7 +27,7 @@ export TERRAGRUNT_TFPATH=tofu
 
 | Tool | Version | Verify |
 |------|---------|--------|
-| OpenTofu | 1.11.8 (module floor `>= 1.11.1`) | `tofu version` |
+| OpenTofu | 1.11.13 (module floor `>= 1.11.1`) | `tofu version` |
 | Terragrunt | 0.99.4 (>= 0.78, < 1.0; 1.x broke iam_role assumption fleet-wide) | `terragrunt --version` |
 | AWS CLI | 2.x | `aws --version` |
 | Helm | 3.x | `helm version` |
