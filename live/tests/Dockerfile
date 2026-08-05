@@ -28,7 +28,7 @@ ARG TERRAGRUNT_VERSION=0.99.4
 # fair comparison rather than a second variable.
 ARG HELM_VERSION=4.2.3
 ARG KUBECTL_VERSION=1.36.3
-ARG VAULT_VERSION=2.0.3
+ARG VAULT_VERSION=2.0.4
 
 # ---------------------------------------------------------------------------
 # Stage 1: tools. Every download is checksum-verified against the publisher's
