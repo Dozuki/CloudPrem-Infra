@@ -493,19 +493,25 @@ resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
 # again ~30min later. One planned stop/start produced 14 notifications across
 # the pair, none of which said anything the first page had not.
 #
-# 9-of-12 fixes the resolve side: clearing now takes 20 sustained minutes of
-# real, healthy data, so a sparse datapoint cannot clear it and CDC has to
-# actually settle first. It also swallows the restart transient for free - a
-# resumed replication opens with the whole accumulated binlog gap as its first
-# reading (observed 11851s, drained to single digits in the next period), and
-# that spike now lands while the alarm is ALREADY ALARM, so it causes no state
-# transition and pages nobody.
+# 9-of-12 fixes the resolve side: clearing now takes 4 non-breaching datapoints
+# within the last 12 periods (60min), so one sparse datapoint can no longer do
+# it. Note M-of-N does not require consecutive datapoints - 4 healthy readings
+# anywhere in the hour will clear it, they do not have to be adjacent. It also
+# swallows the restart transient for free - a resumed replication opens with the
+# whole accumulated binlog gap as its first reading (observed 11851s, drained to
+# single digits in the next period), and that spike now lands while the alarm is
+# ALREADY ALARM, so it causes no state transition and pages nobody.
 #
 # Cost of the wider window: the "replication stopped" page arrives after ~45min
-# of silence instead of ~30. That is immaterial against the 48h binlog
-# retention this alarm exists to protect, and the stop is separately and
-# immediately caught by dms_task_state_changed_rule above, which forwards every
-# DMS state-change event to the same SNS topic.
+# of silence instead of ~30 (both are floors - CloudWatch keeps re-evaluating
+# the last real datapoints for a few periods after a metric stops, which adds an
+# unpublished overhang to either config equally). That is immaterial against the
+# 24h binlog retention this alarm exists to protect (bi.tf sets 'binlog
+# retention hours' 24 on the source endpoints; the 48h in aurora-migration.tf is
+# a different feature). A stop that emits a state-change event is separately and
+# immediately caught by dms_task_state_changed_rule above, but a replication
+# that stalls or goes silent without a state change emits no event - that is the
+# case these alarms uniquely cover, and there the extra 15min is real.
 locals {
   bi_replication_config_id = local.dms_enabled ? join(":", [
     split(":", aws_dms_replication_config.this[0].arn)[4],
