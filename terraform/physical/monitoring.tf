@@ -834,6 +834,14 @@ resource "aws_lambda_permission" "dms_restart_permission" {
 # --- DR replication health (count-gated on enable_dr) --- #
 
 # S3 CRR: pending bytes growing unboundedly means replication is failing/stuck.
+#
+# KNOWN NON-FUNCTIONAL: ReplicationLatency (like BytesPendingReplication and
+# OperationsPendingReplication, but unlike OperationsFailedReplication) is
+# published in the DESTINATION bucket's region, and this alarm lives in the
+# primary region, so it never sees a datapoint and notBreaching keeps it
+# silently OK. Moving it needs a DR-region notification path (the dr_paging
+# topic only exists when Aurora DR is on), so it stays here, documented,
+# until the central-metrics parity work covers cross-region signals.
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
   for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
 
@@ -860,11 +868,18 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
   tags = local.tags
 }
 
+# Dormant from 2026-06 until the replication rules gained their metrics block
+# (dr.tf): the metric did not exist before that, so this alarm had nothing to
+# watch. OperationsFailedReplication is the one replication metric published
+# in the SOURCE region, so unlike the latency alarm above this one is in the
+# right place, and it also counts Batch Replication task failures (though not
+# a job that never runs at all - the rollout runbook's describe-job check
+# covers that).
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
   for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
 
   alarm_name          = "${local.identifier}-dr-s3-replication-failed-${each.key}"
-  alarm_description   = "S3 DR replication operations failing for ${local.identifier} ${each.key} bucket"
+  alarm_description   = "S3 DR replication to ${aws_s3_bucket.dr_guide_buckets[each.key].id} is failing for ${local.identifier} ${each.key}. Failed operations are NOT retried indefinitely. Diagnose (role trust/policy, KMS, destination), read the batch-replication-report CSVs in the logging bucket, then re-drive the gap with a Batch Replication job (util/create-s3-batch.sh)."
   namespace           = "AWS/S3"
   metric_name         = "OperationsFailedReplication"
   statistic           = "Sum"
