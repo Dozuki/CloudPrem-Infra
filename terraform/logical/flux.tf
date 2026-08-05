@@ -231,6 +231,14 @@ locals {
         enabled = var.cloud == "aws" && var.mimir_remote_write_enabled
         url     = var.mimir_url
       }
+      # Routes Alertmanager's always-firing Watchdog to the fleet relay, which
+      # turns it into a CloudWatch datapoint instead of a Slack post, so the
+      # relay's deadman alarms can see this environment stop reporting. Off by
+      # default: with the route pointed at the null receiver the relay gets no
+      # Watchdog traffic, and any deadman armed against it would page instantly.
+      watchdogHeartbeat = {
+        enabled = var.watchdog_heartbeat_enabled
+      }
     }
 
     # metrics-server ships in the chart (default on) as the single source of truth across

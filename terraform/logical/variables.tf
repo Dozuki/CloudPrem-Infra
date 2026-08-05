@@ -614,6 +614,12 @@ variable "mimir_remote_write_enabled" {
   default     = false
 }
 
+variable "watchdog_heartbeat_enabled" {
+  description = "Route Alertmanager's Watchdog alert to the alert relay as a heartbeat. The relay recognizes alertname=Watchdog and records a CloudWatch datapoint instead of posting it, which is what lets a deadman alarm tell 'this environment stopped delivering alerts' apart from 'this environment has nothing to say'. Without it, an alert-delivery failure is indistinguishable from silence, and the alert that would report the failure has to travel the broken path to reach anyone. Off by default so a chart_version bump never changes alert routing on its own. A no-op unless chart_version is >= 2.8.0, the release that added the route. Turn this on and confirm heartbeat datapoints are arriving BEFORE arming the deadman alarm on the relay, or it pages immediately on missing data."
+  type        = bool
+  default     = false
+}
+
 variable "mimir_url" {
   description = "Remote-write push endpoint. Commercial stacks resolve this name through the private hosted zone the physical layer creates over the PrivateLink endpoint; gov has no PrivateLink path and points at the public ingest name instead, so it overrides this."
   type        = string
