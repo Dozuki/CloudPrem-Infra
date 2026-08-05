@@ -16,7 +16,7 @@ brew install opentofu terragrunt
 # (`run --all`, `--non-interactive`). The old `--terragrunt-*` flags were REMOVED in
 # 0.85.0 with no grace period, so an old binary fails with "flag provided but not
 # defined". Check with `terragrunt --version`; if brew gives you something older,
-# `tgenv install 1.1.1 && tgenv use 1.1.1`.
+# `tgenv install 0.99.4 && tgenv use 0.99.4`.
 
 # Everything else
 brew install awscli helm kubectl hashicorp/tap/vault
@@ -27,8 +27,8 @@ export TERRAGRUNT_TFPATH=tofu
 
 | Tool | Version | Verify |
 |------|---------|--------|
-| OpenTofu | 1.12.5 (module floor `>= 1.11.1`) | `tofu version` |
-| Terragrunt | >= 1.0 (fleet runs 1.1.1) | `terragrunt --version` |
+| OpenTofu | 1.11.8 (module floor `>= 1.11.1`) | `tofu version` |
+| Terragrunt | >= 1.0 (fleet runs 0.99.4) | `terragrunt --version` |
 | AWS CLI | 2.x | `aws --version` |
 | Helm | 3.x | `helm version` |
 | kubectl | 1.28+ | `kubectl version --client` |
