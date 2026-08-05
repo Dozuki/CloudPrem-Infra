@@ -653,8 +653,19 @@ var deniedResourceTypes = map[string]bool{
 // left to nuke) while manufacturing a false orphan. The directive that resolved the
 // pod-identity/dms-endpoint asymmetry has nothing to say about a resource the index
 // is simply wrong about, so this rule stays.
+//
+// eks:podidentityassociation joined for the identical reason, measured 2026-08-05: 4 of the
+// 4 deleteAfter-tagged associations in the account name clusters that no longer exist
+// (describe-pod-identity-association returns ResourceNotFoundException "No cluster found",
+// and eks list-clusters shows only dev-min). An association cannot outlive its cluster, so
+// like a security group it can never legitimately be the whole story. It is worse than
+// cosmetic under sweep: the one candidate it manufactured has a physical state with ZERO
+// resources and a logical state whose kubernetes and vault providers point at the deleted
+// cluster, so Teardown dies at provider init rather than reaching StateResidue, and would
+// burn a sweep-failure slot every cycle forever without ever converging.
 var insufficientAloneTypes = map[string]bool{
-	"ec2:security-group": true,
+	"ec2:security-group":         true,
+	"eks:podidentityassociation": true,
 }
 
 // arnResourceType splits a Resource Groups Tagging API ARN into its service

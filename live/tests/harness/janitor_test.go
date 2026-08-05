@@ -1370,3 +1370,15 @@ func TestCountTaggedFailsClosedWhenNoRegionToQuery(t *testing.T) {
 		t.Fatal("expected an error when no region is usable, got nil (a stack would be reported clean without being queried)")
 	}
 }
+
+// A pod identity association cannot outlive its cluster, so like a security group it is
+// never the whole story for a genuinely standing stack. Measured: every deleteAfter-tagged
+// association in the account names a cluster that no longer exists.
+func TestPodIdentityAssociationAloneIsInsufficient(t *testing.T) {
+	if !insufficientAloneTypes["eks:podidentityassociation"] {
+		t.Fatal("eks:podidentityassociation must be insufficient-alone evidence")
+	}
+	if deniedResourceTypes["eks:podidentityassociation"] {
+		t.Fatal("it must NOT be denylisted: alongside a live cluster it is ordinary and must count")
+	}
+}
