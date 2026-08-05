@@ -2,6 +2,23 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.15.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.14.0...v8.15.0) (2026-08-05)
+
+
+### Features
+
+* **logical:** plumb the Watchdog heartbeat flag through to the chart ([c62cc15](https://github.com/Dozuki/CloudPrem-Infra/commit/c62cc1550cb64adc58197331353c027dec0d4d92))
+* **tofu:** bump CPI harness/CI pins to phase 2 (tofu 1.12.5, terragrunt 1.1.2) ([#455](https://github.com/Dozuki/CloudPrem-Infra/issues/455)) ([514b6b6](https://github.com/Dozuki/CloudPrem-Infra/commit/514b6b609dbc5b48df9ca286fdfd12ab7b03d934))
+
+
+### Bug Fixes
+
+* **logical:** set grafana root_url so the dashboards UI loads under /grafana ([bd08d51](https://github.com/Dozuki/CloudPrem-Infra/commit/bd08d51950359fa3596293f2e5b74c3af174c008))
+* **logical:** stop istiod replicas colocating on one node ([#454](https://github.com/Dozuki/CloudPrem-Infra/issues/454)) ([9da3f0c](https://github.com/Dozuki/CloudPrem-Infra/commit/9da3f0ca2be3cd2883a16bf2c3e825a91514e925))
+* **physical:** DR bucket backfill on creation, replication metrics + alarm, DR-region access logs ([#458](https://github.com/Dozuki/CloudPrem-Infra/issues/458)) ([7b2eb40](https://github.com/Dozuki/CloudPrem-Infra/commit/7b2eb40d2459dbbce66ba5373572cfc03504d29c))
+* **physical:** gate the dms event rule on dms_enabled so pure-replication BI can apply ([8407dcf](https://github.com/Dozuki/CloudPrem-Infra/commit/8407dcfa2f47adaf6db28ad124524ca8ddd7f277))
+* **physical:** widen BI CDC latency alarm window to 9-of-12 ([#457](https://github.com/Dozuki/CloudPrem-Infra/issues/457)) ([d401227](https://github.com/Dozuki/CloudPrem-Infra/commit/d4012276e4c887938c651134085ebab6ca12c593))
+
 ## [8.14.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.13.0...v8.14.0) (2026-08-05)
 
 
