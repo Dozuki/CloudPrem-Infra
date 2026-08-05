@@ -3,7 +3,7 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.9.0 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.1 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 4.0 |
 | <a name="requirement_external"></a> [external](#requirement\_external) | ~> 2.0 |
@@ -14,7 +14,7 @@
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
 | <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.0 |
 | <a name="requirement_tls"></a> [tls](#requirement\_tls) | ~> 4.0 |
-| <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 4.0 |
+| <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
 ## Providers
 
@@ -28,7 +28,7 @@
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | ~> 3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 | <a name="provider_tls"></a> [tls](#provider\_tls) | ~> 4.0 |
-| <a name="provider_vault"></a> [vault](#provider\_vault) | ~> 4.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | ~> 5.0 |
 
 ## Modules
 
