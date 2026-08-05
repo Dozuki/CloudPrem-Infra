@@ -423,7 +423,11 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
   # aurora migration task. Gating on enable_bi alone left a migration on an
   # enable_bi=false env alertless - with the STOP_TASK apply-error policies a
   # soak-phase stop must page, or it sits unnoticed past binlog retention.
-  count = var.enable_bi || local.aurora_migration_dms ? 1 : 0
+  # Keyed on dms_enabled, not enable_bi: pure-replication BI (enable_bi with
+  # bi_dms_enabled/bi_public_access false) owns no DMS resources, so the
+  # resources pattern below renders [] and EventBridge rejects the rule
+  # outright (InvalidEventPatternException: Empty arrays are not allowed).
+  count = local.dms_enabled || local.aurora_migration_dms ? 1 : 0
 
   name        = "${local.identifier}-dms-task-changed-rule"
   description = "Capture change state of DMS replications (BI serverless) and tasks (aurora migration)"
@@ -451,7 +455,8 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
 }
 
 resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
-  count = var.enable_bi || local.aurora_migration_dms ? 1 : 0
+  # Same gate as the rule above; must never exist without it.
+  count = local.dms_enabled || local.aurora_migration_dms ? 1 : 0
 
   rule      = aws_cloudwatch_event_rule.dms_task_state_changed_rule[0].name
   target_id = "DmsTaskChangedTarget"
