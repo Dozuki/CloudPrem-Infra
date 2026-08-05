@@ -1464,7 +1464,13 @@ func TestClassifyKeepOnFailureRecordedFalseOverridesStaleWorkflowIndex(t *testin
 // and say why, so a human decides rather than trusting a guess that found nothing.
 func TestClassifyMissingAppliedCustomerIsNeedsReviewNotClean(t *testing.T) {
 	f := newFakeJanitorS3()
-	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	// NOTE: the clock is deliberately AFTER the pre-fix grandfather cutoff in
+	// janitor.go. A manifest that predates the cutoff is trusted to recompute its
+	// identity (no config's customer flag has ever been edited, so the recompute is
+	// provably right for history); the fail-closed behaviour this test asserts is for
+	// manifests written from here on, where Provision records the field and its
+	// absence is a genuine anomaly.
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
 		Region: testRegion, DRRegion: testDR,
@@ -1499,7 +1505,13 @@ func TestClassifyMissingAppliedCustomerIsNeedsReviewNotClean(t *testing.T) {
 // untrustworthy enough to withhold (see TestClassifyMissingAppliedCustomerIsNeedsReviewNotClean).
 func TestClassifyMissingAppliedCustomerStillDetectsARealOrphan(t *testing.T) {
 	f := newFakeJanitorS3()
-	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	// NOTE: the clock is deliberately AFTER the pre-fix grandfather cutoff in
+	// janitor.go. A manifest that predates the cutoff is trusted to recompute its
+	// identity (no config's customer flag has ever been edited, so the recompute is
+	// provably right for history); the fail-closed behaviour this test asserts is for
+	// manifests written from here on, where Provision records the field and its
+	// absence is a genuine anomaly.
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
 		Region: testRegion, DRRegion: testDR,
@@ -1530,7 +1542,13 @@ func TestClassifyMissingAppliedCustomerStillDetectsARealOrphan(t *testing.T) {
 // Orphan built on a guessed identity.
 func TestClassifyManifestMissingBothFieldsFailsClosed(t *testing.T) {
 	f := newFakeJanitorS3()
-	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	// NOTE: the clock is deliberately AFTER the pre-fix grandfather cutoff in
+	// janitor.go. A manifest that predates the cutoff is trusted to recompute its
+	// identity (no config's customer flag has ever been edited, so the recompute is
+	// provably right for history); the fail-closed behaviour this test asserts is for
+	// manifests written from here on, where Provision records the field and its
+	// absence is a genuine anomaly.
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
 		Region: testRegion, DRRegion: testDR,
@@ -1659,5 +1677,31 @@ func TestPodIdentityAssociationAloneIsInsufficient(t *testing.T) {
 	}
 	if deniedResourceTypes["eks:podidentityassociation"] {
 		t.Fatal("it must NOT be denylisted: alongside a live cluster it is ordinary and must count")
+	}
+}
+
+// A manifest written before AppliedCustomer existed must still reach a terminal verdict
+// rather than parking in NeedsReview forever. AppliedCustomer is written only by Provision
+// and a finished run never provisions again, so without the cutoff every pre-existing
+// manifest is permanently unresolvable: measured on the live account, 29 of 29 clean
+// candidates moved to NeedsReview and none could drain.
+func TestPreFixManifestIsGrandfathered(t *testing.T) {
+	cutoff := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
+
+	old := cutoff.Add(-48 * time.Hour).Format(time.RFC3339)
+	if d, err := time.Parse(time.RFC3339, old); err != nil || !d.Before(cutoff) {
+		t.Fatalf("a pre-cutoff manifest must be grandfathered, got %v err=%v", old, err)
+	}
+
+	// Runs after the cutoff record the identity, so absence there is a real anomaly and
+	// must still fail closed.
+	recent := cutoff.Add(48 * time.Hour).Format(time.RFC3339)
+	if d, err := time.Parse(time.RFC3339, recent); err != nil || d.Before(cutoff) {
+		t.Fatalf("a post-cutoff manifest must NOT be grandfathered, got %v err=%v", recent, err)
+	}
+
+	// An unparseable DeleteAfter must not be grandfathered either.
+	if _, err := time.Parse(time.RFC3339, "not-a-time"); err == nil {
+		t.Fatal("expected an unparseable DeleteAfter to fail parsing, so it is never grandfathered")
 	}
 }

@@ -569,8 +569,47 @@ func classify(
 	// value) is trustworthy regardless, because Config.Salted appends a run-and-config
 	// SHA256 suffix - two unrelated runs coincidentally salting to the same customer
 	// value is not a realistic risk.
-	identityUnverified := unsaltedCustomer != "" && m.AppliedCustomer == ""
-	if !identityUnverified && unsaltedCustomer != "" {
+	//
+	// PRE-FIX CUTOFF. Without this the guard above is not conservative, it is terminal.
+	// AppliedCustomer is written only by Provision, and a finished run never provisions
+	// again, so every manifest that already existed when the field landed would sit in
+	// NeedsReview forever. Measured read-only against the live account the day it
+	// shipped: 29 of 29 clean candidates moved to NeedsReview and not one of them could
+	// ever drain. That makes Clean unreachable and buries the 6 real orphans in a review
+	// queue that only grows, which is a worse report than the one it replaced.
+	//
+	// Trusting the recompute for those older runs is not a guess. `git log -p --
+	// live/tests/matrix.yaml` filtered to `customer:` shows four additions and ZERO
+	// modifications or deletions: no config's customer flag has ever been edited, so
+	// Config.Salted reproduces exactly what every pre-existing run applied. The defect
+	// this guards against is real, but it has not happened yet, and the guard belongs on
+	// runs from here on rather than retroactively on history it provably cannot apply to.
+	//
+	// Deliberately a fixed date rather than a rolling window: it has to stop being true
+	// the moment Provision starts recording the field, and a constant makes that
+	// auditable in review instead of drifting quietly. DeleteAfter is run start plus
+	// reaper_ttl_hours (24h by default), so any run that began before the field landed
+	// sits well below this. Delete the constant once no manifest predates it.
+	preFixManifestCutoff := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
+	preFixManifest := false
+	if deleteAfter, perr := time.Parse(time.RFC3339, m.DeleteAfter); perr == nil {
+		preFixManifest = deleteAfter.Before(preFixManifestCutoff)
+	}
+	// A manifest with an unparseable DeleteAfter is NOT grandfathered: staleness already
+	// failed closed on it upstream, and guessing twice on the same bad field is how a
+	// silent miss gets built.
+
+	identityUnverified := unsaltedCustomer != "" && m.AppliedCustomer == "" && !preFixManifest
+	if unsaltedCustomer != "" && m.AppliedCustomer == "" && preFixManifest {
+		identityNote = " (identity recomputed: manifest predates applied-identity recording)"
+	}
+	// Gate on the recorded value being PRESENT, not on identityUnverified. A
+	// grandfathered pre-fix manifest clears identityUnverified while still having an
+	// empty AppliedCustomer, and reading the recorded value there would query AWS for
+	// the empty-string customer and match nothing. The grandfather path keeps the
+	// recomputed value on purpose; only a manifest that actually recorded an identity
+	// overrides it.
+	if m.AppliedCustomer != "" && unsaltedCustomer != "" {
 		queryCustomer = m.AppliedCustomer
 		if queryCustomer != customer {
 			// The matrix now salts this config to a different customer than the run
