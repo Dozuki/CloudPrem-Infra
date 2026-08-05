@@ -232,10 +232,52 @@ spec:
         args:
           - |
             set -uo pipefail
-            REPORT='{{inputs.parameters.report}}'
-            SCAN_STATUS='{{inputs.parameters.scan-status}}'
-            MODE='{{workflow.parameters.mode}}'
+            # REPORT/SCAN_STATUS/MODE come in through the container env: block below,
+            # not by pasting an Argo parameter tag straight into a single-quoted
+            # assignment here. Argo's tag substitution is textual and happens before bash
+            # ever sees this line, so a raw report tag inside single quotes breaks out of
+            # the string the moment the JSON contains an apostrophe - and classify()'s own
+            # reason text does (G11: "the janitor's --region"; identity drift: "the run's
+            # recorded identity, not today's"). That killed the notify script at parse
+            # time on exactly the cycles most likely to need a human, and continueOn below
+            # swallowed the loss silently. A kubelet-set env var never re-parses through
+            # a shell, so it is immune to whatever bytes end up in the value.
+            #
+            # For the same reason this comment names no tag literally: substitution does
+            # not care that a line starts with '#', so writing one here would paste the
+            # entire report JSON into a bash comment - a second copy in the pod spec, and
+            # a parse bomb the first time the report contains a newline.
 
+            # Check the report's own shape before touching a single report field.
+            # schema_version is the janitor's explicit field contract
+            # (harness/janitor.go); a rename or removal downstream of jq's
+            # '.candidates[]?' would otherwise degrade into a wrong count instead of a
+            # clear error. Skipped when REPORT has no "candidates" key at all - that is
+            # the legitimate G1-G3 safety-abort shape (REPORT is the outputs default
+            # '{}', handled by its own branch below), not a schema mismatch.
+            #
+            # A mismatch becomes the Slack message rather than an exit 1. This step
+            # carries continueOn: failed (see the steps: block above), so exiting
+            # non-zero here posts nothing and fails nothing: a silent Slack blackout,
+            # which is the exact failure mode the schema assert exists to prevent. The
+            # only way "fail loud" is true for a notify step is to send the failure.
+            SCHEMA_ERROR=''
+            if printf '%s' "$REPORT" | jq -e 'has("candidates")' >/dev/null 2>&1; then
+              # '// "missing"' rather than a bare '.schema_version': jq -r prints the
+              # literal string "null" for an absent key, and "schema_version is 'null'"
+              # reads like a corrupt value rather than a field that is simply gone.
+              SCHEMA_VERSION=$(printf '%s' "$REPORT" | jq -r '.schema_version // "missing"' 2>/dev/null)
+              if [ "$SCHEMA_VERSION" != "1" ]; then
+                SCHEMA_ERROR="report schema_version is '${SCHEMA_VERSION:-missing}', expected 1 - the janitor's Report JSON field contract (harness/janitor.go) changed underneath this script; any orphan/blocked/residue count from this cycle would be untrustworthy. Update the jq pipeline in argo/50-janitor-cron.yaml before believing another one."
+              fi
+            fi
+
+            if [ -n "$SCHEMA_ERROR" ]; then
+              # Nothing below this point may read a report field: that is precisely what
+              # is no longer trustworthy. Say so and go straight to the send.
+              echo "$SCHEMA_ERROR" >&2
+              TEXT=$(printf 'harness janitor (%s): CANNOT READ THIS CYCLE'"'"'S REPORT. %s' "$MODE" "$SCHEMA_ERROR")
+            else
             # Mine REPORT for candidates regardless of SCAN_STATUS, before deciding what
             # to say. Two different things make SCAN_STATUS non-Succeeded: a G1-G3
             # safety abort in runJanitor (account mismatch, blind ownership, a protected
@@ -290,20 +332,39 @@ spec:
                 TEXT=$(printf 'harness janitor (%s): %s orphaned/blocked/residue test stack(s). Orphan/blocked means a teardown FAILED (blocked also needs a human force-unlock); residue means a destroy SUCCEEDED but tagged resources survived it anyway and need manual cleanup, not a retry - see each line'"'"'s detail below before clearing it by hand.\n%s' "$MODE" "$N" "$LINES")
               fi
             fi
+            fi
 
-            export VAULT_ADDR='{{workflow.parameters.vault-addr}}'
+            # VAULT_ADDR is already in the process environment via the container env:
+            # block below (kubelet sets it, no shell re-parse needed); only AWS_REGION
+            # needs setting here since vault login wants it and it is a fixed literal,
+            # not a workflow parameter.
             export AWS_REGION=us-east-1
             vault login -method=aws role=deployer region=us-east-1 >/dev/null || {
               echo "vault login failed; cannot post the alert (see the pod log above for the report itself)"
               exit 0
             }
             SLACK_TOKEN="$(vault kv get -field=botToken secret/dozuki/global/slack 2>/dev/null)"
-            jq -n --arg c '{{workflow.parameters.slack-channel}}' --arg t "$TEXT" '{channel: $c, text: $t}' \
+            jq -n --arg c "$SLACK_CHANNEL" --arg t "$TEXT" '{channel: $c, text: $t}' \
               | curl -sf -X POST -H 'Content-type: application/json; charset=utf-8' \
                   -H "Authorization: Bearer ${SLACK_TOKEN}" --data @- \
                   https://slack.com/api/chat.postMessage >/dev/null \
               || echo "slack post failed (see the pod log above for the report itself)"
             exit 0
+        # Every parameter this script's body touches comes through here, not through a
+        # {{...}} pasted into the args string above - see the top-of-script comment for
+        # why (apostrophes in classify()'s reason text break a single-quoted paste but
+        # never reach a shell parser when set as a container env var).
+        env:
+          - name: REPORT
+            value: '{{inputs.parameters.report}}'
+          - name: SCAN_STATUS
+            value: '{{inputs.parameters.scan-status}}'
+          - name: MODE
+            value: '{{workflow.parameters.mode}}'
+          - name: VAULT_ADDR
+            value: '{{workflow.parameters.vault-addr}}'
+          - name: SLACK_CHANNEL
+            value: '{{workflow.parameters.slack-channel}}'
         resources:
           requests:
             cpu: 100m
