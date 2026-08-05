@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
 // PhaseParams carries everything a single re-entrant phase needs. Unlike RunParams
@@ -32,6 +37,34 @@ type PhaseParams struct {
 	// on manifest CREATION and persisted there; later phases re-adopt the manifest's
 	// copy so every render — including teardown's — matches the apply.
 	ExtraInputs map[string]interface{}
+	// IdentifierOverride, when non-empty, replaces the "<customer>-<env>" identifier
+	// that prepareWorktree/Teardown would otherwise recompute fresh from today's
+	// matrix checkout. Every out-of-band AWS call Teardown makes (NLB, MSK,
+	// container-insights, and the category-B EBS/launch-template/log-group/IAM
+	// reclaim) is name-scoped off that identifier, and it is normally recomputed
+	// live so a re-entrant retry of a phase still resolves to what the run itself
+	// would apply. The janitor is different: classify() already resolved and
+	// guardProtected-checked the run's RECORDED identity (RunManifest.
+	// AppliedCustomer) to cover the case where the matrix's customer feature flag
+	// was edited after this run applied (see classify()'s identity-drift handling)
+	// - Sweep sets this field to that same guarded value so every mutating call
+	// Teardown makes acts on the identity Sweep actually checked, not a fresh
+	// recompute that could have drifted since. Empty (the zero value) everywhere
+	// else, so every non-janitor caller is unaffected.
+	IdentifierOverride string
+}
+
+// resolveIdentifier is the one place "<customer>-<env>" gets computed from a Config,
+// shared by prepareWorktree and Teardown so they can never disagree. override, when
+// non-empty, wins outright - see PhaseParams.IdentifierOverride for why.
+func resolveIdentifier(cfg Config, override string) string {
+	if override != "" {
+		return override
+	}
+	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
+		return customer + "-" + cfg.Env
+	}
+	return ""
 }
 
 func (p PhaseParams) statePrefix(cfg Config) string {
@@ -82,10 +115,7 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 	if merr := writeAppliedMarker(p.RepoDir, p.statePrefix(cfg), envDir); merr != nil {
 		step("WARNING: could not write applied-worktree marker (%v) — cleanup-orphans.sh will fall back to the live tree", merr)
 	}
-	identifier := ""
-	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
-		identifier = customer + "-" + cfg.Env
-	}
+	identifier := resolveIdentifier(cfg, p.IdentifierOverride)
 	tg := TGOptions{
 		WorkingDir:   envDir,
 		AccountID:    p.AccountID,
@@ -93,7 +123,7 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 		Profile:      p.Profile,
 		BucketPrefix: "",
 		StatePrefix:  p.statePrefix(cfg),
-		NLBName:      identifier,
+		Identifier:   identifier,
 	}
 	return wt, tg, envDir, nil
 }
@@ -110,6 +140,12 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 func stateBucket(accountID, region string) string {
 	return os.Getenv("TG_BUCKET_PREFIX") + "dozuki-terraform-state-" + region + "-" + accountID
 }
+
+// StateBucket is stateBucket for callers outside this package. cmd/harness needs the
+// exact same names to build its bucket->region routing table for the janitor's
+// two-bucket scan: deriving them from the one function that also builds them here is
+// what keeps the router from guessing a region out of a bucket string.
+func StateBucket(accountID, region string) string { return stateBucket(accountID, region) }
 
 // awsConfigFor loads AWS config for an optional shared-config profile + region.
 func awsConfigFor(ctx context.Context, profile, region string) (aws.Config, error) {
@@ -153,6 +189,17 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	}
 	rm.Namespace, rm.AccountID = namespace, p.AccountID
 	p.ExtraInputs = rm.ExtraInputs // a pre-existing manifest's inputs win (re-entrancy)
+	// Record the identity THIS phase actually applied with, once. cfg is already
+	// Config.Salted(p.RunID) (see PhaseParams.Config), so this is the real customer
+	// value the apply below uses - not something the janitor has to recompute later
+	// against whatever the matrix happens to say by then. Guarded so a re-entrant retry
+	// within the same run never overwrites the value the FIRST successful apply used,
+	// even if a later pod's checkout somehow differs.
+	if rm.AppliedCustomer == "" {
+		if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
+			rm.AppliedCustomer = customer
+		}
+	}
 
 	applyRef := toRef
 	initSub := true
@@ -337,6 +384,28 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 		step("teardown: no manifest for %s — nothing to destroy", p.statePrefix(cfg))
 		return nil
 	}
+	// Defect P1 fix: persist the keep-on-failure decision to the manifest BEFORE acting
+	// on it, on every call, whatever it is. The manifest outlives the Workflow CR (Argo
+	// TTLs a failed one after three days - 10-scenario.yaml ttlStrategy), so this is the
+	// one place the decision to leave a stack up on purpose still lives once the CR is
+	// gone and the janitor's workflow-index lookup goes blank. The skip decision two
+	// lines down does not itself depend on this save succeeding (it reads the local
+	// keepOnFailure argument, not rm) - only a LATER read (the janitor) does - but when
+	// this call is about to skip a destroy specifically because keepOnFailure is true,
+	// losing that write would silently reopen the exact hole this fix closes for this
+	// run's whole remaining lifetime, so that combination fails loud rather than best-
+	// effort. Every other combination (nothing protective is riding on it) logs and
+	// moves on, same posture as writeAppliedMarker elsewhere in this function.
+	if rm.KeepOnFailure != keepOnFailure || !rm.KeepOnFailureRecorded {
+		rm.KeepOnFailure = keepOnFailure
+		rm.KeepOnFailureRecorded = true
+		if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
+			if failed && keepOnFailure {
+				return fmt.Errorf("teardown: could not durably record --keep-on-failure before skipping the destroy: %w", serr)
+			}
+			step("WARNING: could not record keep-on-failure to the manifest (%v) — a later janitor read may not see this run's choice", serr)
+		}
+	}
 	if failed && keepOnFailure {
 		step("teardown SKIPPED (--keep-on-failure): stack for %s left up for debugging", p.statePrefix(cfg))
 		return nil
@@ -352,10 +421,7 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	}
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
 
-	identifier := ""
-	if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
-		identifier = customer + "-" + cfg.Env
-	}
+	identifier := resolveIdentifier(cfg, p.IdentifierOverride)
 	// captureDiagnostics reads RepoDir/RunID/ConfigName/FromRef/ToRef/Profile/Namespace
 	// off RunParams; `identifier` ("<customer>-<env>") IS the EKS cluster name (run.go).
 	// RunID drives the .artifacts/<id> dir — use the per-config id WITHOUT trailing slash.
@@ -374,39 +440,369 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	// runtime, so they are in no Terraform state and every run re-leaks the same four
 	// groups, which then fail the verify-clean gate. Best-effort: a failure here must
 	// not fail a teardown that already destroyed the stack.
-	if lerr := deleteContainerInsightsLogGroups(ctx, p.Region, identifier); lerr != nil {
+	if lerr := deleteContainerInsightsLogGroups(ctx, p.Profile, p.Region, identifier); lerr != nil {
 		step("container-insights log-group sweep failed (non-fatal): %v", lerr)
+	}
+	// Runs unconditionally after every successful destroy - the normal Argo teardown
+	// path AND the janitor's - not gated on StateResidue. These leak on every run, not
+	// only on orphans: none of the four carry the harness's Customer/deleteAfter tags,
+	// so they can never surface via the tagging query and can never trigger residue on
+	// their own. Gating this on StateResidue would mean it never runs at all.
+	//
+	// p.Profile, not the ambient default: both this and the log-group sweep above build
+	// their own AWS client rather than reusing anything from tg's terragrunt run, and a
+	// bare `harness teardown` invoked with a different ambient AWS profile than
+	// --profile must still target the account --profile named, not silently fall back
+	// to whatever credentials happen to be active in the shell.
+	if rerr := reclaimOutOfStateResourcesForRegion(ctx, p.Profile, p.Region, identifier); rerr != nil {
+		step("out-of-state resource reclaim failed (non-fatal): %v", rerr)
 	}
 	return nil
 }
 
 // deleteContainerInsightsLogGroups removes the out-of-state log groups the CloudWatch
 // agent created for the cluster. Safe after destroy: the agent is gone, nothing
-// recreates them.
-func deleteContainerInsightsLogGroups(ctx context.Context, region, cluster string) error {
+// recreates them. Thin wrapper: builds a real client via awsConfigFor (same helper
+// reclaimOutOfStateResourcesForRegion uses) and delegates to
+// deleteContainerInsightsLogGroupsWithClient against the LogsReclaimAPI interface
+// below, so tests can inject a fake instead of a live AWS config - same split as
+// reclaimOutOfStateResourcesForRegion / reclaimOutOfStateResources.
+func deleteContainerInsightsLogGroups(ctx context.Context, profile, region, cluster string) error {
 	if cluster == "" {
 		return nil
 	}
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	cfg, err := awsConfigFor(ctx, profile, region)
 	if err != nil {
 		return err
 	}
-	cw := cloudwatchlogs.NewFromConfig(cfg)
+	return deleteContainerInsightsLogGroupsWithClient(ctx, cloudwatchlogs.NewFromConfig(cfg), cluster)
+}
+
+// deleteContainerInsightsLogGroupsWithClient does the actual sweep. Warn-and-continue
+// on a DeleteLogGroup failure, matching every other reclaim helper in this file
+// (reclaimOrphanVolumes, reclaimOrphanLaunchTemplates, reclaimLambdaAndDMSLogGroups):
+// one group stuck behind a policy or already mid-delete must not abandon the rest of
+// the four for the cycle. Returns non-nil only when the Describe pagination itself
+// fails - that is a real API/auth problem upstream of any per-group deletion race.
+func deleteContainerInsightsLogGroupsWithClient(ctx context.Context, api LogsReclaimAPI, cluster string) error {
 	prefix := "/aws/containerinsights/" + cluster + "/"
 	deleted := 0
-	pager := cloudwatchlogs.NewDescribeLogGroupsPaginator(cw, &cloudwatchlogs.DescribeLogGroupsInput{LogGroupNamePrefix: &prefix})
+	pager := cloudwatchlogs.NewDescribeLogGroupsPaginator(api, &cloudwatchlogs.DescribeLogGroupsInput{LogGroupNamePrefix: &prefix})
 	for pager.HasMorePages() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return err
 		}
 		for _, lg := range page.LogGroups {
-			if _, err := cw.DeleteLogGroup(ctx, &cloudwatchlogs.DeleteLogGroupInput{LogGroupName: lg.LogGroupName}); err != nil {
-				return err
+			name := aws.ToString(lg.LogGroupName)
+			if _, derr := api.DeleteLogGroup(ctx, &cloudwatchlogs.DeleteLogGroupInput{LogGroupName: lg.LogGroupName}); derr != nil {
+				step("WARNING: could not delete container-insights log group %s: %v", name, derr)
+				continue
 			}
 			deleted++
 		}
 	}
 	step("deleted %d container-insights log groups under %s", deleted, prefix)
 	return nil
+}
+
+// ---- category B: out-of-state reclaimers (ported from cleanup-orphans.sh) ----
+//
+// None of what follows is tracked in Terraform state, so a destroy - however many times
+// it is retried - can never remove any of it: dynamic PVCs create EBS volumes via the
+// CSI driver, Karpenter/EKS create launch templates outside any resource block, Lambda
+// and DMS create their log groups lazily on first invocation, and a logical destroy that
+// failed midway can leave the flux-source-controller IAM role behind with a
+// deterministic name that collides with the next run's CreateRole (EntityAlreadyExists -
+// the bug that motivated porting this in the first place). None of the four carry the
+// harness's Customer/deleteAfter tags either, so they are invisible to the janitor's own
+// tag-based detection; this is the only place any of them gets reclaimed.
+//
+// Region scoping: Teardown calls reclaimOutOfStateResourcesForRegion - and, on the same
+// contract, deleteContainerInsightsLogGroups - for p.Region only, never the DR region.
+// That is not an oversight. All four classes above are created in the cluster's PRIMARY
+// region or are IAM (global, no region at all): the CSI driver and Karpenter provision
+// EBS volumes and launch templates against the primary EKS cluster, Lambda/DMS log
+// groups follow the same primary-region resources they instrument, and IAM roles have
+// no region. The container-insights groups belong to the same primary-region EKS
+// cluster and its CloudWatch agent, so they share the contract exactly. Nothing today
+// runs any of these in the DR region. If a future class IS DR-region-scoped, add a
+// second call against p.Matrix.Defaults.DRRegion rather than assuming this one already
+// covers it.
+
+// EC2ReclaimAPI is the minimal EC2 surface for reclaiming CSI-created EBS volumes and
+// orphaned launch templates.
+type EC2ReclaimAPI interface {
+	DescribeVolumes(context.Context, *ec2.DescribeVolumesInput, ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	DeleteVolume(context.Context, *ec2.DeleteVolumeInput, ...func(*ec2.Options)) (*ec2.DeleteVolumeOutput, error)
+	DescribeLaunchTemplates(context.Context, *ec2.DescribeLaunchTemplatesInput, ...func(*ec2.Options)) (*ec2.DescribeLaunchTemplatesOutput, error)
+	DeleteLaunchTemplate(context.Context, *ec2.DeleteLaunchTemplateInput, ...func(*ec2.Options)) (*ec2.DeleteLaunchTemplateOutput, error)
+}
+
+// LogsReclaimAPI is the minimal CloudWatch Logs surface for the lambda/DMS log-group
+// sweep - separate from deleteContainerInsightsLogGroups's inline client so both are
+// independently testable.
+type LogsReclaimAPI interface {
+	DescribeLogGroups(context.Context, *cloudwatchlogs.DescribeLogGroupsInput, ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.DescribeLogGroupsOutput, error)
+	DeleteLogGroup(context.Context, *cloudwatchlogs.DeleteLogGroupInput, ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.DeleteLogGroupOutput, error)
+}
+
+// IAMReclaimAPI is the minimal IAM surface for tearing down the flux-source-controller
+// role. Ordering matters: IAM refuses DeleteRole while any attached or inline policy
+// remains, which is exactly what caused the EntityAlreadyExists collision this reclaims.
+type IAMReclaimAPI interface {
+	GetRole(context.Context, *iam.GetRoleInput, ...func(*iam.Options)) (*iam.GetRoleOutput, error)
+	ListAttachedRolePolicies(context.Context, *iam.ListAttachedRolePoliciesInput, ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
+	DetachRolePolicy(context.Context, *iam.DetachRolePolicyInput, ...func(*iam.Options)) (*iam.DetachRolePolicyOutput, error)
+	ListRolePolicies(context.Context, *iam.ListRolePoliciesInput, ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
+	DeleteRolePolicy(context.Context, *iam.DeleteRolePolicyInput, ...func(*iam.Options)) (*iam.DeleteRolePolicyOutput, error)
+	DeleteRole(context.Context, *iam.DeleteRoleInput, ...func(*iam.Options)) (*iam.DeleteRoleOutput, error)
+}
+
+type reclaimDeps struct {
+	EC2  EC2ReclaimAPI
+	Logs LogsReclaimAPI
+	IAM  IAMReclaimAPI
+}
+
+// reclaimOutOfStateResources runs every sub-step for one stack identifier
+// ("<customer>-<env>"). Bails immediately on an empty identifier - there is nothing to
+// scope a filter to, and scanning unfiltered is exactly the over-broad blast radius this
+// design refuses (see the launch-template/log-group prefix comments below). Each
+// sub-step is best-effort and independent: one stuck IAM role must not abort the volume
+// sweep, so every step always runs and their errors are collected rather than the first
+// one aborting the rest.
+func reclaimOutOfStateResources(ctx context.Context, d reclaimDeps, identifier string) error {
+	if identifier == "" {
+		return nil
+	}
+	var errs []string
+
+	if n, err := reclaimOrphanVolumes(ctx, d.EC2, identifier); err != nil {
+		errs = append(errs, fmt.Sprintf("EBS volumes: %v", err))
+	} else if n > 0 {
+		step("reclaimed %d orphan EBS volume(s) for %s", n, identifier)
+	}
+
+	if n, err := reclaimOrphanLaunchTemplates(ctx, d.EC2, identifier); err != nil {
+		errs = append(errs, fmt.Sprintf("launch templates: %v", err))
+	} else if n > 0 {
+		step("reclaimed %d orphan launch template(s) for %s", n, identifier)
+	}
+
+	if n, err := reclaimLambdaAndDMSLogGroups(ctx, d.Logs, identifier); err != nil {
+		errs = append(errs, fmt.Sprintf("lambda/DMS log groups: %v", err))
+	} else if n > 0 {
+		step("reclaimed %d lambda/DMS log group(s) for %s", n, identifier)
+	}
+
+	if err := reclaimFluxSourceControllerRole(ctx, d.IAM, identifier); err != nil {
+		errs = append(errs, fmt.Sprintf("flux-source-controller role: %v", err))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("out-of-state reclaim for %s had %d failure(s): %s", identifier, len(errs), strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// reclaimOrphanVolumes deletes available EBS volumes the app's dynamic PVCs created via
+// the CSI driver (never in TF state, so a destroy never removes them). Scoped to this
+// identifier's own volumes: "Name" tag starting with "<identifier>-dynamic-pvc-" AND
+// status=available, so an in-use volume belonging to a live stack is never touched.
+// Reports every deletion, no silent caps.
+func reclaimOrphanVolumes(ctx context.Context, api EC2ReclaimAPI, identifier string) (int, error) {
+	deleted := 0
+	pager := ec2.NewDescribeVolumesPaginator(api, &ec2.DescribeVolumesInput{
+		Filters: []ec2types.Filter{
+			{Name: aws.String("tag:Name"), Values: []string{identifier + "-dynamic-pvc-*"}},
+			{Name: aws.String("status"), Values: []string{"available"}},
+		},
+	})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return deleted, err
+		}
+		for _, v := range page.Volumes {
+			id := aws.ToString(v.VolumeId)
+			if id == "" {
+				continue
+			}
+			if _, derr := api.DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: aws.String(id)}); derr != nil {
+				step("WARNING: could not delete orphan volume %s: %v", id, derr)
+				continue
+			}
+			step("reclaimed orphan EBS volume: %s", id)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+// reclaimOrphanLaunchTemplates deletes launch templates named for this identifier that
+// Terraform never tracked. Scoped to "<identifier>-*" - never a matrix-wide sweep, unlike
+// cleanup-orphans.sh which iterated every matrix customer account-wide.
+func reclaimOrphanLaunchTemplates(ctx context.Context, api EC2ReclaimAPI, identifier string) (int, error) {
+	deleted := 0
+	pager := ec2.NewDescribeLaunchTemplatesPaginator(api, &ec2.DescribeLaunchTemplatesInput{
+		Filters: []ec2types.Filter{
+			{Name: aws.String("launch-template-name"), Values: []string{identifier + "-*"}},
+		},
+	})
+	for pager.HasMorePages() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return deleted, err
+		}
+		for _, lt := range page.LaunchTemplates {
+			id := aws.ToString(lt.LaunchTemplateId)
+			if id == "" {
+				continue
+			}
+			if _, derr := api.DeleteLaunchTemplate(ctx, &ec2.DeleteLaunchTemplateInput{LaunchTemplateId: aws.String(id)}); derr != nil {
+				step("WARNING: could not delete orphan launch template %s: %v", id, derr)
+				continue
+			}
+			step("reclaimed orphan launch template: %s", id)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+// reclaimLambdaAndDMSLogGroups deletes the two out-of-state log-group families a
+// successful destroy always leaves behind: Lambda creates its group lazily on first
+// invocation (sns_to_slack, dms_restart - terraform/physical/monitoring.tf), and DMS
+// names its group after the replication instance (terraform/physical/aurora-
+// migration.tf). Scoped to THIS identifier's own prefixes only - the same over-broad-
+// blast-radius refusal as the launch-template sweep above.
+func reclaimLambdaAndDMSLogGroups(ctx context.Context, api LogsReclaimAPI, identifier string) (int, error) {
+	deleted := 0
+	for _, prefix := range []string{"/aws/lambda/" + identifier + "-", "dms-tasks-" + identifier + "-"} {
+		pager := cloudwatchlogs.NewDescribeLogGroupsPaginator(api, &cloudwatchlogs.DescribeLogGroupsInput{LogGroupNamePrefix: aws.String(prefix)})
+		for pager.HasMorePages() {
+			page, err := pager.NextPage(ctx)
+			if err != nil {
+				return deleted, err
+			}
+			for _, lg := range page.LogGroups {
+				name := aws.ToString(lg.LogGroupName)
+				if _, derr := api.DeleteLogGroup(ctx, &cloudwatchlogs.DeleteLogGroupInput{LogGroupName: lg.LogGroupName}); derr != nil {
+					step("WARNING: could not delete log group %s: %v", name, derr)
+					continue
+				}
+				deleted++
+			}
+		}
+	}
+	return deleted, nil
+}
+
+// maxIAMListPages bounds either policy listing on one role, for the same reason
+// janitor.go's maxListPages bounds an S3 listing: a paginator that hands back the same
+// marker forever would otherwise loop until something outside this process kills it,
+// which reads as "the teardown hung" rather than "listing broke". Generous on purpose -
+// at IAM's default 100 items per page this is 100,000 policies on a single role, far
+// past IAM's own hard quotas (20 managed policies attached, and inline policy documents
+// are bounded by the role's total policy size), so hitting it can only mean the
+// paginator is not converging.
+const maxIAMListPages = 1000
+
+// reclaimFluxSourceControllerRole deletes the deterministically-named logical-layer IAM
+// role a failed logical destroy can leave behind. A leftover role collides with the next
+// run's CreateRole (EntityAlreadyExists) - the bug that motivated porting this. A
+// no-op when the role does not exist. Ordering is mandatory: IAM rejects DeleteRole
+// while any attached or inline policy remains.
+func reclaimFluxSourceControllerRole(ctx context.Context, api IAMReclaimAPI, identifier string) error {
+	role := identifier + "-flux-source-controller"
+	if _, err := api.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(role)}); err != nil {
+		var nse *iamtypes.NoSuchEntityException
+		if errors.As(err, &nse) {
+			return nil
+		}
+		return fmt.Errorf("GetRole %s: %w", role, err)
+	}
+	// Both list calls page at 100 items by default (IAM's own default MaxItems), so a
+	// role with more than 100 attached or inline policies would silently detach/delete
+	// only the first page and then fail loud on DeleteRole ("role still has policies")
+	// instead of actually clearing them. Loop on IsTruncated/Marker rather than trusting
+	// a single page, under the same two failure rules janitor.go's eachListPage codifies
+	// for S3 listings (truncated-with-no-marker is an error, and there is a page cap):
+	// same paginator hazards, different SDK types, and a shared helper across two
+	// packages' unrelated output shapes would cost more than it saves.
+	var attachedPolicies []iamtypes.AttachedPolicy
+	var marker *string
+	for page := 1; ; page++ {
+		if page > maxIAMListPages {
+			return fmt.Errorf("ListAttachedRolePolicies %s did not terminate within %d pages: refusing to keep paging", role, maxIAMListPages)
+		}
+		attached, aerr := api.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{RoleName: aws.String(role), Marker: marker})
+		if aerr != nil {
+			return fmt.Errorf("ListAttachedRolePolicies %s: %w", role, aerr)
+		}
+		attachedPolicies = append(attachedPolicies, attached.AttachedPolicies...)
+		if !attached.IsTruncated {
+			break
+		}
+		if attached.Marker == nil {
+			return fmt.Errorf("ListAttachedRolePolicies %s reported a truncated result with no marker: refusing to treat a short listing as complete", role)
+		}
+		marker = attached.Marker
+	}
+	for _, p := range attachedPolicies {
+		if _, derr := api.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{RoleName: aws.String(role), PolicyArn: p.PolicyArn}); derr != nil {
+			return fmt.Errorf("DetachRolePolicy %s from %s: %w", aws.ToString(p.PolicyArn), role, derr)
+		}
+	}
+	var inlinePolicyNames []string
+	marker = nil
+	for page := 1; ; page++ {
+		if page > maxIAMListPages {
+			return fmt.Errorf("ListRolePolicies %s did not terminate within %d pages: refusing to keep paging", role, maxIAMListPages)
+		}
+		inline, ierr := api.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{RoleName: aws.String(role), Marker: marker})
+		if ierr != nil {
+			return fmt.Errorf("ListRolePolicies %s: %w", role, ierr)
+		}
+		inlinePolicyNames = append(inlinePolicyNames, inline.PolicyNames...)
+		if !inline.IsTruncated {
+			break
+		}
+		if inline.Marker == nil {
+			return fmt.Errorf("ListRolePolicies %s reported a truncated result with no marker: refusing to treat a short listing as complete", role)
+		}
+		marker = inline.Marker
+	}
+	for _, name := range inlinePolicyNames {
+		if _, derr := api.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{RoleName: aws.String(role), PolicyName: aws.String(name)}); derr != nil {
+			return fmt.Errorf("DeleteRolePolicy %s on %s: %w", name, role, derr)
+		}
+	}
+	if _, err := api.DeleteRole(ctx, &iam.DeleteRoleInput{RoleName: aws.String(role)}); err != nil {
+		return fmt.Errorf("DeleteRole %s: %w", role, err)
+	}
+	step("deleted orphan logical IAM role: %s", role)
+	return nil
+}
+
+// reclaimOutOfStateResourcesForRegion is the thin production wrapper: builds real
+// clients via awsConfigFor (same helper deleteContainerInsightsLogGroups uses, so both
+// honor --profile instead of silently falling back to the ambient default) and calls
+// reclaimOutOfStateResources. Tests call reclaimOutOfStateResources directly with
+// fakes instead.
+func reclaimOutOfStateResourcesForRegion(ctx context.Context, profile, region, identifier string) error {
+	if identifier == "" {
+		return nil
+	}
+	cfg, err := awsConfigFor(ctx, profile, region)
+	if err != nil {
+		return err
+	}
+	d := reclaimDeps{
+		EC2:  ec2.NewFromConfig(cfg),
+		Logs: cloudwatchlogs.NewFromConfig(cfg),
+		IAM:  iam.NewFromConfig(cfg),
+	}
+	return reclaimOutOfStateResources(ctx, d, identifier)
 }

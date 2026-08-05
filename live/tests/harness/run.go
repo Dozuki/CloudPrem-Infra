@@ -31,6 +31,11 @@ var (
 // the log shows what the harness is doing during the otherwise-silent gaps between
 // terragrunt stages (validation waits, output reads, validators, teardown). Each
 // marker is also recorded for the end-of-run HARNESS RUN SUMMARY banner.
+//
+// INVARIANT: single-threaded callers only. The phaseMarks append above is an unguarded
+// write to package state, so this is safe exactly because every caller (the run driver,
+// the phases, the janitor's Scan/Sweep loops) is sequential within one process. Anything
+// that ever calls a phase or a sweep from a goroutine has to put a mutex here first.
 func step(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	phaseMarks = append(phaseMarks, phaseMark{at: time.Now(), msg: msg})

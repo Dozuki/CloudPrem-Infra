@@ -8,6 +8,8 @@ drives the identical `harness <phase>` subcommands, so the two paths stay compar
 00-phase-templates.yaml   config, semaphore, and the harness-phase template (one per subcommand)
 10-scenario.yaml          harness-scenario: one config end to end, teardown as an exit handler
 20-matrix.yaml            harness-matrix: fans out over configs, submits one child workflow each
+40-nightly-cron.yaml      the nightly clock for harness-matrix
+50-janitor-cron.yaml      harness-janitor: the Phase 4 orphan sweeper (dry-run by default)
 ```
 
 Apply:
@@ -75,6 +77,32 @@ which is precisely when teardown matters. And because teardown reads the manifes
 cleanup is not tied to the process that created the stack: this pod, a retry, or the Phase 4
 janitor can all clean up a given run. That is the structural fix for the trap in `run.sh`.
 
+**The janitor is the backstop for a teardown that doesn't retry its way out.** The exit
+handler above plus its own retry (this same `run` template, `retryPolicy: OnError`) covers
+a destroy that fails transiently. Neither covers a destroy that fails for a reason no retry
+fixes - a state lock held by a dead process, expired credentials, a pod killed between apply
+and the manifest write. Those abandon a stack permanently: seven of them leaking over three
+days exhausted DDVtest's 10-VPC ceiling and took the nightly down with VpcLimitExceeded.
+`harness-janitor` (`50-janitor-cron.yaml`) runs nightly, never matches on a name, and
+defaults to a dry-run report - see `harness/janitor.go` for the full predicate and
+`harness/janitor_test.go` for its test coverage.
+
+**A sweep cleans more than the terragrunt destroy.** `PhaseParams.Teardown` runs the same
+destroy every phase pod's exit handler runs, but a sweep also carries the out-of-band
+cleanup `cleanup-orphans.sh` used to do by hand (that script is now the porting spec, not
+a second implementation - see its own header for what stays script-only). Before the
+physical destroy: clearing NLB deletion protection and deleting any MSK cluster
+Terraform's state lost track of (both would otherwise strand the VPC on a
+DependencyViolation), and clearing the S3 backend's stale `-md5` state digest so an
+interrupted prior apply can't abort the destroy before it starts. After every successful
+destroy, sweep or not: reclaiming CSI-created EBS volumes and launch templates, the
+lambda/DMS log groups that only exist lazily at runtime, and the flux-source-controller
+IAM role that otherwise collides with the next run's `CreateRole`. And when a destroy
+succeeds but a tag re-query still finds something standing (`StateResidue`): a targeted,
+single-call delete for exactly the ARNs that query returned, never a wider search. Every
+mutation sits on a path only `Sweep` (or, for the always-on post-destroy reclaim, a real
+`Teardown`) can reach, so `--sweep=false` report mode never mutates anything.
+
 **One semaphore across every entry point.** DDVtest allows 10 VPCs per region and a test
 stack is about one (recovery is two). A nightly matrix plus a couple of PR runs will
 exhaust that mid-apply and surface as a confusing quota error inside a terragrunt run. The
@@ -94,9 +122,7 @@ measurements.
 
 - **The recovery scenario.** `cmd/harness` exposes `provision/upgrade/validate/teardown`
   with `--scenario upgrade|fresh`; `RunRecovery` has no phase equivalent, so the `recover`
-  and `recover_source` configs stay on `run.sh` until the CLI grows a phase for them.
-- **The backstop janitor.** Retry exhaustion (or a failure mode retry can't fix, like a
-  half-provisioned upgrade destroying against the wrong ref) still ends in an orphan with
-  nothing sweeping it. `cleanup-orphans.sh` is the right foundation but is not schedulable
-  as written: no staleness gate on the DynamoDB lock release, no self-mutex, needs an
-  interactive SSO session. That is Phase 4.
+  and `recover_source` configs stay on `run.sh` until the CLI grows a phase for them. The
+  janitor's own region-mismatch check (`harness/janitor.go`) keeps it from ever sweeping
+  the `recover` config's DR-region rebuild for the same reason - it reports `needs-review`
+  rather than guess at a destroy this CLI cannot yet drive.

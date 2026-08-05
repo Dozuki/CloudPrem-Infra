@@ -38,6 +38,12 @@ data:
   # shared Vault channelId (that one points at #spacelift-alerts and other
   # consumers read it). Channel IDs are not secrets; config lives here.
   slack_channel: 'C0BMGD1KE8Z'
+  # Phase 4 janitor mode. 'report' detects and posts, deletes nothing. Flipping to
+  # 'sweep' is a deliberate, reviewable, one-word commit - and the janitor CLI defaults
+  # to dry run independently (--sweep=false), so BOTH have to say sweep before anything
+  # is destroyed. Watch several days of reports, including one with a real orphan in it,
+  # before flipping this.
+  janitor_mode: 'report'
 ---
 # DDVtest has a hard ceiling of 10 VPCs per region and each test stack is about one VPC
 # (recovery is two). A nightly matrix plus a couple of PR runs will exhaust it mid-apply,

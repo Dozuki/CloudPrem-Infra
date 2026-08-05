@@ -39,6 +39,27 @@ type RunManifest struct {
 	// verified - both are gone from live outputs once the drill has run.
 	PromotedClusterID string `json:"promoted_cluster_id,omitempty"`
 	DrillHeartbeats   int    `json:"drill_heartbeats,omitempty"`
+
+	// AppliedCustomer is the salted "customer" feature-flag value actually used at apply
+	// time (phases.go Provision), not a value recomputed from Config.Salted against
+	// whatever the matrix checkout looks like today. The matrix is a live file: if a
+	// config's customer flag is edited after a run starts and that run later leaks, a
+	// fresh recompute would query AWS for a tag the run never carried, find nothing, and
+	// silently misreport a real leak as torn down (the janitor's defect P2). Empty on a
+	// manifest written before this field existed - callers must not guess a value in
+	// that case, see janitor.go classify().
+	AppliedCustomer string `json:"applied_customer,omitempty"`
+
+	// KeepOnFailure/KeepOnFailureRecorded durably record the --keep-on-failure decision
+	// a teardown call was given (phases.go Teardown, written on every call). Argo TTLs
+	// the owning Workflow CR three days after it finishes (10-scenario.yaml
+	// ttlStrategy), so a workflow-index lookup for this same fact goes blank well within
+	// a weekend - long enough for a sweeper to destroy a stack a human deliberately left
+	// up to debug (the janitor's defect P1). KeepOnFailureRecorded distinguishes
+	// "recorded, and it was false" from "this manifest predates the field entirely" -
+	// only the latter should fall back to any other source (the workflow index).
+	KeepOnFailure         bool `json:"keep_on_failure,omitempty"`
+	KeepOnFailureRecorded bool `json:"keep_on_failure_recorded,omitempty"`
 }
 
 // ManifestStore persists a RunManifest keyed by state prefix (e.g. "run1-min/").

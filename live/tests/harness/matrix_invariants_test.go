@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -56,5 +57,76 @@ func TestPostStatusUsesEvidenceSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(script, "log_excerpt") {
 		t.Error("post-status's relay payload no longer carries log_excerpt")
+	}
+}
+
+// TestMatrixConfigsSaltProducesUniqueCustomer guards Config.Salted's documented no-op
+// path (config.go): a base customer already at or past the 10-char terraform cap salts
+// to itself. The janitor (harness/janitor.go) already refuses to reason about a candidate
+// whose salted customer did not change - it reports needs-review rather than guess - but a
+// non-unique identifier is a real collision risk for whatever else derives IAM/Vault/k8s
+// resource names from it, not just the janitor. Every config's customer must leave Salted
+// room to mutate it.
+func TestMatrixConfigsSaltProducesUniqueCustomer(t *testing.T) {
+	m, err := LoadMatrix("../matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	for _, c := range m.Configs {
+		customer, ok := c.FeatureFlags["customer"].(string)
+		if !ok || customer == "" {
+			t.Errorf("config %q has no (or a non-string) customer feature flag; the janitor cannot derive an identity for it", c.Name)
+			continue
+		}
+		salted := c.Salted("janitor-invariant-probe")
+		got, _ := salted.FeatureFlags["customer"].(string)
+		if got == customer {
+			t.Errorf("config %q: customer %q is at/past the 10-char salt cap (Salted is a no-op on it); two runs of this config would collide on the same resource identifier", c.Name, customer)
+		}
+	}
+}
+
+// TestJanitorCronMatchesTheGoConstants guards the two Go/YAML couplings the janitor
+// depends on and that nothing else enforces. Both are "copy this literal by hand"
+// contracts documented in comments on either side, which is exactly the kind of
+// agreement that rots silently.
+//
+//   - schema_version: the notify script asserts the report's version before running its
+//     jq pipeline over the field names. If Go bumps JanitorReportSchemaVersion and the
+//     script keeps asserting the old number, EVERY cycle posts "cannot read this
+//     cycle's report" instead of a report - loud, but permanently wrong.
+//   - activeDeadlineSeconds: JanitorPodActiveDeadlineSeconds is the source of truth
+//     Sweep's wall-clock budget is derived from. If the pod's real deadline is shorter
+//     than the constant, Sweep budgets time the pod does not have and a destroy gets
+//     SIGKILLed mid-run - the one failure the budget exists to prevent.
+func TestJanitorCronMatchesTheGoConstants(t *testing.T) {
+	b, err := os.ReadFile("../argo/50-janitor-cron.yaml")
+	if err != nil {
+		t.Fatalf("read 50-janitor-cron.yaml: %v", err)
+	}
+	yaml := string(b)
+
+	wantSchema := fmt.Sprintf(`[ "$SCHEMA_VERSION" != "%d" ]`, JanitorReportSchemaVersion)
+	if !strings.Contains(yaml, wantSchema) {
+		t.Errorf("the notify script does not assert schema_version %d (looked for %s); Go's JanitorReportSchemaVersion and the script's literal have drifted apart",
+			JanitorReportSchemaVersion, wantSchema)
+	}
+
+	wantDeadline := fmt.Sprintf("activeDeadlineSeconds: %d", JanitorPodActiveDeadlineSeconds)
+	if !strings.Contains(yaml, wantDeadline) {
+		t.Errorf("the scan pod does not carry %q; JanitorPodActiveDeadlineSeconds (%d) is the number Sweep's budget is derived from and the pod must actually get that long",
+			wantDeadline, JanitorPodActiveDeadlineSeconds)
+	}
+
+	// The selector contract, in the other direction: these are the exact state strings
+	// harness/janitor.go emits, and a rename on the Go side that missed the script
+	// would silently drop a whole class of candidate out of Slack.
+	for _, state := range []CandidateState{StateOrphan, StateBlocked, StateResidue, StateUnknown, StateNeedsReview} {
+		if !strings.Contains(yaml, fmt.Sprintf(`.state=="%s"`, state)) {
+			t.Errorf("the notify script's selectors never mention state %q; candidates in that state would be invisible in Slack", state)
+		}
+	}
+	if !strings.Contains(yaml, `(.sweep_result // "") != "destroyed"`) {
+		t.Error(`the notify script no longer excludes sweep_result "destroyed" from the alarm set; a clean destroy would render under a "teardown FAILED" headline (Sweep leaves State=orphan on purpose)`)
 	}
 }

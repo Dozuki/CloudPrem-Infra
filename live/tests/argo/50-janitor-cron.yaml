@@ -1,0 +1,479 @@
+# Phase 4: the orphan janitor.
+#
+# The exit-handler teardown (10-scenario.yaml onExit) plus its retry covers a destroy
+# that fails transiently. This covers what neither does: a destroy that fails for a
+# non-retryable reason - a state lock held by a dead process, expired credentials, a pod
+# killed between apply and the manifest write, a half-provisioned upgrade destroying
+# against the wrong ref. Those abandon a stack permanently. Seven of them leaking over
+# three days exhausted DDVtest's 10-VPC ceiling, after which every run - nightly included
+# - died at provision with VpcLimitExceeded, and the account was cleaned up by hand.
+#
+# Detection never matches a name. It enumerates the harness-manifest.json objects only
+# the phase code writes (harness/manifest_s3.go), recomputes each run's salted identity
+# with the exact function the apply used (Config.Salted, config.go), and confirms against
+# the Resource Groups Tagging API, the live Workflow CRs, and the state lock's own
+# timestamp. dev-min's state sits at the unprefixed top level and carries no
+# harness-manifest.json, so it is never a candidate at any point; the hardcoded protected
+# list in harness/janitor.go is the second wall behind that, and it ABORTS the whole
+# cycle rather than skip one candidate if it is ever tripped. See harness/janitor.go for
+# the full predicate.
+#
+# DEFAULT IS DRY RUN, on two levels: the janitor CLI's own --sweep defaults to false
+# (janitor.go, and Sweep() itself now refuses to run at all when it is not explicitly
+# true), and this workflow only ever passes --sweep=true when the `mode` parameter
+# resolves to 'sweep' - whose DEFAULT comes from the janitor_mode key in harness-config
+# (committed as 'report'). That default is a scheduled cron run's only path here, so the
+# nightly cycle never sweeps until a human commits janitor_mode: sweep. It is not a
+# second switch a submitter cannot also flip in the same breath, though: `argo submit
+# --from workflowtemplate/harness-janitor -p mode=sweep` overrides the parameter at
+# submission time same as any other Argo parameter, independent of what janitor_mode
+# is committed as - so a manual sweep run is one explicit `-p mode=sweep`, not two
+# separate approvals. Watch several days of reports, including one with a real orphan
+# in it, before committing janitor_mode: sweep or running one by hand.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: harness-janitor
+  namespace: argo
+spec:
+  entrypoint: janitor
+  serviceAccountName: argo-workflow
+  # No semaphore, unlike harness-scenario. The janitor holds no stack of its own: by
+  # construction it only ever acts on a prefix that is simultaneously stale, unowned, and
+  # still holding live tagged resources, and the only thing it ever does to one is
+  # destroy it - so it cannot push the account over the VPC ceiling the semaphore
+  # protects. Taking a slot would only starve the two real concurrent-stacks slots for
+  # nothing.
+  arguments:
+    parameters:
+      - name: mode
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: janitor_mode
+      # One destroy per cycle. Leaks are rare and each one is evidence a teardown failed
+      # somewhere - the report is what tells a human that, not a bigger sweep budget.
+      # Raise this deliberately, never reflexively.
+      - name: max-sweeps
+        value: '1'
+      - name: image
+        valueFrom: { configMapKeyRef: { name: harness-config, key: image } }
+      - name: ddvtest-account-id
+        valueFrom: { configMapKeyRef: { name: harness-config, key: ddvtest_account_id } }
+      - name: assume-role-arn
+        valueFrom: { configMapKeyRef: { name: harness-config, key: assume_role_arn } }
+      - name: region
+        valueFrom: { configMapKeyRef: { name: harness-config, key: region } }
+      - name: dr-region
+        valueFrom: { configMapKeyRef: { name: harness-config, key: dr_region } }
+      - name: vault-addr
+        valueFrom: { configMapKeyRef: { name: harness-config, key: vault_addr } }
+      - name: slack-channel
+        valueFrom: { configMapKeyRef: { name: harness-config, key: slack_channel } }
+  # Report mode finishes in minutes (a handful of S3 listings + tag lookups). Sweep mode
+  # can run MULTIPLE Teardown calls in-process now (harness/janitor.go Sweep bounds
+  # attempts by wall clock, not by count, since one Teardown's own historical worst case
+  # ran ~90 minutes with only the Aurora tail left before a deadline killed it -
+  # 10-scenario.yaml's own teardown deadline is 10800s for exactly that reason - and two
+  # slow failures plus one slow success used to be able to exceed this pod's deadline
+  # with nothing to stop it). 12600 is THE authoritative number: harness.go's
+  # JanitorPodActiveDeadlineSeconds constant must equal this literal exactly (its own
+  # comment points back here), and Sweep's wall-clock budget (DefaultSweepBudget) is
+  # derived from that constant minus a fixed setup margin, not tuned here separately.
+  # If this number ever changes, change JanitorPodActiveDeadlineSeconds in
+  # harness/janitor.go FIRST and copy the new literal here - the derivation then
+  # updates Sweep's budget automatically, so there is exactly one number to keep in
+  # sync by hand, not two.
+  activeDeadlineSeconds: 12600
+  ttlStrategy:
+    secondsAfterSuccess: 86400
+    secondsAfterFailure: 259200
+  podMetadata:
+    annotations:
+      # A sweep destroy killed halfway strands the very stack this workflow exists to
+      # clean up - the same reasoning as harness-scenario, doubly so here.
+      karpenter.sh/do-not-disrupt: 'true'
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: 10Gi
+  templates:
+    - name: janitor
+      steps:
+        - - name: scan
+            template: scan
+            # Required here, not just on notify below: in Argo's Steps DSL a FAILING
+            # step aborts every later step group unless that step itself says
+            # otherwise. Without this, any non-zero exit from scan - an account
+            # mismatch, a blind-ownership abort, an AWS call that ran out of retries -
+            # skipped the notify group entirely and the janitor went silently dark,
+            # exactly the failure mode this cron exists to catch for the STACKS it
+            # watches, now happening to itself instead.
+            continueOn:
+              failed: true
+              error: true
+        - - name: notify
+            template: post-report
+            # A notification failure must never fail the cycle - the report already
+            # reached the pod log and the JSON artifact either way.
+            continueOn:
+              failed: true
+            arguments:
+              parameters:
+                - name: report
+                  value: '{{steps.scan.outputs.parameters.report}}'
+                - name: scan-status
+                  value: '{{steps.scan.status}}'
+        - - name: verify-scan
+            template: verify-scan
+            # Deliberately NO continueOn here. continueOn on the scan step only stops a
+            # scan failure from SKIPPING the notify step - it does not make the failure
+            # go away. Per Argo's own continue-on-fail example, a workflow with a
+            # continueOn'd failing step still "completes successfully overall": the
+            # scan step can exit 3 (a safety abort) or 1 (a failed sweep destroy) and
+            # this whole CronWorkflow would still show green, which is exactly the
+            # "a broken janitor looks fine" failure mode this workflow exists to catch
+            # for OTHER stacks, now happening to itself. This step has nothing to do
+            # with continueOn, so if it fails, the failure is real and propagates: a
+            # scan that did not end Succeeded now makes the Argo UI, `argo list`, and
+            # the CronWorkflow's own history all show Failed, on top of the Slack
+            # alert notify already sent.
+            arguments:
+              parameters:
+                - name: scan-status
+                  value: '{{steps.scan.status}}'
+
+    - name: scan
+      outputs:
+        parameters:
+          - name: report
+            valueFrom:
+              path: /tmp/report.json
+              default: '{}'
+      container:
+        image: '{{workflow.parameters.image}}'
+        command: ['/bin/bash', '-c']
+        args:
+          - |
+            set -uo pipefail
+            SWEEP_FLAG=--sweep=false
+            [ '{{workflow.parameters.mode}}' = sweep ] && SWEEP_FLAG=--sweep=true
+
+            # The ownership check is only as good as this list, so it is piped in rather
+            # than fetched by the Go binary: the exact proven pattern `harness evidence`
+            # already uses (main.go runEvidence), against the same RBAC - the
+            # harness-submit-children Role (20-matrix.yaml) already grants argo-workflow
+            # get/list/watch on workflows in this namespace. No client-go, no new RBAC.
+            #
+            # No label filter: the janitor has to see every live workflow in the
+            # namespace to know what is owned, not just one matrix's children. On a
+            # kubectl failure this intentionally still produces an (empty) file rather
+            # than aborting the script - an empty or unparseable body is exactly what
+            # janitor's own G2 check refuses to proceed past, so the failure mode is
+            # "the janitor aborts and says why" rather than "the pod never ran the CLI
+            # at all and the cron looks silently green".
+            kubectl -n argo get workflows -o json > /tmp/wf.json || : > /tmp/wf.json
+
+            /usr/local/bin/docker-entrypoint.sh janitor \
+              --account-id '{{workflow.parameters.ddvtest-account-id}}' \
+              --region '{{workflow.parameters.region}}' \
+              --dr-region '{{workflow.parameters.dr-region}}' \
+              --profile ddvtest \
+              --repo-dir /workspace/repo \
+              --self-workflow '{{workflow.name}}' \
+              --max-sweeps '{{workflow.parameters.max-sweeps}}' \
+              --json "${SWEEP_FLAG}" < /tmp/wf.json | tee /tmp/out.txt
+            RC=${PIPESTATUS[0]}
+            # runJanitor's last stdout line is the JSON report (--json); everything
+            # before it is the human-readable table, in both report and sweep mode.
+            tail -1 /tmp/out.txt > /tmp/report.json || echo '{}' > /tmp/report.json
+            exit "$RC"
+        env:
+          - name: HARNESS_REPO_DIR
+            value: /workspace/repo
+          - name: HARNESS_ASSUME_ROLE_ARN
+            value: '{{workflow.parameters.assume-role-arn}}'
+          - name: VAULT_ADDR
+            value: '{{workflow.parameters.vault-addr}}'
+          - name: VAULT_AWS_ROLE
+            value: deployer
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: '1'
+            memory: '4Gi'
+          limits:
+            memory: '6Gi'
+
+    # Finding an orphan means a teardown FAILED somewhere. The point of this step is that
+    # the underlying bug gets seen by a human, not that the mess quietly disappears.
+    #
+    # A plain bot-token post rather than the fleet Slack relay module: the relay's card
+    # renderer has no 'harness-janitor' source and would drop an unrecognized one on the
+    # floor. Wire this into the relay (and pick up its richer card formatting) as a
+    # follow-up once the source type exists there - not a blocker for landing the
+    # janitor, since a plain message still gets the signal in front of a human.
+    - name: post-report
+      inputs:
+        parameters:
+          - name: report
+          - name: scan-status
+      activeDeadlineSeconds: 300
+      container:
+        image: '{{workflow.parameters.image}}'
+        command: ['/bin/bash', '-c']
+        args:
+          - |
+            set -uo pipefail
+            # REPORT/SCAN_STATUS/MODE come in through the container env: block below,
+            # not by pasting an Argo parameter tag straight into a single-quoted
+            # assignment here. Argo's tag substitution is textual and happens before bash
+            # ever sees this line, so a raw report tag inside single quotes breaks out of
+            # the string the moment the JSON contains an apostrophe - and classify()'s own
+            # reason text does (G11: "the janitor's --region"; identity drift: "the run's
+            # recorded identity, not today's"). That killed the notify script at parse
+            # time on exactly the cycles most likely to need a human, and continueOn below
+            # swallowed the loss silently. A kubelet-set env var never re-parses through
+            # a shell, so it is immune to whatever bytes end up in the value.
+            #
+            # For the same reason this comment names no tag literally: substitution does
+            # not care that a line starts with '#', so writing one here would paste the
+            # entire report JSON into a bash comment - a second copy in the pod spec, and
+            # a parse bomb the first time the report contains a newline.
+
+            # Check the report's own shape before touching a single report field.
+            # schema_version is the janitor's explicit field contract
+            # (harness/janitor.go); a rename or removal downstream of jq's
+            # '.candidates[]?' would otherwise degrade into a wrong count instead of a
+            # clear error. Skipped when REPORT has no "candidates" key at all - that is
+            # the legitimate G1-G3 safety-abort shape (REPORT is the outputs default
+            # '{}', handled by its own branch below), not a schema mismatch.
+            #
+            # A mismatch becomes the Slack message rather than an exit 1. This step
+            # carries continueOn: failed (see the steps: block above), so exiting
+            # non-zero here posts nothing and fails nothing: a silent Slack blackout,
+            # which is the exact failure mode the schema assert exists to prevent. The
+            # only way "fail loud" is true for a notify step is to send the failure.
+            SCHEMA_ERROR=''
+            if printf '%s' "$REPORT" | jq -e 'has("candidates")' >/dev/null 2>&1; then
+              # '// "missing"' rather than a bare '.schema_version': jq -r prints the
+              # literal string "null" for an absent key, and "schema_version is 'null'"
+              # reads like a corrupt value rather than a field that is simply gone.
+              SCHEMA_VERSION=$(printf '%s' "$REPORT" | jq -r '.schema_version // "missing"' 2>/dev/null)
+              if [ "$SCHEMA_VERSION" != "1" ]; then
+                SCHEMA_ERROR="report schema_version is '${SCHEMA_VERSION:-missing}', expected 1 - the janitor's Report JSON field contract (harness/janitor.go) changed underneath this script; any orphan/blocked/residue count from this cycle would be untrustworthy. Update the jq pipeline in argo/50-janitor-cron.yaml before believing another one."
+              fi
+            fi
+
+            if [ -n "$SCHEMA_ERROR" ]; then
+              # Nothing below this point may read a report field: that is precisely what
+              # is no longer trustworthy. Say so and go straight to the send.
+              echo "$SCHEMA_ERROR" >&2
+              TEXT=$(printf 'harness janitor (%s): CANNOT READ THIS CYCLE'"'"'S REPORT. %s' "$MODE" "$SCHEMA_ERROR")
+            else
+            # Mine REPORT for candidates regardless of SCAN_STATUS, before deciding what
+            # to say. Two different things make SCAN_STATUS non-Succeeded: a G1-G3
+            # safety abort in runJanitor (account mismatch, blind ownership, a protected
+            # identity) that returns before Scan() ever ran - every count below stays 0 -
+            # or a cycle that ran a full scan AND a sweep, printed a real report, and
+            # then runJanitor still returned exit 1 because a destroy attempt failed or
+            # its post-destroy verification did (rep.Failed / rep.Inconclusive). That
+            # second case is not "no report was produced" - it is a complete report
+            # sitting right here in REPORT, including exactly which candidate broke and
+            # why in its sweep_result. Gating entirely on SCAN_STATUS told a human to go
+            # dig through the pod log for information already sitting in the JSON, in
+            # what is - once sweep mode is ever enabled - the single most likely way for
+            # SCAN_STATUS to end up non-Succeeded.
+            #
+            # THREE selectors, because "how many candidates are there" is three
+            # different questions with three different answers a human needs:
+            #
+            #   ALARM  - orphan, blocked, residue, unknown, and NOT already destroyed.
+            #            orphan/blocked/residue were always here. unknown was not, and
+            #            its absence was a hole: StateUnknown is what Sweep sets when a
+            #            destroy RAN and the verification query then failed, i.e. the
+            #            single least-understood outcome the janitor can produce, and it
+            #            matched no selector at all. The sweep_result exclusion is the
+            #            other half: Sweep deliberately LEAVES State=orphan on a clean
+            #            destroy (only sweep_result changes to "destroyed", see
+            #            harness/janitor.go Sweep), so without it every successful
+            #            destroy rendered under a headline saying a teardown FAILED.
+            #   REVIEW - needs-review: candidates the janitor refused to reason about
+            #            (an unverifiable identity, a recovery-drill config, an
+            #            unreadable manifest). Never acted on, never previously
+            #            reported, so a cycle whose ONLY finding was one posted nothing
+            #            at all. Counted separately, not folded into ALARM, because
+            #            recovery drills produce these routinely and they must not read
+            #            as "a teardown failed".
+            #   DONE   - sweep_result "destroyed": purely informational, but a sweep
+            #            that actually destroyed something is a record worth having in
+            #            the channel.
+            ALARM_SEL='select((.state=="orphan" or .state=="blocked" or .state=="residue" or .state=="unknown") and (.sweep_result // "") != "destroyed")'
+            REVIEW_SEL='select(.state=="needs-review")'
+            DONE_SEL='select((.sweep_result // "") == "destroyed")'
+            # One line renderer for all three, so the wording cannot drift between
+            # sections. Every field is defaulted: a needs-review candidate built from an
+            # unreadable manifest carries no run_id, config_name or delete_after at all,
+            # and jq's + on null would abort the whole pipeline (empty Slack card) for
+            # exactly the candidate that most needs printing.
+            LINE_DEF='def line: "- `" + (if (.run_id // "") != "" then .run_id else (.prefix // "?") end) + "` (" + (.config_name // "?") + ") " + (.state // "?") + ": " + ((.resources // 0)|tostring) + " tagged resources, delete_after " + (if (.delete_after // "") != "" then .delete_after else "(none)" end) + (if (.sweep_result // "") != "" then " -> " + .sweep_result else "" end);'
+            jq_count() { printf '%s' "$REPORT" | jq -r "[.candidates[]? | $1] | length" 2>/dev/null; }
+            jq_lines() { printf '%s' "$REPORT" | jq -r "$LINE_DEF [.candidates[]? | $1 | line] | join(\"\n\")" 2>/dev/null; }
+
+            A=$(jq_count "$ALARM_SEL") || A=0
+            R=$(jq_count "$REVIEW_SEL") || R=0
+            D=$(jq_count "$DONE_SEL") || D=0
+            case "$A" in ''|*[!0-9]*) A=0 ;; esac
+            case "$R" in ''|*[!0-9]*) R=0 ;; esac
+            case "$D" in ''|*[!0-9]*) D=0 ;; esac
+            TOTAL=$((A + R + D))
+
+            if [ "$SCAN_STATUS" != "Succeeded" ] && [ "$TOTAL" = 0 ]; then
+              # No usable report at all: a safety abort, a pod eviction before the
+              # script ran, or any other failure that happened before a report existed.
+              TEXT=$(printf 'harness janitor (%s): the SCAN step failed (status=%s). No orphan report was produced this cycle - check the scan pod log.' "$MODE" "$SCAN_STATUS")
+            elif [ "$TOTAL" = 0 ]; then
+              echo "nothing to report this cycle (no orphan, blocked, residue, unknown, needs-review or destroyed candidates)"
+              exit 0
+            else
+              BODY=''
+              add_section() {
+                [ -z "$2" ] && return 0
+                if [ -n "$BODY" ]; then
+                  BODY=$(printf '%s\n\n%s\n%s' "$BODY" "$1" "$2")
+                else
+                  BODY=$(printf '%s\n%s' "$1" "$2")
+                fi
+              }
+              [ "$A" -gt 0 ] && add_section "NEEDS A HUMAN ($A):" "$(jq_lines "$ALARM_SEL")"
+              [ "$R" -gt 0 ] && add_section "NEVER SWEPT, needs review ($R):" "$(jq_lines "$REVIEW_SEL")"
+              [ "$D" -gt 0 ] && add_section "destroyed this cycle ($D), informational:" "$(jq_lines "$DONE_SEL")"
+
+              if [ "$SCAN_STATUS" != "Succeeded" ]; then
+                # The step itself ended non-Succeeded but got far enough to leave a real
+                # report - most likely a sweep destroy failing on one candidate, or a
+                # post-destroy verification query failing, while the scan otherwise
+                # completed. Say both things instead of picking one.
+                HEAD=$(printf 'harness janitor (%s): the SCAN step did not finish cleanly (status=%s) but left a real report - %s needing a human, %s needing review, %s destroyed. Check the scan pod log AND the lines below (a failed sweep destroy, or a destroy whose verification query failed, is the likely cause).' "$MODE" "$SCAN_STATUS" "$A" "$R" "$D")
+              else
+                # Each state means a different thing and wants a different response, so
+                # the headline names all of them rather than calling everything a failed
+                # teardown: residue and unknown both follow a destroy that SUCCEEDED.
+                HEAD=$(printf 'harness janitor (%s): %s test stack(s) need a human, %s need review, %s destroyed this cycle. orphan/blocked = a teardown FAILED (blocked also needs a manual force-unlock); residue = a destroy SUCCEEDED but tagged resources outlived it and need manual cleanup, not a retry; unknown = a destroy ran and its verification query failed, so what survived is not known; needs-review = the janitor refused to reason about it and never touched it. Read each line'"'"'s own detail before clearing anything by hand.' "$MODE" "$A" "$R" "$D")
+              fi
+              TEXT=$(printf '%s\n%s' "$HEAD" "$BODY")
+            fi
+            fi
+
+            # VAULT_ADDR is already in the process environment via the container env:
+            # block below (kubelet sets it, no shell re-parse needed); only AWS_REGION
+            # needs setting here since vault login wants it and it is a fixed literal,
+            # not a workflow parameter.
+            export AWS_REGION=us-east-1
+            vault login -method=aws role=deployer region=us-east-1 >/dev/null || {
+              echo "vault login failed; cannot post the alert (see the pod log above for the report itself)"
+              exit 0
+            }
+            SLACK_TOKEN="$(vault kv get -field=botToken secret/dozuki/global/slack 2>/dev/null)"
+            jq -n --arg c "$SLACK_CHANNEL" --arg t "$TEXT" '{channel: $c, text: $t}' \
+              | curl -sf -X POST -H 'Content-type: application/json; charset=utf-8' \
+                  -H "Authorization: Bearer ${SLACK_TOKEN}" --data @- \
+                  https://slack.com/api/chat.postMessage >/dev/null \
+              || echo "slack post failed (see the pod log above for the report itself)"
+            exit 0
+        # Every parameter this script's body touches comes through here, not through a
+        # {{...}} pasted into the args string above - see the top-of-script comment for
+        # why (apostrophes in classify()'s reason text break a single-quoted paste but
+        # never reach a shell parser when set as a container env var).
+        env:
+          # The whole report JSON rides the pod spec as this value, which puts it under
+          # etcd's ~1MiB object limit along with the rest of the spec. A cycle's report
+          # is a handful of candidates (kilobytes) and the account holds ten VPCs, so
+          # there is a lot of headroom - but a pathological cycle that somehow produced
+          # thousands of candidates would fail to create the pod rather than truncate,
+          # so if that ever happens the fix is to pass an artifact, not a parameter.
+          - name: REPORT
+            value: '{{inputs.parameters.report}}'
+          - name: SCAN_STATUS
+            value: '{{inputs.parameters.scan-status}}'
+          - name: MODE
+            value: '{{workflow.parameters.mode}}'
+          - name: VAULT_ADDR
+            value: '{{workflow.parameters.vault-addr}}'
+          - name: SLACK_CHANNEL
+            value: '{{workflow.parameters.slack-channel}}'
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+
+    # The gate that makes a broken scan visibly fail. runJanitor's own exit codes (see
+    # cmd/harness/main.go) already distinguish a real problem (2 usage, 3 safety abort, 1
+    # a sweep destroy failed OR a destroy whose post-destroy verification query failed,
+    # which is the same "a human has to look" verdict) from a normal report. Succeeded
+    # is the only phase that means "nothing here needs a human." This template has no
+    # continueOn, on purpose: it is the one step in this workflow whose failure is
+    # meant to propagate.
+    - name: verify-scan
+      inputs:
+        parameters:
+          - name: scan-status
+      activeDeadlineSeconds: 60
+      container:
+        image: '{{workflow.parameters.image}}'
+        command: ['/bin/bash', '-c']
+        args:
+          - |
+            set -u
+            STATUS='{{inputs.parameters.scan-status}}'
+            if [ "$STATUS" != "Succeeded" ]; then
+              echo "scan step ended in status=$STATUS - failing this workflow so a broken janitor never reports green (the Slack alert already went out from the notify step; the pod log for the scan step has the actual error)." >&2
+              exit 1
+            fi
+            echo "scan step succeeded"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: harness-janitor
+  namespace: argo
+spec:
+  schedules:
+    # 09:00 ET, an hour past the absolute worst case a nightly child can still be
+    # tearing down at (harness-scenario's own activeDeadlineSeconds is 21600 from a
+    # 02:00 start - 40-nightly-cron.yaml). That is courtesy, not the safety mechanism:
+    # PR and manual runs are not on this clock at all, and a run queued behind the
+    # semaphore can start hours after 02:00. The age + ownership + lock gates in
+    # harness/janitor.go are what make a cycle safe; the clock only decides when it is
+    # convenient to run one.
+    - '0 9 * * *'
+  timezone: America/New_York
+  # This IS the janitor's self-mutex. cleanup-orphans.sh has none, which is exactly how
+  # two invocations of it could both decide to destroy the same prefix off the same
+  # stale listing. Forbid means Argo refuses to start a second janitor cycle while one
+  # is still running, rather than trusting a lockfile that does not exist.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  workflowMetadata:
+    labels:
+      harness/trigger: janitor
+  workflowSpec:
+    workflowTemplateRef:
+      name: harness-janitor

@@ -18,6 +18,26 @@
 #   ./cleanup-orphans.sh                       # auto-detect + tear down all local-* orphans
 #   ./cleanup-orphans.sh local-1700000000-min_default-min_default   # a specific prefix
 #   CUSTOMER=smoke ./cleanup-orphans.sh        # override the resource-name prefix (default: smoke)
+#
+# STATUS (round 5): harness/janitor.go is the primary implementation for the Argo path
+# (the nightly janitor cron never shells out to this script). This script stays because
+# run.sh's local-runner teardown (run.sh:144, "STARTED_RUN" trap) still calls it directly,
+# and because three of its steps were deliberately NOT ported to Go:
+#   - step 2b, the DR-bucket _harness/ object purge (touches object VERSIONS across every
+#     matching bucket, a wider blast radius than the janitor's single-candidate scope;
+#     tracked as a future round)
+#   - step 6, central Vault auth-mount/policy cleanup (needs its own Vault credential/RBAC
+#     story - a separate concern from the AWS-only janitor)
+#   - step 7, verify-clean.sh (the janitor's own tag query already serves that role for
+#     its own candidates)
+# Everything else here - NLB deletion-protection clear, MSK cluster delete, lock/digest
+# clear, EBS volume + launch template reclaim, lambda/DMS/containerinsights log-group
+# sweep, the flux-source-controller IAM role cleanup - now also runs from Go inside
+# harness/janitor.go's Sweep, gated the same way this script's DRY_RUN was SUPPOSED to
+# gate every mutation (report mode there is enforced by which code path can reach a
+# call, not a per-call flag, which closes two bugs this script still has: the DynamoDB
+# lock/digest delete and the log-group delete both bypass DRY_RUN, and the lock scan
+# below matches by substring instead of an exact key).
 set -uo pipefail
 cd "$(dirname "$0")"
 HARNESS_DIR="$PWD"
