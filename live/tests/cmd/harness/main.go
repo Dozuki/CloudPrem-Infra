@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/harness"
@@ -222,7 +221,8 @@ func runEvidence(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // Exit codes: 2 is a usage error (bad flags). 3 is a SAFETY ABORT - the account identity
 // did not match, the workflow list could not be trusted, or a candidate resolved to a
 // protected identity - and means the janitor looked at nothing or stopped mid-cycle. 1
-// means the cycle completed but a sweep destroy failed. 0 means the cycle completed,
+// means the cycle completed but a sweep destroy failed, or a destroy ran and its
+// post-destroy verification query failed (see janitorExitCode). 0 means the cycle completed,
 // which is true even when the report lists orphans in report mode: the report is the
 // signal, not the exit code, so a nightly report is not what pages anyone red.
 func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -332,10 +332,14 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	s3Router := multiRegionS3{primary: *region, byRegion: map[string]*s3.Client{
+	s3Router, rerr := newMultiRegionS3(*acct, *region, map[string]*s3.Client{
 		*region:   s3.NewFromConfig(awsCfg),
 		*drRegion: s3.NewFromConfig(drCfg),
-	}}
+	})
+	if rerr != nil {
+		fmt.Fprintf(stderr, "janitor: %v\n", rerr)
+		return 1
+	}
 	deps := harness.JanitorDeps{
 		S3: s3Router,
 		Tags: map[string]harness.TagAPI{
@@ -371,6 +375,25 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		ProcessStart: processStart,
 	}
 
+	// emitJSON prints the report as the last stdout line when --json is set. Every exit
+	// path from here on goes through it, including the mid-sweep safety abort: the Argo
+	// scan step's `tail -1 > report.json` contract (50-janitor-cron.yaml) treats the
+	// last stdout line as the report, and an abort is exactly the cycle whose report a
+	// human needs. Before this, the abort path returned before the print and the notify
+	// step got the outputs default '{}' - no candidates, no reason, nothing to read.
+	emitJSON := func(rep *harness.Report, code int) int {
+		if !*jsonOut || rep == nil {
+			return code
+		}
+		out, jerr := json.Marshal(rep)
+		if jerr != nil {
+			fmt.Fprintf(stderr, "janitor: marshal report: %v\n", jerr)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(out))
+		return code
+	}
+
 	rep, serr := harness.Scan(ctx, deps, opts, wfList)
 	if serr != nil {
 		// G3 lands here too (guardProtected returns ErrProtected up through Scan): a
@@ -395,24 +418,40 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		if serr != nil {
 			fmt.Fprintf(stderr, "janitor: sweep aborted: %v\n", serr)
-			return 3
+			// The report is partial by definition here (the cycle stopped mid-sweep),
+			// and partial is exactly what the human needs to see: which candidates were
+			// already destroyed before the abort.
+			return emitJSON(rep, 3)
 		}
 		fmt.Fprintln(stdout)
 		printJanitorReport(stdout, rep)
-		if rep.Failed > 0 {
-			exitCode = 1
-		}
+		exitCode = janitorExitCode(rep)
 	}
 
-	if *jsonOut {
-		out, jerr := json.Marshal(rep)
-		if jerr != nil {
-			fmt.Fprintf(stderr, "janitor: marshal report: %v\n", jerr)
-			return 1
-		}
-		fmt.Fprintln(stdout, string(out))
+	return emitJSON(rep, exitCode)
+}
+
+// janitorExitCode is the sweep-cycle verdict: non-zero whenever a candidate ended in a
+// state a human has to look at, so the Argo verify-scan gate fails the workflow rather
+// than reporting green.
+//
+// Inconclusive counts as loudly as Failed. A post-destroy verification query that fails
+// means a destroy RAN and nobody can say what survived it (harness.StateUnknown) - the
+// one outcome in the whole janitor with the least information attached, and it used to
+// increment nothing and exit 0.
+//
+// Residue is deliberately NOT here: a residue candidate is fully explained (the destroy
+// worked, tagged resources outlived state, a retry cannot help) and reaches a human
+// through the Slack card, so failing the workflow on it would turn a known, documented
+// condition into a red CronWorkflow every cycle until someone hand-cleans it.
+func janitorExitCode(rep *harness.Report) int {
+	if rep == nil {
+		return 0
 	}
-	return exitCode
+	if rep.Failed > 0 || rep.Inconclusive > 0 {
+		return 1
+	}
+	return 0
 }
 
 // printJanitorReport renders the human-readable table the pod log and the "before" half
@@ -432,39 +471,68 @@ func printJanitorReport(w io.Writer, rep *harness.Report) {
 		fmt.Fprintln(w, line)
 		fmt.Fprintln(w, "    "+c.Reason)
 	}
-	fmt.Fprintf(w, "-- orphans=%d swept=%d failed=%d residue=%d --\n", rep.Orphans, rep.Swept, rep.Failed, rep.Residue)
+	fmt.Fprintf(w, "-- orphans=%d swept=%d failed=%d residue=%d inconclusive=%d --\n",
+		rep.Orphans, rep.Swept, rep.Failed, rep.Residue, rep.Inconclusive)
 }
 
 // multiRegionS3 routes each call to the client whose signing region matches the target
-// bucket, derived from the bucket name (phases.go stateBucket: "...-state-<region>-
-// <account>"). A single client cannot address both buckets: SigV4 requires the signing
+// bucket. A single client cannot address both buckets: SigV4 requires the signing
 // region to match where the bucket actually lives (us-east-1 is the one legacy
 // exception), and the janitor's two-bucket scan (primary + DR) needs both.
+//
+// The routing table is built at startup from harness.StateBucket - the SAME function
+// that composes the names the janitor then asks for - so a bucket is matched by exact
+// name, not by fishing a region substring out of it. The old substring match
+// (strings.Contains(bucket, "-"+region+"-")) could pick the wrong client whenever one
+// configured region's name is a substring of another's, and there is no reason to
+// derive by inference something the composer can hand over exactly.
 type multiRegionS3 struct {
-	byRegion map[string]*s3.Client
-	// primary is the region whose client answers for a bucket name that matches none
-	// of the configured regions. Named explicitly because the old fallback picked
+	// byBucket is keyed by full bucket name, built once by newMultiRegionS3.
+	byBucket map[string]*s3.Client
+	// fallback answers for a bucket name that is in no table entry: the primary
+	// region's client. Deliberately a real client rather than an error, so the
+	// resulting AWS response names the real problem (the bucket) instead of the
+	// janitor guessing quietly. Named explicitly because the ORIGINAL fallback picked
 	// whatever came out of a map range first, and Go randomizes that: the same
-	// unrecognized bucket could hit the primary client one run and the DR client the
-	// next, so the AWS error a human read varied run to run for one underlying bug.
-	primary string
+	// unrecognized bucket could hit a different client every run, so the AWS error a
+	// human read varied run to run for one underlying bug.
+	fallback *s3.Client
+	// primaryBucket/primaryRegion are carried only for the error message below.
+	primaryRegion string
 }
 
-// clientFor picks the client whose signing region matches the bucket. The fallback for
-// an unrecognized name is the primary-region client, deliberately, so the resulting AWS
-// error names the real problem (the bucket) instead of the janitor guessing quietly and
-// inconsistently. A map with no usable client is a configuration error and says so,
-// rather than returning nil for a caller to dereference.
-func (m multiRegionS3) clientFor(bucket string) (*s3.Client, error) {
-	for region, c := range m.byRegion {
-		if c != nil && strings.Contains(bucket, "-"+region+"-") {
-			return c, nil
-		}
+// newMultiRegionS3 builds the router. clients is keyed by region; the primary region
+// MUST be present with a non-nil client, because it is the fallback for anything the
+// table does not name - a router with no fallback would fail every unrecognized bucket
+// at call time, deep inside a scan, instead of at startup where a configuration error
+// belongs.
+func newMultiRegionS3(accountID, primary string, clients map[string]*s3.Client) (multiRegionS3, error) {
+	fallback := clients[primary]
+	if fallback == nil {
+		return multiRegionS3{}, fmt.Errorf("no S3 client for the primary region %q (%d client(s) wired): the bucket router has no fallback", primary, len(clients))
 	}
-	if c := m.byRegion[m.primary]; c != nil {
+	byBucket := map[string]*s3.Client{}
+	for region, c := range clients {
+		if c == nil {
+			continue
+		}
+		byBucket[harness.StateBucket(accountID, region)] = c
+	}
+	return multiRegionS3{byBucket: byBucket, fallback: fallback, primaryRegion: primary}, nil
+}
+
+// clientFor picks the client for a bucket by exact name, falling back to the primary
+// region's client for anything else. A zero-value router (no fallback) is a
+// configuration error and says so, rather than returning nil for a caller to
+// dereference.
+func (m multiRegionS3) clientFor(bucket string) (*s3.Client, error) {
+	if c, ok := m.byBucket[bucket]; ok && c != nil {
 		return c, nil
 	}
-	return nil, fmt.Errorf("no S3 client configured for bucket %q (primary region %q, %d client(s) wired)", bucket, m.primary, len(m.byRegion))
+	if m.fallback != nil {
+		return m.fallback, nil
+	}
+	return nil, fmt.Errorf("no S3 client configured for bucket %q (primary region %q, %d bucket(s) in the routing table)", bucket, m.primaryRegion, len(m.byBucket))
 }
 
 func (m multiRegionS3) GetObject(ctx context.Context, in *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
