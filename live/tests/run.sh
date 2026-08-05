@@ -253,7 +253,7 @@ else
 ERROR: terragrunt ${tg_major}.${tg_minor}.x is too old for this harness (need >= ${TG_MIN_MAJOR}.${TG_MIN_MINOR}).
   The harness uses the post-0.78 CLI (\`run --all\`, \`--non-interactive\`). An older
   binary fails with a bare "flag provided but not defined" partway into a run.
-  Install the version the fleet pins:  tgenv install 0.99.4 && tgenv use 0.99.4
+  Install the version the fleet pins:  tgenv install 1.1.2 && tgenv use 1.1.2
   Note tgenv switches the ACTIVE version globally - do not switch while a run is in flight.
 EOF
     exit 1
@@ -268,8 +268,8 @@ fi
 # a hard gate here would also strand anyone mid-upgrade. Keep these in step with
 # infra-live/_spacelift/stacks.tf (terraform_version / terragrunt_version) - that file is
 # the source of truth, this is a mirror.
-FLEET_TOFU_VERSION="1.11.13"
-FLEET_TG_VERSION="0.99.4"
+FLEET_TOFU_VERSION="1.12.5"
+FLEET_TG_VERSION="1.1.2"
 tofu_raw="$("$TG_TF_PATH" version 2>/dev/null | head -1)"
 tofu_ver="$(printf '%s' "$tofu_raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
 if [ "$tofu_ver" = "$FLEET_TOFU_VERSION" ]; then
