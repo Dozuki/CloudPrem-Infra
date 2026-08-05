@@ -557,18 +557,21 @@ func TestCountTaggedExcludesKMSPendingDeletionNoise(t *testing.T) {
 	}
 }
 
-// TestCountTaggedExcludesKnownLingeringTypes covers the rest of defect 1's minimum
-// denylist: CloudWatch log groups, RDS/Aurora parameter groups, DMS certificates, and EKS
-// pod identity associations are all known to outlive a stack's teardown without meaning
-// anything is still live.
-func TestCountTaggedExcludesKnownLingeringTypes(t *testing.T) {
+// TestCountTaggedCountsFormerlyDenylistedTypes is the regression test for the account
+// owner's directive: "anything tagged as a smoke test resource is disposable" resolves
+// the old denylist's asymmetry (a dangling eks:podidentityassociation was invisible
+// while a dangling dms:endpoint anchored an orphan) in favour of counting everything.
+// logs, rds:pg, rds:cluster-pg, dms:cert, and eks:podidentityassociation used to be
+// denied; none of them are anymore, so every one of them must now count exactly like
+// rds:db always did.
+func TestCountTaggedCountsFormerlyDenylistedTypes(t *testing.T) {
 	tag := &fakeTagAPI{byType: map[string]int{
 		"logs:log-group":             3,
 		"rds:pg":                     1,
 		"rds:cluster-pg":             1,
 		"dms:cert":                   1,
 		"eks:podidentityassociation": 1,
-		"rds:db":                     4, // the real signal: an actual live database
+		"rds:db":                     4,
 	}}
 	tags := map[string]TagAPI{testRegion: tag}
 
@@ -576,11 +579,11 @@ func TestCountTaggedExcludesKnownLingeringTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("countTagged: %v", err)
 	}
-	if n != 4 {
-		t.Fatalf("countTagged = %d, want 4 (only rds:db should count)", n)
+	if n != 11 {
+		t.Fatalf("countTagged = %d, want 11 (every type here now counts; only kms is still denied)", n)
 	}
 	if !anchored {
-		t.Fatal("anchored = false, want true (rds:db is real standing evidence)")
+		t.Fatal("anchored = false, want true")
 	}
 }
 
@@ -726,13 +729,23 @@ func (r *teardownRecorder) teardown(context.Context, PhaseParams, bool) error {
 	return nil
 }
 
+// noResidueTags wires a post-destroy tag recheck that finds nothing left, so a
+// candidate hand-built with a real Customer/Region (needed to exercise the residue
+// check's gate at all) still resolves to a plain "destroyed" success. Tests that only
+// care about maxFailures/MaxSweeps/wall-clock-budget behavior use this to keep the
+// residue check (Change 3) a no-op rather than re-testing it in every one of them.
+func noResidueTags() map[string]TagAPI {
+	clean := &fakeTagAPI{resources: 0}
+	return map[string]TagAPI{testRegion: clean, testDR: clean}
+}
+
 func TestSweepRespectsMaxSweepsCap(t *testing.T) {
 	rep := &Report{Candidates: []Candidate{
-		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion, DRRegion: testDR},
 	}}
 	recorder := &teardownRecorder{}
-	deps := JanitorDeps{Matrix: testMatrix(), Teardown: recorder.teardown}
+	deps := JanitorDeps{Matrix: testMatrix(), Teardown: recorder.teardown, Tags: noResidueTags()}
 	opts := testOptions(time.Now())
 	opts.MaxSweeps = 1
 
@@ -790,11 +803,11 @@ func TestSweepGuardsProtectedIdentityAgainAtDestroyTime(t *testing.T) {
 // destroy attempt (and succeed) in THIS SAME cycle.
 func TestSweepMakesProgressPastAPersistentlyFailingCandidate(t *testing.T) {
 	rep := &Report{Candidates: []Candidate{
-		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion, DRRegion: testDR},
 	}}
 	var calls []string
-	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
 		calls = append(calls, p.RunID)
 		if p.RunID == "run1" {
 			return errors.New("destroy failed: lock held by a dead process")
@@ -824,12 +837,12 @@ func TestSweepMakesProgressPastAPersistentlyFailingCandidate(t *testing.T) {
 // the cap was already met, not because anything is wrong with it.
 func TestSweepStopsAfterMaxSweepsSuccesses(t *testing.T) {
 	rep := &Report{Candidates: []Candidate{
-		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run3-min_default/", Bucket: primaryBucket(), RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion, DRRegion: testDR},
+		{Prefix: "run3-min_default/", Bucket: primaryBucket(), RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min", State: StateOrphan, Resources: 3, Customer: "smokecc", Region: testRegion, DRRegion: testDR},
 	}}
 	var calls []string
-	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
 		calls = append(calls, p.RunID)
 		if p.RunID == "run1" {
 			return errors.New("destroy failed")
@@ -923,10 +936,10 @@ func TestSweepDefaultMaxSweepFailuresWhenUnset(t *testing.T) {
 // destroyed in the same cycle.
 func TestSweepFailureCapStillMakesProgressPastOneBadApple(t *testing.T) {
 	rep := &Report{Candidates: []Candidate{
-		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion, DRRegion: testDR},
 	}}
-	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
 		if p.RunID == "run1" {
 			return errors.New("destroy failed")
 		}
@@ -941,6 +954,324 @@ func TestSweepFailureCapStillMakesProgressPastOneBadApple(t *testing.T) {
 	}
 	if rep.Candidates[1].SweepResult != "destroyed" {
 		t.Fatalf("run2.SweepResult = %q, want destroyed - the default failure cap must not block the candidate right behind a single failure", rep.Candidates[1].SweepResult)
+	}
+}
+
+// ---- Sweep wall-clock budget (bound by TIME, not just attempt count) ----
+
+// TestDefaultSweepBudgetDerivesFromPodDeadline proves DefaultSweepBudget is arithmetic
+// on JanitorPodActiveDeadlineSeconds, not an independent number someone could tune out
+// of sync with 50-janitor-cron.yaml's activeDeadlineSeconds.
+func TestDefaultSweepBudgetDerivesFromPodDeadline(t *testing.T) {
+	want := time.Duration(JanitorPodActiveDeadlineSeconds)*time.Second - sweepSetupMargin
+	if got := DefaultSweepBudget(); got != want {
+		t.Fatalf("DefaultSweepBudget() = %s, want %s (podDeadline - sweepSetupMargin)", got, want)
+	}
+	// 50-janitor-cron.yaml's own comment claims this literal; keep the claim honest.
+	if JanitorPodActiveDeadlineSeconds != 12600 {
+		t.Fatalf("JanitorPodActiveDeadlineSeconds = %d, want 12600 to match 50-janitor-cron.yaml activeDeadlineSeconds - update the YAML comment (and literal) if this ever changes", JanitorPodActiveDeadlineSeconds)
+	}
+}
+
+// TestJanitorOptionsSweepBudgetOverride proves an explicit SweepBudget wins over the
+// derived default, the same override shape MaxSweepFailures already has.
+func TestJanitorOptionsSweepBudgetOverride(t *testing.T) {
+	o := JanitorOptions{}
+	if got := o.sweepBudget(); got != DefaultSweepBudget() {
+		t.Fatalf("sweepBudget() = %s, want the derived default %s", got, DefaultSweepBudget())
+	}
+	o.SweepBudget = 5 * time.Minute
+	if got := o.sweepBudget(); got != 5*time.Minute {
+		t.Fatalf("sweepBudget() = %s, want the explicit override 5m", got)
+	}
+}
+
+// TestSweepStopsStartingNewAttemptsPastWallClockBudget is the regression test for the
+// wall-clock bound: Teardown has no internal timeout (tg.Destroy takes no context), so
+// nothing used to stop several slow attempts from together outlasting the pod's
+// activeDeadlineSeconds. Each attempt here "takes" 50 minutes (simulated by advancing
+// a fake clock inside the Teardown func); with a 90-minute budget, run1 and run2 both
+// fit (0m and 50m elapsed when each STARTS), but run3 would start at 100m - past
+// budget - so it must be skipped without ever calling Teardown.
+func TestSweepStopsStartingNewAttemptsPastWallClockBudget(t *testing.T) {
+	start := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
+	clock := start
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run3-min_default/", Bucket: primaryBucket(), RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min", State: StateOrphan, Resources: 3},
+	}}
+	var calls []string
+	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
+		calls = append(calls, p.RunID)
+		clock = clock.Add(50 * time.Minute) // simulate a slow destroy
+		return nil
+	}}
+	opts := testOptions(start)
+	opts.Now = func() time.Time { return clock }
+	opts.MaxSweeps = 10 // wide open; the wall-clock budget is what must bind here
+	opts.SweepBudget = 90 * time.Minute
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(calls) != 2 || calls[0] != "run1" || calls[1] != "run2" {
+		t.Fatalf("Teardown calls = %v, want [run1 run2] - run3 must never be attempted once the budget is exhausted", calls)
+	}
+	if rep.Swept != 2 {
+		t.Fatalf("rep.Swept = %d, want 2", rep.Swept)
+	}
+	got := rep.Candidates[2].SweepResult
+	if !strings.Contains(got, "skipped: sweep wall-clock budget") {
+		t.Fatalf("run3.SweepResult = %q, want a wall-clock-budget skip message", got)
+	}
+}
+
+// TestSweepWallClockBudgetStillMakesProgressPastAFailingCandidate proves the wall-clock
+// bound does not reintroduce defect 2's starvation: a slow-but-failing run1 must not
+// stop run2, a fast real orphan right behind it, from being attempted and destroyed in
+// the same cycle, as long as the budget has not actually run out yet.
+func TestSweepWallClockBudgetStillMakesProgressPastAFailingCandidate(t *testing.T) {
+	start := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
+	clock := start
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
+	}}
+	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
+		clock = clock.Add(10 * time.Minute)
+		if p.RunID == "run1" {
+			return errors.New("destroy failed")
+		}
+		return nil
+	}}
+	opts := testOptions(start)
+	opts.Now = func() time.Time { return clock }
+	opts.MaxSweeps = 10
+	opts.SweepBudget = 90 * time.Minute
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if rep.Candidates[1].SweepResult != "destroyed" {
+		t.Fatalf("run2.SweepResult = %q, want destroyed", rep.Candidates[1].SweepResult)
+	}
+}
+
+// ---- state-orphaned residue (a destroy that succeeded but left tagged resources) ----
+
+// TestSweepDetectsResidueAfterASuccessfulDestroy is the regression test for the
+// smoke4879-bi shape in the measured baseline: Teardown's terragrunt destroy reports
+// success (nothing left in STATE), but a post-destroy re-query of the same tag filter
+// classify() used still finds real, anchored resources - proof they were never
+// reachable from state at all. That candidate must land on StateResidue, not
+// "destroyed" and not "failed" (a retry cannot fix state that never had them), and it
+// must NOT consume the MaxSweeps success budget - see the next test for why that part
+// matters.
+func TestSweepDetectsResidueAfterASuccessfulDestroy(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{
+			// DRRegion deliberately empty: the fixture below models a single-region
+			// query. countTaggedDetailed dedups identical region strings but not a
+			// distinct primary+DR pair, so wiring both to the same fake would double
+			// every count - this candidate only ever had one region to begin with.
+			Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 3,
+			Customer: "smoke4879", Region: testRegion,
+		},
+	}}
+	// The destroy itself succeeds (err == nil): terragrunt had nothing left to
+	// destroy for the surviving objects because they were never in its state.
+	residueTags := &fakeTagAPI{byType: map[string]int{"dms:endpoint": 2, "dms:subgrp": 1}}
+	deps := JanitorDeps{
+		Matrix: testMatrix(),
+		Tags:   map[string]TagAPI{testRegion: residueTags, testDR: residueTags},
+		Teardown: func(context.Context, PhaseParams, bool) error {
+			return nil
+		},
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue {
+		t.Fatalf("State = %q, want residue; reason=%q sweep_result=%q", c.State, c.Reason, c.SweepResult)
+	}
+	if c.SweepResult != "residue: needs manual cleanup" {
+		t.Fatalf("SweepResult = %q, want %q", c.SweepResult, "residue: needs manual cleanup")
+	}
+	if !strings.Contains(c.Reason, "dms:endpoint x2") || !strings.Contains(c.Reason, "dms:subgrp x1") {
+		t.Fatalf("Reason = %q, want it to name the surviving resource types", c.Reason)
+	}
+	if rep.Swept != 0 {
+		t.Fatalf("rep.Swept = %d, want 0 (residue is not a clean success)", rep.Swept)
+	}
+	if rep.Failed != 0 {
+		t.Fatalf("rep.Failed = %d, want 0 (residue is not a failed destroy - a retry cannot fix it)", rep.Failed)
+	}
+	if rep.Residue != 1 {
+		t.Fatalf("rep.Residue = %d, want 1", rep.Residue)
+	}
+}
+
+// TestSweepResidueDoesNotConsumeSweepBudget is the "cannot consume the sweep budget
+// every cycle forever" requirement: with MaxSweeps=1, run1 resolves to residue (a
+// successful destroy with survivors) and must NOT count against the one-success
+// budget, so run2 - a real, fully clean orphan sorted right behind it - still gets
+// attempted and destroyed in the SAME cycle.
+func TestSweepResidueDoesNotConsumeSweepBudget(t *testing.T) {
+	residueTags := &fakeTagAPI{byType: map[string]int{"dms:endpoint": 1}}
+	cleanTags := &fakeTagAPI{resources: 0}
+
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 3,
+			Customer: "smokeaa", Region: testRegion, DRRegion: testDR,
+		},
+		{
+			Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default",
+			Identifier: "smokebb-min", State: StateOrphan, Resources: 3,
+			Customer: "smokebb", Region: testRegion, DRRegion: testDR,
+		},
+	}}
+	// Route the post-destroy tag recheck by which run is currently being torn down:
+	// run1's customer sees the residue fixture, run2's sees a clean account. A real
+	// GetResources call is already scoped by TagFilters{Customer: <value>}, so this
+	// fake stands in for "two different customers get two different answers" without
+	// needing a per-customer TagAPI plumbed through JanitorDeps.
+	router := &routingTagAPI{byCustomerTail: map[byte]*fakeTagAPI{
+		'a': residueTags, // smokeaa
+		'b': cleanTags,   // smokebb
+	}}
+	deps := JanitorDeps{
+		Matrix: testMatrix(),
+		Tags:   map[string]TagAPI{testRegion: router, testDR: router},
+		Teardown: func(context.Context, PhaseParams, bool) error {
+			return nil
+		},
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if rep.Candidates[0].State != StateResidue {
+		t.Fatalf("run1.State = %q, want residue", rep.Candidates[0].State)
+	}
+	if rep.Candidates[1].SweepResult != "destroyed" {
+		t.Fatalf("run2.SweepResult = %q, want destroyed - residue on run1 must not block run2's turn", rep.Candidates[1].SweepResult)
+	}
+	if rep.Swept != 1 {
+		t.Fatalf("rep.Swept = %d, want 1 (only run2's clean destroy counts)", rep.Swept)
+	}
+	if rep.Residue != 1 {
+		t.Fatalf("rep.Residue = %d, want 1", rep.Residue)
+	}
+}
+
+// routingTagAPI answers GetResources differently depending on the last byte of the
+// Customer tag filter's value, so a single fake JanitorDeps.Tags client can stand in
+// for what production's per-customer-scoped queries would actually return.
+type routingTagAPI struct {
+	byCustomerTail map[byte]*fakeTagAPI
+}
+
+func (r *routingTagAPI) GetResources(ctx context.Context, in *resourcegroupstaggingapi.GetResourcesInput, opts ...func(*resourcegroupstaggingapi.Options)) (*resourcegroupstaggingapi.GetResourcesOutput, error) {
+	var customer string
+	for _, f := range in.TagFilters {
+		if aws.ToString(f.Key) == "Customer" && len(f.Values) > 0 {
+			customer = f.Values[0]
+		}
+	}
+	if customer == "" {
+		return &resourcegroupstaggingapi.GetResourcesOutput{}, nil
+	}
+	fake, ok := r.byCustomerTail[customer[len(customer)-1]]
+	if !ok {
+		return &resourcegroupstaggingapi.GetResourcesOutput{}, nil
+	}
+	return fake.GetResources(ctx, in, opts...)
+}
+
+// TestSweepResiduePostCheckFailureFailsClosedToUnknown proves the post-destroy
+// recheck follows the same fail-closed posture as every other AWS call in this file:
+// a query it could not complete must never be silently read as "destroyed".
+func TestSweepResiduePostCheckFailureFailsClosedToUnknown(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 3,
+			Customer: "smokeaa", Region: testRegion, DRRegion: testDR,
+		},
+	}}
+	failing := &fakeTagAPI{err: errors.New("throttled")}
+	deps := JanitorDeps{
+		Matrix: testMatrix(),
+		Tags:   map[string]TagAPI{testRegion: failing, testDR: failing},
+		Teardown: func(context.Context, PhaseParams, bool) error {
+			return nil
+		},
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateUnknown {
+		t.Fatalf("State = %q, want unknown (a failed verification query must not be read as success)", c.State)
+	}
+	if rep.Swept != 0 {
+		t.Fatalf("rep.Swept = %d, want 0", rep.Swept)
+	}
+	if rep.Residue != 0 {
+		t.Fatalf("rep.Residue = %d, want 0 (inconclusive is not the same as confirmed residue)", rep.Residue)
+	}
+}
+
+// TestSweepSecurityGroupOnlySurvivorIsStillDestroyedNotResidue proves the post-destroy
+// recheck reuses defect 2's anchoring rule: if the only thing GetResources still
+// returns is stale tagging-index security-group residue, that is not a real leak
+// terraform failed to reach, and the candidate must resolve to a clean "destroyed",
+// exactly as classify() already treats the same shape pre-destroy.
+func TestSweepSecurityGroupOnlySurvivorIsStillDestroyedNotResidue(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 3,
+			Customer: "smokeaa", Region: testRegion, DRRegion: testDR,
+		},
+	}}
+	staleSG := &fakeTagAPI{byType: map[string]int{"ec2:security-group": 2}}
+	deps := JanitorDeps{
+		Matrix: testMatrix(),
+		Tags:   map[string]TagAPI{testRegion: staleSG, testDR: staleSG},
+		Teardown: func(context.Context, PhaseParams, bool) error {
+			return nil
+		},
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateOrphan {
+		// Sweep never rewrites State on the clean path - it only sets SweepResult.
+		t.Fatalf("State = %q, want unchanged (orphan); Sweep only updates State on residue/unknown", c.State)
+	}
+	if c.SweepResult != "destroyed" {
+		t.Fatalf("SweepResult = %q, want destroyed (security groups alone are not residue)", c.SweepResult)
+	}
+	if rep.Swept != 1 || rep.Residue != 0 {
+		t.Fatalf("Swept=%d Residue=%d, want 1/0", rep.Swept, rep.Residue)
 	}
 }
 

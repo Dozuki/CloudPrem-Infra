@@ -27,7 +27,7 @@ const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|jani
   evidence:  --region --max-nodes --timeout (reads a WorkflowList json on stdin,
              writes the CHILD_JSON array on stdout; needs neither --run-id nor --config)
   janitor:   --account-id --region --dr-region --self-workflow [--sweep] [--max-sweeps]
-             [--max-sweep-failures]
+             [--max-sweep-failures] [--sweep-budget]
              (Phase 4 orphan sweeper; reads a WorkflowList json on stdin, defaults to a
              dry-run report; needs neither --run-id nor --config)`
 
@@ -241,6 +241,7 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		sweep        = fs.Bool("sweep", false, "actually destroy orphans; default is dry-run report-only")
 		maxSweeps    = fs.Int("max-sweeps", 1, "cap on successful destroys performed in one cycle")
 		maxSweepFail = fs.Int("max-sweep-failures", 2, "cap on FAILED destroy attempts in one cycle, independent of --max-sweeps (bounds total attempts against the pod deadline; see janitor.go Sweep)")
+		sweepBudget  = fs.Duration("sweep-budget", 0, "wall-clock budget for starting new Sweep destroy attempts in one cycle; <= 0 derives it from harness.JanitorPodActiveDeadlineSeconds (see janitor.go DefaultSweepBudget) rather than a second independent number")
 		jsonOut      = fs.Bool("json", false, "also print the report as JSON on the last stdout line")
 	)
 	if err := fs.Parse(rest); err != nil {
@@ -334,7 +335,7 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		AccountID: *acct, Region: *region, DRRegion: *drRegion, Profile: *profile,
 		RepoDir: *repoDir, LockTable: *lockTable, Grace: *grace, LockFresh: *lockFresh,
 		SelfWorkflow: *selfWorkflow, Sweep: *sweep, MaxSweeps: *maxSweeps,
-		MaxSweepFailures: *maxSweepFail,
+		MaxSweepFailures: *maxSweepFail, SweepBudget: *sweepBudget,
 	}
 
 	rep, serr := harness.Scan(ctx, deps, opts, wfList)
@@ -388,7 +389,7 @@ func printJanitorReport(w io.Writer, rep *harness.Report) {
 		fmt.Fprintln(w, line)
 		fmt.Fprintln(w, "    "+c.Reason)
 	}
-	fmt.Fprintf(w, "-- orphans=%d swept=%d failed=%d --\n", rep.Orphans, rep.Swept, rep.Failed)
+	fmt.Fprintf(w, "-- orphans=%d swept=%d failed=%d residue=%d --\n", rep.Orphans, rep.Swept, rep.Failed, rep.Residue)
 }
 
 // multiRegionS3 routes each call to the client whose signing region matches the target

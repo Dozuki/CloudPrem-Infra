@@ -47,6 +47,17 @@ const (
 	StateKept        CandidateState = "kept"         // orphan-shaped, but --keep-on-failure means a human left it up on purpose
 	StateNeedsReview CandidateState = "needs-review" // we could not establish the facts; never acted on
 	StateUnknown     CandidateState = "unknown"      // an AWS call was inconclusive; fail closed
+	// StateResidue is set by Sweep only, after it has already tried: Teardown's
+	// terragrunt destroy ran and reported success, but a re-query still finds tagged
+	// resources standing. That is not a failed destroy, it is a destroy that succeeded
+	// against everything terraform state actually tracked while something else
+	// (created outside a tracked resource block, or already removed from state by a
+	// prior run killed mid-teardown) survives untouched - a retry of Teardown cannot
+	// reach it either, because Teardown only ever acts on what is in state. Reported
+	// distinctly so a human sees "terraform can't reach this" instead of reading a
+	// repeating, unexplained failure. See Sweep for why it does not count toward
+	// MaxSweeps or MaxSweepFailures.
+	StateResidue CandidateState = "residue"
 )
 
 // Candidate is one state prefix and everything the janitor learned about it.
@@ -64,6 +75,14 @@ type Candidate struct {
 	KeepOnFailure bool           `json:"keep_on_failure"`
 	LockAge       string         `json:"lock_age,omitempty"`
 	SweepResult   string         `json:"sweep_result,omitempty"`
+	// Customer, Region, DRRegion are the exact identity and regions classify() used
+	// for its Resource Groups Tagging API query (G8). Carried on the candidate, not
+	// just used and discarded, so Sweep can re-run the identical query after a
+	// destroy to tell a clean success apart from state-orphaned residue (StateResidue)
+	// without reloading the manifest a second time.
+	Customer string `json:"customer,omitempty"`
+	Region   string `json:"region,omitempty"`
+	DRRegion string `json:"dr_region,omitempty"`
 }
 
 // Report is the whole cycle, emitted as JSON for the Slack step and printed as a table.
@@ -75,6 +94,12 @@ type Report struct {
 	Orphans    int         `json:"orphans"`
 	Swept      int         `json:"swept"`
 	Failed     int         `json:"failed"`
+	// Residue counts StateResidue candidates: a destroy that succeeded against
+	// terraform state but left tagged resources standing anyway (see StateResidue).
+	// Kept apart from Failed on purpose - retrying Teardown cannot fix this, so
+	// lumping it into "failed" would tell a human to do the one thing that provably
+	// does not work.
+	Residue int `json:"residue"`
 }
 
 // protectedStatePrefixes and protectedIdentifiers are the never-touch list. They are a
@@ -126,7 +151,13 @@ type JanitorOptions struct {
 	// "unbounded" - see the comment on that fallback for why zero is never treated as
 	// "no cap".
 	MaxSweepFailures int
-	Now              func() time.Time // injected for tests; production is time.Now
+	// SweepBudget is the wall-clock ceiling on how long Sweep will keep STARTING new
+	// destroy attempts, checked against o.now() before each one. <= 0 falls back to
+	// DefaultSweepBudget(), derived from JanitorPodActiveDeadlineSeconds - see that
+	// const and Sweep for why this exists (defect: Sweep used to bound attempt COUNT,
+	// not attempt TIME, and a slow Teardown has no internal timeout of its own).
+	SweepBudget time.Duration
+	Now         func() time.Time // injected for tests; production is time.Now
 }
 
 func (o JanitorOptions) now() time.Time {
@@ -134,6 +165,55 @@ func (o JanitorOptions) now() time.Time {
 		return o.Now()
 	}
 	return time.Now()
+}
+
+// JanitorPodActiveDeadlineSeconds MUST match the `scan` container's
+// activeDeadlineSeconds in 50-janitor-cron.yaml - that YAML value carries a comment
+// pointing back here for the same reason. This is the single source of truth; the
+// YAML is the consumer. If the pod deadline ever needs to change, change it here
+// first and let DefaultSweepBudget's derivation carry the new number into Sweep
+// automatically, then copy the same literal into the YAML (Go cannot reach into a
+// YAML manifest at build time, so the copy is manual - but there is only one number
+// to copy, not two independently-tuned ones to keep in sync by hand).
+const JanitorPodActiveDeadlineSeconds = 12600
+
+// sweepSetupMargin is reserved for everything in the pod that runs BEFORE Sweep's own
+// clock starts and so is never inside its budget: image pull/container start, the
+// workspace repo clone or incremental fetch (docker-entrypoint.sh, unconditional even
+// in report mode), Vault login, and Scan itself (S3 listings + tag lookups, "minutes"
+// per 50-janitor-cron.yaml's own comment). 30 minutes is generous against all of
+// that put together, and generous is the right direction to round: undercounting the
+// margin is what would let Sweep itself blow the pod deadline.
+const sweepSetupMargin = 30 * time.Minute
+
+// DefaultSweepBudget derives Sweep's wall-clock budget from
+// JanitorPodActiveDeadlineSeconds by subtracting sweepSetupMargin, rather than being
+// a second, independent magic number that could silently drift out of agreement with
+// the pod deadline. At today's values that is 12600s - 1800s = 10800s (3h) - which,
+// not by coincidence but because it is the same worst case, is exactly enough wall
+// clock for two attempts at the historical ~90-minute worst case per Teardown call
+// (10-scenario.yaml's own teardown deadline is 10800s for that identical reason). A
+// third attempt started right after two such worst-case ones would push the pod past
+// its deadline mid-destroy - the exact failure this budget exists to prevent - so the
+// budget check in Sweep (elapsed >= budget) refuses to start it.
+func DefaultSweepBudget() time.Duration {
+	total := time.Duration(JanitorPodActiveDeadlineSeconds) * time.Second
+	if total <= sweepSetupMargin {
+		// Defensive only: a misconfigured pod deadline shorter than the margin must
+		// never derive a zero or negative budget (which Sweep would read as "no time
+		// ever, skip everything" - silently doing nothing is its own failure mode).
+		// Falling back to the margin itself keeps the budget small and finite, which
+		// is loud in a report (almost nothing attempted) rather than silently wrong.
+		return sweepSetupMargin
+	}
+	return total - sweepSetupMargin
+}
+
+func (o JanitorOptions) sweepBudget() time.Duration {
+	if o.SweepBudget > 0 {
+		return o.SweepBudget
+	}
+	return DefaultSweepBudget()
 }
 
 // JanitorDeps are the AWS/Argo surfaces, injected so the predicate is unit-testable
@@ -372,6 +452,7 @@ func classify(
 	base := &Candidate{
 		Prefix: prefix, Bucket: bucket, RunID: runID, ConfigName: m.ConfigName,
 		Identifier: identifier, DeleteAfter: m.DeleteAfter,
+		Customer: customer, Region: m.Region, DRRegion: m.DRRegion,
 	}
 	if wf, ok := byWF[runID]; ok {
 		base.WorkflowPhase = wf.Status.Phase
@@ -502,7 +583,7 @@ func classify(
 
 // deniedResourceTypes is the short DENYLIST of types known to legitimately survive a
 // SUCCESSFUL teardown. Everything NOT on this list counts by default - that inversion is
-// the fix for defect 1: the old code sent these 17 types as an ALLOWLIST
+// the fix for defect 1: the old code sent these types as an ALLOWLIST
 // (ResourceTypeFilters), so any resource type not on it - dms:rep, dms:task,
 // rds:global-cluster, ec2:natgateway, ec2:eip, lambda:function, acm:certificate, and
 // every type CPI adds after this list was written - made a still-standing stack count as
@@ -513,26 +594,33 @@ func classify(
 //
 // A key with no colon denies the whole service; "service:type" denies only that one
 // resource type, leaving the rest of that service counted normally.
+//
+// KMS is the ONLY entry, and deliberately so. The account owner's rule for everything
+// else this janitor looks at is "if it carries the harness's Customer + deleteAfter
+// tags, it is disposable, so count it" - there is no policy reason for a dangling
+// eks:podidentityassociation to be invisible while a dangling dms:endpoint anchors an
+// orphan. That asymmetry used to exist (logs, rds:pg, rds:cluster-pg, dms:cert,
+// eks:podidentityassociation were all denied) and it is gone: those five types now
+// count like anything else. KMS survives that same directive not as a policy
+// exception but because excluding it is MECHANICAL, not a judgment call about
+// disposability - see below.
 var deniedResourceTypes = map[string]bool{
-	// A successful Teardown schedules its customer-managed KMS key for deletion, and
-	// AWS holds it in PendingDeletion for 7-30 days - the whole window it keeps its
-	// Customer and deleteAfter tags. Measured against the real account: of 20 stacks
-	// an unfiltered query once reported as orphans, 17 had zero non-PendingDeletion
-	// resources. This was the original noise source that motivated filtering at all.
+	// A SUCCESSFUL Teardown schedules its customer-managed KMS key for deletion via
+	// ScheduleKeyDeletion. Verified against the AWS KMS docs (deleting-keys.html,
+	// "About the waiting period"): AWS enforces a mandatory 7-30 day waiting period
+	// (default 30) in KeyState=PendingDeletion before the key is actually deleted,
+	// and "after the waiting period ends, AWS KMS deletes the KMS key, its aliases,
+	// and all related AWS KMS metadata" - i.e. the key's tags (Customer, deleteAfter)
+	// are part of that metadata and are NOT removed until the key is actually,
+	// finally deleted at the end of the window. For up to 30 days after a teardown
+	// that fully succeeded, the key still exists, still carries both tags the
+	// Resource Groups Tagging API filters on, and CANNOT be deleted any further by
+	// this janitor or anyone else - it is already scheduled, and there is nothing a
+	// Teardown retry could do to it. Counting it would therefore nuke nothing while
+	// marking every successfully-torn-down stack an orphan for up to a month. This
+	// was the original false-positive source: of 20 stacks an unfiltered query once
+	// reported as orphans, 17 had zero non-PendingDeletion resources.
 	"kms": true,
-	// CloudWatch log groups outlive the stack that wrote to them and carry no signal
-	// about whether anything is still running.
-	"logs": true,
-	// RDS/Aurora parameter groups are cheap, standalone config objects that commonly
-	// survive a cluster delete without the cluster itself being alive.
-	"rds:pg":         true,
-	"rds:cluster-pg": true,
-	// DMS certificates are uploaded once and reused across replication tasks; a
-	// finished migration's cert says nothing about whether its task/instance is gone.
-	"dms:cert": true,
-	// EKS pod identity associations are known to trail a cluster delete asynchronously
-	// and briefly outlive it without a live cluster behind them.
-	"eks:podidentityassociation": true,
 }
 
 // insufficientAloneTypes are resource types whose presence, BY ITSELF with nothing else
@@ -551,6 +639,20 @@ var deniedResourceTypes = map[string]bool{
 // VPC/cluster/database/load balancer is completely ordinary and must still count. The
 // check only fires when security groups are the WHOLE story, which is the one shape a
 // real leak can never take.
+//
+// SURVIVES the "anything smoke-tagged is disposable, count it" directive that shrank
+// deniedResourceTypes to KMS only (see that var's comment). The two rules answer
+// different questions. deniedResourceTypes is a POLICY call about whether a real,
+// present resource is worth reporting on - and under the new directive, almost
+// nothing is exempt. insufficientAloneTypes is not policy at all: it exists because
+// AWS's own tagging index can return an entry for a security group that
+// describe-security-groups already reports as InvalidGroup.NotFound - the object is
+// gone, the index just has not caught up. That is a data-quality problem, not a
+// disposability judgment, and the fix for KMS's mechanical exemption applies here for
+// the identical reason: counting stale index residue nukes nothing (there is nothing
+// left to nuke) while manufacturing a false orphan. The directive that resolved the
+// pod-identity/dms-endpoint asymmetry has nothing to say about a resource the index
+// is simply wrong about, so this rule stays.
 var insufficientAloneTypes = map[string]bool{
 	"ec2:security-group": true,
 }
@@ -585,17 +687,35 @@ func isDeniedResourceType(service, resourceType string) bool {
 	return deniedResourceTypes[service] || deniedResourceTypes[resourceType]
 }
 
-// countTagged exhausts the paginator in every region and returns an error on any
-// failure. Silent under-enumeration is the worst outcome available here: it makes the
-// janitor declare a stack torn down when it is not, and then the leak is invisible
-// forever (no manifest signal, no state, real infra still holding VPC quota).
+// taggedResources is the full result of a tag-query enumeration - what countTagged
+// collapses to (total, anchored) for classify()'s G8, plus the per-type breakdown
+// Sweep needs to name specifically which resources survived a destroy (StateResidue).
+// Keeping one enumeration behind both callers means the denylist/anchoring logic is
+// written and tested in exactly one place instead of two loops that could quietly
+// diverge.
+type taggedResources struct {
+	total    int
+	anchored bool
+	// byType counts surviving (post-denylist) resources by arnResourceType's
+	// resourceType, falling back to "unknown" for an ARN that failed to parse -
+	// countTagged's caller treats an unparseable ARN as "count it" for the same
+	// fail-loud reason (see arnResourceType), so it needs a bucket here too.
+	byType map[string]int
+}
+
+// countTaggedDetailed exhausts the paginator in every region and returns an error on
+// any failure. Silent under-enumeration is the worst outcome available here: it makes
+// the janitor declare a stack torn down when it is not, and then the leak is
+// invisible forever (no manifest signal, no state, real infra still holding VPC
+// quota).
 //
 // The query itself carries NO ResourceTypeFilters (defect 1's fix) - filtering happens
 // after the fact, against each result's own ARN, so an unrecognized resource type is
 // counted rather than silently dropped. anchored reports whether any counted resource is
 // of a type OTHER than the ones in insufficientAloneTypes (defect 2's fix); the caller
 // uses that to tell a genuinely standing stack apart from stale tagging-index residue.
-func countTagged(ctx context.Context, tags map[string]TagAPI, regions []string, customer string) (total int, anchored bool, err error) {
+func countTaggedDetailed(ctx context.Context, tags map[string]TagAPI, regions []string, customer string) (taggedResources, error) {
+	var r taggedResources
 	filters := []rgtypes.TagFilter{
 		{Key: aws.String("Customer"), Values: []string{customer}},
 		{Key: aws.String("deleteAfter")}, // key presence only; AND-ed with the filter above
@@ -618,7 +738,7 @@ func countTagged(ctx context.Context, tags map[string]TagAPI, regions []string, 
 		seenRegion[region] = true
 		client, ok := tags[region]
 		if !ok || client == nil {
-			return 0, false, fmt.Errorf("no tagging client configured for region %q", region)
+			return taggedResources{}, fmt.Errorf("no tagging client configured for region %q", region)
 		}
 		paginator := resourcegroupstaggingapi.NewGetResourcesPaginator(client, &resourcegroupstaggingapi.GetResourcesInput{
 			TagFilters: filters,
@@ -628,24 +748,61 @@ func countTagged(ctx context.Context, tags map[string]TagAPI, regions []string, 
 		for paginator.HasMorePages() {
 			page, err := paginator.NextPage(ctx)
 			if err != nil {
-				return 0, false, fmt.Errorf("GetResources in %s: %w", region, err)
+				return taggedResources{}, fmt.Errorf("GetResources in %s: %w", region, err)
 			}
 			for _, res := range page.ResourceTagMappingList {
 				service, resourceType := arnResourceType(aws.ToString(res.ResourceARN))
 				if service != "" && isDeniedResourceType(service, resourceType) {
 					continue
 				}
-				total++
+				r.total++
+				key := resourceType
+				if service == "" {
+					key = "unknown"
+				}
+				if r.byType == nil {
+					r.byType = map[string]int{}
+				}
+				r.byType[key]++
 				if service == "" || !insufficientAloneTypes[resourceType] {
-					anchored = true
+					r.anchored = true
 				}
 			}
 		}
 	}
 	if queried == 0 {
-		return 0, false, fmt.Errorf("no usable region on the manifest (regions=%v): refusing to report a stack as clean without querying anything", regions)
+		return taggedResources{}, fmt.Errorf("no usable region on the manifest (regions=%v): refusing to report a stack as clean without querying anything", regions)
 	}
-	return total, anchored, nil
+	return r, nil
+}
+
+// countTagged is the (total, anchored) view classify() needs for G8. A thin wrapper
+// over countTaggedDetailed - see that function for the actual query and filtering.
+func countTagged(ctx context.Context, tags map[string]TagAPI, regions []string, customer string) (total int, anchored bool, err error) {
+	r, err := countTaggedDetailed(ctx, tags, regions, customer)
+	if err != nil {
+		return 0, false, err
+	}
+	return r.total, r.anchored, nil
+}
+
+// formatByType renders a byType breakdown deterministically ("dms:endpoint x2,
+// dms:subgrp x1"), sorted by key, for a human-readable residue reason. Empty input
+// renders "", not a panic or a placeholder string, so a caller can safely inline it.
+func formatByType(byType map[string]int) string {
+	if len(byType) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(byType))
+	for k := range byType {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s x%d", k, byType[k]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // lockInfo mirrors the JSON the Terraform/OpenTofu S3 backend stores in a lock item's
@@ -756,6 +913,18 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 	if maxFailures <= 0 {
 		maxFailures = 2
 	}
+	// The wall-clock companion to maxFailures above. maxFailures bounds the number of
+	// BAD attempts; nothing before this bounded the number of SLOW ones, and Teardown
+	// has no internal timeout of its own (tg.Destroy takes no context) - the pod's
+	// activeDeadlineSeconds is the only thing that would ever stop a hung or simply
+	// slow destroy, and killing a Teardown mid-destroy strands infra worse than
+	// leaving it reported as an orphan (same reasoning as the maxFailures skip below).
+	// budget is checked BEFORE every attempt starts, never mid-attempt (there is no
+	// way to interrupt tg.Destroy once called) - see DefaultSweepBudget for how it is
+	// derived from the pod deadline with margin for everything that runs before Sweep
+	// is even called.
+	budget := o.sweepBudget()
+	start := o.now()
 	failedAttempts := 0
 	for i := range rep.Candidates {
 		c := &rep.Candidates[i]
@@ -786,7 +955,9 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 		// destroyed MaxSweeps stacks (or run out of candidates, or hit maxFailures
 		// below). The failing candidate still gets retried every cycle - that part is by
 		// design, the evidence should keep surfacing - it just can no longer block
-		// anyone else.
+		// anyone else. StateResidue candidates (below) never increment rep.Swept
+		// either, for the same reason: a candidate Sweep already knows it cannot fix
+		// must never be the thing that eats the one real orphan's turn.
 		if rep.Swept >= o.MaxSweeps {
 			continue
 		}
@@ -798,6 +969,16 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			// still StateOrphan in the report and gets picked up again next cycle, same
 			// as the one that failed.
 			c.SweepResult = "skipped: max-sweep-failures reached this cycle"
+			continue
+		}
+		if elapsed := o.now().Sub(start); elapsed >= budget {
+			// The wall-clock bound. Everything already attempted this cycle (however
+			// many successes, failures, or residue outcomes) ran long enough to use up
+			// the time this cycle can safely spend inside Sweep - starting one more
+			// risks the pod deadline killing it mid-destroy. Every skipped candidate
+			// here is still StateOrphan and gets picked up again next cycle, same as
+			// the maxFailures skip above.
+			c.SweepResult = fmt.Sprintf("skipped: sweep wall-clock budget (%s) exhausted after %s", budget, elapsed.Round(time.Second))
 			continue
 		}
 		// G3, second call site. The gate runs again immediately before the destroy, on
@@ -819,8 +1000,49 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			failedAttempts++
 			continue
 		}
-		c.SweepResult = "destroyed"
-		rep.Swept++
+		// Teardown succeeded, but "succeeded" only means terragrunt destroy removed
+		// everything ITS state still tracked. Re-query the same tag filter classify()
+		// used to build this candidate: if it still turns up real (anchored) results,
+		// those resources are orphaned FROM state - created outside a tracked
+		// resource block, or already state-rm'd by a run killed mid-teardown before
+		// this cycle ever started (smoke4879-bi's DMS endpoints in the measured
+		// baseline are exactly this shape: VPC and RDS gone, meaning a destroy DID
+		// run at some point, but 2 endpoints and a subnet group were never in state
+		// to remove). Retrying Teardown cannot reach them either, so this is not a
+		// failure to retry - see StateResidue for why it gets its own state instead
+		// of either "destroyed" or "failed".
+		//
+		// c.Customer is only ever empty on a candidate a test built by hand for a
+		// concern unrelated to residue (real Orphan candidates from classify() always
+		// have one - G8 already requires a non-empty customer before Orphan is even
+		// reachable). Skipping the recheck in that case is not a production gap.
+		if c.Customer != "" {
+			r, terr := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)
+			switch {
+			case terr != nil:
+				// Inconclusive, not success: a query we could not complete must never
+				// be reported as "destroyed" on trust. Fail closed to Unknown, same
+				// posture as every other inconclusive AWS call in this file.
+				c.State = StateUnknown
+				c.SweepResult = "destroy ran, but the post-destroy verification query failed: " + terr.Error()
+			case r.total > 0 && r.anchored:
+				c.State = StateResidue
+				c.Resources = r.total
+				c.Reason = fmt.Sprintf(
+					"terraform destroy completed, but %d tagged resources survived (%s): orphaned from state, not reachable by retrying Teardown; needs manual cleanup",
+					r.total, formatByType(r.byType))
+				c.SweepResult = "residue: needs manual cleanup"
+				rep.Residue++
+			default:
+				// n==0, or the only survivors are insufficient-alone types (stale
+				// tagging-index residue, defect 2) - a genuinely clean destroy.
+				c.SweepResult = "destroyed"
+				rep.Swept++
+			}
+		} else {
+			c.SweepResult = "destroyed"
+			rep.Swept++
+		}
 	}
 	return nil
 }

@@ -64,10 +64,19 @@ spec:
       - name: slack-channel
         valueFrom: { configMapKeyRef: { name: harness-config, key: slack_channel } }
   # Report mode finishes in minutes (a handful of S3 listings + tag lookups). Sweep mode
-  # runs at most one Teardown in-process, whose own historical worst case ran ~90 minutes
-  # with only the Aurora tail left before a deadline killed it (10-scenario.yaml's own
-  # teardown deadline is 10800s for exactly that reason); this budgets past that plus
-  # setup and the repo clone.
+  # can run MULTIPLE Teardown calls in-process now (harness/janitor.go Sweep bounds
+  # attempts by wall clock, not by count, since one Teardown's own historical worst case
+  # ran ~90 minutes with only the Aurora tail left before a deadline killed it -
+  # 10-scenario.yaml's own teardown deadline is 10800s for exactly that reason - and two
+  # slow failures plus one slow success used to be able to exceed this pod's deadline
+  # with nothing to stop it). 12600 is THE authoritative number: harness.go's
+  # JanitorPodActiveDeadlineSeconds constant must equal this literal exactly (its own
+  # comment points back here), and Sweep's wall-clock budget (DefaultSweepBudget) is
+  # derived from that constant minus a fixed setup margin, not tuned here separately.
+  # If this number ever changes, change JanitorPodActiveDeadlineSeconds in
+  # harness/janitor.go FIRST and copy the new literal here - the derivation then
+  # updates Sweep's budget automatically, so there is exactly one number to keep in
+  # sync by hand, not two.
   activeDeadlineSeconds: 12600
   ttlStrategy:
     secondsAfterSuccess: 86400
@@ -235,11 +244,14 @@ spec:
             # non-Succeeded (a destroy failing on real AWS state is far more common than
             # a safety abort or the harness's own workflow-list plumbing breaking).
             #
-            # Counts both orphan AND blocked candidates - the same set LINES below
+            # Counts orphan, blocked, AND residue candidates - the same set LINES below
             # selects. Gating on report.orphans alone let a cycle whose only finding was
             # StateBlocked print "no orphans" and post nothing, even though StateBlocked's
-            # own reason text says it needs a human to force-unlock it.
-            N=$(printf '%s' "$REPORT" | jq -r '[.candidates[]? | select(.state=="orphan" or .state=="blocked")] | length' 2>/dev/null) || N=0
+            # own reason text says it needs a human to force-unlock it; residue is the
+            # same shape of miss - Sweep already knows a retry cannot fix it (see
+            # harness/janitor.go StateResidue), so silence here would be the one place
+            # that fact never reaches a human.
+            N=$(printf '%s' "$REPORT" | jq -r '[.candidates[]? | select(.state=="orphan" or .state=="blocked" or .state=="residue")] | length' 2>/dev/null) || N=0
             case "$N" in ''|*[!0-9]*) N=0 ;; esac
 
             if [ "$SCAN_STATUS" != "Succeeded" ] && [ "$N" = 0 ]; then
@@ -247,11 +259,11 @@ spec:
               # script ran, or any other failure that happened before a report existed.
               TEXT=$(printf 'harness janitor (%s): the SCAN step failed (status=%s). No orphan report was produced this cycle - check the scan pod log.' "$MODE" "$SCAN_STATUS")
             elif [ "$N" = 0 ]; then
-              echo "no orphans or blocked candidates this cycle"
+              echo "no orphans, blocked, or residue candidates this cycle"
               exit 0
             else
               LINES=$(printf '%s' "$REPORT" | jq -r '
-                [.candidates[] | select(.state=="orphan" or .state=="blocked")] |
+                [.candidates[] | select(.state=="orphan" or .state=="blocked" or .state=="residue")] |
                 map("- `" + .run_id + "` (" + .config_name + ") " + .state +
                     ": " + (.resources|tostring) + " resources still up, delete_after " + .delete_after +
                     (if .sweep_result != "" then " -> " + .sweep_result else "" end)) |
@@ -260,9 +272,14 @@ spec:
                 # The step itself ended non-Succeeded but got far enough to leave a real
                 # report - most likely a sweep destroy failing on one candidate while the
                 # scan otherwise completed. Say both things instead of picking one.
-                TEXT=$(printf 'harness janitor (%s): the SCAN step did not finish cleanly (status=%s), but left a report with %s orphaned/blocked test stack(s) - check the scan pod log AND the candidates below (a failed sweep destroy is the likely cause).\n%s' "$MODE" "$SCAN_STATUS" "$N" "$LINES")
+                TEXT=$(printf 'harness janitor (%s): the SCAN step did not finish cleanly (status=%s), but left a report with %s orphaned/blocked/residue test stack(s) - check the scan pod log AND the candidates below (a failed sweep destroy is the likely cause).\n%s' "$MODE" "$SCAN_STATUS" "$N" "$LINES")
               else
-                TEXT=$(printf 'harness janitor (%s): %s orphaned/blocked test stack(s). Each one means a teardown FAILED (blocked ones also need a human force-unlock) - check the exit handler and diagnostics artifact for that run before clearing it by hand.\n%s' "$MODE" "$N" "$LINES")
+                # residue candidates did NOT fail a teardown - Sweep already ran one
+                # successfully and it is state, not this janitor, that cannot reach
+                # them - so the blanket "teardown FAILED" framing below is wrong for
+                # that state and each line's own sweep_result (from harness/janitor.go
+                # StateResidue) carries the accurate reason instead.
+                TEXT=$(printf 'harness janitor (%s): %s orphaned/blocked/residue test stack(s). Orphan/blocked means a teardown FAILED (blocked also needs a human force-unlock); residue means a destroy SUCCEEDED but tagged resources survived it anyway and need manual cleanup, not a retry - see each line'"'"'s detail below before clearing it by hand.\n%s' "$MODE" "$N" "$LINES")
               fi
             fi
 
