@@ -261,10 +261,16 @@ locals {
 
     grafana = {
       env = {
-        GF_DATABASE_TYPE = var.enable_dashboards ? "mysql" : ""
-        GF_DATABASE_HOST = var.enable_dashboards ? "${local.db_master_host}:3306" : ""
-        GF_DATABASE_NAME = var.enable_dashboards ? "grafana_primary" : ""
-        GF_DATABASE_USER = var.enable_dashboards ? local.db_master_username : ""
+        # The chart sets serve_from_sub_path but root_url needs the concrete host, which
+        # only this layer knows. Without it Grafana's base href stays "/", every asset
+        # request lands on the dozuki app instead, and the embedded dashboards render as
+        # a blank "failed to load its application files" page. Same host grafana.json's
+        # baseUrl uses; /grafana matches the chart's dashboards.subpath default.
+        GF_SERVER_ROOT_URL = var.enable_dashboards ? "https://${var.dns_domain_name}/grafana/" : ""
+        GF_DATABASE_TYPE   = var.enable_dashboards ? "mysql" : ""
+        GF_DATABASE_HOST   = var.enable_dashboards ? "${local.db_master_host}:3306" : ""
+        GF_DATABASE_NAME   = var.enable_dashboards ? "grafana_primary" : ""
+        GF_DATABASE_USER   = var.enable_dashboards ? local.db_master_username : ""
         # RDS enforces require_secure_transport=ON, so grafana's backend MySQL connection must be
         # TLS or it is refused (Error 3159, crashloops the dashboards-grafana pod and wedges the
         # helm upgrade). skip-verify encrypts without pinning the RDS CA. grafana's makeCert reads
