@@ -365,8 +365,16 @@ data "aws_iam_policy_document" "dr_s3_replication_assume" {
     effect  = "Allow"
     actions = ["sts:AssumeRole"]
     principals {
-      type        = "Service"
-      identifiers = ["s3.amazonaws.com"]
+      type = "Service"
+      # Live CRR assumes this role as s3; Batch Replication assumes it as
+      # batchoperations.s3. Without the second principal every backfill job
+      # submits fine and then fails async on sts:AssumeRole with 0 tasks run
+      # while the apply stays green. Same pair the migration role carries
+      # (s3.tf), partition-aware for the same reason.
+      identifiers = [
+        "s3.${data.aws_partition.current.dns_suffix}",
+        "batchoperations.s3.${data.aws_partition.current.dns_suffix}",
+      ]
     }
   }
 }
@@ -399,10 +407,21 @@ data "aws_iam_policy_document" "dr_s3_replication" {
   }
 
   # Batch job task reports land in the primary-region logging bucket.
+  # PutObject only: the manifest is S3-generated (never read back by this
+  # role), so read access to the fleet's access logs stays off this role.
   statement {
     effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"]
+    actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.logging_bucket.arn}/*"]
+  }
+
+  # The logging bucket defaults to SSE-KMS on the primary S3 key, so the
+  # report write also needs to generate a data key there. Without this the
+  # backfill replicates fine but the completion report never appears.
+  statement {
+    effect    = "Allow"
+    actions   = ["kms:Encrypt", "kms:GenerateDataKey"]
+    resources = distinct(compact([local.s3_kms_key_id, var.s3_kms_key_id]))
   }
 
   statement {
@@ -509,16 +528,18 @@ resource "null_resource" "dr_replication_job_init" {
     aws_s3_bucket_replication_configuration.dr,
   ]
 
+  # Triggers are ONLY the data identity of the pair. A re-fire re-replicates
+  # the whole corpus (the generated manifest has no ObjectReplicationStatuses
+  # filter), so operational parameters must never force one. In particular
+  # aws_profile is empty on Spacelift and set on a local terragrunt run, so
+  # keying on it would re-copy tens of millions of objects every time the two
+  # alternate. Everything the command needs beyond the pair identity is
+  # referenced directly below (legal in creation-time provisioners) so a
+  # change to it never replaces this resource. bucket_prefix means a recreated
+  # DR bucket gets a NEW name, so dr_bucket does change when it matters.
   triggers = {
-    aws_account      = data.aws_caller_identity.current.account_id
-    aws_profile      = var.aws_profile
-    aws_partition    = data.aws_partition.current.partition
-    logging_bucket   = aws_s3_bucket.logging_bucket.arn
-    source_bucket    = aws_s3_bucket.guide_buckets[each.key].bucket
-    replication_role = aws_iam_role.dr_s3_replication[0].arn
-    # Ties the trigger set to the DR bucket's identity so the job re-fires only
-    # if the destination is ever recreated, never on routine applies.
-    dr_bucket = each.value.id
+    source_bucket = aws_s3_bucket.guide_buckets[each.key].bucket
+    dr_bucket     = each.value.id
   }
 
   provisioner "local-exec" {
@@ -527,45 +548,20 @@ resource "null_resource" "dr_replication_job_init" {
     environment = {
       AWS_REGION = data.aws_region.current.region
     }
-    command = "/usr/bin/env bash ./util/create-s3-batch.sh ${self.triggers["logging_bucket"]} ${self.triggers["source_bucket"]} ${self.triggers["replication_role"]} ${self.triggers["aws_account"]} ${self.triggers["aws_partition"]} ${self.triggers["aws_profile"]}"
+    # The leading sleep is for replication-config propagation, a different
+    # wait than the script's IAM sleep: AWS advises waiting a few minutes
+    # after adding or updating a replication configuration before creating a
+    # Batch Replication job with an S3-generated manifest, or the manifest
+    # can come up short against the unpropagated config.
+    command = "sleep 270 && /usr/bin/env bash ./util/create-s3-batch.sh \"${aws_s3_bucket.logging_bucket.arn}\" \"${self.triggers["source_bucket"]}\" \"${aws_iam_role.dr_s3_replication[0].arn}\" \"${data.aws_caller_identity.current.account_id}\" \"${data.aws_partition.current.partition}\" \"${var.aws_profile}\""
   }
 }
 
-# Failed replication operations do not retry forever; once S3 gives up the
-# object silently never reaches DR. Requires the metrics block on the
-# replication rule - before that block existed this metric did not exist, so
-# no alarm was possible. Emitted in the SOURCE region, so this uses the
-# primary-region provider and the standard SNS topic.
-resource "aws_cloudwatch_metric_alarm" "dr_replication_failed" {
-  for_each = aws_s3_bucket.dr_guide_buckets
-
-  alarm_name        = "${local.identifier}-dr-replication-failed-${each.key}"
-  alarm_description = "S3 replication to DR is failing: ${aws_s3_bucket.guide_buckets[each.key].bucket} -> ${each.value.bucket}. Failed operations are NOT retried indefinitely. Diagnose (role policy, KMS, destination), then re-drive the gap with a Batch Replication job (util/create-s3-batch.sh)."
-
-  namespace           = "AWS/S3"
-  metric_name         = "OperationsFailedReplication"
-  statistic           = "Sum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 0
-  comparison_operator = "GreaterThanThreshold"
-
-  # The metric emits datapoints only while there is replication traffic;
-  # absence means "nothing to replicate", not "healthy", so missing data must
-  # not page. Absence-of-parity detection is a separate concern (central
-  # metrics), not expressible as a per-stack CloudWatch alarm without lying.
-  treat_missing_data = "notBreaching"
-
-  dimensions = {
-    SourceBucket      = aws_s3_bucket.guide_buckets[each.key].bucket
-    DestinationBucket = each.value.bucket
-    RuleId            = "dr-${each.key}"
-  }
-
-  alarm_actions = [module.sns.topic_arn]
-  ok_actions    = [module.sns.topic_arn]
-  tags          = local.tags
-}
+# The OperationsFailedReplication alarm for these pairs already exists
+# (monitoring.tf dr_s3_replication_failed) and is in the right region: that is
+# the one replication metric published in the SOURCE region. It has been inert
+# since 2026-06 only because the metrics block above did not exist; enabling
+# metrics is what turns it on. Do not add a second alarm here.
 
 # S3 server access logging can only target a bucket in the SAME region as the
 # source, so the primary logging bucket can never receive the DR buckets' logs
@@ -575,8 +571,8 @@ resource "aws_cloudwatch_metric_alarm" "dr_replication_failed" {
 # Policy-based log delivery only (no ACLs): these buckets are new enough to
 # stay on the BucketOwnerEnforced default.
 #
-// No logging on the logging bucket, same as the primary one - that way lies
-// recursion.
+# No logging on the logging bucket, same as the primary one - that way lies
+# recursion.
 #tfsec:ignore:aws-s3-enable-bucket-logging
 resource "aws_s3_bucket" "dr_logging_bucket" {
   count    = local.dr_enabled ? 1 : 0
@@ -661,6 +657,45 @@ resource "aws_s3_bucket_versioning" "dr_logging_bucket" {
   }
 }
 
+resource "aws_s3_bucket_server_side_encryption_configuration" "dr_logging_bucket" {
+  count    = local.dr_enabled ? 1 : 0
+  provider = aws.dr
+
+  bucket = aws_s3_bucket.dr_logging_bucket[0].id
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.dr_s3[0].arn
+      sse_algorithm     = "aws:kms"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+# Same hygiene the primary logging bucket carries: without it a versioned
+# bucket receiving one log record per replicated PUT keeps every noncurrent
+# version forever.
+resource "aws_s3_bucket_lifecycle_configuration" "dr_logging_bucket" {
+  count    = local.dr_enabled ? 1 : 0
+  provider = aws.dr
+
+  bucket = aws_s3_bucket.dr_logging_bucket[0].id
+
+  rule {
+    id     = "finops-hygiene"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+}
+
 resource "aws_s3_bucket_logging" "dr_guide_buckets" {
   for_each = aws_s3_bucket.dr_guide_buckets
   provider = aws.dr
@@ -669,4 +704,10 @@ resource "aws_s3_bucket_logging" "dr_guide_buckets" {
 
   target_bucket = aws_s3_bucket.dr_logging_bucket[0].bucket
   target_prefix = "${each.key}/"
+
+  # No implicit graph edge exists to the target bucket's policy, and with
+  # BucketOwnerEnforced (no ACLs) that policy is the ONLY thing authorising
+  # log delivery - without this edge the first apply can enable logging
+  # before delivery is grantable.
+  depends_on = [aws_s3_bucket_policy.dr_logging_bucket]
 }
