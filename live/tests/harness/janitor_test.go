@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,18 @@ import (
 type fakeJanitorS3 struct {
 	buckets map[string]map[string][]byte
 	listErr error // when set, ListObjectsV2 always fails - simulates a listing outage
+	// pageSize, when > 0, splits every listing into pages of that many entries with
+	// real continuation tokens. Production buckets page constantly (1000 keys per
+	// page); a fake that always answers in one page cannot catch a pagination bug at
+	// all, which is how the truncated-with-no-token hole survived review.
+	pageSize int
+	// truncatedNoToken models an API contract violation: IsTruncated true with no
+	// NextContinuationToken. The listing helper must fail loud on that rather than
+	// treat the short page as the whole answer.
+	truncatedNoToken bool
+	// alwaysTruncated models a paginator that never converges (a repeated token), so
+	// the page cap is what has to stop it.
+	alwaysTruncated bool
 }
 
 func newFakeJanitorS3() *fakeJanitorS3 {
@@ -64,19 +77,26 @@ func (f *fakeJanitorS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ..
 	return &s3.PutObjectOutput{}, nil
 }
 
+// listEntry is one row of a listing: either a common prefix or an object key. Kept as
+// one ordered slice so paging cuts across both the same way S3 does.
+type listEntry struct {
+	common bool
+	value  string
+}
+
 func (f *fakeJanitorS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Input, _ ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	prefix := aws.ToString(in.Prefix)
 	delim := aws.ToString(in.Delimiter)
-	out := &s3.ListObjectsV2Output{}
 	seenCommon := map[string]bool{}
 	var keys []string
 	for k := range f.bucket(*in.Bucket) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var entries []listEntry
 	for _, k := range keys {
 		if !strings.HasPrefix(k, prefix) {
 			continue
@@ -87,12 +107,47 @@ func (f *fakeJanitorS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Inp
 				cp := prefix + rest[:idx+len(delim)]
 				if !seenCommon[cp] {
 					seenCommon[cp] = true
-					out.CommonPrefixes = append(out.CommonPrefixes, s3types.CommonPrefix{Prefix: aws.String(cp)})
+					entries = append(entries, listEntry{common: true, value: cp})
 				}
 				continue
 			}
 		}
-		out.Contents = append(out.Contents, s3types.Object{Key: aws.String(k)})
+		entries = append(entries, listEntry{value: k})
+	}
+
+	// The continuation token is just the offset into entries, which is enough to model
+	// real paging behavior (each page continues where the last one stopped) without
+	// pretending to reproduce S3's opaque token format.
+	start := 0
+	if in.ContinuationToken != nil {
+		n, err := strconv.Atoi(aws.ToString(in.ContinuationToken))
+		if err != nil {
+			return nil, fmt.Errorf("fake s3: bad continuation token %q", aws.ToString(in.ContinuationToken))
+		}
+		start = n
+	}
+	end := len(entries)
+	if f.pageSize > 0 && start+f.pageSize < end {
+		end = start + f.pageSize
+	}
+	out := &s3.ListObjectsV2Output{}
+	for _, e := range entries[start:end] {
+		if e.common {
+			out.CommonPrefixes = append(out.CommonPrefixes, s3types.CommonPrefix{Prefix: aws.String(e.value)})
+			continue
+		}
+		out.Contents = append(out.Contents, s3types.Object{Key: aws.String(e.value)})
+	}
+	switch {
+	case f.alwaysTruncated:
+		// Never converges: same token back every time.
+		out.IsTruncated = aws.Bool(true)
+		out.NextContinuationToken = aws.String(strconv.Itoa(start))
+	case f.truncatedNoToken:
+		out.IsTruncated = aws.Bool(true)
+	case end < len(entries):
+		out.IsTruncated = aws.Bool(true)
+		out.NextContinuationToken = aws.String(strconv.Itoa(end))
 	}
 	return out, nil
 }
@@ -164,6 +219,19 @@ func (f *fakeLockAPI) setLock(lockID string, created time.Time) {
 	}
 }
 
+// setRawLock stores a lock item exactly as given, so a test can model a real lock
+// whose Info payload is missing or unparseable (lockState treats those as fresh,
+// fail-closed, and flags them corrupt).
+func (f *fakeLockAPI) setRawLock(lockID, info string) {
+	item := map[string]ddbtypes.AttributeValue{
+		"LockID": &ddbtypes.AttributeValueMemberS{Value: lockID},
+	}
+	if info != "" {
+		item["Info"] = &ddbtypes.AttributeValueMemberS{Value: info}
+	}
+	f.items[lockID] = item
+}
+
 func (f *fakeLockAPI) GetItem(_ context.Context, in *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
 	id := in.Key["LockID"].(*ddbtypes.AttributeValueMemberS).Value
 	item, ok := f.items[id]
@@ -171,6 +239,19 @@ func (f *fakeLockAPI) GetItem(_ context.Context, in *dynamodb.GetItemInput, _ ..
 		return &dynamodb.GetItemOutput{}, nil
 	}
 	return &dynamodb.GetItemOutput{Item: item}, nil
+}
+
+// oneLockPerRegion wires the SAME fake lock table under both regions - the shape most
+// tests want, where the split between the primary and DR tables is not what is being
+// exercised. Tests that DO care about the split (a lock item that exists only in the DR
+// region's table) build two distinct fakes instead.
+func oneLockPerRegion(l *fakeLockAPI) map[string]LockAPI {
+	return map[string]LockAPI{testRegion: l, testDR: l}
+}
+
+// oneDigestPerRegion is oneLockPerRegion's counterpart for the digest clients.
+func oneDigestPerRegion(d *fakeDigestAPI) map[string]DigestAPI {
+	return map[string]DigestAPI{testRegion: d, testDR: d}
 }
 
 // ---- shared fixtures ----
@@ -242,7 +323,7 @@ func baseDeps(f *fakeJanitorS3, tagResources int, tagErr error) JanitorDeps {
 	return JanitorDeps{
 		S3:       f,
 		Tags:     map[string]TagAPI{testRegion: tag, testDR: tag},
-		Locks:    newFakeLockAPI(),
+		Locks:    oneLockPerRegion(newFakeLockAPI()),
 		Matrix:   testMatrix(),
 		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
 	}
@@ -266,6 +347,10 @@ func TestGuardProtected(t *testing.T) {
 		{"min-min identifier", "run1-min_default/", "min-min", true},
 		{"empty prefix", "", "smoke-min", true},
 		{"prefix without trailing slash", "run1-min_default", "smoke-min", true},
+		// The recovery-drill configs are deliberately NOT here. They are a
+		// per-candidate wall (G12 in classify), not a cycle abort - see
+		// neverSweepConfigNames and TestScanRoutesARecoveryDrillConfigToNeedsReview.
+		{"recover config prefix is otherwise ordinary", "run1-recover/", "smokerecab-min", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -277,6 +362,109 @@ func TestGuardProtected(t *testing.T) {
 				t.Fatalf("guardProtected(%q, %q) = %v, want nil", c.prefix, c.identifier, err)
 			}
 		})
+	}
+}
+
+// ---- G12: recovery-drill configs are a per-candidate wall ----
+
+// TestScanRoutesARecoveryDrillConfigToNeedsReview is the end-to-end half of the
+// config-name wall. Two things have to be true at once, and only one of them used to
+// be: the recovery config must never be sweepable even when the janitor is pointed at
+// the DR region (where G11's region check stops matching), AND the cycle must keep
+// going. recover/recover_source are exercised configs - a drill leaves manifests under
+// <runID>-recover*/ behind - so routing them through guardProtected's abort-the-cycle
+// contract meant every cycle overlapping or following a drill produced no report at
+// all, for anything.
+func TestScanRoutesARecoveryDrillConfigToNeedsReview(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	// The recovery rebuild's state (and here its manifest) lives in the DR bucket, which
+	// is the only bucket a DR-region janitor would even list.
+	seedManifest(t, f, drBucket(), "run1-recover/", &RunManifest{
+		ConfigName: "recover", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testDR, DRRegion: testDR,
+		AppliedCustomer: appliedCustomerFor(t, "recover", "run1"),
+	})
+	// An ordinary orphan alongside it, on a config that really does live in the DR
+	// region so G11 passes it through to a verdict: this is the candidate that used to
+	// disappear from every report the moment a drill's prefix existed.
+	m := testMatrix()
+	m.Configs = append(m.Configs, Config{Name: "dr_default", Env: "min", Region: testDR,
+		FeatureFlags: map[string]interface{}{"customer": "smokedr"}})
+	drCfg, cerr := m.Config("dr_default")
+	if cerr != nil {
+		t.Fatalf("Config(dr_default): %v", cerr)
+	}
+	drCustomer, _ := drCfg.Salted("run2").FeatureFlags["customer"].(string)
+	seedManifest(t, f, drBucket(), "run2-dr_default/", &RunManifest{
+		ConfigName: "dr_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testDR, DRRegion: testDR, AppliedCustomer: drCustomer,
+	})
+	deps := baseDeps(f, 3, nil)
+	deps.Matrix = m
+
+	// Point the janitor at the DR region, which is exactly the case where G11 stops
+	// protecting these configs.
+	opts := testOptions(now)
+	opts.Region = testDR
+	opts.DRRegion = testDR
+	rep, err := Scan(context.Background(), deps, opts, JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v - a recovery-drill candidate must not kill the cycle", err)
+	}
+	byPrefix := map[string]Candidate{}
+	for _, c := range rep.Candidates {
+		byPrefix[c.Prefix] = c
+	}
+	rec, ok := byPrefix["run1-recover/"]
+	if !ok {
+		t.Fatalf("no candidate for the recovery config; got %+v", rep.Candidates)
+	}
+	if rec.State != StateNeedsReview {
+		t.Fatalf("recover candidate State = %q, want needs-review (reason %q)", rec.State, rec.Reason)
+	}
+	if !strings.Contains(rec.Reason, "recovery drill config") {
+		t.Fatalf("recover candidate Reason = %q, want it to name the recovery drill wall", rec.Reason)
+	}
+	// The cycle continued far enough to classify the unrelated stack as the orphan it is.
+	other, ok := byPrefix["run2-dr_default/"]
+	if !ok {
+		t.Fatalf("the ordinary candidate is missing; got %+v", rep.Candidates)
+	}
+	if other.State != StateOrphan {
+		t.Fatalf("ordinary candidate State = %q, want orphan (reason %q)", other.State, other.Reason)
+	}
+	if rep.Orphans != 1 {
+		t.Fatalf("rep.Orphans = %d, want 1", rep.Orphans)
+	}
+}
+
+// TestSweepSkipsARecoveryDrillConfig is G12's destroy-time half: defense in depth for a
+// hand-built Report or a future refactor that puts a drill config back at StateOrphan.
+// A skip, never an error - the same reason the classify() gate is per candidate.
+func TestSweepSkipsARecoveryDrillConfig(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-recover/", Bucket: drBucket(), RunID: "run1", ConfigName: "recover",
+			Identifier: "smokerecab-min", State: StateOrphan, Resources: 3,
+			Customer: "smokerecab", Region: testDR},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default",
+			Identifier: "smokebb-min", State: StateOrphan, Resources: 3,
+			Customer: "smokebb", Region: testRegion},
+	}}
+	recorder := &teardownRecorder{}
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: recorder.teardown}
+
+	if err := Sweep(context.Background(), deps, testOptions(time.Now()), rep); err != nil {
+		t.Fatalf("Sweep: %v - a recovery-drill candidate must be skipped, not fatal", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("Teardown called %d times, want 1 (only the ordinary orphan)", recorder.calls)
+	}
+	if !strings.Contains(rep.Candidates[0].SweepResult, "recovery drill config") {
+		t.Fatalf("recover SweepResult = %q, want the drill skip", rep.Candidates[0].SweepResult)
+	}
+	if rep.Candidates[1].SweepResult != sweepResultDestroyed {
+		t.Fatalf("ordinary SweepResult = %q, want %q", rep.Candidates[1].SweepResult, sweepResultDestroyed)
 	}
 }
 
@@ -470,7 +658,7 @@ func TestFreshLockIsActive(t *testing.T) {
 	key := "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate"
 	f.put(primaryBucket(), key, "{}")
 	deps := baseDeps(f, 5, nil)
-	lock := deps.Locks.(*fakeLockAPI)
+	lock := deps.Locks[testRegion].(*fakeLockAPI)
 	lock.setLock(primaryBucket()+"/"+key, now.Add(-1*time.Hour)) // fresh: LockFresh default is 4h
 
 	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
@@ -494,7 +682,7 @@ func TestStaleLockOnOrphanIsBlockedAndSkippedBySweep(t *testing.T) {
 	key := "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate"
 	f.put(primaryBucket(), key, "{}")
 	deps := baseDeps(f, 5, nil)
-	lock := deps.Locks.(*fakeLockAPI)
+	lock := deps.Locks[testRegion].(*fakeLockAPI)
 	lock.setLock(primaryBucket()+"/"+key, now.Add(-24*time.Hour)) // well past LockFresh (4h)
 
 	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
@@ -548,12 +736,107 @@ func TestLockStateFindsAFreshLockInASecondBucket(t *testing.T) {
 	if len(buckets) != 2 {
 		t.Fatalf("candidateBuckets = %v, want 2 buckets (primary + DR)", buckets)
 	}
-	fresh, _, err := lockState(context.Background(), locks, f, "dozuki-terraform-lock", buckets, prefix, now, 4*time.Hour)
+	fresh, _, _, err := lockState(context.Background(), oneLockPerRegion(locks), f, "dozuki-terraform-lock", buckets, prefix, now, 4*time.Hour)
 	if err != nil {
 		t.Fatalf("lockState: %v", err)
 	}
 	if !fresh {
 		t.Fatalf("lockState fresh = false, want true (a fresh lock exists, just not in the first bucket searched)")
+	}
+}
+
+// TestLockStateReadsTheDRRegionsLockTable is the region half of the same gap, and a
+// gap the split-bucket fix above did NOT close: live/root.hcl's backend sets
+// `region = local.aws_region` while every region reuses the table NAME
+// dozuki-terraform-lock, so a DR-region unit's lock item lives in the DR region's
+// TABLE. With a single primary-region client the query went to the wrong table, found
+// nothing, and reported "no lock at all" for a state file that was actively locked.
+// Here the item exists ONLY in the DR region's table, and the primary table is empty.
+func TestLockStateReadsTheDRRegionsLockTable(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	prefix := "run1-recover/"
+	key := prefix + "standard/us-west-2/min/physical/terraform.tfstate"
+	f.put(drBucket(), key, "{}")
+
+	primaryLocks := newFakeLockAPI() // empty, as the real primary table would be
+	drLocks := newFakeLockAPI()
+	drLocks.setLock(drBucket()+"/"+key, now.Add(-1*time.Minute)) // fresh
+
+	locks := map[string]LockAPI{testRegion: primaryLocks, testDR: drLocks}
+	fresh, _, _, err := lockState(context.Background(), locks, f, "dozuki-terraform-lock",
+		candidateBuckets(testAccount, testRegion, testDR), prefix, now, 4*time.Hour)
+	if err != nil {
+		t.Fatalf("lockState: %v", err)
+	}
+	if !fresh {
+		t.Fatal("lockState fresh = false, want true - the lock item lives in the DR region's table and must be queried with that region's client")
+	}
+}
+
+// TestLockStateFailsClosedWithNoClientForARegion: a region with no configured client
+// must be an error, never a silent skip. Skipping reads back as "no lock", the
+// permissive answer, for a table nobody looked at.
+func TestLockStateFailsClosedWithNoClientForARegion(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	locks := map[string]LockAPI{testRegion: newFakeLockAPI()} // no DR client
+	_, _, _, err := lockState(context.Background(), locks, f, "dozuki-terraform-lock",
+		candidateBuckets(testAccount, testRegion, testDR), "run1-min_default/", now, 4*time.Hour)
+	if err == nil {
+		t.Fatal("expected an error when a candidate region has no lock client, got nil")
+	}
+}
+
+// TestLockStateFlagsACorruptLockItem: a lock whose Info payload cannot be parsed is
+// still treated as fresh (fail closed), but the report needs to be able to say so -
+// "something is applying right now" and "this lock item is garbage" want different
+// responses from whoever reads the card.
+func TestLockStateFlagsACorruptLockItem(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	prefix := "run1-min_default/"
+	key := prefix + "standard/us-east-1/min/physical/terraform.tfstate"
+	f.put(primaryBucket(), key, "{}")
+	locks := newFakeLockAPI()
+	locks.setRawLock(primaryBucket()+"/"+key, "not json at all")
+
+	fresh, _, corrupt, err := lockState(context.Background(), oneLockPerRegion(locks), f,
+		"dozuki-terraform-lock", []stateLocation{{Region: testRegion, Bucket: primaryBucket()}}, prefix, now, 4*time.Hour)
+	if err != nil {
+		t.Fatalf("lockState: %v", err)
+	}
+	if !fresh || !corrupt {
+		t.Fatalf("fresh=%v corrupt=%v, want true/true (unparseable Info fails closed AND says why)", fresh, corrupt)
+	}
+}
+
+// TestClassifyReportsACorruptLockDistinctly is the reason text half of the test above:
+// the candidate is Active either way, but the operator-facing reason must name the
+// corrupt lock rather than claim an apply is in progress.
+func TestClassifyReportsACorruptLockDistinctly(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer: appliedCustomerFor(t, "min_default", "run1"),
+	})
+	key := "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate"
+	f.put(primaryBucket(), key, "{}")
+	deps := baseDeps(f, 5, nil)
+	deps.Locks[testRegion].(*fakeLockAPI).setRawLock(primaryBucket()+"/"+key, "")
+
+	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	c := mustCandidate(t, rep, "run1-min_default/")
+	if c.State != StateActive {
+		t.Fatalf("state = %q, want active (a lock we cannot read fails closed); reason=%q", c.State, c.Reason)
+	}
+	if !strings.Contains(c.Reason, "corrupt") {
+		t.Fatalf("reason = %q, want it to name the corrupt lock", c.Reason)
 	}
 }
 
@@ -570,7 +853,8 @@ func TestLockStateSingleBucketOnlySearchesThatBucket(t *testing.T) {
 	locks := newFakeLockAPI()
 	locks.setLock(drBucket()+"/"+key, now.Add(-1*time.Minute))
 
-	fresh, age, err := lockState(context.Background(), locks, f, "dozuki-terraform-lock", []string{primaryBucket()}, prefix, now, 4*time.Hour)
+	fresh, age, _, err := lockState(context.Background(), oneLockPerRegion(locks), f, "dozuki-terraform-lock",
+		[]stateLocation{{Region: testRegion, Bucket: primaryBucket()}}, prefix, now, 4*time.Hour)
 	if err != nil {
 		t.Fatalf("lockState: %v", err)
 	}
@@ -589,7 +873,7 @@ func TestClearStateDigestsSearchesEveryCandidateBucket(t *testing.T) {
 	f.put(drBucket(), key, "{}") // only in the DR bucket
 
 	digests := &fakeDigestAPI{}
-	deps := JanitorDeps{S3: f, Digests: digests}
+	deps := JanitorDeps{S3: f, Digests: oneDigestPerRegion(digests)}
 	opts := testOptions(time.Now())
 
 	n, err := clearStateDigests(context.Background(), deps, opts, candidateBuckets(testAccount, testRegion, testDR), prefix)
@@ -602,6 +886,55 @@ func TestClearStateDigestsSearchesEveryCandidateBucket(t *testing.T) {
 	want := drBucket() + "/" + key + "-md5"
 	if len(digests.deleted) != 1 || digests.deleted[0] != want {
 		t.Fatalf("deleted = %v, want [%q]", digests.deleted, want)
+	}
+}
+
+// TestClearStateDigestsUsesTheDRRegionsDigestTable is the region counterpart: the
+// digest item for DR-region state lives in the DR region's copy of the lock table, so
+// the delete has to be issued by that region's client. This one bites harder than the
+// lock read, because DynamoDB DeleteItem against a missing item SUCCEEDS: with a
+// primary-only client the janitor reported the digest cleared, then the destroy aborted
+// on the stale digest it never actually touched.
+func TestClearStateDigestsUsesTheDRRegionsDigestTable(t *testing.T) {
+	f := newFakeJanitorS3()
+	prefix := "run1-recover/"
+	key := prefix + "standard/us-west-2/min/physical/terraform.tfstate"
+	f.put(drBucket(), key, "{}") // state only in the DR bucket
+
+	primaryDigests := &fakeDigestAPI{}
+	drDigests := &fakeDigestAPI{}
+	deps := JanitorDeps{S3: f, Digests: map[string]DigestAPI{testRegion: primaryDigests, testDR: drDigests}}
+	opts := testOptions(time.Now())
+
+	n, err := clearStateDigests(context.Background(), deps, opts, candidateBuckets(testAccount, testRegion, testDR), prefix)
+	if err != nil {
+		t.Fatalf("clearStateDigests: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("cleared = %d, want 1", n)
+	}
+	want := drBucket() + "/" + key + "-md5"
+	if len(drDigests.deleted) != 1 || drDigests.deleted[0] != want {
+		t.Fatalf("DR-region deletes = %v, want [%q] - the DR digest must be deleted through the DR region's client", drDigests.deleted, want)
+	}
+	if len(primaryDigests.deleted) != 0 {
+		t.Fatalf("primary-region deletes = %v, want none - nothing under this prefix lives in the primary bucket", primaryDigests.deleted)
+	}
+}
+
+// TestClearStateDigestsReportsAMissingRegionClient: no client for a region in play is
+// an error, not a silent skip - a digest nobody cleared is a destroy that aborts later
+// with no explanation.
+func TestClearStateDigestsReportsAMissingRegionClient(t *testing.T) {
+	f := newFakeJanitorS3()
+	prefix := "run1-recover/"
+	f.put(drBucket(), prefix+"standard/us-west-2/min/physical/terraform.tfstate", "{}")
+
+	deps := JanitorDeps{S3: f, Digests: map[string]DigestAPI{testRegion: &fakeDigestAPI{}}} // no DR client
+	opts := testOptions(time.Now())
+
+	if _, err := clearStateDigests(context.Background(), deps, opts, candidateBuckets(testAccount, testRegion, testDR), prefix); err == nil {
+		t.Fatal("expected an error when a candidate region has no digest client, got nil")
 	}
 }
 
@@ -794,7 +1127,7 @@ func TestClassifySecurityGroupAloneIsCleanNotOrphan(t *testing.T) {
 	tag := &fakeTagAPI{byType: map[string]int{"ec2:security-group": 2}}
 	deps := JanitorDeps{
 		S3: f, Tags: map[string]TagAPI{testRegion: tag, testDR: tag},
-		Locks: newFakeLockAPI(), Matrix: testMatrix(),
+		Locks: oneLockPerRegion(newFakeLockAPI()), Matrix: testMatrix(),
 		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
 	}
 
@@ -1037,10 +1370,10 @@ func TestSweepStopsAfterMaxSweepsSuccesses(t *testing.T) {
 // that many have failed in this cycle, rather than trying every orphan in the report.
 func TestSweepBoundsFailedAttemptsPerCycle(t *testing.T) {
 	rep := &Report{Candidates: []Candidate{
-		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run3-min_default/", Bucket: primaryBucket(), RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run4-min_default/", Bucket: primaryBucket(), RunID: "run4", ConfigName: "min_default", Identifier: "smokedd-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion},
+		{Prefix: "run3-min_default/", Bucket: primaryBucket(), RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min", State: StateOrphan, Resources: 3, Customer: "smokecc", Region: testRegion},
+		{Prefix: "run4-min_default/", Bucket: primaryBucket(), RunID: "run4", ConfigName: "min_default", Identifier: "smokedd-min", State: StateOrphan, Resources: 3, Customer: "smokedd", Region: testRegion},
 	}}
 	var calls []string
 	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
@@ -1077,6 +1410,7 @@ func TestSweepDefaultMaxSweepFailuresWhenUnset(t *testing.T) {
 		candidates = append(candidates, Candidate{
 			Prefix: "run" + id + "-min_default/", Bucket: primaryBucket(), RunID: "run" + id,
 			ConfigName: "min_default", Identifier: "smoke" + id + "-min", State: StateOrphan, Resources: 3,
+			Customer: "smoke" + id, Region: testRegion,
 		})
 	}
 	rep := &Report{Candidates: candidates}
@@ -1164,12 +1498,12 @@ func TestSweepStopsStartingNewAttemptsPastWallClockBudget(t *testing.T) {
 	start := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
 	clock := start
 	rep := &Report{Candidates: []Candidate{
-		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run3-min_default/", Bucket: primaryBucket(), RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion},
+		{Prefix: "run3-min_default/", Bucket: primaryBucket(), RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min", State: StateOrphan, Resources: 3, Customer: "smokecc", Region: testRegion},
 	}}
 	var calls []string
-	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
 		calls = append(calls, p.RunID)
 		clock = clock.Add(50 * time.Minute) // simulate a slow destroy
 		return nil
@@ -1202,10 +1536,10 @@ func TestSweepWallClockBudgetStillMakesProgressPastAFailingCandidate(t *testing.
 	start := time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC)
 	clock := start
 	rep := &Report{Candidates: []Candidate{
-		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3},
-		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3},
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default", Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion},
 	}}
-	deps := JanitorDeps{Matrix: testMatrix(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: func(_ context.Context, p PhaseParams, _ bool) error {
 		clock = clock.Add(10 * time.Minute)
 		if p.RunID == "run1" {
 			return errors.New("destroy failed")
@@ -1749,7 +2083,7 @@ func TestClassifyUsesRecordedIdentityNotRecomputedMatrix(t *testing.T) {
 	tag := &customerAwareTagAPI{resourcesFor: map[string]int{recorded: 3}} // nothing under "recomputed"
 	deps := JanitorDeps{
 		S3: f, Tags: map[string]TagAPI{testRegion: tag, testDR: tag},
-		Locks: newFakeLockAPI(), Matrix: testMatrix(),
+		Locks: oneLockPerRegion(newFakeLockAPI()), Matrix: testMatrix(),
 		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
 	}
 
@@ -1839,10 +2173,10 @@ func TestClearStateDigestsComposesExactMD5KeysFromS3Listing(t *testing.T) {
 	f.put(bucket, prefix+"harness-manifest.json", "{}")
 
 	digests := &fakeDigestAPI{}
-	deps := JanitorDeps{S3: f, Digests: digests}
+	deps := JanitorDeps{S3: f, Digests: oneDigestPerRegion(digests)}
 	opts := testOptions(time.Now())
 
-	n, err := clearStateDigests(context.Background(), deps, opts, []string{bucket}, prefix)
+	n, err := clearStateDigests(context.Background(), deps, opts, []stateLocation{{Region: testRegion, Bucket: bucket}}, prefix)
 	if err != nil {
 		t.Fatalf("clearStateDigests: %v", err)
 	}
@@ -1879,7 +2213,7 @@ func TestSweepClearsStateDigestsBeforeDestroy(t *testing.T) {
 		{Prefix: prefix, Bucket: bucket, RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
 	}}
 	digests := &fakeDigestAPI{}
-	deps := JanitorDeps{S3: f, Matrix: testMatrix(), Digests: digests, Tags: noResidueTags(), Teardown: func(context.Context, PhaseParams, bool) error { return nil }}
+	deps := JanitorDeps{S3: f, Matrix: testMatrix(), Digests: oneDigestPerRegion(digests), Tags: noResidueTags(), Teardown: func(context.Context, PhaseParams, bool) error { return nil }}
 	opts := testOptions(time.Now())
 	opts.MaxSweeps = 1
 
@@ -1911,7 +2245,7 @@ func TestScanNeverClearsDigestsEvenWithDigestsWired(t *testing.T) {
 	tag := &fakeTagAPI{resources: 3}
 	deps := JanitorDeps{
 		S3: f, Tags: map[string]TagAPI{testRegion: tag, testDR: tag},
-		Locks: newFakeLockAPI(), Digests: digests, Matrix: testMatrix(),
+		Locks: oneLockPerRegion(newFakeLockAPI()), Digests: oneDigestPerRegion(digests), Matrix: testMatrix(),
 		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
 	}
 	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
@@ -2263,5 +2597,367 @@ func TestSweepResidueReclaimUsesARNsOwnRegionNotCandidatePrimary(t *testing.T) {
 	}
 	if len(drDMS.deletedEndpoints) != 0 {
 		t.Fatalf("DR-region DMS client calls = %v, want 0", drDMS.deletedEndpoints)
+	}
+}
+
+// ---- review round 6: the empty-Customer sweep path ----
+
+// TestSweepRefusesACandidateWithNoCustomerIdentity closes the file's one fail-OPEN
+// branch. A candidate with State=Orphan and no recorded Customer used to be destroyed
+// and counted Swept with no post-destroy re-verify at all, because there was no
+// identity to re-query with. classify() cannot produce that shape (G8 needs a non-empty
+// customer before Orphan is reachable), so this is defense in depth of exactly the same
+// kind as the keep-on-failure and guardProtected re-checks that sit beside it: a
+// hand-built Report or a future refactor must not be able to reach an unverifiable
+// destroy.
+//
+// The refusal must ALSO stay visible. State stays StateOrphan on purpose: the notify
+// script's jq selector matches orphan/blocked/residue, so moving the one candidate the
+// janitor explicitly refused to touch out of that set would delete it from the Slack
+// alert and from the post-sweep orphan recount - a silent skip, which is the same
+// failure shape as a silent destroy.
+func TestSweepRefusesACandidateWithNoCustomerIdentity(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 3}, // no Customer on purpose
+	}}
+	recorder := &teardownRecorder{}
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: recorder.teardown}
+	opts := testOptions(time.Now())
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if recorder.calls != 0 {
+		t.Fatalf("Teardown called %d times, want 0 - a candidate with no verifiable identity must never be destroyed", recorder.calls)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateOrphan {
+		t.Fatalf("State = %q, want orphan so the notify selector and the recount both still see it; sweep_result=%q", c.State, c.SweepResult)
+	}
+	if !strings.Contains(c.SweepResult, "refused") {
+		t.Fatalf("SweepResult = %q, want a refusal message", c.SweepResult)
+	}
+	if !strings.Contains(c.Reason, "no customer identity recorded") {
+		t.Fatalf("Reason = %q, want it to say why the janitor refused", c.Reason)
+	}
+	if rep.Swept != 0 || rep.Failed != 0 {
+		t.Fatalf("Swept=%d Failed=%d, want 0/0", rep.Swept, rep.Failed)
+	}
+	if rep.Orphans != 1 {
+		t.Fatalf("rep.Orphans = %d, want 1 - the refused candidate is still standing and must still be counted", rep.Orphans)
+	}
+}
+
+// ---- review round 6: --max-sweeps <= 0 ----
+
+// TestSweepMaxFallsBackToOne pins the accessor: MaxSweeps <= 0 means the conservative
+// default, never "sweep nothing". Read literally, --max-sweeps=0 made every candidate
+// skip while the cycle still exited 0 - a sweep that looks armed, destroys nothing, and
+// says nothing about it.
+func TestSweepMaxFallsBackToOne(t *testing.T) {
+	for _, n := range []int{0, -1} {
+		o := JanitorOptions{MaxSweeps: n}
+		if got := o.sweepMax(); got != 1 {
+			t.Fatalf("sweepMax() with MaxSweeps=%d = %d, want 1", n, got)
+		}
+	}
+	if got := (JanitorOptions{MaxSweeps: 3}).sweepMax(); got != 3 {
+		t.Fatalf("sweepMax() with MaxSweeps=3 = %d, want 3 (an explicit cap must win)", got)
+	}
+}
+
+// TestSweepWithZeroMaxSweepsStillDestroysOne is the behavioral half: a zero cap must
+// not silently turn the cycle into a no-op.
+func TestSweepWithZeroMaxSweepsStillDestroysOne(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion},
+		{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default",
+			Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion},
+	}}
+	recorder := &teardownRecorder{}
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(), Teardown: recorder.teardown}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 0
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("Teardown called %d times, want 1 (the zero cap falls back to 1, not to zero)", recorder.calls)
+	}
+}
+
+// ---- review round 6: tagging-index lag caveat on residue ----
+
+// TestResidueReasonCarriesTheIndexLagCaveat: the post-destroy re-query runs seconds
+// after the destroy and reads an index that lags, so a residue line can name resources
+// that are already gone. There is no sleep to fix that (it would spend the wall-clock
+// budget the pod deadline depends on), so the reason text has to carry the caveat for
+// whoever reads the card.
+func TestResidueReasonCarriesTheIndexLagCaveat(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 3, Customer: "smoke4879", Region: testRegion},
+	}}
+	residueTags := &fakeTagAPI{byType: map[string]int{"ec2:vpc": 1}} // no registered deleter
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: residueTags},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	opts := testOptions(time.Now())
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue {
+		t.Fatalf("State = %q, want residue", c.State)
+	}
+	if !strings.Contains(c.Reason, "tagging index") {
+		t.Fatalf("Reason = %q, want the index-lag caveat", c.Reason)
+	}
+}
+
+// ---- review round 6: S3 pagination ----
+
+// TestListTopPrefixesCrossesPageBoundaries: the fake now pages like the real API, so a
+// bucket with more prefixes than fit in one page must still enumerate all of them. A
+// short listing here means missed candidates, which reads exactly like "no leak".
+func TestListTopPrefixesCrossesPageBoundaries(t *testing.T) {
+	f := newFakeJanitorS3()
+	f.pageSize = 2
+	for i := 0; i < 5; i++ {
+		f.put(primaryBucket(), fmt.Sprintf("run%d-min_default/harness-manifest.json", i), "{}")
+	}
+
+	got, err := listTopPrefixes(context.Background(), f, primaryBucket())
+	if err != nil {
+		t.Fatalf("listTopPrefixes: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("listTopPrefixes = %v (%d), want all 5 prefixes across 3 pages", got, len(got))
+	}
+}
+
+// TestListStateKeysCrossesPageBoundaries is the same proof for the state-key listing
+// both the lock check and the digest clear run on. Under-listing here leaves digests
+// uncleared, which aborts the destroy later with no obvious cause.
+func TestListStateKeysCrossesPageBoundaries(t *testing.T) {
+	f := newFakeJanitorS3()
+	f.pageSize = 2
+	prefix := "run1-min_default/"
+	for i := 0; i < 5; i++ {
+		f.put(primaryBucket(), fmt.Sprintf("%sstandard/us-east-1/min/layer%d/terraform.tfstate", prefix, i), "{}")
+	}
+	// Non-state objects share the pages and must not be counted.
+	f.put(primaryBucket(), prefix+"harness-manifest.json", "{}")
+
+	got, err := listStateKeys(context.Background(), f, primaryBucket(), prefix)
+	if err != nil {
+		t.Fatalf("listStateKeys: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("listStateKeys = %v (%d), want all 5 state keys across pages", got, len(got))
+	}
+}
+
+// TestListingFailsClosedOnTruncatedWithNoToken: S3's contract says a truncated response
+// always carries a continuation token. The old loops treated a missing one as the end
+// of the listing, which is a SILENT short read - the one shape where guessing is worst.
+func TestListingFailsClosedOnTruncatedWithNoToken(t *testing.T) {
+	f := newFakeJanitorS3()
+	f.truncatedNoToken = true
+	f.put(primaryBucket(), "run1-min_default/harness-manifest.json", "{}")
+	f.put(primaryBucket(), "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate", "{}")
+
+	if _, err := listTopPrefixes(context.Background(), f, primaryBucket()); err == nil {
+		t.Fatal("listTopPrefixes: expected an error on truncated-with-no-token, got nil")
+	}
+	if _, err := listStateKeys(context.Background(), f, primaryBucket(), "run1-min_default/"); err == nil {
+		t.Fatal("listStateKeys: expected an error on truncated-with-no-token, got nil")
+	}
+}
+
+// TestListingStopsAtTheMaxPageCap: a paginator that hands back the same token forever
+// used to loop until the pod deadline killed the cycle, which reads to a human as "the
+// janitor hung" rather than "listing broke".
+func TestListingStopsAtTheMaxPageCap(t *testing.T) {
+	f := newFakeJanitorS3()
+	f.alwaysTruncated = true
+	f.put(primaryBucket(), "run1-min_default/harness-manifest.json", "{}")
+
+	_, err := listTopPrefixes(context.Background(), f, primaryBucket())
+	if err == nil {
+		t.Fatal("expected an error when the paginator never converges, got nil")
+	}
+	if !strings.Contains(err.Error(), "pages") {
+		t.Fatalf("err = %v, want it to name the page cap", err)
+	}
+}
+
+// ---- review round 6: budget measured from process start ----
+
+// TestSweepBudgetReplacesTheSetupEstimateWithTheMeasurement proves the derived budget
+// is the pod deadline minus the MEASURED pre-Sweep elapsed time - a replacement for
+// sweepSetupMargin's estimate, not a second subtraction on top of it. Charging both
+// would bill setup twice (a fast 5-minute setup still losing the full 30-minute
+// margin), and the flat estimate alone would let a slow Scan push Sweep right through
+// the pod's activeDeadlineSeconds and get a Teardown SIGKILLed mid-destroy.
+func TestSweepBudgetReplacesTheSetupEstimateWithTheMeasurement(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	podDeadline := time.Duration(JanitorPodActiveDeadlineSeconds) * time.Second
+
+	o := JanitorOptions{
+		ProcessStart: now.Add(-30 * time.Minute),
+		Now:          func() time.Time { return now },
+	}
+	// 30 minutes measured happens to equal sweepSetupMargin, so this case also pins
+	// that the two agree rather than compound: the answer is the deadline minus 30m
+	// once, which is exactly DefaultSweepBudget().
+	if got, want := o.sweepBudget(), podDeadline-30*time.Minute; got != want {
+		t.Fatalf("sweepBudget() = %s, want %s (pod deadline minus the 30m measured)", got, want)
+	}
+	if got := o.sweepBudget(); got != DefaultSweepBudget() {
+		t.Fatalf("sweepBudget() = %s, want DefaultSweepBudget() = %s when the measurement matches the estimate", got, DefaultSweepBudget())
+	}
+
+	// A fast setup gets the time back instead of paying the estimate anyway.
+	o.ProcessStart = now.Add(-5 * time.Minute)
+	if got, want := o.sweepBudget(), podDeadline-5*time.Minute; got != want {
+		t.Fatalf("sweepBudget() = %s, want %s (only the 5m actually spent)", got, want)
+	}
+
+	// Past the whole pod deadline: floor, never zero or negative. Zero would read as
+	// "never start anything", and silently doing nothing is its own failure mode.
+	o.ProcessStart = now.Add(-8 * time.Hour)
+	if got := o.sweepBudget(); got != minSweepBudget {
+		t.Fatalf("sweepBudget() = %s, want the %s floor", got, minSweepBudget)
+	}
+
+	// No ProcessStart recorded means no measurement, so the estimate-derived budget stands.
+	o.ProcessStart = time.Time{}
+	if got := o.sweepBudget(); got != DefaultSweepBudget() {
+		t.Fatalf("sweepBudget() = %s, want DefaultSweepBudget() = %s when there is nothing to measure", got, DefaultSweepBudget())
+	}
+}
+
+// TestSweepBudgetHonorsAnExplicitBudgetVerbatim: an operator-supplied --sweep-budget is
+// an instruction, not a starting point. Subtracting elapsed time from it would silently
+// hand back less than the number someone typed.
+func TestSweepBudgetHonorsAnExplicitBudgetVerbatim(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	o := JanitorOptions{
+		SweepBudget:  90 * time.Minute,
+		ProcessStart: now.Add(-30 * time.Minute),
+		Now:          func() time.Time { return now },
+	}
+	if got := o.sweepBudget(); got != 90*time.Minute {
+		t.Fatalf("sweepBudget() = %s, want the explicit 90m untouched", got)
+	}
+}
+
+// ---- review round 6: report schema version, post-sweep orphan count, audit trail ----
+
+// TestReportCarriesTheSchemaVersion: the notify script asserts on this before running
+// its jq pipeline over the field names, so a rename fails loud instead of quietly
+// producing an empty Slack card.
+func TestReportCarriesTheSchemaVersion(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	rep, err := Scan(context.Background(), baseDeps(f, 0, nil), testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if rep.SchemaVersion != JanitorReportSchemaVersion {
+		t.Fatalf("SchemaVersion = %d, want %d", rep.SchemaVersion, JanitorReportSchemaVersion)
+	}
+	body, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(body), `"schema_version":1`) {
+		t.Fatalf("report json = %s, want a schema_version field (the script asserts on that exact key)", body)
+	}
+}
+
+// TestSweepRecomputesTheOrphanHeadline: Scan's orphans count is pre-sweep. Leaving it
+// alone published a JSON report whose orphans= headline contradicted its own candidate
+// list - "orphans=1" on a cycle that had just destroyed the only one.
+func TestSweepRecomputesTheOrphanHeadline(t *testing.T) {
+	rep := &Report{
+		Orphans: 2,
+		Candidates: []Candidate{
+			{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+				Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion},
+			{Prefix: "run2-min_default/", Bucket: primaryBucket(), RunID: "run2", ConfigName: "min_default",
+				Identifier: "smokebb-min", State: StateOrphan, Resources: 3, Customer: "smokebb", Region: testRegion},
+		},
+	}
+	deps := JanitorDeps{Matrix: testMatrix(), Tags: noResidueTags(),
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil }}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1 // only run1 gets destroyed; run2 is still standing at the end
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if rep.Swept != 1 {
+		t.Fatalf("rep.Swept = %d, want 1 (setup sanity check)", rep.Swept)
+	}
+	if rep.Orphans != 1 {
+		t.Fatalf("rep.Orphans = %d, want 1 - the headline must count what is still standing after the sweep", rep.Orphans)
+	}
+}
+
+// TestWriteSweepReportArchivesToThePrimaryBucket: the pod log is short-retention and a
+// Slack message is gone from anyone's scrollback in a week, so before sweep mode is
+// enabled the report JSON has to land somewhere durable. It goes under its own prefix,
+// which has no manifest under it and therefore can never become a candidate itself.
+func TestWriteSweepReportArchivesToThePrimaryBucket(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	opts := testOptions(now)
+	opts.SelfWorkflow = "harness-janitor-abcde"
+	rep := &Report{SchemaVersion: JanitorReportSchemaVersion, Mode: "sweep", At: now.Format(time.RFC3339), Swept: 1}
+
+	key, err := WriteSweepReport(context.Background(), JanitorDeps{S3: f}, opts, rep)
+	if err != nil {
+		t.Fatalf("WriteSweepReport: %v", err)
+	}
+	if !strings.HasPrefix(key, JanitorReportPrefix) || !strings.HasSuffix(key, ".json") {
+		t.Fatalf("key = %q, want %s<name>.json", key, JanitorReportPrefix)
+	}
+	if !strings.Contains(key, opts.SelfWorkflow) {
+		t.Fatalf("key = %q, want the janitor workflow name in it", key)
+	}
+	body, ok := f.buckets[primaryBucket()][key]
+	if !ok {
+		t.Fatalf("nothing written at %s/%s; bucket has %v", primaryBucket(), key, f.buckets[primaryBucket()])
+	}
+	var got Report
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("archived body is not the report JSON: %v", err)
+	}
+	if got.Swept != 1 || got.SchemaVersion != JanitorReportSchemaVersion {
+		t.Fatalf("archived report = %+v, want the report as passed in", got)
+	}
+}
+
+// A janitor prefix must never be mistaken for a run prefix: it holds no
+// harness-manifest.json, so G4 drops it before anything else runs.
+func TestJanitorReportPrefixIsNeverACandidate(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	f.put(primaryBucket(), JanitorReportPrefix+"20260804T120000Z.json", "{}")
+
+	rep, err := Scan(context.Background(), baseDeps(f, 0, nil), testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(rep.Candidates) != 0 {
+		t.Fatalf("candidates = %+v, want none", rep.Candidates)
 	}
 }

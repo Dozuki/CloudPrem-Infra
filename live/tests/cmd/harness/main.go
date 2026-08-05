@@ -226,6 +226,13 @@ func runEvidence(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // which is true even when the report lists orphans in report mode: the report is the
 // signal, not the exit code, so a nightly report is not what pages anyone red.
 func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	// Stamped before anything else so JanitorOptions.ProcessStart measures the real
+	// pre-Sweep cost (repo clone happened earlier still, but everything this process
+	// does - stdin read, AWS config, STS, matrix load, Scan - is counted). Sweep's
+	// budget subtracts it, because the pod's activeDeadlineSeconds has been running
+	// since long before Sweep's own clock starts.
+	processStart := time.Now()
+
 	fs := flag.NewFlagSet("janitor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -255,6 +262,13 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if *selfWorkflow == "" {
 		fmt.Fprintln(stderr, "error: --self-workflow is required — the ownership check must be able to prove it is looking at a real workflow list\n"+usage)
 		return 2
+	}
+	if *maxSweeps < 1 {
+		// Not a usage error: janitor.go clamps this to 1 (JanitorOptions.sweepMax, the
+		// same rule --max-sweep-failures already follows), so the cycle is safe either
+		// way. Say it out loud here because the alternative is a ConfigMap typo that
+		// looks like a working sweep and destroys nothing, silently, every night.
+		fmt.Fprintf(stderr, "janitor: --max-sweeps=%d is not a usable cap; falling back to 1\n", *maxSweeps)
 	}
 
 	// G2: the ownership check is only as good as this list. Empty stdin (the caller's
@@ -318,7 +332,7 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	s3Router := multiRegionS3{byRegion: map[string]*s3.Client{
+	s3Router := multiRegionS3{primary: *region, byRegion: map[string]*s3.Client{
 		*region:   s3.NewFromConfig(awsCfg),
 		*drRegion: s3.NewFromConfig(drCfg),
 	}}
@@ -328,8 +342,20 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			*region:   resourcegroupstaggingapi.NewFromConfig(awsCfg),
 			*drRegion: resourcegroupstaggingapi.NewFromConfig(drCfg),
 		},
-		Locks:   dynamodb.NewFromConfig(awsCfg),
-		Digests: dynamodb.NewFromConfig(awsCfg),
+		// Both DynamoDB client sets are per region, like Tags. live/root.hcl's backend
+		// block sets `region = local.aws_region` while every region reuses the same
+		// table NAME, so a DR-region unit's lock and its -md5 digest item live in the
+		// DR region's copy of dozuki-terraform-lock. Wiring only awsCfg here read that
+		// table as permanently empty (a weakened lock gate) and "cleared" DR digests
+		// that were never touched, since DeleteItem on a missing item succeeds.
+		Locks: map[string]harness.LockAPI{
+			*region:   dynamodb.NewFromConfig(awsCfg),
+			*drRegion: dynamodb.NewFromConfig(drCfg),
+		},
+		Digests: map[string]harness.DigestAPI{
+			*region:   dynamodb.NewFromConfig(awsCfg),
+			*drRegion: dynamodb.NewFromConfig(drCfg),
+		},
 		DMS: map[string]harness.DMSReclaimAPI{
 			*region:   databasemigrationservice.NewFromConfig(awsCfg),
 			*drRegion: databasemigrationservice.NewFromConfig(drCfg),
@@ -342,6 +368,7 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		RepoDir: *repoDir, LockTable: *lockTable, Grace: *grace, LockFresh: *lockFresh,
 		SelfWorkflow: *selfWorkflow, Sweep: *sweep, MaxSweeps: *maxSweeps,
 		MaxSweepFailures: *maxSweepFail, SweepBudget: *sweepBudget,
+		ProcessStart: processStart,
 	}
 
 	rep, serr := harness.Scan(ctx, deps, opts, wfList)
@@ -356,8 +383,18 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	exitCode := 0
 	if *sweep {
-		if err := harness.Sweep(ctx, deps, opts, rep); err != nil {
-			fmt.Fprintf(stderr, "janitor: sweep aborted: %v\n", err)
+		serr := harness.Sweep(ctx, deps, opts, rep)
+		// Archive the report before acting on the outcome, including the safety-abort
+		// path: a cycle that stopped mid-sweep is exactly the one whose record matters
+		// later. The archive write is best-effort - failing to store the audit copy
+		// must not change what the cycle already did to real infrastructure.
+		if key, werr := harness.WriteSweepReport(ctx, deps, opts, rep); werr != nil {
+			fmt.Fprintf(stderr, "janitor: could not archive the sweep report (non-fatal): %v\n", werr)
+		} else {
+			fmt.Fprintf(stdout, "janitor: sweep report archived at %s in the primary state bucket\n", key)
+		}
+		if serr != nil {
+			fmt.Fprintf(stderr, "janitor: sweep aborted: %v\n", serr)
 			return 3
 		}
 		fmt.Fprintln(stdout)
@@ -405,30 +442,51 @@ func printJanitorReport(w io.Writer, rep *harness.Report) {
 // exception), and the janitor's two-bucket scan (primary + DR) needs both.
 type multiRegionS3 struct {
 	byRegion map[string]*s3.Client
+	// primary is the region whose client answers for a bucket name that matches none
+	// of the configured regions. Named explicitly because the old fallback picked
+	// whatever came out of a map range first, and Go randomizes that: the same
+	// unrecognized bucket could hit the primary client one run and the DR client the
+	// next, so the AWS error a human read varied run to run for one underlying bug.
+	primary string
 }
 
-func (m multiRegionS3) clientFor(bucket string) *s3.Client {
+// clientFor picks the client whose signing region matches the bucket. The fallback for
+// an unrecognized name is the primary-region client, deliberately, so the resulting AWS
+// error names the real problem (the bucket) instead of the janitor guessing quietly and
+// inconsistently. A map with no usable client is a configuration error and says so,
+// rather than returning nil for a caller to dereference.
+func (m multiRegionS3) clientFor(bucket string) (*s3.Client, error) {
 	for region, c := range m.byRegion {
-		if strings.Contains(bucket, "-"+region+"-") {
-			return c
+		if c != nil && strings.Contains(bucket, "-"+region+"-") {
+			return c, nil
 		}
 	}
-	// An unrecognized bucket name falls through to whichever client is configured, so the
-	// resulting AWS error names the real problem instead of a nil-pointer panic.
-	for _, c := range m.byRegion {
-		return c
+	if c := m.byRegion[m.primary]; c != nil {
+		return c, nil
 	}
-	return nil
+	return nil, fmt.Errorf("no S3 client configured for bucket %q (primary region %q, %d client(s) wired)", bucket, m.primary, len(m.byRegion))
 }
 
 func (m multiRegionS3) GetObject(ctx context.Context, in *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
-	return m.clientFor(aws.ToString(in.Bucket)).GetObject(ctx, in, opts...)
+	c, err := m.clientFor(aws.ToString(in.Bucket))
+	if err != nil {
+		return nil, err
+	}
+	return c.GetObject(ctx, in, opts...)
 }
 
 func (m multiRegionS3) PutObject(ctx context.Context, in *s3.PutObjectInput, opts ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-	return m.clientFor(aws.ToString(in.Bucket)).PutObject(ctx, in, opts...)
+	c, err := m.clientFor(aws.ToString(in.Bucket))
+	if err != nil {
+		return nil, err
+	}
+	return c.PutObject(ctx, in, opts...)
 }
 
 func (m multiRegionS3) ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input, opts ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
-	return m.clientFor(aws.ToString(in.Bucket)).ListObjectsV2(ctx, in, opts...)
+	c, err := m.clientFor(aws.ToString(in.Bucket))
+	if err != nil {
+		return nil, err
+	}
+	return c.ListObjectsV2(ctx, in, opts...)
 }

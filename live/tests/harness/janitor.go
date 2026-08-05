@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,6 +62,22 @@ const (
 	StateResidue CandidateState = "residue"
 )
 
+// sweepResultDestroyed is the one SweepResult value that means a clean destroy. Named
+// because two places have to agree on it: the writer below and the post-sweep orphan
+// recount, which uses it to tell "still standing" from "gone" on a candidate whose
+// State is deliberately left at Orphan.
+const sweepResultDestroyed = "destroyed"
+
+// residueIndexLagCaveat is appended to every StateResidue reason. The post-destroy
+// re-query runs seconds after the destroy returns, and the Resource Groups Tagging API
+// is an index, not the source of truth - the same lag that motivates
+// insufficientAloneTypes can hand back entries for resources that are already gone.
+// Waiting it out is not an option (a sleep inside Sweep spends the wall-clock budget
+// the pod deadline depends on), so the honest fix is to say so in the text a human
+// reads: a residue line that does not repeat next cycle was index lag, and one that
+// does is real.
+const residueIndexLagCaveat = " (note: these counts come from the tagging index, which can lag a destroy by minutes - residue that is genuinely gone will not be reported again next cycle)"
+
 // Candidate is one state prefix and everything the janitor learned about it.
 type Candidate struct {
 	Prefix        string         `json:"prefix"`
@@ -86,15 +103,32 @@ type Candidate struct {
 	DRRegion string `json:"dr_region,omitempty"`
 }
 
+// JanitorReportSchemaVersion is stamped into every Report as schema_version. The Argo
+// notify script (50-janitor-cron.yaml) asserts it before running its jq pipeline over
+// the field names below: without a version, renaming a field here silently turns the
+// Slack card into empty/null values instead of failing loud. Bump it whenever a field
+// this report emits is renamed or removed, and update the script's assertion in the
+// same change.
+const JanitorReportSchemaVersion = 1
+
 // Report is the whole cycle, emitted as JSON for the Slack step and printed as a table.
 type Report struct {
-	Mode       string      `json:"mode"` // "report" | "sweep"
-	At         string      `json:"at"`
-	Account    string      `json:"account"`
-	Candidates []Candidate `json:"candidates"`
-	Orphans    int         `json:"orphans"`
-	Swept      int         `json:"swept"`
-	Failed     int         `json:"failed"`
+	// SchemaVersion is always JanitorReportSchemaVersion. The json tag must stay
+	// exactly "schema_version" - the notify script asserts on that literal key.
+	SchemaVersion int         `json:"schema_version"`
+	Mode          string      `json:"mode"` // "report" | "sweep"
+	At            string      `json:"at"`
+	Account       string      `json:"account"`
+	Candidates    []Candidate `json:"candidates"`
+	// Orphans counts StateOrphan candidates AS OF the last thing that touched the
+	// report: Scan sets it, and Sweep recomputes it from the final candidate states
+	// before returning. Without that recompute the post-sweep JSON kept Scan's
+	// pre-sweep number, so the headline read "orphans=3" on a cycle that had just
+	// destroyed all three - the notify script sidesteps it by counting candidates
+	// itself, but any other parser reading the field would be wrong.
+	Orphans int `json:"orphans"`
+	Swept   int `json:"swept"`
+	Failed  int `json:"failed"`
 	// Residue counts StateResidue candidates: a destroy that succeeded against
 	// terraform state but left tagged resources standing anyway (see StateResidue).
 	// Kept apart from Failed on purpose - retrying Teardown cannot fix this, so
@@ -113,6 +147,26 @@ type Report struct {
 // wall behind that, for the day someone changes how prefixes are built.
 var protectedStatePrefixes = []string{"standard/", "_templates/", "_global/"}
 var protectedIdentifiers = []string{"dev-min", "dozuki-min", "min-min"}
+
+// neverSweepConfigNames are the recovery-drill configs (matrix.yaml). They stand their
+// stacks up in the DR region and are not wired through the Argo phases at all (README
+// "Not covered"), so the janitor has never been able to destroy one correctly. Until
+// this list existed they were shielded only by classify()'s G11 region check, which
+// compares against the janitor's own --region flag: point a janitor at the DR region
+// for any legitimate reason and G11 stops matching, leaving nothing between the
+// recovery stacks and a destroy. G12 (classify) is the wall that does not move when a
+// flag does.
+//
+// Deliberately NOT part of guardProtected. These configs are EXERCISED - a drill runs
+// them regularly and leaves manifests under <runID>-recover/ and
+// <runID>-recover_source/ behind - so a hit is an ordinary, expected candidate, not
+// evidence that the detection logic is broken. guardProtected's contract is to abort
+// the whole cycle on a hit, which would mean every janitor cycle overlapping or
+// following a drill produces no report at all: no orphan detection, no Slack card,
+// nothing, for as long as the drill's state prefix exists. A per-candidate wall
+// (StateNeedsReview, cycle continues) protects the same stacks without taking the rest
+// of the fleet's reporting down with them.
+var neverSweepConfigNames = map[string]bool{"recover": true, "recover_source": true}
 
 // ErrProtected aborts the cycle. Callers must not continue past it.
 var ErrProtected = fmt.Errorf("janitor: protected identity reached the candidate path")
@@ -146,19 +200,30 @@ type JanitorOptions struct {
 	LockFresh    time.Duration // a lock younger than this means something is applying NOW
 	SelfWorkflow string        // this janitor workflow's own name; proves the stdin list is real
 	Sweep        bool          // false = dry run. The default everywhere.
-	MaxSweeps    int           // cap on SUCCESSFUL destroys in one cycle
+	// MaxSweeps caps SUCCESSFUL destroys in one cycle. <= 0 falls back to 1 in
+	// sweepMax(), never to "no cap" and never to "sweep nothing" - see that accessor.
+	MaxSweeps int
 	// MaxSweepFailures caps FAILED destroy attempts in one cycle, independent of
 	// MaxSweeps (defect 3). <= 0 falls back to a default of 2 in Sweep, not to
 	// "unbounded" - see the comment on that fallback for why zero is never treated as
 	// "no cap".
 	MaxSweepFailures int
 	// SweepBudget is the wall-clock ceiling on how long Sweep will keep STARTING new
-	// destroy attempts, checked against o.now() before each one. <= 0 falls back to
-	// DefaultSweepBudget(), derived from JanitorPodActiveDeadlineSeconds - see that
-	// const and Sweep for why this exists (defect: Sweep used to bound attempt COUNT,
-	// not attempt TIME, and a slow Teardown has no internal timeout of its own).
+	// destroy attempts, checked against o.now() before each one. A value > 0 is an
+	// explicit operator instruction and sweepBudget() honors it verbatim; <= 0 means
+	// "derive one" - see sweepBudget and DefaultSweepBudget for why this exists
+	// (defect: Sweep used to bound attempt COUNT, not attempt TIME, and a slow Teardown
+	// has no internal timeout of its own).
 	SweepBudget time.Duration
-	Now         func() time.Time // injected for tests; production is time.Now
+	// ProcessStart is when the janitor PROCESS started, not when Sweep was entered. The
+	// pod's activeDeadlineSeconds clock started at process start while Sweep's own
+	// clock starts much later, and the gap between the two is what sweepSetupMargin
+	// only ESTIMATES. When this is set, sweepBudget() derives the budget from the pod
+	// deadline minus the MEASURED gap, so a Scan that runs long eats into the budget
+	// instead of the pod deadline. Zero value means "no measurement available" and the
+	// budget stays the flat estimate-derived one.
+	ProcessStart time.Time
+	Now          func() time.Time // injected for tests; production is time.Now
 }
 
 func (o JanitorOptions) now() time.Time {
@@ -187,6 +252,16 @@ const JanitorPodActiveDeadlineSeconds = 12600
 // margin is what would let Sweep itself blow the pod deadline.
 const sweepSetupMargin = 30 * time.Minute
 
+// minSweepBudget is the floor sweepBudget() will not go below once it subtracts the
+// measured pre-Sweep elapsed time. A floor rather than "clamp to zero" because a zero
+// budget reads as "never start anything", and silently doing nothing is its own
+// failure mode (the same reasoning as DefaultSweepBudget's defensive branch). It is
+// deliberately small: Sweep's budget check compares elapsed-inside-Sweep against it,
+// and elapsed is 0 for the first candidate, so the floor never blocks the first
+// attempt - it just stops a second one almost immediately when the pod is already
+// nearly out of time, which is the direction to fail toward.
+const minSweepBudget = time.Minute
+
 // DefaultSweepBudget derives Sweep's wall-clock budget from
 // JanitorPodActiveDeadlineSeconds by subtracting sweepSetupMargin, rather than being
 // a second, independent magic number that could silently drift out of agreement with
@@ -197,6 +272,12 @@ const sweepSetupMargin = 30 * time.Minute
 // third attempt started right after two such worst-case ones would push the pod past
 // its deadline mid-destroy - the exact failure this budget exists to prevent - so the
 // budget check in Sweep (elapsed >= budget) refuses to start it.
+//
+// sweepSetupMargin is an ESTIMATE of everything that runs before Sweep's clock starts.
+// When JanitorOptions.ProcessStart is set (main.go stamps it at process start),
+// sweepBudget() derives the budget from the pod deadline and the MEASURED elapsed time
+// instead of calling this function at all, so a Scan that runs long eats into the
+// budget rather than silently eating into the pod deadline.
 func DefaultSweepBudget() time.Duration {
 	total := time.Duration(JanitorPodActiveDeadlineSeconds) * time.Second
 	if total <= sweepSetupMargin {
@@ -210,25 +291,72 @@ func DefaultSweepBudget() time.Duration {
 	return total - sweepSetupMargin
 }
 
+// sweepBudget resolves the wall-clock ceiling Sweep checks before each destroy.
+//
+// An operator-supplied o.SweepBudget is returned verbatim, whatever ProcessStart says:
+// it is an explicit "spend at most this long in Sweep" instruction (a --sweep-budget
+// flag, or a test), and quietly shortening a number someone typed is worse than
+// honoring it.
+//
+// Otherwise the budget is derived, and ProcessStart decides how. sweepSetupMargin is
+// only an ESTIMATE of the pre-Sweep cost (image pull, repo clone, Vault login, Scan),
+// so when main.go has stamped ProcessStart there is a real measurement to use instead:
+// subtract the MEASURED elapsed time from the pod deadline directly rather than from
+// DefaultSweepBudget(), which has already subtracted the estimate. Subtracting from
+// DefaultSweepBudget() would charge setup twice - a fast 5-minute setup would still lose
+// the full 30-minute margin on top of its own 5 - and the point of measuring is to
+// replace the guess, not to stack on top of it. Never below minSweepBudget: the goal is
+// to attempt LESS when the pod is nearly out of time, not to turn a slow cycle into a
+// silent no-op.
 func (o JanitorOptions) sweepBudget() time.Duration {
 	if o.SweepBudget > 0 {
 		return o.SweepBudget
 	}
-	return DefaultSweepBudget()
+	if o.ProcessStart.IsZero() {
+		return DefaultSweepBudget()
+	}
+	budget := time.Duration(JanitorPodActiveDeadlineSeconds)*time.Second - o.now().Sub(o.ProcessStart)
+	if budget < minSweepBudget {
+		return minSweepBudget
+	}
+	return budget
+}
+
+// sweepMax is the SUCCESSFUL-destroy cap, with the same "<= 0 means the conservative
+// default, never a silent extreme" rule MaxSweepFailures already follows. Zero used to
+// be read literally, so --max-sweeps=0 made every candidate skip while the cycle still
+// reported success: a sweep that looks armed and destroys nothing, forever. 1 is the
+// production value (50-janitor-cron.yaml) and the safe end of the range.
+func (o JanitorOptions) sweepMax() int {
+	if o.MaxSweeps <= 0 {
+		return 1
+	}
+	return o.MaxSweeps
 }
 
 // JanitorDeps are the AWS/Argo surfaces, injected so the predicate is unit-testable
 // without AWS or a cluster.
 type JanitorDeps struct {
-	S3    S3ListGetAPI
-	Tags  map[string]TagAPI // keyed by region
-	Locks LockAPI
+	S3   S3ListGetAPI
+	Tags map[string]TagAPI // keyed by region
+	// Locks is keyed by region, like Tags, because the lock table is per region. The
+	// terraform S3 backend (live/root.hcl) sets `region = local.aws_region` on the
+	// backend block while every region reuses the same table NAME
+	// (dozuki-terraform-lock), so a DR-region unit's lock item lives in the DR
+	// region's copy of the table - and the account really does have items in both
+	// (us-east-1 and us-west-2 both hold live items today). A primary-only client
+	// reads the DR table as permanently empty, which silently weakens G7's lock gate
+	// for exactly the split-region runs candidateBuckets exists to cover.
+	Locks map[string]LockAPI
 	// Digests clears the S3 backend's -md5 consistency digest for a candidate's state
 	// keys immediately before Sweep destroys it (a stale digest aborts terragrunt
-	// destroy before it touches a single resource - see clearStateDigests). Optional:
-	// nil skips the step, which is what every test that does not care about it wires by
-	// leaving this unset.
-	Digests DigestAPI
+	// destroy before it touches a single resource - see clearStateDigests). Keyed by
+	// region for the same reason as Locks, and worse than a read gap when it is wrong:
+	// DynamoDB DeleteItem on a missing item succeeds, so a primary-only client
+	// "clears" DR digests that were never touched and the destroy then aborts on the
+	// stale one it could not reach. Optional: nil (or an empty map) skips the step,
+	// which is what every test that does not care about it wires by leaving this unset.
+	Digests map[string]DigestAPI
 	// DMS is the residue-reclaim client set, keyed by region like Tags - residue can be
 	// in either the primary or DR region. Optional: nil (or a missing region key) just
 	// means reclaimResidueByARN skips any ARN that would have needed it, leaving that
@@ -337,6 +465,16 @@ func byNameOrRunID(list JanitorWorkflowList) map[string]JanitorWorkflow {
 	return idx
 }
 
+// stateLocation is one state bucket plus the region it lives in. The region travels
+// WITH the bucket rather than being parsed back out of the bucket name later: the
+// DynamoDB lock table is per region, so every lock/digest query has to be issued by the
+// client for that bucket's region, and recovering the region by substring-matching a
+// name is the fragile shape this file avoids everywhere else.
+type stateLocation struct {
+	Region string
+	Bucket string
+}
+
 // candidateBuckets returns every S3 state bucket a run's resources could plausibly be
 // split across for a given (region, DR region) pair: the primary bucket always, plus
 // the DR bucket when one is configured and distinct. A run's manifest and its actual
@@ -347,12 +485,12 @@ func byNameOrRunID(list JanitorWorkflowList) map[string]JanitorWorkflow {
 // prefix's manifest happened to be found in" is also the bucket its state lives in;
 // treating those as the same bucket is what silently reads a split-bucket run's lock
 // table as empty.
-func candidateBuckets(accountID, region, drRegion string) []string {
-	buckets := []string{stateBucket(accountID, region)}
+func candidateBuckets(accountID, region, drRegion string) []stateLocation {
+	locs := []stateLocation{{Region: region, Bucket: stateBucket(accountID, region)}}
 	if drRegion != "" && drRegion != region {
-		buckets = append(buckets, stateBucket(accountID, drRegion))
+		locs = append(locs, stateLocation{Region: drRegion, Bucket: stateBucket(accountID, drRegion)})
 	}
-	return buckets
+	return locs
 }
 
 // Scan is the whole read-only half: enumerate, classify, return. It performs NO mutation
@@ -362,7 +500,7 @@ func Scan(ctx context.Context, d JanitorDeps, o JanitorOptions, wfList JanitorWo
 	owners := runningOwners(wfList)
 	byWF := byNameOrRunID(wfList)
 
-	rep := &Report{Mode: "report", At: now.Format(time.RFC3339), Account: o.AccountID}
+	rep := &Report{SchemaVersion: JanitorReportSchemaVersion, Mode: "report", At: now.Format(time.RFC3339), Account: o.AccountID}
 	if o.Sweep {
 		rep.Mode = "sweep"
 	}
@@ -374,7 +512,8 @@ func Scan(ctx context.Context, d JanitorDeps, o JanitorOptions, wfList JanitorWo
 	buckets := candidateBuckets(o.AccountID, o.Region, o.DRRegion)
 
 	seen := map[string]bool{}
-	for _, bucket := range buckets {
+	for _, loc := range buckets {
+		bucket := loc.Bucket
 		prefixes, err := listTopPrefixes(ctx, d.S3, bucket)
 		if err != nil {
 			// Fail the CYCLE, not the candidate. A partial listing under-reports, and an
@@ -405,30 +544,70 @@ func Scan(ctx context.Context, d JanitorDeps, o JanitorOptions, wfList JanitorWo
 	return rep, nil
 }
 
+// maxListPages bounds any single S3 listing. Generous on purpose: at 1000 keys per
+// page this is ten million objects under one prefix, far past anything the harness
+// buckets hold, so hitting it means the paginator is not converging (a repeated
+// continuation token, an S3-compatible layer behaving oddly) rather than a genuinely
+// enormous bucket. Without it that shape loops until the pod's activeDeadlineSeconds
+// kills the cycle, which reads to a human as "the janitor hung", not "listing broke".
+const maxListPages = 10000
+
+// eachListPage runs the ListObjectsV2 paginator for one input and calls fn on every
+// page. Both listing loops in this file go through it so the two failure rules are
+// written once:
+//
+//   - truncated with no continuation token is an ERROR, not a break. The old loops
+//     treated it as the end of the listing, which is a SILENT short read: fewer
+//     candidates than really exist (a leak nobody sees) or fewer state keys than really
+//     exist (digests left unclear). S3's contract says a truncated response always
+//     carries a token, so this only fires when something upstream is violating it - and
+//     that is exactly when guessing is worst.
+//   - a page cap, see maxListPages.
+//
+// The caller's input is copied per page rather than mutated, so a caller can safely
+// reuse the input it passed in.
+func eachListPage(ctx context.Context, api S3ListGetAPI, in *s3.ListObjectsV2Input, fn func(*s3.ListObjectsV2Output)) error {
+	var token *string
+	for page := 1; ; page++ {
+		if page > maxListPages {
+			return fmt.Errorf("listing %s (prefix %q) did not terminate within %d pages: refusing to keep paging",
+				aws.ToString(in.Bucket), aws.ToString(in.Prefix), maxListPages)
+		}
+		req := *in
+		req.ContinuationToken = token
+		out, err := api.ListObjectsV2(ctx, &req)
+		if err != nil {
+			return err
+		}
+		fn(out)
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			return nil
+		}
+		if out.NextContinuationToken == nil {
+			return fmt.Errorf("listing %s (prefix %q) reported a truncated result with no continuation token: refusing to treat a short listing as complete",
+				aws.ToString(in.Bucket), aws.ToString(in.Prefix))
+		}
+		token = out.NextContinuationToken
+	}
+}
+
 // listTopPrefixes returns the top-level "directories" in bucket - the run prefixes plus
 // whatever else lives at the top level (standard/, _templates/, ...). A delimited listing,
 // not a recursive one: nothing below the first "/" is ever inspected here.
 func listTopPrefixes(ctx context.Context, api S3ListGetAPI, bucket string) ([]string, error) {
 	var prefixes []string
-	var token *string
-	for {
-		out, err := api.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket:            aws.String(bucket),
-			Delimiter:         aws.String("/"),
-			ContinuationToken: token,
-		})
-		if err != nil {
-			return nil, err
-		}
+	err := eachListPage(ctx, api, &s3.ListObjectsV2Input{
+		Bucket:    aws.String(bucket),
+		Delimiter: aws.String("/"),
+	}, func(out *s3.ListObjectsV2Output) {
 		for _, cp := range out.CommonPrefixes {
 			if cp.Prefix != nil {
 				prefixes = append(prefixes, *cp.Prefix)
 			}
 		}
-		if out.IsTruncated == nil || !*out.IsTruncated || out.NextContinuationToken == nil {
-			break
-		}
-		token = out.NextContinuationToken
+	})
+	if err != nil {
+		return nil, err
 	}
 	return prefixes, nil
 }
@@ -519,6 +698,18 @@ func classify(
 		return base, nil
 	}
 
+	// G12: the recovery-drill configs, by name, independent of any region flag. G11
+	// below shields the same stacks only while the janitor is pointed at the primary
+	// region; this one holds when it is not. Per candidate, not a cycle abort: these
+	// configs are exercised regularly and a drill's own state prefix is an ordinary
+	// thing to find, so aborting on it would silence the whole report - see
+	// neverSweepConfigNames.
+	if neverSweepConfigNames[m.ConfigName] {
+		base.State = StateNeedsReview
+		base.Reason = "recovery drill config, never sweepable: " + m.ConfigName + " stands its stack up in the DR region and is not wired through the Argo phases, so the janitor cannot destroy it correctly"
+		return base, nil
+	}
+
 	// G11: the recovery rebuild config stands its stack up in the DR region and is not
 	// wired through the Argo phases at all yet (README "Not covered"). Getting the region
 	// wiring wrong on a destroy is exactly the guess to avoid, so report and never sweep.
@@ -572,7 +763,7 @@ func classify(
 	// different buckets (candidateBuckets), and using only `bucket` here would read a
 	// split-bucket run's lock table as permanently empty.
 	lockBuckets := candidateBuckets(o.AccountID, m.Region, m.DRRegion)
-	fresh, age, lerr := lockState(ctx, d.Locks, d.S3, o.LockTable, lockBuckets, prefix, now, o.LockFresh)
+	fresh, age, corruptLock, lerr := lockState(ctx, d.Locks, d.S3, o.LockTable, lockBuckets, prefix, now, o.LockFresh)
 	if lerr != nil {
 		base.State = StateUnknown
 		base.Reason = "lock check inconclusive: " + lerr.Error()
@@ -581,6 +772,13 @@ func classify(
 	if fresh {
 		base.State = StateActive
 		base.Reason = "a state lock under this prefix is fresh; something is applying right now"
+		if corruptLock {
+			// Same verdict, different fact. A lock whose Info payload is missing or
+			// unparseable is treated as fresh (fail closed, lockState), but it reads
+			// identically to a real in-progress apply in the report - and the two want
+			// opposite responses from a human, so say which one this was.
+			base.Reason = "a state lock under this prefix has a corrupt or unreadable Info payload, so its age could not be established; treated as fresh (fail closed) - a human may need to inspect the lock item"
+		}
 		return base, nil
 	}
 
@@ -894,6 +1092,17 @@ var residueDeleters = map[string]func(context.Context, DMSReclaimAPI, string) er
 // needs to tell a permissions/dependency problem apart from genuine, untouchable
 // residue. Every failure is also logged here, matching every sibling reclaim helper in
 // this file - it was the only one silently swallowing its error before this fix.
+//
+// These deletes run AFTER Sweep's wall-clock budget check for the candidate, so they
+// are outside the budget by construction. That is deliberate and rests on an
+// assumption worth stating: every registered deleter is a single control-plane API
+// call that returns in well under a second (DMS DeleteEndpoint and
+// DeleteReplicationSubnetGroup return as soon as the delete is accepted, they do not
+// wait for the resource to disappear), and the ARN list is one candidate's own
+// survivors - single digits in every case measured. Total time here is therefore noise
+// against the ~90-minute Teardown the budget actually exists to bound. If a
+// long-running or waiter-style deleter is ever added to residueDeleters, that
+// assumption breaks and this loop needs its own bound.
 func reclaimResidueByARN(ctx context.Context, dms map[string]DMSReclaimAPI, arns []string) (attempted, failed int, byType map[string]int) {
 	for _, a := range arns {
 		service, resourceType := arnResourceType(a)
@@ -1053,23 +1262,17 @@ func formatByType(byType map[string]int) string {
 // share one S3 listing loop instead of two that could quietly diverge.
 func listStateKeys(ctx context.Context, api S3ListGetAPI, bucket, prefix string) ([]string, error) {
 	var stateKeys []string
-	var token *string
-	for {
-		out, err := api.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket: aws.String(bucket), Prefix: aws.String(prefix), ContinuationToken: token,
-		})
-		if err != nil {
-			return nil, err
-		}
+	err := eachListPage(ctx, api, &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket), Prefix: aws.String(prefix),
+	}, func(out *s3.ListObjectsV2Output) {
 		for _, obj := range out.Contents {
 			if obj.Key != nil && strings.HasSuffix(*obj.Key, "/terraform.tfstate") {
 				stateKeys = append(stateKeys, *obj.Key)
 			}
 		}
-		if out.IsTruncated == nil || !*out.IsTruncated || out.NextContinuationToken == nil {
-			break
-		}
-		token = out.NextContinuationToken
+	})
+	if err != nil {
+		return nil, err
 	}
 	return stateKeys, nil
 }
@@ -1082,32 +1285,42 @@ type lockInfo struct {
 }
 
 // lockState reads the lock item for every terraform.tfstate under prefix, searched
-// across every bucket in buckets (not just one), and returns whether any is "fresh"
-// (younger than fresh) plus the oldest lock's age (0 when there is no lock at all). It
-// lists state files under the prefix via S3 rather than assuming a fixed layout,
-// because the physical/logical layer paths differ by env_path, AND because the bucket
-// holding a run's state is not always the bucket its manifest was found in - see
+// across every location in locs (not just one), and returns whether any is "fresh"
+// (younger than fresh), the oldest lock's age (0 when there is no lock at all), and
+// whether the freshness verdict came from a lock whose Info payload could not be read
+// (corrupt). It lists state files under the prefix via S3 rather than assuming a fixed
+// layout, because the physical/logical layer paths differ by env_path, AND because the
+// bucket holding a run's state is not always the bucket its manifest was found in - see
 // candidateBuckets. Searching every candidate bucket, not just the one the caller
 // happened to resolve the manifest from, is what keeps a split-bucket run's lock
 // visible here instead of silently reading back "no lock at all".
-func lockState(ctx context.Context, locks LockAPI, api S3ListGetAPI, table string, buckets []string, prefix string, now time.Time, freshWithin time.Duration) (bool, time.Duration, error) {
+//
+// locks is keyed by region and the item for a bucket's state is looked up through the
+// client for THAT bucket's region: one table name, one table per region (see
+// JanitorDeps.Locks). A region with no client configured is an error, not a skip - a
+// lock we could not look at is exactly the thing that must not read back as "no lock".
+func lockState(ctx context.Context, locks map[string]LockAPI, api S3ListGetAPI, table string, locs []stateLocation, prefix string, now time.Time, freshWithin time.Duration) (fresh bool, oldest time.Duration, corrupt bool, err error) {
 	var oldestAge time.Duration
 	found := false
-	for _, bucket := range buckets {
-		stateKeys, err := listStateKeys(ctx, api, bucket, prefix)
+	for _, loc := range locs {
+		client, ok := locks[loc.Region]
+		if !ok || client == nil {
+			return false, 0, false, fmt.Errorf("no lock-table client configured for region %q (bucket %s)", loc.Region, loc.Bucket)
+		}
+		stateKeys, err := listStateKeys(ctx, api, loc.Bucket, prefix)
 		if err != nil {
-			return false, 0, fmt.Errorf("list state objects under %s in %s: %w", prefix, bucket, err)
+			return false, 0, false, fmt.Errorf("list state objects under %s in %s: %w", prefix, loc.Bucket, err)
 		}
 		for _, key := range stateKeys {
-			lockID := bucket + "/" + key
-			out, err := locks.GetItem(ctx, &dynamodb.GetItemInput{
+			lockID := loc.Bucket + "/" + key
+			out, err := client.GetItem(ctx, &dynamodb.GetItemInput{
 				TableName: aws.String(table),
 				Key: map[string]ddbtypes.AttributeValue{
 					"LockID": &ddbtypes.AttributeValueMemberS{Value: lockID},
 				},
 			})
 			if err != nil {
-				return false, 0, fmt.Errorf("GetItem %s: %w", lockID, err)
+				return false, 0, false, fmt.Errorf("GetItem %s in %s: %w", lockID, loc.Region, err)
 			}
 			if len(out.Item) == 0 {
 				continue // no lock held on this state file
@@ -1115,20 +1328,22 @@ func lockState(ctx context.Context, locks LockAPI, api S3ListGetAPI, table strin
 			infoAttr, ok := out.Item["Info"].(*ddbtypes.AttributeValueMemberS)
 			if !ok || infoAttr.Value == "" {
 				// A lock item with no readable Info: we cannot establish its age, so treat it
-				// as fresh (fail closed) rather than assume it is safe to touch.
-				return true, 0, nil
+				// as fresh (fail closed) rather than assume it is safe to touch. corrupt=true
+				// so the report can say WHY - "fresh" and "unreadable, assumed fresh" are the
+				// same verdict but very different things for a human deciding what to do.
+				return true, 0, true, nil
 			}
 			var li lockInfo
 			if err := json.Unmarshal([]byte(infoAttr.Value), &li); err != nil || li.Created == "" {
-				return true, 0, nil // same fail-closed reasoning
+				return true, 0, true, nil // same fail-closed reasoning
 			}
 			created, perr := time.Parse(time.RFC3339, li.Created)
 			if perr != nil {
-				return true, 0, nil
+				return true, 0, true, nil
 			}
 			age := now.Sub(created)
 			if age < freshWithin {
-				return true, age, nil
+				return true, age, false, nil
 			}
 			if !found || age > oldestAge {
 				oldestAge = age
@@ -1136,7 +1351,7 @@ func lockState(ctx context.Context, locks LockAPI, api S3ListGetAPI, table strin
 			}
 		}
 	}
-	return false, oldestAge, nil
+	return false, oldestAge, false, nil
 }
 
 // clearStateDigests deletes the S3 backend's -md5 consistency-digest item for every
@@ -1164,14 +1379,26 @@ func lockState(ctx context.Context, locks LockAPI, api S3ListGetAPI, table strin
 // but does not stop on an error - caller logs and continues rather than blocking a
 // destroy attempt on a diagnostic side channel.
 //
-// Searches every bucket in buckets, not just one - a split-bucket run (candidateBuckets)
+// Searches every location in locs, not just one - a split-bucket run (candidateBuckets)
 // has its state, and therefore its digest items, in the DR bucket while its manifest
 // (and c.Bucket) point at the primary one; clearing only c.Bucket would silently clear
-// nothing for exactly the runs this function exists to unblock.
-func clearStateDigests(ctx context.Context, d JanitorDeps, o JanitorOptions, buckets []string, prefix string) (int, error) {
+// nothing for exactly the runs this function exists to unblock. Each location's deletes
+// go through the digest client for THAT region: the table is per region (see
+// JanitorDeps.Digests), and DeleteItem against a missing item succeeds, so a
+// primary-only client would report a DR digest "cleared" and the destroy would still
+// abort on it.
+func clearStateDigests(ctx context.Context, d JanitorDeps, o JanitorOptions, locs []stateLocation, prefix string) (int, error) {
 	cleared := 0
 	var firstErr error
-	for _, bucket := range buckets {
+	for _, loc := range locs {
+		bucket := loc.Bucket
+		client, ok := d.Digests[loc.Region]
+		if !ok || client == nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("no digest-table client configured for region %q (bucket %s)", loc.Region, bucket)
+			}
+			continue
+		}
 		stateKeys, err := listStateKeys(ctx, d.S3, bucket, prefix)
 		if err != nil {
 			if firstErr == nil {
@@ -1191,7 +1418,7 @@ func clearStateDigests(ctx context.Context, d JanitorDeps, o JanitorOptions, buc
 				}
 				continue
 			}
-			_, derr := d.Digests.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+			_, derr := client.DeleteItem(ctx, &dynamodb.DeleteItemInput{
 				TableName: aws.String(o.LockTable),
 				Key: map[string]ddbtypes.AttributeValue{
 					"LockID": &ddbtypes.AttributeValueMemberS{Value: digestID},
@@ -1283,6 +1510,16 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			c.SweepResult = "skipped: keep-on-failure"
 			continue
 		}
+		if neverSweepConfigNames[c.ConfigName] {
+			// G12 again, at destroy time, same defense-in-depth shape as the
+			// keep-on-failure check above: classify() routes a recovery-drill config to
+			// StateNeedsReview long before it could reach here, so this only fires on a
+			// hand-built Report or a future refactor that flips a State back to Orphan.
+			// A skip rather than an error - see neverSweepConfigNames for why a drill
+			// config must never take the whole cycle down.
+			c.SweepResult = "skipped: recovery drill config, never sweepable"
+			continue
+		}
 		// This cap counts SUCCESSES only, deliberately separate from maxFailures below.
 		// Candidates arrive sorted by prefix (Scan, above) and that order is fixed for
 		// the whole cycle, so counting failures against THIS cap let a single
@@ -1299,7 +1536,7 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 		// anyone else. StateResidue candidates (below) never increment rep.Swept
 		// either, for the same reason: a candidate Sweep already knows it cannot fix
 		// must never be the thing that eats the one real orphan's turn.
-		if rep.Swept >= o.MaxSweeps {
+		if rep.Swept >= o.sweepMax() {
 			continue
 		}
 		if failedAttempts >= maxFailures {
@@ -1328,6 +1565,29 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 		if perr := guardProtected(c.Prefix, c.Identifier); perr != nil {
 			return perr
 		}
+		// No recorded customer, no destroy. classify() cannot produce this shape today
+		// (G8 requires a non-empty customer before StateOrphan is reachable), so in
+		// practice it only appears on a hand-built Report or after a future refactor -
+		// the same class of caller the keep-on-failure and guardProtected checks above
+		// exist for. It used to destroy anyway and skip the post-destroy re-verify,
+		// which made this the one fail-OPEN branch in a file that is fail-closed
+		// everywhere else: a destroy nothing could verify, counted as a clean success.
+		// Skip it instead - a candidate whose identity we cannot re-query is a candidate
+		// we cannot prove anything about afterwards.
+		//
+		// State stays StateOrphan on purpose. The refusal belongs in SweepResult and
+		// Reason, not in a state change: the notify script's jq selector matches
+		// orphan/blocked/residue only, so moving this one to needs-review would delete
+		// the single candidate the janitor explicitly refused to touch from the Slack
+		// alert, and the post-sweep orphan recount below would stop counting it too. The
+		// whole point of this branch is that a human has to look at it, so it has to stay
+		// in the set a human is shown. SweepResult is not sweepResultDestroyed, so the
+		// recount keeps it in rep.Orphans.
+		if c.Customer == "" {
+			c.Reason = "refused: no customer identity recorded on this candidate, so a post-destroy verification query is impossible; needs review before anything destroys something whose result cannot be checked"
+			c.SweepResult = "refused: no customer identity recorded; needs review"
+			continue
+		}
 		p := PhaseParams{
 			RepoDir: o.RepoDir, Matrix: d.Matrix,
 			Store:      NewS3Store(d.S3, c.Bucket),
@@ -1340,11 +1600,12 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			// PhaseParams.IdentifierOverride.
 			IdentifierOverride: c.Identifier,
 		}
-		if d.Digests != nil {
+		if len(d.Digests) > 0 {
 			// c.Region/c.DRRegion are the candidate's OWN recorded region split (from the
 			// manifest), not o.Region/o.DRRegion - same reasoning as classify's G7 lock
 			// check: a split-bucket run's state digests live in a bucket c.Bucket (the
-			// manifest's bucket) may not be.
+			// manifest's bucket) may not be, and in the DR region's copy of the lock
+			// table rather than the primary one.
 			digestBuckets := candidateBuckets(o.AccountID, c.Region, c.DRRegion)
 			if n, derr := clearStateDigests(ctx, d, o, digestBuckets, c.Prefix); derr != nil {
 				step("JANITOR: could not clear state digests for %s (non-fatal, destroy may abort on a stale digest): %v", c.Prefix, derr)
@@ -1371,83 +1632,145 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 		// failure to retry - see StateResidue for why it gets its own state instead
 		// of either "destroyed" or "failed".
 		//
-		// c.Customer is only ever empty on a candidate a test built by hand for a
-		// concern unrelated to residue (real Orphan candidates from classify() always
-		// have one - G8 already requires a non-empty customer before Orphan is even
-		// reachable). Skipping the recheck in that case is not a production gap.
-		if c.Customer != "" {
-			r, terr := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)
+		// c.Customer is guaranteed non-empty here: the guard above this destroy routes
+		// a candidate without one to NeedsReview rather than letting it through, so the
+		// re-verify below always has an identity to query.
+		r, terr := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)
+		switch {
+		case terr != nil:
+			// Inconclusive, not success: a query we could not complete must never
+			// be reported as "destroyed" on trust. Fail closed to Unknown, same
+			// posture as every other inconclusive AWS call in this file.
+			c.State = StateUnknown
+			c.SweepResult = "destroy ran, but the post-destroy verification query failed: " + terr.Error()
+		case r.total > 0 && r.anchored:
+			c.State = StateResidue
+			c.Resources = r.total
+			// Category C: the tag-confirmed survivors. Attempt a targeted, single-call
+			// delete for exactly the ARNs this query returned (never a wider search -
+			// see reclaimResidueByARN), then re-verify with the identical query before
+			// saying anything cleared. State never promotes past StateResidue here even
+			// on a full clear - a candidate this function already knows it could not
+			// fully fix on the first try does not get to claim "destroyed" without a
+			// clean re-verify proving it, matching the fail-closed posture everywhere
+			// else in this file.
+			attempted, failedReclaims, attemptedByType := reclaimResidueByARN(ctx, d.DMS, r.arns)
 			switch {
-			case terr != nil:
-				// Inconclusive, not success: a query we could not complete must never
-				// be reported as "destroyed" on trust. Fail closed to Unknown, same
-				// posture as every other inconclusive AWS call in this file.
-				c.State = StateUnknown
-				c.SweepResult = "destroy ran, but the post-destroy verification query failed: " + terr.Error()
-			case r.total > 0 && r.anchored:
-				c.State = StateResidue
-				c.Resources = r.total
-				// Category C: the tag-confirmed survivors. Attempt a targeted, single-call
-				// delete for exactly the ARNs this query returned (never a wider search -
-				// see reclaimResidueByARN), then re-verify with the identical query before
-				// saying anything cleared. State never promotes past StateResidue here even
-				// on a full clear - a candidate this function already knows it could not
-				// fully fix on the first try does not get to claim "destroyed" without a
-				// clean re-verify proving it, matching the fail-closed posture everywhere
-				// else in this file.
-				attempted, failedReclaims, attemptedByType := reclaimResidueByARN(ctx, d.DMS, r.arns)
-				switch {
-				case attempted == 0 && failedReclaims == 0:
-					// Nothing here was even eligible for a targeted delete (no registered
-					// deleter for its type, or no DMS client configured for its region) -
-					// distinct from the case below, where deletes WERE tried and every one
-					// of them errored. Conflating the two throws away the one diagnostic
-					// signal (an actual AWS error, already logged by reclaimResidueByARN)
-					// an operator needs to tell "genuinely untouchable" apart from "a
-					// permissions or dependency problem worth investigating".
-					c.Reason = fmt.Sprintf(
-						"terraform destroy completed, but %d tagged resources survived (%s): orphaned from state, not reachable by retrying Teardown; needs manual cleanup",
-						r.total, formatByType(r.byType))
-					c.SweepResult = "residue: needs manual cleanup"
-					rep.Residue++
-				case attempted == 0 && failedReclaims > 0:
-					c.Reason = fmt.Sprintf(
-						"terraform destroy completed; %d targeted delete(s) were attempted (%s) but every one failed - see the pod log for the AWS error(s); needs manual cleanup",
-						failedReclaims, formatByType(r.byType))
-					c.SweepResult = fmt.Sprintf("residue: %d targeted delete(s) attempted, all failed", failedReclaims)
-					rep.Residue++
-				default:
-					r2, terr2 := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)
-					if terr2 != nil {
-						// Same fail-closed reasoning as the outer terr case: a re-verify
-						// query we could not complete must never be read as "it worked".
-						c.State = StateUnknown
-						c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s), but the re-verify query failed: %v", attempted, formatByType(attemptedByType), terr2)
-						break
-					}
-					c.Resources = r2.total
-					c.Reason = fmt.Sprintf(
-						"terraform destroy completed; attempted %d targeted delete(s) (%s); %d tagged resource(s) still standing (%s): needs manual cleanup",
-						attempted, formatByType(attemptedByType), r2.total, formatByType(r2.byType))
-					c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s), %d remain", attempted, formatByType(attemptedByType), r2.total)
-					rep.Residue++
-				}
+			case attempted == 0 && failedReclaims == 0:
+				// Nothing here was even eligible for a targeted delete (no registered
+				// deleter for its type, or no DMS client configured for its region) -
+				// distinct from the case below, where deletes WERE tried and every one
+				// of them errored. Conflating the two throws away the one diagnostic
+				// signal (an actual AWS error, already logged by reclaimResidueByARN)
+				// an operator needs to tell "genuinely untouchable" apart from "a
+				// permissions or dependency problem worth investigating".
+				c.Reason = fmt.Sprintf(
+					"terraform destroy completed, but %d tagged resources survived (%s): orphaned from state, not reachable by retrying Teardown; needs manual cleanup%s",
+					r.total, formatByType(r.byType), residueIndexLagCaveat)
+				c.SweepResult = "residue: needs manual cleanup"
+				rep.Residue++
+			case attempted == 0 && failedReclaims > 0:
+				c.Reason = fmt.Sprintf(
+					"terraform destroy completed; %d targeted delete(s) were attempted (%s) but every one failed - see the pod log for the AWS error(s); needs manual cleanup%s",
+					failedReclaims, formatByType(r.byType), residueIndexLagCaveat)
+				c.SweepResult = fmt.Sprintf("residue: %d targeted delete(s) attempted, all failed", failedReclaims)
+				rep.Residue++
 			default:
-				// n==0, or the only survivors are insufficient-alone types (stale
-				// tagging-index residue, defect 2) - a genuinely clean destroy.
-				c.SweepResult = "destroyed"
-				rep.Swept++
+				r2, terr2 := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)
+				if terr2 != nil {
+					// Same fail-closed reasoning as the outer terr case: a re-verify
+					// query we could not complete must never be read as "it worked".
+					c.State = StateUnknown
+					c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s), but the re-verify query failed: %v", attempted, formatByType(attemptedByType), terr2)
+					break
+				}
+				c.Resources = r2.total
+				c.Reason = fmt.Sprintf(
+					"terraform destroy completed; attempted %d targeted delete(s) (%s); %d tagged resource(s) still standing (%s): needs manual cleanup%s",
+					attempted, formatByType(attemptedByType), r2.total, formatByType(r2.byType), residueIndexLagCaveat)
+				c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s), %d remain", attempted, formatByType(attemptedByType), r2.total)
+				rep.Residue++
 			}
-		} else {
-			c.SweepResult = "destroyed"
+		default:
+			// n==0, or the only survivors are insufficient-alone types (stale
+			// tagging-index residue, defect 2) - a genuinely clean destroy.
+			c.SweepResult = sweepResultDestroyed
 			rep.Swept++
+		}
+	}
+	// Recompute the headline from the FINAL states. Scan's count is pre-sweep, and by
+	// here candidates have moved to residue/unknown/needs-review or been destroyed, so
+	// leaving the old number in place would publish a JSON report whose orphans= field
+	// contradicts its own candidate list. A destroyed candidate keeps State=Orphan on
+	// purpose (Sweep only rewrites State when the outcome was NOT a clean destroy, so
+	// the report still says what it was), which is why the count reads SweepResult too:
+	// orphans= means "orphans still standing at the end of this cycle".
+	rep.Orphans = 0
+	for _, c := range rep.Candidates {
+		if c.State == StateOrphan && c.SweepResult != sweepResultDestroyed {
+			rep.Orphans++
 		}
 	}
 	return nil
 }
 
+// JanitorReportPrefix is where sweep reports are archived in the primary state bucket.
+// A prefix of its own, well away from the run prefixes classify() enumerates: a top
+// level "directory" with no harness-manifest.json under it is not a candidate (G4), so
+// the janitor's own artifacts can never become something it reasons about.
+const JanitorReportPrefix = "janitor-reports/"
+
+// WriteSweepReport archives the report JSON in the primary state bucket. Until this
+// existed the only record that the janitor destroyed something was the Argo pod log
+// (short retention) and a Slack message (editable, and gone from anyone's scrollback
+// in a week), so reconstructing a wrong destroy days later was not possible. The
+// bucket is versioned and already the janitor's own data store, which makes it the
+// cheapest durable place to put this.
+//
+// Sweep cycles only. A report-only cycle mutates nothing and its report is
+// reconstructible by re-running the scan, so archiving those would just be noise (and
+// a write from a mode that is supposed to be side-effect free). Called on the safety
+// abort path too: a cycle that stopped mid-sweep is exactly when the record matters.
+func WriteSweepReport(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) (string, error) {
+	if d.S3 == nil {
+		return "", fmt.Errorf("no S3 client wired")
+	}
+	body, err := json.Marshal(rep)
+	if err != nil {
+		return "", fmt.Errorf("marshal report: %w", err)
+	}
+	// Name it after the janitor workflow when there is one (that is the run id a human
+	// searching Argo already has) and fall back to the timestamp alone otherwise. The
+	// timestamp leads either way so a plain S3 listing sorts chronologically.
+	name := o.now().UTC().Format("20060102T150405Z")
+	if o.SelfWorkflow != "" {
+		name += "-" + o.SelfWorkflow
+	}
+	key := JanitorReportPrefix + name + ".json"
+	bucket := stateBucket(o.AccountID, o.Region)
+	if _, err := d.S3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(body),
+		ContentType: aws.String("application/json"),
+	}); err != nil {
+		return "", fmt.Errorf("put %s/%s: %w", bucket, key, err)
+	}
+	step("JANITOR: sweep report archived at s3://%s/%s", bucket, key)
+	return key, nil
+}
+
 // RealTeardown wires JanitorDeps.Teardown to the actual PhaseParams.Teardown for
 // production use (cmd/harness). Tests supply their own func instead.
+//
+// keepOnFailure is hardcoded false, and that is not a lost parameter: keep-on-failure
+// is a decision about the RUN that failed, and it has already been honored long before
+// this point - classify() routes a keep-on-failure candidate to StateKept (never
+// sweepable), and Sweep re-checks c.KeepOnFailure immediately before the destroy.
+// Anything that reaches here has passed both, so passing true would mean "keep the
+// stack" on a candidate the janitor exists specifically to remove: the sweep would
+// silently no-op forever. failed=true is passed instead so the full diagnostics dump
+// runs before the stack goes away.
 func RealTeardown(ctx context.Context, p PhaseParams, failed bool) error {
 	return p.Teardown(ctx, false, failed)
 }

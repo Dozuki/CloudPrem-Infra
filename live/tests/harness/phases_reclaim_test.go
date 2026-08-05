@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,13 +62,21 @@ func (f *fakeEC2Reclaim) DeleteLaunchTemplate(_ context.Context, in *ec2.DeleteL
 }
 
 // fakeLogsReclaim answers DescribeLogGroups by exact prefix, same reasoning as
-// fakeEC2Reclaim above.
+// fakeEC2Reclaim above. describeErr, when set, fails the Describe call (proving the
+// pagination-failure path still returns an error). deleteErrByName, when a name is a
+// key, fails DeleteLogGroup for that one name only, so a test can prove a single
+// deletion failure does not abandon the rest of the sweep.
 type fakeLogsReclaim struct {
-	groupsByPrefix map[string][]string
-	deleted        []string
+	groupsByPrefix  map[string][]string
+	deleted         []string
+	describeErr     error
+	deleteErrByName map[string]error
 }
 
 func (f *fakeLogsReclaim) DescribeLogGroups(_ context.Context, in *cloudwatchlogs.DescribeLogGroupsInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
+	if f.describeErr != nil {
+		return nil, f.describeErr
+	}
 	prefix := aws.ToString(in.LogGroupNamePrefix)
 	var out []cwtypes.LogGroup
 	for _, name := range f.groupsByPrefix[prefix] {
@@ -77,17 +87,40 @@ func (f *fakeLogsReclaim) DescribeLogGroups(_ context.Context, in *cloudwatchlog
 }
 
 func (f *fakeLogsReclaim) DeleteLogGroup(_ context.Context, in *cloudwatchlogs.DeleteLogGroupInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.DeleteLogGroupOutput, error) {
-	f.deleted = append(f.deleted, aws.ToString(in.LogGroupName))
+	name := aws.ToString(in.LogGroupName)
+	if err, bad := f.deleteErrByName[name]; bad {
+		return nil, err
+	}
+	f.deleted = append(f.deleted, name)
 	return &cloudwatchlogs.DeleteLogGroupOutput{}, nil
 }
 
 // fakeIAMReclaim models one role (or none, if roleExists is false) and records call
 // order so a test can prove detach/delete-policy happen strictly before DeleteRole -
 // IAM itself enforces that ordering, and this is the regression test for it.
+//
+// attached/inline are the single-page case (attachedPages/inlinePages both nil): every
+// existing test that seeds only attached/inline gets exactly one page back with
+// IsTruncated=false, unchanged from before pagination was added. attachedPages/
+// inlinePages, when non-nil, model a multi-page listing: each call returns the next
+// slice keyed off the incoming Marker (its stringified index) and sets
+// IsTruncated/Marker on every page but the last, so a test can prove
+// reclaimFluxSourceControllerRole loops rather than trusting page one.
+//
+// truncatedNoMarker models the contract violation the loop has to fail closed on:
+// IsTruncated=true with a nil Marker. Re-issuing that request refetches page one
+// forever, so the loop must error instead of looping or silently stopping short.
 type fakeIAMReclaim struct {
 	roleExists bool
 	attached   []iamtypes.AttachedPolicy
 	inline     []string
+
+	attachedPages [][]iamtypes.AttachedPolicy
+	inlinePages   [][]string
+
+	attachedTruncatedNoMarker bool
+	inlineTruncatedNoMarker   bool
+
 	getRoleErr error // non-NoSuchEntity error, to test the "other sub-steps still run" guarantee
 	calls      []string
 }
@@ -105,7 +138,23 @@ func (f *fakeIAMReclaim) GetRole(_ context.Context, in *iam.GetRoleInput, _ ...f
 
 func (f *fakeIAMReclaim) ListAttachedRolePolicies(_ context.Context, in *iam.ListAttachedRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error) {
 	f.calls = append(f.calls, "ListAttachedRolePolicies")
-	return &iam.ListAttachedRolePoliciesOutput{AttachedPolicies: f.attached}, nil
+	if f.attachedTruncatedNoMarker {
+		return &iam.ListAttachedRolePoliciesOutput{AttachedPolicies: f.attached, IsTruncated: true}, nil
+	}
+	if len(f.attachedPages) == 0 {
+		return &iam.ListAttachedRolePoliciesOutput{AttachedPolicies: f.attached}, nil
+	}
+	idx := 0
+	if in.Marker != nil {
+		idx, _ = strconv.Atoi(*in.Marker)
+	}
+	out := &iam.ListAttachedRolePoliciesOutput{AttachedPolicies: f.attachedPages[idx]}
+	if next := idx + 1; next < len(f.attachedPages) {
+		nextMarker := strconv.Itoa(next)
+		out.IsTruncated = true
+		out.Marker = &nextMarker
+	}
+	return out, nil
 }
 
 func (f *fakeIAMReclaim) DetachRolePolicy(_ context.Context, in *iam.DetachRolePolicyInput, _ ...func(*iam.Options)) (*iam.DetachRolePolicyOutput, error) {
@@ -115,7 +164,23 @@ func (f *fakeIAMReclaim) DetachRolePolicy(_ context.Context, in *iam.DetachRoleP
 
 func (f *fakeIAMReclaim) ListRolePolicies(_ context.Context, in *iam.ListRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error) {
 	f.calls = append(f.calls, "ListRolePolicies")
-	return &iam.ListRolePoliciesOutput{PolicyNames: f.inline}, nil
+	if f.inlineTruncatedNoMarker {
+		return &iam.ListRolePoliciesOutput{PolicyNames: f.inline, IsTruncated: true}, nil
+	}
+	if len(f.inlinePages) == 0 {
+		return &iam.ListRolePoliciesOutput{PolicyNames: f.inline}, nil
+	}
+	idx := 0
+	if in.Marker != nil {
+		idx, _ = strconv.Atoi(*in.Marker)
+	}
+	out := &iam.ListRolePoliciesOutput{PolicyNames: f.inlinePages[idx]}
+	if next := idx + 1; next < len(f.inlinePages) {
+		nextMarker := strconv.Itoa(next)
+		out.IsTruncated = true
+		out.Marker = &nextMarker
+	}
+	return out, nil
 }
 
 func (f *fakeIAMReclaim) DeleteRolePolicy(_ context.Context, in *iam.DeleteRolePolicyInput, _ ...func(*iam.Options)) (*iam.DeleteRolePolicyOutput, error) {
@@ -269,5 +334,139 @@ func TestReclaimOutOfStateResourcesOneSubStepFailureDoesNotBlockOthers(t *testin
 	}
 	if len(logsf.deleted) != 1 {
 		t.Fatalf("deleted log groups = %v, want the log-group sweep to still have run despite the IAM failure", logsf.deleted)
+	}
+}
+
+// TestReclaimFluxRolePaginatesAttachedAndInlinePolicies is the regression test for the
+// unpaginated ListAttachedRolePolicies/ListRolePolicies calls: seed two pages of each
+// and prove every page's policies get detached/deleted, not just the first.
+func TestReclaimFluxRolePaginatesAttachedAndInlinePolicies(t *testing.T) {
+	iamf := &fakeIAMReclaim{
+		roleExists: true,
+		attachedPages: [][]iamtypes.AttachedPolicy{
+			{{PolicyArn: aws.String("arn:aws:iam::123:policy/p1")}},
+			{{PolicyArn: aws.String("arn:aws:iam::123:policy/p2")}},
+		},
+		inlinePages: [][]string{
+			{"inline1"},
+			{"inline2"},
+		},
+	}
+	if err := reclaimFluxSourceControllerRole(context.Background(), iamf, "smokeaa-min"); err != nil {
+		t.Fatalf("reclaimFluxSourceControllerRole: %v", err)
+	}
+
+	var gotDetached, gotDeletedInline []string
+	listAttachedCalls, listInlineCalls := 0, 0
+	for _, c := range iamf.calls {
+		switch {
+		case c == "ListAttachedRolePolicies":
+			listAttachedCalls++
+		case c == "ListRolePolicies":
+			listInlineCalls++
+		case strings.HasPrefix(c, "DetachRolePolicy:"):
+			gotDetached = append(gotDetached, strings.TrimPrefix(c, "DetachRolePolicy:"))
+		case strings.HasPrefix(c, "DeleteRolePolicy:"):
+			gotDeletedInline = append(gotDeletedInline, strings.TrimPrefix(c, "DeleteRolePolicy:"))
+		}
+	}
+	if listAttachedCalls != 2 {
+		t.Fatalf("ListAttachedRolePolicies calls = %d, want 2 (one per page) — second page never fetched", listAttachedCalls)
+	}
+	if listInlineCalls != 2 {
+		t.Fatalf("ListRolePolicies calls = %d, want 2 (one per page) — second page never fetched", listInlineCalls)
+	}
+	wantDetached := []string{"arn:aws:iam::123:policy/p1", "arn:aws:iam::123:policy/p2"}
+	if !reflect.DeepEqual(gotDetached, wantDetached) {
+		t.Fatalf("detached = %v, want %v — page two's policy was never touched", gotDetached, wantDetached)
+	}
+	wantDeletedInline := []string{"inline1", "inline2"}
+	if !reflect.DeepEqual(gotDeletedInline, wantDeletedInline) {
+		t.Fatalf("deleted inline policies = %v, want %v — page two's policy was never touched", gotDeletedInline, wantDeletedInline)
+	}
+}
+
+// TestReclaimFluxRoleFailsClosedOnTruncatedWithNoMarker: IAM's contract says a truncated
+// listing carries a Marker. Without this check the loop would re-issue the same
+// markerless request forever, refetching page one until the pod deadline killed the
+// teardown - which reads as "the teardown hung", not "listing broke". Same two rules
+// janitor.go's eachListPage applies to S3 listings.
+func TestReclaimFluxRoleFailsClosedOnTruncatedWithNoMarker(t *testing.T) {
+	t.Run("attached", func(t *testing.T) {
+		iamf := &fakeIAMReclaim{
+			roleExists:                true,
+			attached:                  []iamtypes.AttachedPolicy{{PolicyArn: aws.String("arn:aws:iam::123:policy/p1")}},
+			attachedTruncatedNoMarker: true,
+		}
+		err := reclaimFluxSourceControllerRole(context.Background(), iamf, "smokeaa-min")
+		if err == nil {
+			t.Fatal("reclaimFluxSourceControllerRole: want an error on truncated-with-no-marker, got nil")
+		}
+		if !strings.Contains(err.Error(), "no marker") {
+			t.Fatalf("error = %v, want it to name the missing marker", err)
+		}
+		for _, c := range iamf.calls {
+			if strings.HasPrefix(c, "DeleteRole:") {
+				t.Fatalf("calls = %v, want no DeleteRole after an incomplete policy listing", iamf.calls)
+			}
+		}
+	})
+	t.Run("inline", func(t *testing.T) {
+		iamf := &fakeIAMReclaim{
+			roleExists:              true,
+			inline:                  []string{"inline1"},
+			inlineTruncatedNoMarker: true,
+		}
+		err := reclaimFluxSourceControllerRole(context.Background(), iamf, "smokeaa-min")
+		if err == nil {
+			t.Fatal("reclaimFluxSourceControllerRole: want an error on truncated-with-no-marker, got nil")
+		}
+		if !strings.Contains(err.Error(), "no marker") {
+			t.Fatalf("error = %v, want it to name the missing marker", err)
+		}
+	})
+}
+
+// TestDeleteContainerInsightsLogGroupsWarnsAndContinuesOnDeleteFailure is the regression
+// test for finding 13: DeleteLogGroup failing on one group (a policy hold, a race with
+// something else deleting it) must not abandon the remaining groups in the cycle, same
+// as every sibling reclaim helper above.
+func TestDeleteContainerInsightsLogGroupsWarnsAndContinuesOnDeleteFailure(t *testing.T) {
+	const prefix = "/aws/containerinsights/smokeaa-min/"
+	logsf := &fakeLogsReclaim{
+		groupsByPrefix: map[string][]string{
+			prefix: {prefix + "application", prefix + "dataplane", prefix + "host"},
+		},
+		deleteErrByName: map[string]error{
+			prefix + "dataplane": errors.New("access denied"),
+		},
+	}
+	if err := deleteContainerInsightsLogGroupsWithClient(context.Background(), logsf, "smokeaa-min"); err != nil {
+		t.Fatalf("deleteContainerInsightsLogGroupsWithClient: %v, want nil — one failed group must not fail the whole sweep", err)
+	}
+	want := []string{prefix + "application", prefix + "host"}
+	if len(logsf.deleted) != len(want) {
+		t.Fatalf("deleted = %v, want the 2 groups that did not fail (dataplane skipped, application and host still reclaimed)", logsf.deleted)
+	}
+	for _, w := range want {
+		found := false
+		for _, d := range logsf.deleted {
+			if d == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("deleted = %v, want it to include %q", logsf.deleted, w)
+		}
+	}
+}
+
+// TestDeleteContainerInsightsLogGroupsFailsOnDescribePaginationError proves the one path
+// that must still fail loud: the Describe pagination itself erroring (a real API/auth
+// problem), as opposed to a single DeleteLogGroup call failing.
+func TestDeleteContainerInsightsLogGroupsFailsOnDescribePaginationError(t *testing.T) {
+	logsf := &fakeLogsReclaim{describeErr: errors.New("throttled")}
+	if err := deleteContainerInsightsLogGroupsWithClient(context.Background(), logsf, "smokeaa-min"); err == nil {
+		t.Fatal("deleteContainerInsightsLogGroupsWithClient: want a non-nil error when Describe pagination itself fails")
 	}
 }

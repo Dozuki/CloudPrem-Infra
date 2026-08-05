@@ -456,7 +456,11 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 
 // deleteContainerInsightsLogGroups removes the out-of-state log groups the CloudWatch
 // agent created for the cluster. Safe after destroy: the agent is gone, nothing
-// recreates them.
+// recreates them. Thin wrapper: builds a real client via awsConfigFor (same helper
+// reclaimOutOfStateResourcesForRegion uses) and delegates to
+// deleteContainerInsightsLogGroupsWithClient against the LogsReclaimAPI interface
+// below, so tests can inject a fake instead of a live AWS config - same split as
+// reclaimOutOfStateResourcesForRegion / reclaimOutOfStateResources.
 func deleteContainerInsightsLogGroups(ctx context.Context, profile, region, cluster string) error {
 	if cluster == "" {
 		return nil
@@ -465,18 +469,29 @@ func deleteContainerInsightsLogGroups(ctx context.Context, profile, region, clus
 	if err != nil {
 		return err
 	}
-	cw := cloudwatchlogs.NewFromConfig(cfg)
+	return deleteContainerInsightsLogGroupsWithClient(ctx, cloudwatchlogs.NewFromConfig(cfg), cluster)
+}
+
+// deleteContainerInsightsLogGroupsWithClient does the actual sweep. Warn-and-continue
+// on a DeleteLogGroup failure, matching every other reclaim helper in this file
+// (reclaimOrphanVolumes, reclaimOrphanLaunchTemplates, reclaimLambdaAndDMSLogGroups):
+// one group stuck behind a policy or already mid-delete must not abandon the rest of
+// the four for the cycle. Returns non-nil only when the Describe pagination itself
+// fails - that is a real API/auth problem upstream of any per-group deletion race.
+func deleteContainerInsightsLogGroupsWithClient(ctx context.Context, api LogsReclaimAPI, cluster string) error {
 	prefix := "/aws/containerinsights/" + cluster + "/"
 	deleted := 0
-	pager := cloudwatchlogs.NewDescribeLogGroupsPaginator(cw, &cloudwatchlogs.DescribeLogGroupsInput{LogGroupNamePrefix: &prefix})
+	pager := cloudwatchlogs.NewDescribeLogGroupsPaginator(api, &cloudwatchlogs.DescribeLogGroupsInput{LogGroupNamePrefix: &prefix})
 	for pager.HasMorePages() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return err
 		}
 		for _, lg := range page.LogGroups {
-			if _, err := cw.DeleteLogGroup(ctx, &cloudwatchlogs.DeleteLogGroupInput{LogGroupName: lg.LogGroupName}); err != nil {
-				return err
+			name := aws.ToString(lg.LogGroupName)
+			if _, derr := api.DeleteLogGroup(ctx, &cloudwatchlogs.DeleteLogGroupInput{LogGroupName: lg.LogGroupName}); derr != nil {
+				step("WARNING: could not delete container-insights log group %s: %v", name, derr)
+				continue
 			}
 			deleted++
 		}
@@ -496,6 +511,16 @@ func deleteContainerInsightsLogGroups(ctx context.Context, profile, region, clus
 // the bug that motivated porting this in the first place). None of the four carry the
 // harness's Customer/deleteAfter tags either, so they are invisible to the janitor's own
 // tag-based detection; this is the only place any of them gets reclaimed.
+//
+// Region scoping: Teardown calls reclaimOutOfStateResourcesForRegion for p.Region only,
+// never the DR region. That is not an oversight - all four classes above are created in
+// the cluster's PRIMARY region or are IAM (global, no region at all): the CSI driver and
+// Karpenter provision EBS volumes and launch templates against the primary EKS cluster,
+// Lambda/DMS log groups follow the same primary-region resources they instrument, and
+// IAM roles have no region. Nothing today runs any of these four in the DR region. If a
+// future category-B class IS DR-region-scoped, add a second
+// reclaimOutOfStateResourcesForRegion call against p.Matrix.Defaults.DRRegion rather than
+// assuming this one call already covers it.
 
 // EC2ReclaimAPI is the minimal EC2 surface for reclaiming CSI-created EBS volumes and
 // orphaned launch templates.
@@ -666,6 +691,16 @@ func reclaimLambdaAndDMSLogGroups(ctx context.Context, api LogsReclaimAPI, ident
 	return deleted, nil
 }
 
+// maxIAMListPages bounds either policy listing on one role, for the same reason
+// janitor.go's maxListPages bounds an S3 listing: a paginator that hands back the same
+// marker forever would otherwise loop until something outside this process kills it,
+// which reads as "the teardown hung" rather than "listing broke". Generous on purpose -
+// at IAM's default 100 items per page this is 100,000 policies on a single role, far
+// past IAM's own hard quotas (20 managed policies attached, and inline policy documents
+// are bounded by the role's total policy size), so hitting it can only mean the
+// paginator is not converging.
+const maxIAMListPages = 1000
+
 // reclaimFluxSourceControllerRole deletes the deterministically-named logical-layer IAM
 // role a failed logical destroy can leave behind. A leftover role collides with the next
 // run's CreateRole (EntityAlreadyExists) - the bug that motivated porting this. A
@@ -680,20 +715,58 @@ func reclaimFluxSourceControllerRole(ctx context.Context, api IAMReclaimAPI, ide
 		}
 		return fmt.Errorf("GetRole %s: %w", role, err)
 	}
-	attached, err := api.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{RoleName: aws.String(role)})
-	if err != nil {
-		return fmt.Errorf("ListAttachedRolePolicies %s: %w", role, err)
+	// Both list calls page at 100 items by default (IAM's own default MaxItems), so a
+	// role with more than 100 attached or inline policies would silently detach/delete
+	// only the first page and then fail loud on DeleteRole ("role still has policies")
+	// instead of actually clearing them. Loop on IsTruncated/Marker rather than trusting
+	// a single page, under the same two failure rules janitor.go's eachListPage codifies
+	// for S3 listings (truncated-with-no-marker is an error, and there is a page cap):
+	// same paginator hazards, different SDK types, and a shared helper across two
+	// packages' unrelated output shapes would cost more than it saves.
+	var attachedPolicies []iamtypes.AttachedPolicy
+	var marker *string
+	for page := 1; ; page++ {
+		if page > maxIAMListPages {
+			return fmt.Errorf("ListAttachedRolePolicies %s did not terminate within %d pages: refusing to keep paging", role, maxIAMListPages)
+		}
+		attached, aerr := api.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{RoleName: aws.String(role), Marker: marker})
+		if aerr != nil {
+			return fmt.Errorf("ListAttachedRolePolicies %s: %w", role, aerr)
+		}
+		attachedPolicies = append(attachedPolicies, attached.AttachedPolicies...)
+		if !attached.IsTruncated {
+			break
+		}
+		if attached.Marker == nil {
+			return fmt.Errorf("ListAttachedRolePolicies %s reported a truncated result with no marker: refusing to treat a short listing as complete", role)
+		}
+		marker = attached.Marker
 	}
-	for _, p := range attached.AttachedPolicies {
+	for _, p := range attachedPolicies {
 		if _, derr := api.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{RoleName: aws.String(role), PolicyArn: p.PolicyArn}); derr != nil {
 			return fmt.Errorf("DetachRolePolicy %s from %s: %w", aws.ToString(p.PolicyArn), role, derr)
 		}
 	}
-	inline, err := api.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{RoleName: aws.String(role)})
-	if err != nil {
-		return fmt.Errorf("ListRolePolicies %s: %w", role, err)
+	var inlinePolicyNames []string
+	marker = nil
+	for page := 1; ; page++ {
+		if page > maxIAMListPages {
+			return fmt.Errorf("ListRolePolicies %s did not terminate within %d pages: refusing to keep paging", role, maxIAMListPages)
+		}
+		inline, ierr := api.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{RoleName: aws.String(role), Marker: marker})
+		if ierr != nil {
+			return fmt.Errorf("ListRolePolicies %s: %w", role, ierr)
+		}
+		inlinePolicyNames = append(inlinePolicyNames, inline.PolicyNames...)
+		if !inline.IsTruncated {
+			break
+		}
+		if inline.Marker == nil {
+			return fmt.Errorf("ListRolePolicies %s reported a truncated result with no marker: refusing to treat a short listing as complete", role)
+		}
+		marker = inline.Marker
 	}
-	for _, name := range inline.PolicyNames {
+	for _, name := range inlinePolicyNames {
 		if _, derr := api.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{RoleName: aws.String(role), PolicyName: aws.String(name)}); derr != nil {
 			return fmt.Errorf("DeleteRolePolicy %s on %s: %w", name, role, derr)
 		}

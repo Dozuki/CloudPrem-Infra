@@ -86,10 +86,10 @@ func TestRenderInfraLiveEnvHCL(t *testing.T) {
 func TestSanitizeSnapshotID(t *testing.T) {
 	cases := map[string]string{
 		"harness-recovery-local-1785290702-recover-recover_source": "harness-recovery-local-1785290702-recover-recover-source",
-		"smokerec-min-dr-rebuild": "smokerec-min-dr-rebuild",
-		"Weird__Name--x-":         "weird-name-x",
-		"123abc":                  "s-123abc",
-		"___":                     "s",
+		"smokerec-min-dr-rebuild":                                  "smokerec-min-dr-rebuild",
+		"Weird__Name--x-":                                          "weird-name-x",
+		"123abc":                                                   "s-123abc",
+		"___":                                                      "s",
 	}
 	for in, want := range cases {
 		if got := SanitizeSnapshotID(in); got != want {
