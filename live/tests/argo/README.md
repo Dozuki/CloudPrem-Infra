@@ -60,6 +60,16 @@ spot reclaim, node replacement), which re-entrancy makes safe to repeat. A non-z
 from the harness is a real verdict; retrying it would burn another hour and report the same
 thing.
 
+**Teardown is the exception, and carries its own retry.** OnError is correct for provision
+and validate because their exit code IS the verdict. It is wrong for teardown: a non-zero
+exit there is a failed cleanup, not an answer, and the stack it failed to destroy sits on
+DDVtest's books against a ceiling of 10 VPCs until a human notices. So the `teardown` step
+in `10-scenario.yaml` carries its own `retryPolicy: Always`, on the exit-handler template
+rather than the shared one, so provision and validate are untouched. The budget is bounded
+on purpose (three attempts, wall-clock capped): the workflow holds `harness-semaphore`
+through the whole exit handler, so an unbounded retry on one run would starve the other
+slot instead of just leaking a VPC.
+
 **Teardown is an exit handler.** A final step does not run when an earlier step fails,
 which is precisely when teardown matters. And because teardown reads the manifest from S3,
 cleanup is not tied to the process that created the stack: this pod, a retry, or the Phase 4
@@ -85,5 +95,8 @@ measurements.
 - **The recovery scenario.** `cmd/harness` exposes `provision/upgrade/validate/teardown`
   with `--scenario upgrade|fresh`; `RunRecovery` has no phase equivalent, so the `recover`
   and `recover_source` configs stay on `run.sh` until the CLI grows a phase for them.
-- **Cron and PR triggers**, and the backstop janitor. Those are Phase 4. Everything here is
-  submit-driven so far.
+- **The backstop janitor.** Retry exhaustion (or a failure mode retry can't fix, like a
+  half-provisioned upgrade destroying against the wrong ref) still ends in an orphan with
+  nothing sweeping it. `cleanup-orphans.sh` is the right foundation but is not schedulable
+  as written: no staleness gate on the DynamoDB lock release, no self-mutex, needs an
+  interactive SSO session. That is Phase 4.
