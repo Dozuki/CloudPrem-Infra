@@ -242,7 +242,13 @@ resource "aws_dms_replication_config" "this" {
   source_endpoint_arn           = aws_dms_endpoint.source[0].endpoint_arn
   target_endpoint_arn           = aws_dms_endpoint.target[0].endpoint_arn
   table_mappings                = file("static/dms_mapping.json")
-  replication_settings          = file("static/dms_config.json")
+  # replication_settings only takes effect on CREATE (see ignore_changes below), so an
+  # edit to dms_config.json reaches existing replications only by hand:
+  # stop-replication, modify-replication-config with the patched settings doc, then
+  # resume. The 3M fleet got PartitionSize=1000000 that way on 2026-08-04; it caps
+  # validation partition state on large tables (a 10M-row table is 10 partitions
+  # instead of 1000). Tables under 1M rows are one partition either way.
+  replication_settings = file("static/dms_config.json")
   # See the greenfield note above before flipping this to true.
   start_replication = false
 

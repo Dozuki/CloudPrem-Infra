@@ -91,6 +91,7 @@
     "EnableValidation": true,
     "FailureMaxCount": 10000,
     "HandleCollationDiff": false,
+    "PartitionSize": 1000000,
     "RecordFailureDelayLimitInMinutes": 0,
     "SkipLobColumns": false,
     "TableFailureMaxCount": 1000,
