@@ -18,10 +18,18 @@
 # cycle rather than skip one candidate if it is ever tripped. See harness/janitor.go for
 # the full predicate.
 #
-# DEFAULT IS DRY RUN. Two independent switches have to agree before anything is
-# destroyed: the janitor_mode key in harness-config (committed as 'report') and the
-# janitor CLI's own --sweep (default false, set below from janitor_mode). Watch several
-# days of reports, including one with a real orphan in it, before flipping either.
+# DEFAULT IS DRY RUN, on two levels: the janitor CLI's own --sweep defaults to false
+# (janitor.go, and Sweep() itself now refuses to run at all when it is not explicitly
+# true), and this workflow only ever passes --sweep=true when the `mode` parameter
+# resolves to 'sweep' - whose DEFAULT comes from the janitor_mode key in harness-config
+# (committed as 'report'). That default is a scheduled cron run's only path here, so the
+# nightly cycle never sweeps until a human commits janitor_mode: sweep. It is not a
+# second switch a submitter cannot also flip in the same breath, though: `argo submit
+# --from workflowtemplate/harness-janitor -p mode=sweep` overrides the parameter at
+# submission time same as any other Argo parameter, independent of what janitor_mode
+# is committed as - so a manual sweep run is one explicit `-p mode=sweep`, not two
+# separate approvals. Watch several days of reports, including one with a real orphan
+# in it, before committing janitor_mode: sweep or running one by hand.
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
