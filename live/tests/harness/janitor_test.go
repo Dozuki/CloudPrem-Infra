@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/databasemigrationservice"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
@@ -189,12 +191,18 @@ func testMatrix() *Matrix {
 	}
 }
 
+// testOptions defaults Sweep to true. Scan tests never call Sweep at all, and every
+// test that does call Sweep is testing what Sweep actually does when invoked for real
+// (matching how main.go only ever calls Sweep behind --sweep); the one test that cares
+// about the o.Sweep=false refusal (TestSweepRefusesToRunWhenSweepIsFalse) sets it back
+// to false explicitly.
 func testOptions(now time.Time) JanitorOptions {
 	return JanitorOptions{
 		AccountID: testAccount, Region: testRegion, DRRegion: testDR,
 		LockTable: "dozuki-terraform-lock",
 		Grace:     6 * time.Hour, LockFresh: 4 * time.Hour,
 		MaxSweeps: 1,
+		Sweep:     true,
 		Now:       func() time.Time { return now },
 	}
 }
@@ -455,6 +463,9 @@ func TestFreshLockIsActive(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, // production manifests always carry this (loadOrInitManifest); the
+		// lock check now searches candidateBuckets(m.Region, m.DRRegion), not just the bucket
+		// the manifest happened to be found in, so a real region must be present here too.
 	})
 	key := "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate"
 	f.put(primaryBucket(), key, "{}")
@@ -510,6 +521,87 @@ func TestStaleLockOnOrphanIsBlockedAndSkippedBySweep(t *testing.T) {
 	}
 	if rep.Swept != 0 || rep.Failed != 0 {
 		t.Fatalf("Swept=%d Failed=%d, want 0/0", rep.Swept, rep.Failed)
+	}
+}
+
+// ---- G7: split-bucket lock visibility ----
+
+// TestLockStateFindsAFreshLockInASecondBucket pins the fix for a real gap: a run's
+// manifest and its actual terraform state do not always share a bucket (the recovery
+// rebuild keeps its manifest in the primary bucket and its state in the DR one -
+// candidateBuckets). Before this fix, classify's G7 lock check searched only the
+// bucket a prefix's manifest happened to be found in, so a split-bucket run's lock -
+// living in the OTHER bucket - was invisible: lockState found zero state keys there and
+// silently reported "no lock at all", the permissive answer, for a stack that was
+// actively being applied. Searching every candidate bucket closes that.
+func TestLockStateFindsAFreshLockInASecondBucket(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	prefix := "run1-recover/"
+	key := prefix + "standard/us-west-2/min/physical/terraform.tfstate"
+	// State (and therefore the lock) lives ONLY in the DR bucket.
+	f.put(drBucket(), key, "{}")
+	locks := newFakeLockAPI()
+	locks.setLock(drBucket()+"/"+key, now.Add(-1*time.Minute)) // fresh: well under LockFresh
+
+	buckets := candidateBuckets(testAccount, testRegion, testDR)
+	if len(buckets) != 2 {
+		t.Fatalf("candidateBuckets = %v, want 2 buckets (primary + DR)", buckets)
+	}
+	fresh, _, err := lockState(context.Background(), locks, f, "dozuki-terraform-lock", buckets, prefix, now, 4*time.Hour)
+	if err != nil {
+		t.Fatalf("lockState: %v", err)
+	}
+	if !fresh {
+		t.Fatalf("lockState fresh = false, want true (a fresh lock exists, just not in the first bucket searched)")
+	}
+}
+
+// TestLockStateSingleBucketOnlySearchesThatBucket is the control for the test above:
+// with only the primary bucket in play, a lock sitting in the (unsearched) DR bucket
+// must not be found - this is not "search everywhere", it is "search every bucket the
+// run's own recorded region split says is in play".
+func TestLockStateSingleBucketOnlySearchesThatBucket(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	prefix := "run1-min_default/"
+	key := prefix + "standard/us-east-1/min/physical/terraform.tfstate"
+	f.put(drBucket(), key, "{}") // deliberately NOT in the bucket being searched
+	locks := newFakeLockAPI()
+	locks.setLock(drBucket()+"/"+key, now.Add(-1*time.Minute))
+
+	fresh, age, err := lockState(context.Background(), locks, f, "dozuki-terraform-lock", []string{primaryBucket()}, prefix, now, 4*time.Hour)
+	if err != nil {
+		t.Fatalf("lockState: %v", err)
+	}
+	if fresh || age != 0 {
+		t.Fatalf("fresh=%v age=%v, want false/0 (the lock is in a bucket not being searched)", fresh, age)
+	}
+}
+
+// TestClearStateDigestsSearchesEveryCandidateBucket is clearStateDigests' analogue of
+// the lockState fix above: a split-bucket run's state (and its digest items) live in
+// the DR bucket, not the primary one the manifest/c.Bucket points at.
+func TestClearStateDigestsSearchesEveryCandidateBucket(t *testing.T) {
+	f := newFakeJanitorS3()
+	prefix := "run1-recover/"
+	key := prefix + "standard/us-west-2/min/physical/terraform.tfstate"
+	f.put(drBucket(), key, "{}") // only in the DR bucket
+
+	digests := &fakeDigestAPI{}
+	deps := JanitorDeps{S3: f, Digests: digests}
+	opts := testOptions(time.Now())
+
+	n, err := clearStateDigests(context.Background(), deps, opts, candidateBuckets(testAccount, testRegion, testDR), prefix)
+	if err != nil {
+		t.Fatalf("clearStateDigests: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("cleared = %d, want 1", n)
+	}
+	want := drBucket() + "/" + key + "-md5"
+	if len(digests.deleted) != 1 || digests.deleted[0] != want {
+		t.Fatalf("deleted = %v, want [%q]", digests.deleted, want)
 	}
 }
 
@@ -738,12 +830,14 @@ func TestScanFailsClosedOnListingError(t *testing.T) {
 // ---- max-sweeps cap ----
 
 type teardownRecorder struct {
-	calls int
-	fail  bool
+	calls    int
+	fail     bool
+	lastArgs PhaseParams
 }
 
-func (r *teardownRecorder) teardown(context.Context, PhaseParams, bool) error {
+func (r *teardownRecorder) teardown(_ context.Context, p PhaseParams, _ bool) error {
 	r.calls++
+	r.lastArgs = p
 	if r.fail {
 		return errors.New("destroy failed")
 	}
@@ -758,6 +852,32 @@ func (r *teardownRecorder) teardown(context.Context, PhaseParams, bool) error {
 func noResidueTags() map[string]TagAPI {
 	clean := &fakeTagAPI{resources: 0}
 	return map[string]TagAPI{testRegion: clean, testDR: clean}
+}
+
+// TestSweepRefusesToRunWhenSweepIsFalse pins the enforcement point for "report mode
+// never mutates anything": Sweep itself must refuse to run when o.Sweep is false,
+// rather than relying on main.go being the only caller that happens to gate it. Before
+// this guard existed, calling Sweep directly with Sweep:false ran the full destroy path
+// anyway - report mode was safe only by accident of there being one caller.
+func TestSweepRefusesToRunWhenSweepIsFalse(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
+	}}
+	recorder := &teardownRecorder{}
+	deps := JanitorDeps{Matrix: testMatrix(), Teardown: recorder.teardown, Tags: noResidueTags()}
+	opts := testOptions(time.Now())
+	opts.Sweep = false
+
+	err := Sweep(context.Background(), deps, opts, rep)
+	if err == nil {
+		t.Fatalf("Sweep with o.Sweep=false: want an error, got nil")
+	}
+	if recorder.calls != 0 {
+		t.Fatalf("Sweep called Teardown %d times with o.Sweep=false, want 0", recorder.calls)
+	}
+	if rep.Swept != 0 || rep.Failed != 0 || rep.Residue != 0 {
+		t.Fatalf("Swept=%d Failed=%d Residue=%d, want 0/0/0", rep.Swept, rep.Failed, rep.Residue)
+	}
 }
 
 func TestSweepRespectsMaxSweepsCap(t *testing.T) {
@@ -790,6 +910,32 @@ func TestSweepRespectsMaxSweepsCap(t *testing.T) {
 	}
 	if rep.Swept != 1 {
 		t.Fatalf("rep.Swept = %d, want 1", rep.Swept)
+	}
+}
+
+// TestSweepPassesGuardedIdentifierNotARecompute proves Sweep forces Teardown's
+// out-of-band mutations (NLB/MSK/container-insights/category-B reclaim) to act on the
+// SAME identifier guardProtected just checked, not a fresh recompute from today's
+// matrix. testMatrix's "min_default" config salts to "smoke-min" if recomputed live,
+// but the candidate here carries "smokeaa-min" (standing in for classify()'s recorded,
+// already-guarded identity after identity drift) - Teardown must receive that value,
+// not "smoke-min".
+func TestSweepPassesGuardedIdentifierNotARecompute(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
+	}}
+	recorder := &teardownRecorder{}
+	deps := JanitorDeps{Matrix: testMatrix(), Teardown: recorder.teardown, Tags: noResidueTags()}
+	opts := testOptions(time.Now())
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("Teardown called %d times, want 1", recorder.calls)
+	}
+	if recorder.lastArgs.IdentifierOverride != "smokeaa-min" {
+		t.Fatalf("IdentifierOverride = %q, want the candidate's guarded identifier %q", recorder.lastArgs.IdentifierOverride, "smokeaa-min")
 	}
 }
 
@@ -1659,5 +1805,463 @@ func TestPodIdentityAssociationAloneIsInsufficient(t *testing.T) {
 	}
 	if deniedResourceTypes["eks:podidentityassociation"] {
 		t.Fatal("it must NOT be denylisted: alongside a live cluster it is ordinary and must count")
+	}
+}
+
+// ---- round 5: state-digest clearing (category A) ----
+
+// fakeDigestAPI records every DeleteItem call by the exact LockID it was given, so a
+// test can assert clearStateDigests never issues one for a plain (non "-md5") id - the
+// one thing this function must never do, since that would be force-releasing a real
+// state lock unattended.
+type fakeDigestAPI struct {
+	deleted []string
+	err     error
+}
+
+func (f *fakeDigestAPI) DeleteItem(_ context.Context, in *dynamodb.DeleteItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	id := in.Key["LockID"].(*ddbtypes.AttributeValueMemberS).Value
+	f.deleted = append(f.deleted, id)
+	return &dynamodb.DeleteItemOutput{}, nil
+}
+
+func TestClearStateDigestsComposesExactMD5KeysFromS3Listing(t *testing.T) {
+	f := newFakeJanitorS3()
+	bucket := primaryBucket()
+	prefix := "run1-min_default/"
+	f.put(bucket, prefix+"standard/us-east-1/min/physical/terraform.tfstate", "{}")
+	f.put(bucket, prefix+"standard/us-east-1/min/logical/terraform.tfstate", "{}")
+	// A non-state object under the same prefix must never generate a digest delete -
+	// listStateKeys only picks up keys ending in "/terraform.tfstate".
+	f.put(bucket, prefix+"harness-manifest.json", "{}")
+
+	digests := &fakeDigestAPI{}
+	deps := JanitorDeps{S3: f, Digests: digests}
+	opts := testOptions(time.Now())
+
+	n, err := clearStateDigests(context.Background(), deps, opts, []string{bucket}, prefix)
+	if err != nil {
+		t.Fatalf("clearStateDigests: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("cleared = %d, want 2", n)
+	}
+	want := map[string]bool{
+		bucket + "/" + prefix + "standard/us-east-1/min/physical/terraform.tfstate-md5": true,
+		bucket + "/" + prefix + "standard/us-east-1/min/logical/terraform.tfstate-md5":  true,
+	}
+	if len(digests.deleted) != 2 {
+		t.Fatalf("DeleteItem calls = %v, want 2", digests.deleted)
+	}
+	for _, id := range digests.deleted {
+		if !strings.HasSuffix(id, "-md5") {
+			t.Fatalf("DeleteItem id %q does not end in -md5 - a plain LockID must never be deleted", id)
+		}
+		if !want[id] {
+			t.Fatalf("unexpected DeleteItem id %q, want one of %v", id, want)
+		}
+	}
+}
+
+// TestSweepClearsStateDigestsBeforeDestroy proves the report-mode gate is placement,
+// not a flag: Digests is wired, and Sweep (a real sweep, not a dry-run report) is the
+// only path that ever reaches clearStateDigests.
+func TestSweepClearsStateDigestsBeforeDestroy(t *testing.T) {
+	f := newFakeJanitorS3()
+	bucket := primaryBucket()
+	prefix := "run1-min_default/"
+	f.put(bucket, prefix+"standard/us-east-1/min/physical/terraform.tfstate", "{}")
+
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: prefix, Bucket: bucket, RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion, DRRegion: testDR},
+	}}
+	digests := &fakeDigestAPI{}
+	deps := JanitorDeps{S3: f, Matrix: testMatrix(), Digests: digests, Tags: noResidueTags(), Teardown: func(context.Context, PhaseParams, bool) error { return nil }}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(digests.deleted) != 1 {
+		t.Fatalf("digests.deleted = %v, want 1 entry cleared before the destroy", digests.deleted)
+	}
+	if rep.Candidates[0].SweepResult != "destroyed" {
+		t.Fatalf("SweepResult = %q, want destroyed", rep.Candidates[0].SweepResult)
+	}
+}
+
+// TestScanNeverClearsDigestsEvenWithDigestsWired proves Scan (report mode) never
+// reaches clearStateDigests regardless of what is wired - the gate is that only Sweep
+// calls it, not a conditional inside Scan that could be gotten wrong.
+func TestScanNeverClearsDigestsEvenWithDigestsWired(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	f := newFakeJanitorS3()
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer: appliedCustomerFor(t, "min_default", "run1"),
+	})
+	f.put(primaryBucket(), "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate", "{}")
+
+	digests := &fakeDigestAPI{}
+	tag := &fakeTagAPI{resources: 3}
+	deps := JanitorDeps{
+		S3: f, Tags: map[string]TagAPI{testRegion: tag, testDR: tag},
+		Locks: newFakeLockAPI(), Digests: digests, Matrix: testMatrix(),
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if got := mustCandidate(t, rep, "run1-min_default/").State; got != StateOrphan {
+		t.Fatalf("state = %q, want orphan (setup sanity check)", got)
+	}
+	if len(digests.deleted) != 0 {
+		t.Fatalf("digests.deleted = %v, want 0 - Scan must never clear a digest", digests.deleted)
+	}
+}
+
+// ---- round 5: residue targeted reclaim by exact ARN (category C) ----
+
+// fakeSequencedTagAPI returns a different byType inventory on each successive call,
+// modeling the "before reclaim" and "after reclaim" tag-query snapshots Sweep's residue
+// path takes. errOnCall, when >= 0, makes that 0-indexed call return an error instead.
+type fakeSequencedTagAPI struct {
+	responses []map[string]int
+	errOnCall int
+	calls     int
+}
+
+func (f *fakeSequencedTagAPI) GetResources(_ context.Context, _ *resourcegroupstaggingapi.GetResourcesInput, _ ...func(*resourcegroupstaggingapi.Options)) (*resourcegroupstaggingapi.GetResourcesOutput, error) {
+	idx := f.calls
+	f.calls++
+	if f.errOnCall >= 0 && idx == f.errOnCall {
+		return nil, errors.New("tagging api unavailable")
+	}
+	if idx >= len(f.responses) {
+		idx = len(f.responses) - 1
+	}
+	byType := f.responses[idx]
+	var list []rgtypes.ResourceTagMapping
+	n := 0
+	for typ, count := range byType {
+		service, rtype := typ, typ
+		if i := strings.Index(typ, ":"); i >= 0 {
+			service, rtype = typ[:i], typ[i+1:]
+		}
+		for i := 0; i < count; i++ {
+			arn := fmt.Sprintf("arn:aws:%s:%s:123456789012:%s/res-%d", service, testRegion, rtype, n)
+			list = append(list, rgtypes.ResourceTagMapping{ResourceARN: aws.String(arn)})
+			n++
+		}
+	}
+	return &resourcegroupstaggingapi.GetResourcesOutput{ResourceTagMappingList: list}, nil
+}
+
+// fakeDMSReclaim records every delete call, and can be told to fail one call kind so a
+// test can exercise a PARTIAL reclaim.
+type fakeDMSReclaim struct {
+	failEndpoint bool
+	failSubgrp   bool
+
+	deletedEndpoints []string
+	deletedSubgrps   []string
+}
+
+func (f *fakeDMSReclaim) DeleteEndpoint(_ context.Context, in *databasemigrationservice.DeleteEndpointInput, _ ...func(*databasemigrationservice.Options)) (*databasemigrationservice.DeleteEndpointOutput, error) {
+	if f.failEndpoint {
+		return nil, errors.New("delete endpoint failed")
+	}
+	f.deletedEndpoints = append(f.deletedEndpoints, aws.ToString(in.EndpointArn))
+	return &databasemigrationservice.DeleteEndpointOutput{}, nil
+}
+
+func (f *fakeDMSReclaim) DeleteReplicationSubnetGroup(_ context.Context, in *databasemigrationservice.DeleteReplicationSubnetGroupInput, _ ...func(*databasemigrationservice.Options)) (*databasemigrationservice.DeleteReplicationSubnetGroupOutput, error) {
+	if f.failSubgrp {
+		return nil, errors.New("delete subnet group failed")
+	}
+	f.deletedSubgrps = append(f.deletedSubgrps, aws.ToString(in.ReplicationSubnetGroupIdentifier))
+	return &databasemigrationservice.DeleteReplicationSubnetGroupOutput{}, nil
+}
+
+// TestSweepResidueTargetedReclaimFullClearStaysResidue is the full-clear case: every
+// surviving ARN has a registered deleter, all succeed, and the re-verify query comes
+// back empty - but the candidate must still read StateResidue, never promoted to
+// "destroyed", because that promotion requires a clean FIRST-pass destroy, not a
+// second-pass targeted one.
+func TestSweepResidueTargetedReclaimFullClearStaysResidue(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: -1, responses: []map[string]int{
+		{"dms:endpoint": 2, "dms:subgrp": 1},
+		{},
+	}}
+	dms := &fakeDMSReclaim{}
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 3,
+			Customer: "smoke4879", Region: testRegion,
+		},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: dms},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue {
+		t.Fatalf("State = %q, want residue even after a full targeted clear; sweep_result=%q reason=%q", c.State, c.SweepResult, c.Reason)
+	}
+	if len(dms.deletedEndpoints) != 2 {
+		t.Fatalf("DeleteEndpoint calls = %v, want 2", dms.deletedEndpoints)
+	}
+	if len(dms.deletedSubgrps) != 1 {
+		t.Fatalf("DeleteReplicationSubnetGroup calls = %v, want 1", dms.deletedSubgrps)
+	}
+	if c.Resources != 0 {
+		t.Fatalf("Resources = %d, want 0 after the re-verify found nothing left", c.Resources)
+	}
+	if rep.Residue != 1 {
+		t.Fatalf("rep.Residue = %d, want 1", rep.Residue)
+	}
+	if rep.Swept != 0 {
+		t.Fatalf("rep.Swept = %d, want 0 - residue never counts as a clean success", rep.Swept)
+	}
+	if !strings.Contains(c.SweepResult, "attempted 3 targeted delete") {
+		t.Fatalf("SweepResult = %q, want it to name the attempted-delete count", c.SweepResult)
+	}
+}
+
+// TestSweepResidueTargetedReclaimPartialClearReportsWhatRemains: the subnet-group
+// delete fails, so the re-verify still finds it standing - the candidate must report
+// exactly what remains, not claim a full clear.
+func TestSweepResidueTargetedReclaimPartialClearReportsWhatRemains(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: -1, responses: []map[string]int{
+		{"dms:endpoint": 2, "dms:subgrp": 1},
+		{"dms:subgrp": 1},
+	}}
+	dms := &fakeDMSReclaim{failSubgrp: true}
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 3,
+			Customer: "smoke4879", Region: testRegion,
+		},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: dms},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue {
+		t.Fatalf("State = %q, want residue", c.State)
+	}
+	if c.Resources != 1 {
+		t.Fatalf("Resources = %d, want 1 (the subnet group that failed to delete)", c.Resources)
+	}
+	if len(dms.deletedEndpoints) != 2 {
+		t.Fatalf("DeleteEndpoint calls = %v, want 2 (both endpoints still cleared)", dms.deletedEndpoints)
+	}
+	if len(dms.deletedSubgrps) != 0 {
+		t.Fatalf("DeleteReplicationSubnetGroup calls = %v, want 0 (it was made to fail)", dms.deletedSubgrps)
+	}
+	if !strings.Contains(c.SweepResult, "1 remain") {
+		t.Fatalf("SweepResult = %q, want it to say 1 remains", c.SweepResult)
+	}
+}
+
+// TestSweepResidueAllEligibleDeletesFailedIsDistinctFromNothingEligible proves that a
+// candidate whose targeted deletes were all ELIGIBLE and all FAILED is reported
+// differently from one where nothing was eligible for a targeted delete in the first
+// place - before this fix both read as the identical "residue: needs manual cleanup",
+// discarding the fact that a delete was actually attempted and errored (already logged
+// by reclaimResidueByARN, visible in the pod log).
+func TestSweepResidueAllEligibleDeletesFailedIsDistinctFromNothingEligible(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: -1, responses: []map[string]int{
+		{"dms:endpoint": 2},
+	}}
+	dms := &fakeDMSReclaim{failEndpoint: true}
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 3,
+			Customer: "smoke4879", Region: testRegion,
+		},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: dms},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue {
+		t.Fatalf("State = %q, want residue", c.State)
+	}
+	if len(dms.deletedEndpoints) != 0 {
+		t.Fatalf("DeleteEndpoint successes = %v, want 0 (every attempt was made to fail)", dms.deletedEndpoints)
+	}
+	if c.SweepResult == "residue: needs manual cleanup" {
+		t.Fatalf("SweepResult = %q, must not read identically to the nothing-was-eligible case", c.SweepResult)
+	}
+	if !strings.Contains(c.SweepResult, "attempted") || !strings.Contains(c.SweepResult, "all failed") {
+		t.Fatalf("SweepResult = %q, want it to say deletes were attempted and all failed", c.SweepResult)
+	}
+	if rep.Residue != 1 {
+		t.Fatalf("rep.Residue = %d, want 1", rep.Residue)
+	}
+}
+
+// TestSweepResidueReclaimSkipsUnregisteredTypes proves deletion is attempted ONLY for
+// ARNs whose type is in residueDeleters - an anchored survivor of a type with no
+// registered deleter (rds:cluster here) must be reported, never deleted, and must never
+// cause a DMS call to be issued at all.
+func TestSweepResidueReclaimSkipsUnregisteredTypes(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: -1, responses: []map[string]int{
+		{"rds:cluster": 1},
+	}}
+	dms := &fakeDMSReclaim{}
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 3,
+			Customer: "smoke4879", Region: testRegion,
+		},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: dms},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue {
+		t.Fatalf("State = %q, want residue", c.State)
+	}
+	if len(dms.deletedEndpoints) != 0 || len(dms.deletedSubgrps) != 0 {
+		t.Fatalf("a type with no registered deleter must never trigger a DMS call: endpoints=%v subgrps=%v", dms.deletedEndpoints, dms.deletedSubgrps)
+	}
+	if c.SweepResult != "residue: needs manual cleanup" {
+		t.Fatalf("SweepResult = %q, want the plain unattempted-reclaim message", c.SweepResult)
+	}
+	// Only one tag query should have run at all: with nothing to attempt, there is
+	// nothing to re-verify.
+	if tags.calls != 1 {
+		t.Fatalf("tag query calls = %d, want 1 (no re-verify when nothing was attempted)", tags.calls)
+	}
+}
+
+// TestSweepResidueReclaimPostVerifyFailureFailsClosedToUnknown: the targeted delete
+// succeeds, but the re-verify tag query itself fails - this must never be read as
+// success. StateUnknown, not StateResidue and not "destroyed".
+func TestSweepResidueReclaimPostVerifyFailureFailsClosedToUnknown(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: 1, responses: []map[string]int{
+		{"dms:endpoint": 1},
+	}}
+	dms := &fakeDMSReclaim{}
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 3,
+			Customer: "smoke4879", Region: testRegion,
+		},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: dms},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateUnknown {
+		t.Fatalf("State = %q, want unknown - a failed re-verify must never be read as success", c.State)
+	}
+	if len(dms.deletedEndpoints) != 1 {
+		t.Fatalf("DeleteEndpoint calls = %v, want 1 (the delete itself still happened)", dms.deletedEndpoints)
+	}
+	if rep.Residue != 0 {
+		t.Fatalf("rep.Residue = %d, want 0 - an unknown outcome must not count as residue", rep.Residue)
+	}
+	if rep.Swept != 0 {
+		t.Fatalf("rep.Swept = %d, want 0", rep.Swept)
+	}
+}
+
+// TestSweepResidueReclaimUsesARNsOwnRegionNotCandidatePrimary: the residue ARN's own
+// region is the DR region, not the candidate's primary Region field. Only a DMS client
+// keyed by the ARN's region must be used - proving reclaimResidueByARN never assumes
+// the candidate's primary region.
+func TestSweepResidueReclaimUsesARNsOwnRegionNotCandidatePrimary(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: -1, responses: []map[string]int{
+		{"dms:endpoint": 1},
+		{},
+	}}
+	primaryDMS := &fakeDMSReclaim{}
+	drDMS := &fakeDMSReclaim{}
+	rep := &Report{Candidates: []Candidate{
+		{
+			Prefix: "smoke4879-bi/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+			Identifier: "smoke4879-bi", State: StateOrphan, Resources: 1,
+			Customer: "smoke4879", Region: testDR, // candidate primary region IS the DR region here
+		},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testDR: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: primaryDMS, testDR: drDMS},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	// fakeSequencedTagAPI always builds its ARNs in testRegion (see the fake), so the
+	// delete must land on the testRegion client even though the candidate's own
+	// "primary" Region field here is testDR - proving the dispatch reads the ARN, not
+	// the candidate.
+	if len(primaryDMS.deletedEndpoints) != 1 {
+		t.Fatalf("primary-region DMS client calls = %v, want 1 (the ARN says testRegion)", primaryDMS.deletedEndpoints)
+	}
+	if len(drDMS.deletedEndpoints) != 0 {
+		t.Fatalf("DR-region DMS client calls = %v, want 0", drDMS.deletedEndpoints)
 	}
 }

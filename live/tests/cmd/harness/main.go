@@ -14,6 +14,7 @@ import (
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/harness"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/databasemigrationservice"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -327,7 +328,12 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			*region:   resourcegroupstaggingapi.NewFromConfig(awsCfg),
 			*drRegion: resourcegroupstaggingapi.NewFromConfig(drCfg),
 		},
-		Locks:    dynamodb.NewFromConfig(awsCfg),
+		Locks:   dynamodb.NewFromConfig(awsCfg),
+		Digests: dynamodb.NewFromConfig(awsCfg),
+		DMS: map[string]harness.DMSReclaimAPI{
+			*region:   databasemigrationservice.NewFromConfig(awsCfg),
+			*drRegion: databasemigrationservice.NewFromConfig(drCfg),
+		},
 		Matrix:   m,
 		Teardown: harness.RealTeardown,
 	}

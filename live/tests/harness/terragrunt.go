@@ -73,7 +73,12 @@ type TGOptions struct {
 	Profile      string
 	BucketPrefix string
 	StatePrefix  string
-	NLBName      string // "<customer>-<env>" (e.g. smoke-min); for pre-destroy protection clear
+	// Identifier is "<customer>-<env>" (e.g. smoke-min), the EKS cluster name (see
+	// terraform/physical/main.tf's local.identifier). Drives two separate pre-destroy
+	// steps (clearNLBProtection, clearMSKClusters) - named for what it IS, not for the
+	// first thing it was used for, since a field called NLBName deleting MSK clusters
+	// is exactly the kind of thing that misleads the next reader.
+	Identifier string
 }
 
 func (o TGOptions) env() []string {
@@ -231,6 +236,7 @@ func (o TGOptions) Destroy() error {
 	if err := o.destroyModule("logical"); err != nil {
 		fmt.Fprintf(os.Stderr, "\n>> teardown: logical destroy failed (continuing to physical so infra isn't stranded): %v\n", err)
 	}
+	o.clearMSKClusters()
 	o.clearNLBProtection()
 	return o.destroyModule("physical")
 }
@@ -303,12 +309,12 @@ func refreshVaultToken() bool {
 // makes the harness's own teardown self-sufficient. Best-effort + idempotent: a
 // missing NLB or already-cleared protection is a silent no-op.
 func (o TGOptions) clearNLBProtection() {
-	if o.NLBName == "" {
+	if o.Identifier == "" {
 		return
 	}
 	out, err := exec.Command("aws", "elbv2", "describe-load-balancers",
 		"--region", o.Region, "--profile", o.Profile,
-		"--query", fmt.Sprintf("LoadBalancers[?LoadBalancerName=='%s'].LoadBalancerArn|[0]", o.NLBName),
+		"--query", fmt.Sprintf("LoadBalancers[?LoadBalancerName=='%s'].LoadBalancerArn|[0]", o.Identifier),
 		"--output", "text").Output()
 	arn := strings.TrimSpace(string(out))
 	if err != nil || arn == "" || arn == "None" {
@@ -318,7 +324,46 @@ func (o TGOptions) clearNLBProtection() {
 		"--load-balancer-arn", arn,
 		"--attributes", "Key=deletion_protection.enabled,Value=false",
 		"--region", o.Region, "--profile", o.Profile).Run(); e == nil {
-		fmt.Fprintf(os.Stderr, "\n>> teardown: cleared NLB deletion-protection on %s (avoids IGW stall)\n", o.NLBName)
+		fmt.Fprintf(os.Stderr, "\n>> teardown: cleared NLB deletion-protection on %s (avoids IGW stall)\n", o.Identifier)
+	}
+}
+
+// clearMSKClusters deletes any MSK cluster named for this stack that Terraform does not
+// know about, before the physical destroy. A run killed mid-apply (SIGKILL, no trap) can
+// finish creating MSK after state was last written, leaving an ACTIVE cluster absent from
+// state - `destroy` then removes the MSK *configuration* but never the cluster, and the
+// cluster's ENIs pin every subnet and security group in the VPC, so the VPC destroy fails
+// forever and strands the whole network. Ported from cleanup-orphans.sh step 1b.
+//
+// No aws_msk_* resource exists anywhere in terraform/ at HEAD (verified by grep across
+// the module tree) - this exists for cross-architecture upgrade teardowns against an
+// older baseline ref that did create one, so a reader who greps for MSK today and finds
+// nothing in terraform/ should not delete this as dead code.
+//
+// Shells out to the aws CLI, matching clearNLBProtection right above it, rather than
+// adding the kafka Go SDK: TGOptions has no AWS SDK client threaded into it today, and
+// adding one (plus a go.mod/go.sum entry) for two calls covering a resource type that no
+// longer exists in terraform/ is more plumbing than the calls themselves. Best-effort:
+// silent no-op on absence or any CLI failure, never fails the destroy.
+func (o TGOptions) clearMSKClusters() {
+	if o.Identifier == "" {
+		return
+	}
+	out, err := exec.Command("aws", "kafka", "list-clusters",
+		"--region", o.Region, "--profile", o.Profile,
+		"--query", fmt.Sprintf("ClusterInfoList[?starts_with(ClusterName,'%s')].ClusterArn", o.Identifier),
+		"--output", "text").Output()
+	if err != nil {
+		return
+	}
+	for _, carn := range strings.Fields(strings.TrimSpace(string(out))) {
+		if carn == "" || carn == "None" {
+			continue
+		}
+		if e := exec.Command("aws", "kafka", "delete-cluster",
+			"--cluster-arn", carn, "--region", o.Region, "--profile", o.Profile).Run(); e == nil {
+			fmt.Fprintf(os.Stderr, "\n>> teardown: MSK cluster delete requested: %s (avoids ENI-pinned VPC destroy failure)\n", carn)
+		}
 	}
 }
 

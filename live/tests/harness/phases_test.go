@@ -38,6 +38,27 @@ func makeTagRepo(t *testing.T) string {
 	return dir
 }
 
+func TestResolveIdentifierPrefersOverride(t *testing.T) {
+	cfg := Config{Env: "min", FeatureFlags: map[string]interface{}{"customer": "smokebb"}}
+	if got := resolveIdentifier(cfg, "smokeaa-min"); got != "smokeaa-min" {
+		t.Fatalf("resolveIdentifier with override = %q, want the override value unchanged", got)
+	}
+}
+
+func TestResolveIdentifierFallsBackToConfigWhenOverrideEmpty(t *testing.T) {
+	cfg := Config{Env: "min", FeatureFlags: map[string]interface{}{"customer": "smokebb"}}
+	if got := resolveIdentifier(cfg, ""); got != "smokebb-min" {
+		t.Fatalf("resolveIdentifier with no override = %q, want smokebb-min", got)
+	}
+}
+
+func TestResolveIdentifierEmptyWhenNoCustomerAndNoOverride(t *testing.T) {
+	cfg := Config{Env: "min"}
+	if got := resolveIdentifier(cfg, ""); got != "" {
+		t.Fatalf("resolveIdentifier = %q, want empty (no customer flag, no override)", got)
+	}
+}
+
 func TestPrepareWorktreeReentrant(t *testing.T) {
 	repo := makeTagRepo(t)
 	m := &Matrix{

@@ -77,6 +77,22 @@ days exhausted DDVtest's 10-VPC ceiling and took the nightly down with VpcLimitE
 defaults to a dry-run report - see `harness/janitor.go` for the full predicate and
 `harness/janitor_test.go` for its test coverage.
 
+**A sweep cleans more than the terragrunt destroy.** `PhaseParams.Teardown` runs the same
+destroy every phase pod's exit handler runs, but a sweep also carries the out-of-band
+cleanup `cleanup-orphans.sh` used to do by hand (that script is now the porting spec, not
+a second implementation - see its own header for what stays script-only). Before the
+physical destroy: clearing NLB deletion protection and deleting any MSK cluster
+Terraform's state lost track of (both would otherwise strand the VPC on a
+DependencyViolation), and clearing the S3 backend's stale `-md5` state digest so an
+interrupted prior apply can't abort the destroy before it starts. After every successful
+destroy, sweep or not: reclaiming CSI-created EBS volumes and launch templates, the
+lambda/DMS log groups that only exist lazily at runtime, and the flux-source-controller
+IAM role that otherwise collides with the next run's `CreateRole`. And when a destroy
+succeeds but a tag re-query still finds something standing (`StateResidue`): a targeted,
+single-call delete for exactly the ARNs that query returned, never a wider search. Every
+mutation sits on a path only `Sweep` (or, for the always-on post-destroy reclaim, a real
+`Teardown`) can reach, so `--sweep=false` report mode never mutates anything.
+
 **One semaphore across every entry point.** DDVtest allows 10 VPCs per region and a test
 stack is about one (recovery is two). A nightly matrix plus a couple of PR runs will
 exhaust that mid-apply and surface as a confusing quota error inside a terragrunt run. The
