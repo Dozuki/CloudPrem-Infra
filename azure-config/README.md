@@ -11,7 +11,7 @@ Self-contained deployment bundle for Dozuki MPC (managed private cloud) on Azure
   (cluster nodes also need outbound HTTPS to ghcr.io for runtime image pulls)
 
 The bundle downloads and checksum-verifies the OpenTofu version pinned in
-`.opentofu-version` (currently 1.11.13). It does not require Terraform or
+`.opentofu-version` (currently 1.12.5). It does not require Terraform or
 Terragrunt on the operator's machine.
 
 ## Quick start

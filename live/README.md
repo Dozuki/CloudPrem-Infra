@@ -92,7 +92,7 @@ region:
 # CD to the region diretory
 $ cd live/standard/us-east-1/
 # Run all terraform modules in this directory recursively
-$ terragrunt run-all apply
+$ terragrunt run --all apply
 ```
 This would spin up every stack: min, bi, and full. This is probably not what
 you want to do, but it's possible.
@@ -102,7 +102,7 @@ For a more realistic example:
 # CD into the environment directory
 $ cd live/standard/us-east-1/min
 # Run all terraform modules in this directory recursively
-$ terragrunt run-all apply
+$ terragrunt run --all apply
 ```
 
 This would give you 1 stack by spinning up the 4 modules inside only.
