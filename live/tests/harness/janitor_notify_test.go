@@ -1,0 +1,283 @@
+package harness
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// The notify script (argo/50-janitor-cron.yaml, template post-report) is the only thing
+// standing between a report and a human, and it is bash+jq that nothing else executes
+// until 09:00 ET in production. Every previous bug in it - a report tag pasted into
+// single quotes and detonating on an apostrophe, a selector that rendered clean
+// destroys under a "teardown FAILED" headline, states that matched nothing at all -
+// would have been caught by running the thing once against a realistic report.
+//
+// So these tests do exactly that: pull the script out of the YAML it ships in, run it
+// under a real bash with a real jq, and read what it tried to post. `vault` and `curl`
+// are stubbed on PATH (the script's only two external side effects), so the assertions
+// are on the actual Slack payload.
+
+// notifyScript extracts the post-report template's inline script from the cron YAML.
+// Parsing the YAML rather than string-slicing it means the test breaks loudly if the
+// template is restructured, instead of silently testing nothing.
+func notifyScript(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("../argo/50-janitor-cron.yaml")
+	if err != nil {
+		t.Fatalf("read 50-janitor-cron.yaml: %v", err)
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(b)))
+	for {
+		var doc struct {
+			Kind string `yaml:"kind"`
+			Spec struct {
+				Templates []struct {
+					Name      string `yaml:"name"`
+					Container struct {
+						Args []string `yaml:"args"`
+					} `yaml:"container"`
+				} `yaml:"templates"`
+			} `yaml:"spec"`
+		}
+		if err := dec.Decode(&doc); err != nil {
+			break
+		}
+		for _, tpl := range doc.Spec.Templates {
+			if tpl.Name == "post-report" && len(tpl.Container.Args) > 0 {
+				return tpl.Container.Args[0]
+			}
+		}
+	}
+	t.Fatal("no post-report template with a container script found in 50-janitor-cron.yaml")
+	return ""
+}
+
+// runNotify executes the script with REPORT/SCAN_STATUS/MODE set, against stub vault
+// and curl binaries, and returns (posted slack text, "" if nothing was posted, stdout).
+func runNotify(t *testing.T, report, scanStatus, mode string) (posted, stdout string) {
+	t.Helper()
+	for _, bin := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available; the notify script cannot be exercised here", bin)
+		}
+	}
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "notify.sh")
+	if err := os.WriteFile(scriptPath, []byte(notifyScript(t)), 0o700); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	// Stub PATH entries for the script's only two side effects. vault answers any
+	// subcommand with a token; curl writes the payload it was handed to a file.
+	binDir := filepath.Join(dir, "bin")
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	postFile := filepath.Join(dir, "posted.json")
+	stubs := map[string]string{
+		"vault": "#!/bin/sh\necho stub-token\nexit 0\n",
+		"curl":  "#!/bin/sh\ncat > " + postFile + "\nexit 0\n",
+	}
+	for name, body := range stubs {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0o700); err != nil {
+			t.Fatalf("write stub %s: %v", name, err)
+		}
+	}
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"REPORT="+report,
+		"SCAN_STATUS="+scanStatus,
+		"MODE="+mode,
+		"SLACK_CHANNEL=#harness-test",
+		"VAULT_ADDR=http://vault.invalid:8200",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("notify script exited non-zero (%v); it carries continueOn: failed and must always exit 0\n%s", err, out)
+	}
+	body, rerr := os.ReadFile(postFile)
+	if rerr != nil {
+		return "", string(out) // nothing posted
+	}
+	var payload struct {
+		Channel string `json:"channel"`
+		Text    string `json:"text"`
+	}
+	if jerr := json.Unmarshal(body, &payload); jerr != nil {
+		t.Fatalf("the payload handed to curl is not JSON (%v): %s", jerr, body)
+	}
+	if payload.Channel != "#harness-test" {
+		t.Fatalf("posted to channel %q, want the SLACK_CHANNEL value", payload.Channel)
+	}
+	return payload.Text, string(out)
+}
+
+// sampleSweepReport is a realistic post-sweep report: one candidate destroyed cleanly
+// (State stays orphan on purpose, only sweep_result changes), one residue, one unknown
+// (destroy ran, verification failed), one needs-review, and one clean. The reason text
+// carries the apostrophes classify() really emits ("the janitor's --region"), which is
+// what used to detonate the script at parse time.
+func sampleSweepReport(t *testing.T) string {
+	t.Helper()
+	rep := Report{
+		SchemaVersion: JanitorReportSchemaVersion,
+		Mode:          "sweep",
+		At:            time.Now().UTC().Format(time.RFC3339),
+		Account:       testAccount,
+		Candidates: []Candidate{
+			{Prefix: "run1-min_default/", RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min",
+				DeleteAfter: "2026-08-04T00:00:00Z", State: StateOrphan, Resources: 12,
+				Reason: "12 resources still live past delete_after + grace with no owner: a teardown FAILED", SweepResult: "destroyed"},
+			{Prefix: "run2-bi/", RunID: "run2", ConfigName: "bi_default", Identifier: "smokebb-bi",
+				DeleteAfter: "2026-08-03T00:00:00Z", State: StateResidue, Resources: 3,
+				Reason:      "terraform destroy completed, but 3 tagged resources survived; it is state, not the janitor's reach, that is the problem",
+				SweepResult: "residue: needs manual cleanup"},
+			{Prefix: "run3-min_default/", RunID: "run3", ConfigName: "min_default", Identifier: "smokecc-min",
+				DeleteAfter: "2026-08-03T00:00:00Z", State: StateUnknown, Resources: 5,
+				Reason:      "the run's recorded identity, not today's",
+				SweepResult: "destroy ran, but the post-destroy verification query failed: tagging api unavailable"},
+			{Prefix: "run4-recover/", RunID: "run4", ConfigName: "recover", Identifier: "smokerec-min",
+				State: StateNeedsReview, Reason: "recovery drill config, never sweepable"},
+			{Prefix: "run5-min_default/", RunID: "run5", ConfigName: "min_default", Identifier: "smokedd-min",
+				DeleteAfter: "2026-08-01T00:00:00Z", State: StateClean, Reason: "stale and unowned, no tagged resources remain"},
+		},
+		Orphans: 0, Swept: 1, Failed: 0, Residue: 1, Inconclusive: 1,
+	}
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal sample report: %v", err)
+	}
+	return string(b)
+}
+
+// TestNotifyScriptSelectsTheRightCandidates is the regression test for the selector
+// bug: a clean destroy must not be counted as something needing a human, and unknown
+// and needs-review must not be invisible.
+func TestNotifyScriptSelectsTheRightCandidates(t *testing.T) {
+	text, out := runNotify(t, sampleSweepReport(t), "Succeeded", "sweep")
+	if text == "" {
+		t.Fatalf("nothing was posted for a report with residue, unknown and needs-review candidates\n%s", out)
+	}
+
+	// Counts: residue + unknown need a human; needs-review is its own bucket; the
+	// destroyed candidate is informational and must NOT inflate the alarm count even
+	// though its state is still "orphan".
+	if !strings.Contains(text, "2 test stack(s) need a human") {
+		t.Errorf("headline does not count residue+unknown as the 2 needing a human:\n%s", text)
+	}
+	if !strings.Contains(text, "1 need review") {
+		t.Errorf("headline does not count the needs-review candidate:\n%s", text)
+	}
+	if !strings.Contains(text, "1 destroyed this cycle") {
+		t.Errorf("headline does not report the destroyed candidate:\n%s", text)
+	}
+
+	// Every candidate that matters is named, and the clean one is not.
+	for _, want := range []string{"run2", "run3", "run4", "run1"} {
+		if !strings.Contains(text, "`"+want+"`") {
+			t.Errorf("candidate %s is missing from the message:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "`run5`") {
+		t.Error("the clean candidate was reported; clean is neither alerted nor swept")
+	}
+
+	// The destroyed candidate belongs under the informational heading, not the alarm
+	// one - the whole point of excluding sweep_result "destroyed" from the alarm set.
+	alarmSection := text[strings.Index(text, "NEEDS A HUMAN"):]
+	if idx := strings.Index(alarmSection, "destroyed this cycle"); idx >= 0 {
+		if strings.Contains(alarmSection[:idx], "`run1`") {
+			t.Errorf("the destroyed candidate is listed under NEEDS A HUMAN:\n%s", text)
+		}
+	}
+
+	// Apostrophes in the reason/sweep_result survive the whole pipeline.
+	if !strings.Contains(text, "verification query failed") {
+		t.Errorf("the unknown candidate's sweep_result did not survive the pipeline:\n%s", text)
+	}
+}
+
+// TestNotifyScriptStaysQuietWhenThereIsNothingToSay: a report whose only candidates are
+// active/clean posts nothing at all. A janitor that pages every night for a healthy
+// account gets muted, and then it pages for nothing when it matters.
+func TestNotifyScriptStaysQuietWhenThereIsNothingToSay(t *testing.T) {
+	rep := Report{
+		SchemaVersion: JanitorReportSchemaVersion, Mode: "report", At: "2026-08-05T09:00:00Z",
+		Candidates: []Candidate{
+			{Prefix: "run1-min_default/", RunID: "run1", ConfigName: "min_default", State: StateClean, Reason: "no tagged resources remain"},
+			{Prefix: "run2-min_default/", RunID: "run2", ConfigName: "min_default", State: StateActive, Reason: "owned by a live workflow (phase Running)"},
+		},
+	}
+	b, _ := json.Marshal(rep)
+	text, out := runNotify(t, string(b), "Succeeded", "report")
+	if text != "" {
+		t.Fatalf("posted %q for a report with nothing to say", text)
+	}
+	if !strings.Contains(out, "nothing to report") {
+		t.Fatalf("stdout does not say why it stayed quiet:\n%s", out)
+	}
+}
+
+// TestNotifyScriptReportsASafetyAbort: a G1-G3 abort returns before Scan runs, so
+// REPORT is the outputs default '{}' and SCAN_STATUS is not Succeeded. That must post
+// the "scan failed" message rather than nothing.
+func TestNotifyScriptReportsASafetyAbort(t *testing.T) {
+	text, out := runNotify(t, "{}", "Failed", "report")
+	if text == "" {
+		t.Fatalf("nothing posted for a safety abort\n%s", out)
+	}
+	if !strings.Contains(text, "the SCAN step failed") {
+		t.Errorf("message does not name the scan failure:\n%s", text)
+	}
+}
+
+// TestNotifyScriptRefusesAnUnknownSchema: the schema assert must become the Slack
+// message. Exiting non-zero instead would post nothing and fail nothing (continueOn:
+// failed) - a silent blackout, which is the exact thing the assert exists to prevent.
+func TestNotifyScriptRefusesAnUnknownSchema(t *testing.T) {
+	text, out := runNotify(t, `{"schema_version":99,"candidates":[{"state":"orphan","run_id":"run1"}]}`, "Succeeded", "sweep")
+	if text == "" {
+		t.Fatalf("nothing posted on a schema mismatch\n%s", out)
+	}
+	if !strings.Contains(text, "CANNOT READ THIS CYCLE'S REPORT") {
+		t.Errorf("message does not say the report is unreadable:\n%s", text)
+	}
+	if strings.Contains(text, "`run1`") {
+		t.Error("the script read candidate fields after declaring the schema untrustworthy")
+	}
+}
+
+// TestNotifyScriptSurvivesAMidSweepAbortReport: the abort path now prints its partial
+// report as the last stdout line (cmd/harness main.go), so the script gets a real
+// report AND a non-Succeeded status. It has to say both things.
+func TestNotifyScriptSurvivesAMidSweepAbortReport(t *testing.T) {
+	rep := Report{
+		SchemaVersion: JanitorReportSchemaVersion, Mode: "sweep", At: "2026-08-05T09:00:00Z",
+		Candidates: []Candidate{
+			{Prefix: "run1-min_default/", RunID: "run1", ConfigName: "min_default", Identifier: "smokeaa-min",
+				DeleteAfter: "2026-08-04T00:00:00Z", State: StateOrphan, Resources: 9,
+				Reason: "a teardown FAILED", SweepResult: "failed: destroy: exit status 1"},
+		},
+		Orphans: 1, Failed: 1,
+	}
+	b, _ := json.Marshal(rep)
+	text, out := runNotify(t, string(b), "Failed", "sweep")
+	if text == "" {
+		t.Fatalf("nothing posted for a failed sweep that left a report\n%s", out)
+	}
+	if !strings.Contains(text, "did not finish cleanly") {
+		t.Errorf("message does not name the failed step:\n%s", text)
+	}
+	if !strings.Contains(text, "`run1`") || !strings.Contains(text, "failed: destroy") {
+		t.Errorf("message does not carry the candidate that failed:\n%s", text)
+	}
+}

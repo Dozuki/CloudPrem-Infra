@@ -281,56 +281,94 @@ spec:
             # Mine REPORT for candidates regardless of SCAN_STATUS, before deciding what
             # to say. Two different things make SCAN_STATUS non-Succeeded: a G1-G3
             # safety abort in runJanitor (account mismatch, blind ownership, a protected
-            # identity) that returns before Scan() ever ran - REPORT there really is the
-            # outputs default '{}', N stays 0 below - or a cycle that ran a full scan
-            # AND a sweep, printed a real report, and then runJanitor still returned
-            # exit 1 because a destroy attempt failed (rep.Failed > 0). That second case
-            # is not "no report was produced" - it is a complete report sitting right
-            # here in REPORT, including exactly which candidate's destroy failed and
-            # why in its sweep_result. The previous version of this script gated
-            # entirely on SCAN_STATUS and told a human to go dig through the pod log for
-            # information already sitting in the JSON, in what is - once sweep mode is
-            # ever enabled - the single most likely way for SCAN_STATUS to end up
-            # non-Succeeded (a destroy failing on real AWS state is far more common than
-            # a safety abort or the harness's own workflow-list plumbing breaking).
+            # identity) that returns before Scan() ever ran - every count below stays 0 -
+            # or a cycle that ran a full scan AND a sweep, printed a real report, and
+            # then runJanitor still returned exit 1 because a destroy attempt failed or
+            # its post-destroy verification did (rep.Failed / rep.Inconclusive). That
+            # second case is not "no report was produced" - it is a complete report
+            # sitting right here in REPORT, including exactly which candidate broke and
+            # why in its sweep_result. Gating entirely on SCAN_STATUS told a human to go
+            # dig through the pod log for information already sitting in the JSON, in
+            # what is - once sweep mode is ever enabled - the single most likely way for
+            # SCAN_STATUS to end up non-Succeeded.
             #
-            # Counts orphan, blocked, AND residue candidates - the same set LINES below
-            # selects. Gating on report.orphans alone let a cycle whose only finding was
-            # StateBlocked print "no orphans" and post nothing, even though StateBlocked's
-            # own reason text says it needs a human to force-unlock it; residue is the
-            # same shape of miss - Sweep already knows a retry cannot fix it (see
-            # harness/janitor.go StateResidue), so silence here would be the one place
-            # that fact never reaches a human.
-            N=$(printf '%s' "$REPORT" | jq -r '[.candidates[]? | select(.state=="orphan" or .state=="blocked" or .state=="residue")] | length' 2>/dev/null) || N=0
-            case "$N" in ''|*[!0-9]*) N=0 ;; esac
+            # THREE selectors, because "how many candidates are there" is three
+            # different questions with three different answers a human needs:
+            #
+            #   ALARM  - orphan, blocked, residue, unknown, and NOT already destroyed.
+            #            orphan/blocked/residue were always here. unknown was not, and
+            #            its absence was a hole: StateUnknown is what Sweep sets when a
+            #            destroy RAN and the verification query then failed, i.e. the
+            #            single least-understood outcome the janitor can produce, and it
+            #            matched no selector at all. The sweep_result exclusion is the
+            #            other half: Sweep deliberately LEAVES State=orphan on a clean
+            #            destroy (only sweep_result changes to "destroyed", see
+            #            harness/janitor.go Sweep), so without it every successful
+            #            destroy rendered under a headline saying a teardown FAILED.
+            #   REVIEW - needs-review: candidates the janitor refused to reason about
+            #            (an unverifiable identity, a recovery-drill config, an
+            #            unreadable manifest). Never acted on, never previously
+            #            reported, so a cycle whose ONLY finding was one posted nothing
+            #            at all. Counted separately, not folded into ALARM, because
+            #            recovery drills produce these routinely and they must not read
+            #            as "a teardown failed".
+            #   DONE   - sweep_result "destroyed": purely informational, but a sweep
+            #            that actually destroyed something is a record worth having in
+            #            the channel.
+            ALARM_SEL='select((.state=="orphan" or .state=="blocked" or .state=="residue" or .state=="unknown") and (.sweep_result // "") != "destroyed")'
+            REVIEW_SEL='select(.state=="needs-review")'
+            DONE_SEL='select((.sweep_result // "") == "destroyed")'
+            # One line renderer for all three, so the wording cannot drift between
+            # sections. Every field is defaulted: a needs-review candidate built from an
+            # unreadable manifest carries no run_id, config_name or delete_after at all,
+            # and jq's + on null would abort the whole pipeline (empty Slack card) for
+            # exactly the candidate that most needs printing.
+            LINE_DEF='def line: "- `" + (if (.run_id // "") != "" then .run_id else (.prefix // "?") end) + "` (" + (.config_name // "?") + ") " + (.state // "?") + ": " + ((.resources // 0)|tostring) + " tagged resources, delete_after " + (if (.delete_after // "") != "" then .delete_after else "(none)" end) + (if (.sweep_result // "") != "" then " -> " + .sweep_result else "" end);'
+            jq_count() { printf '%s' "$REPORT" | jq -r "[.candidates[]? | $1] | length" 2>/dev/null; }
+            jq_lines() { printf '%s' "$REPORT" | jq -r "$LINE_DEF [.candidates[]? | $1 | line] | join(\"\n\")" 2>/dev/null; }
 
-            if [ "$SCAN_STATUS" != "Succeeded" ] && [ "$N" = 0 ]; then
+            A=$(jq_count "$ALARM_SEL") || A=0
+            R=$(jq_count "$REVIEW_SEL") || R=0
+            D=$(jq_count "$DONE_SEL") || D=0
+            case "$A" in ''|*[!0-9]*) A=0 ;; esac
+            case "$R" in ''|*[!0-9]*) R=0 ;; esac
+            case "$D" in ''|*[!0-9]*) D=0 ;; esac
+            TOTAL=$((A + R + D))
+
+            if [ "$SCAN_STATUS" != "Succeeded" ] && [ "$TOTAL" = 0 ]; then
               # No usable report at all: a safety abort, a pod eviction before the
               # script ran, or any other failure that happened before a report existed.
               TEXT=$(printf 'harness janitor (%s): the SCAN step failed (status=%s). No orphan report was produced this cycle - check the scan pod log.' "$MODE" "$SCAN_STATUS")
-            elif [ "$N" = 0 ]; then
-              echo "no orphans, blocked, or residue candidates this cycle"
+            elif [ "$TOTAL" = 0 ]; then
+              echo "nothing to report this cycle (no orphan, blocked, residue, unknown, needs-review or destroyed candidates)"
               exit 0
             else
-              LINES=$(printf '%s' "$REPORT" | jq -r '
-                [.candidates[] | select(.state=="orphan" or .state=="blocked" or .state=="residue")] |
-                map("- `" + .run_id + "` (" + .config_name + ") " + .state +
-                    ": " + (.resources|tostring) + " resources still up, delete_after " + .delete_after +
-                    (if .sweep_result != "" then " -> " + .sweep_result else "" end)) |
-                join("\n")')
+              BODY=''
+              add_section() {
+                [ -z "$2" ] && return 0
+                if [ -n "$BODY" ]; then
+                  BODY=$(printf '%s\n\n%s\n%s' "$BODY" "$1" "$2")
+                else
+                  BODY=$(printf '%s\n%s' "$1" "$2")
+                fi
+              }
+              [ "$A" -gt 0 ] && add_section "NEEDS A HUMAN ($A):" "$(jq_lines "$ALARM_SEL")"
+              [ "$R" -gt 0 ] && add_section "NEVER SWEPT, needs review ($R):" "$(jq_lines "$REVIEW_SEL")"
+              [ "$D" -gt 0 ] && add_section "destroyed this cycle ($D), informational:" "$(jq_lines "$DONE_SEL")"
+
               if [ "$SCAN_STATUS" != "Succeeded" ]; then
                 # The step itself ended non-Succeeded but got far enough to leave a real
-                # report - most likely a sweep destroy failing on one candidate while the
-                # scan otherwise completed. Say both things instead of picking one.
-                TEXT=$(printf 'harness janitor (%s): the SCAN step did not finish cleanly (status=%s), but left a report with %s orphaned/blocked/residue test stack(s) - check the scan pod log AND the candidates below (a failed sweep destroy is the likely cause).\n%s' "$MODE" "$SCAN_STATUS" "$N" "$LINES")
+                # report - most likely a sweep destroy failing on one candidate, or a
+                # post-destroy verification query failing, while the scan otherwise
+                # completed. Say both things instead of picking one.
+                HEAD=$(printf 'harness janitor (%s): the SCAN step did not finish cleanly (status=%s) but left a real report - %s needing a human, %s needing review, %s destroyed. Check the scan pod log AND the lines below (a failed sweep destroy, or a destroy whose verification query failed, is the likely cause).' "$MODE" "$SCAN_STATUS" "$A" "$R" "$D")
               else
-                # residue candidates did NOT fail a teardown - Sweep already ran one
-                # successfully and it is state, not this janitor, that cannot reach
-                # them - so the blanket "teardown FAILED" framing below is wrong for
-                # that state and each line's own sweep_result (from harness/janitor.go
-                # StateResidue) carries the accurate reason instead.
-                TEXT=$(printf 'harness janitor (%s): %s orphaned/blocked/residue test stack(s). Orphan/blocked means a teardown FAILED (blocked also needs a human force-unlock); residue means a destroy SUCCEEDED but tagged resources survived it anyway and need manual cleanup, not a retry - see each line'"'"'s detail below before clearing it by hand.\n%s' "$MODE" "$N" "$LINES")
+                # Each state means a different thing and wants a different response, so
+                # the headline names all of them rather than calling everything a failed
+                # teardown: residue and unknown both follow a destroy that SUCCEEDED.
+                HEAD=$(printf 'harness janitor (%s): %s test stack(s) need a human, %s need review, %s destroyed this cycle. orphan/blocked = a teardown FAILED (blocked also needs a manual force-unlock); residue = a destroy SUCCEEDED but tagged resources outlived it and need manual cleanup, not a retry; unknown = a destroy ran and its verification query failed, so what survived is not known; needs-review = the janitor refused to reason about it and never touched it. Read each line'"'"'s own detail before clearing anything by hand.' "$MODE" "$A" "$R" "$D")
               fi
+              TEXT=$(printf '%s\n%s' "$HEAD" "$BODY")
             fi
             fi
 
@@ -355,6 +393,12 @@ spec:
         # why (apostrophes in classify()'s reason text break a single-quoted paste but
         # never reach a shell parser when set as a container env var).
         env:
+          # The whole report JSON rides the pod spec as this value, which puts it under
+          # etcd's ~1MiB object limit along with the rest of the spec. A cycle's report
+          # is a handful of candidates (kilobytes) and the account holds ten VPCs, so
+          # there is a lot of headroom - but a pathological cycle that somehow produced
+          # thousands of candidates would fail to create the pod rather than truncate,
+          # so if that ever happens the fix is to pass an artifact, not a parameter.
           - name: REPORT
             value: '{{inputs.parameters.report}}'
           - name: SCAN_STATUS
@@ -374,7 +418,8 @@ spec:
 
     # The gate that makes a broken scan visibly fail. runJanitor's own exit codes (see
     # cmd/harness/main.go) already distinguish a real problem (2 usage, 3 safety abort, 1
-    # a sweep destroy failed) from a normal report - Succeeded is the only phase that
+    # a sweep destroy failed OR a destroy whose post-destroy verification query failed,
+    # which is the same "a human has to look" verdict) from a normal report - Succeeded is the only phase that
     # means "nothing here needs a human." This template has no continueOn, on purpose:
     # it is the one step in this workflow whose failure is meant to propagate.
     - name: verify-scan
