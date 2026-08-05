@@ -409,19 +409,13 @@ data "aws_iam_policy_document" "dr_s3_replication" {
   # Batch job task reports land in the primary-region logging bucket.
   # PutObject only: the manifest is S3-generated (never read back by this
   # role), so read access to the fleet's access logs stays off this role.
+  # No KMS grant needed for the report despite the bucket's SSE-KMS default:
+  # AWS writes completion reports with SSE-S3 explicitly, which overrides
+  # the bucket default.
   statement {
     effect    = "Allow"
     actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.logging_bucket.arn}/*"]
-  }
-
-  # The logging bucket defaults to SSE-KMS on the primary S3 key, so the
-  # report write also needs to generate a data key there. Without this the
-  # backfill replicates fine but the completion report never appears.
-  statement {
-    effect    = "Allow"
-    actions   = ["kms:Encrypt", "kms:GenerateDataKey"]
-    resources = distinct(compact([local.s3_kms_key_id, var.s3_kms_key_id]))
   }
 
   statement {
