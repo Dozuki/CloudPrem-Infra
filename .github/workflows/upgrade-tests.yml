@@ -49,6 +49,10 @@ env:
   PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || '' }}
   PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
   PR_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
+  # Supersession identity for the matrix's supersede step: it selects older runs by
+  # this label, never by parsing workflow names. Empty on dispatch runs, which never
+  # supersede anything.
+  PR_NUM: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
   NAME_HINT: ${{ github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || 'manual' }}
 
 jobs:
@@ -256,6 +260,7 @@ jobs:
             namespace: argo
             labels:
               harness/trigger: ${{ github.event_name == 'pull_request' && 'pr' || 'manual' }}
+              harness/pr: '${PR_NUM}'
           spec:
             workflowTemplateRef:
               name: harness-matrix
