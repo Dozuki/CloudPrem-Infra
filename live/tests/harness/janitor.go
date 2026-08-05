@@ -458,6 +458,20 @@ func classify(
 		base.WorkflowPhase = wf.Status.Phase
 		base.KeepOnFailure = wf.param("keep-on-failure") == "true"
 	}
+	// Defect P1 fix: the workflow-index value set just above is a best-effort fallback
+	// only now, not the source of truth. Argo TTLs the Workflow CR three days after it
+	// finishes (10-scenario.yaml ttlStrategy) - well inside "someone left a stack up
+	// over a weekend to debug it" - and once the CR is gone byWF has no entry at all, so
+	// the index silently reads back to false regardless of what a human actually chose.
+	// "a human explicitly asked to keep this" is exactly the intent a sweeper must never
+	// override on a technicality like an expired index. phases.go's Teardown now writes
+	// this decision into the manifest on every call (durable, outlives the CR), so it
+	// wins whenever it has an opinion. A manifest from before that write existed has no
+	// opinion (KeepOnFailureRecorded is false), so it falls back to whatever the
+	// workflow index above found - the same as today's behavior for an old run.
+	if m.KeepOnFailureRecorded {
+		base.KeepOnFailure = m.KeepOnFailure
+	}
 
 	// A salt that did not change anything (customer already at the 10-char terraform cap,
 	// or the config carries no "customer" flag at all) means the identifier is not
@@ -528,56 +542,113 @@ func classify(
 		return base, nil
 	}
 
-	// G8: live resources, confirmed by TAG VALUES recomputed from code. Customer is the
-	// salted identity this run applied with; deleteAfter is present only when the harness
-	// generated env.hcl (root.hcl only emits the tag when delete_after is non-empty, and
-	// only withDeleteAfter ever sets it). A hand-authored stack cannot match either filter.
-	n, anchored, terr := countTagged(ctx, d.Tags, []string{m.Region, m.DRRegion}, customer)
+	// G8: live resources, confirmed by TAG VALUES. Defect P2 fix: query with the customer
+	// this run ACTUALLY applied, not a fresh recompute of Config.Salted against today's
+	// matrix checkout. The matrix is a live file in the repo - if a config's "customer"
+	// feature flag is edited after a run starts and that run later leaks, recomputing
+	// here would query AWS for a tag the run never carried, find nothing, and
+	// permanently report a genuine leak Clean. Clean is neither alerted nor swept, so
+	// that is the silent under-detection this file's own countTaggedDetailed comment
+	// calls "the worst outcome available here". Provision now writes the identity it
+	// actually applied into the manifest at apply time (phases.go, RunManifest.
+	// AppliedCustomer) - that recorded value is authoritative here whenever present.
+	queryCustomer := customer
+	identityNote := ""
+	// identityUnverified: this config salts a real customer identity, but the manifest
+	// predates recording what was actually applied (a pre-fix run, or a write that
+	// failed after the field was added). The query below still runs against the
+	// RECOMPUTED value in that case, on purpose, rather than jumping straight to
+	// NeedsReview: the recompute is only WRONG when the config's customer flag was
+	// edited after this particular run applied, which is rare, and refusing to trust
+	// EVERY pre-fix manifest would quarantine every already-confirmed historical orphan
+	// behind a human gate for no reason. What the recompute can never be trusted for is
+	// a NEGATIVE result: if the guess is wrong, it queries a tag nothing carries, finds
+	// zero, and that is defect P2's exact failure (a real leak reported permanently
+	// Clean). So only the "found nothing" branches below downgrade to NeedsReview when
+	// this flag is set; a POSITIVE match (something real IS tagged under the recomputed
+	// value) is trustworthy regardless, because Config.Salted appends a run-and-config
+	// SHA256 suffix - two unrelated runs coincidentally salting to the same customer
+	// value is not a realistic risk.
+	identityUnverified := unsaltedCustomer != "" && m.AppliedCustomer == ""
+	if !identityUnverified && unsaltedCustomer != "" {
+		queryCustomer = m.AppliedCustomer
+		if queryCustomer != customer {
+			// The matrix now salts this config to a different customer than the run
+			// recorded - the config's "customer" flag was very likely edited after this
+			// run applied. Trust the recorded value (it is what actually owns the AWS
+			// resources) but say so plainly rather than silently preferring one, and run
+			// guardProtected again against it: this is a NEW identity the first gate
+			// (computed from today's matrix, above) never had the chance to see.
+			base.Identifier = queryCustomer + "-" + cfg.Env
+			base.Customer = queryCustomer
+			if perr := guardProtected(prefix, base.Identifier); perr != nil {
+				return nil, perr
+			}
+			identityNote = fmt.Sprintf(" [identity drift: this run recorded customer %q; config %q now salts to %q instead - using the run's recorded identity, not today's]", queryCustomer, m.ConfigName, customer)
+		}
+	} else if identityUnverified {
+		identityNote = " [identity unverified: manifest predates applied-customer recording, so this query used today's recomputed matrix value rather than a recorded one]"
+	}
+
+	// deleteAfter is present only when the harness generated env.hcl (root.hcl only
+	// emits the tag when delete_after is non-empty, and only withDeleteAfter ever sets
+	// it). A hand-authored stack cannot match either filter.
+	n, anchored, terr := countTagged(ctx, d.Tags, []string{m.Region, m.DRRegion}, queryCustomer)
 	if terr != nil {
 		base.State = StateUnknown
-		base.Reason = "tag lookup inconclusive: " + terr.Error()
+		base.Reason = "tag lookup inconclusive: " + terr.Error() + identityNote
 		return base, nil
 	}
 	base.Resources = n
 	if n == 0 {
+		if identityUnverified {
+			// The exact P2 failure mode: a "found nothing" verdict built on a GUESSED
+			// identity is not trustworthy enough to call this stack torn down. DO NOT
+			// guess - see the identityUnverified comment above.
+			base.State = StateNeedsReview
+			base.Reason = "manifest predates applied-customer recording (pre-fix run) and the recomputed identity found no tagged resources: a false negative here is exactly the P2 failure mode this fix closes (the recompute could be wrong if the config's customer flag changed since this run applied) - needs human review before trusting this as torn down"
+			return base, nil
+		}
 		// Normal, not a leak: Teardown never deletes the manifest or the state prefix, so
 		// every successfully torn-down run in history leaves this exact shape behind.
 		base.State = StateClean
-		base.Reason = "stale and unowned, no tagged resources remain"
+		base.Reason = "stale and unowned, no tagged resources remain" + identityNote
 		return base, nil
 	}
 	if !anchored {
 		// Defect 2: every counted resource is a type in insufficientAloneTypes (today,
 		// only security groups). Treat it the same as n==0 - see insufficientAloneTypes
 		// for why a security group can never legitimately be the only thing left behind.
+		if identityUnverified {
+			base.State = StateNeedsReview
+			base.Reason = fmt.Sprintf("manifest predates applied-customer recording (pre-fix run); the recomputed identity found only %d insufficient-alone-evidence resources, functionally a negative result - needs human review before trusting this as torn down", n)
+			return base, nil
+		}
 		// The count still goes in the report (base.Resources above) so the reason is
 		// visible, but the state is Clean: Sweep never acts on Clean, and there is
 		// nothing to destroy - AWS's own real state already has the VPC gone.
 		base.State = StateClean
-		base.Reason = fmt.Sprintf("%d tagged resources remain, but all are insufficient-alone evidence types (e.g. a stale security-group tag no longer backed by a real VPC); treating as torn down", n)
+		base.Reason = fmt.Sprintf("%d tagged resources remain, but all are insufficient-alone evidence types (e.g. a stale security-group tag no longer backed by a real VPC); treating as torn down%s", n, identityNote)
 		return base, nil
 	}
 	if age > 0 {
 		base.State = StateBlocked
 		base.LockAge = age.String()
-		base.Reason = fmt.Sprintf("%d resources still live but a stale lock (age %s) blocks an automatic destroy; needs a human force-unlock", n, age)
+		base.Reason = fmt.Sprintf("%d resources still live but a stale lock (age %s) blocks an automatic destroy; needs a human force-unlock%s", n, age, identityNote)
 		return base, nil
 	}
 	// keep-on-failure, checked last and specifically here: everything above it (ownership,
 	// staleness, lock) already had to pass for this candidate to even be orphan-shaped, so
 	// this is the exact point where Sweep would otherwise destroy a stack a human
-	// deliberately left up for debugging (Teardown's own keepOnFailure param, phases.go,
-	// only protects the harness's OWN exit-handler teardown - the janitor calls Teardown
-	// through RealTeardown, which does not thread this through, so nothing downstream of
-	// this check would have caught it). StateKept, not StateActive, so the report says WHY
-	// nothing happened instead of looking like an ordinary live run.
+	// deliberately left up for debugging. StateKept, not StateActive, so the report says
+	// WHY nothing happened instead of looking like an ordinary live run.
 	if base.KeepOnFailure {
 		base.State = StateKept
-		base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace, but the run set --keep-on-failure: left up on purpose, never auto-swept", n)
+		base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace, but the run set --keep-on-failure: left up on purpose, never auto-swept%s", n, identityNote)
 		return base, nil
 	}
 	base.State = StateOrphan
-	base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace with no owner: a teardown FAILED", n)
+	base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace with no owner: a teardown FAILED%s", n, identityNote)
 	return base, nil
 }
 

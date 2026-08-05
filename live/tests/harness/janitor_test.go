@@ -212,6 +212,23 @@ func seedManifest(t *testing.T, f *fakeJanitorS3, bucket, prefix string, rm *Run
 	}
 }
 
+// appliedCustomerFor computes the exact salted customer value production code would
+// (Config.Salted, config.go) for a given config+runID against testMatrix(). Used to
+// seed a test manifest's AppliedCustomer so it matches what a real Provision would
+// have written for a normal, non-drifted run - i.e. a well-formed POST-fix manifest,
+// as opposed to the pre-fix (field-absent) or drifted (deliberately different)
+// manifests the P2 regression tests construct on purpose.
+func appliedCustomerFor(t *testing.T, cfgName, runID string) string {
+	t.Helper()
+	cfg, err := testMatrix().Config(cfgName)
+	if err != nil {
+		t.Fatalf("appliedCustomerFor: %v", err)
+	}
+	salted := cfg.Salted(runID)
+	customer, _ := salted.FeatureFlags["customer"].(string)
+	return customer
+}
+
 func baseDeps(f *fakeJanitorS3, tagResources int, tagErr error) JanitorDeps {
 	tag := &fakeTagAPI{resources: tagResources, err: tagErr}
 	return JanitorDeps{
@@ -416,6 +433,7 @@ func TestStalenessBoundaries(t *testing.T) {
 			seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 				ConfigName: "min_default", DeleteAfter: c.deleteAfter.Format(time.RFC3339),
 				Region: testRegion, DRRegion: testDR,
+				AppliedCustomer: appliedCustomerFor(t, "min_default", "run1"),
 			})
 			deps := baseDeps(f, c.resources, nil)
 			rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
@@ -460,6 +478,7 @@ func TestStaleLockOnOrphanIsBlockedAndSkippedBySweep(t *testing.T) {
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
 		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer: appliedCustomerFor(t, "min_default", "run1"),
 	})
 	key := "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate"
 	f.put(primaryBucket(), key, "{}")
@@ -502,6 +521,7 @@ func TestTagLookupErrorIsUnknownAndNeverSwept(t *testing.T) {
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
 		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer: appliedCustomerFor(t, "min_default", "run1"),
 	})
 	deps := baseDeps(f, 0, errors.New("throttled"))
 
@@ -677,6 +697,7 @@ func TestClassifySecurityGroupAloneIsCleanNotOrphan(t *testing.T) {
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
 		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer: appliedCustomerFor(t, "min_default", "run1"),
 	})
 	tag := &fakeTagAPI{byType: map[string]int{"ec2:security-group": 2}}
 	deps := JanitorDeps{
@@ -1287,6 +1308,7 @@ func TestClassifyKeepOnFailureIsKeptNotOrphan(t *testing.T) {
 	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
 		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
 		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer: appliedCustomerFor(t, "min_default", "run1"),
 	})
 	wf := JanitorWorkflowList{Items: []JanitorWorkflow{
 		wfWithParam("run1", "Failed", "keep-on-failure", "true"),
@@ -1344,6 +1366,263 @@ func TestSweepSkipsKeepOnFailureAtDestroyTime(t *testing.T) {
 	}
 	if rep.Swept != 0 || rep.Failed != 0 {
 		t.Fatalf("Swept=%d Failed=%d, want 0/0", rep.Swept, rep.Failed)
+	}
+}
+
+// ---- defect P1: keep-on-failure must outlive the Workflow CR ----
+
+// TestClassifyKeepOnFailureSurvivesWorkflowCRExpiry is the regression test for defect
+// P1: a run that set --keep-on-failure and failed must stay StateKept, and therefore
+// never sweepable, even after Argo has already TTL'd its Workflow CR away
+// (10-scenario.yaml ttlStrategy reaps a failed workflow after three days - well inside
+// "left up over a weekend"). Before the fix, KeepOnFailure came ONLY from the workflow
+// index (janitor.go byWF): with no workflow object at all in the wfList passed to Scan
+// (simulating the CR being gone), that index has no entry for this run id, base.
+// KeepOnFailure silently defaults to false, and the candidate reads Orphan - sweepable.
+// The fix makes the manifest (written durably by every Teardown call, phases.go)
+// authoritative whenever it has an opinion, so this must classify Kept from the
+// manifest alone with zero workflow objects present.
+func TestClassifyKeepOnFailureSurvivesWorkflowCRExpiry(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer:       appliedCustomerFor(t, "min_default", "run1"),
+		KeepOnFailure:         true,
+		KeepOnFailureRecorded: true,
+	})
+	deps := baseDeps(f, 3, nil)
+
+	// No workflow objects at all - this is what the account looks like three-plus days
+	// after the run failed, once ttlStrategy has reaped the CR.
+	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	c := mustCandidate(t, rep, "run1-min_default/")
+	if c.State != StateKept {
+		t.Fatalf("state = %q, want kept (manifest must protect this run with no workflow object present); reason=%q", c.State, c.Reason)
+	}
+	if !c.KeepOnFailure {
+		t.Fatal("KeepOnFailure = false, want true (read from the manifest, not the empty workflow index)")
+	}
+
+	opts := testOptions(now)
+	opts.Sweep = true
+	swept := &teardownRecorder{}
+	deps.Teardown = swept.teardown
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if swept.calls != 0 {
+		t.Fatalf("Sweep called Teardown %d times, want 0 (a kept run with an expired CR must still never be swept)", swept.calls)
+	}
+	if rep.Orphans != 0 {
+		t.Fatalf("rep.Orphans = %d, want 0", rep.Orphans)
+	}
+}
+
+// TestClassifyKeepOnFailureRecordedFalseOverridesStaleWorkflowIndex is the flip side:
+// a manifest that explicitly recorded KeepOnFailure=false must win even if a leftover
+// (or malformed) workflow entry claims otherwise - the manifest is authoritative
+// whenever KeepOnFailureRecorded is true, not just when it happens to say true.
+func TestClassifyKeepOnFailureRecordedFalseOverridesStaleWorkflowIndex(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, DRRegion: testDR,
+		AppliedCustomer:       appliedCustomerFor(t, "min_default", "run1"),
+		KeepOnFailure:         false,
+		KeepOnFailureRecorded: true,
+	})
+	wf := JanitorWorkflowList{Items: []JanitorWorkflow{
+		wfWithParam("run1", "Failed", "keep-on-failure", "true"),
+	}}
+	deps := baseDeps(f, 3, nil)
+
+	rep, err := Scan(context.Background(), deps, testOptions(now), wf)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	c := mustCandidate(t, rep, "run1-min_default/")
+	if c.State != StateOrphan {
+		t.Fatalf("state = %q, want orphan (recorded keep-on-failure=false must win over the workflow index); reason=%q", c.State, c.Reason)
+	}
+}
+
+// ---- defect P2: identity must come from the manifest, not a live recompute ----
+
+// TestClassifyMissingAppliedCustomerIsNeedsReviewNotClean is the regression test for
+// defect P2's stated failure mode itself: a manifest written before AppliedCustomer
+// existed, whose recomputed identity happens to find NO tagged resources (exactly what
+// a config-drifted, still-genuinely-leaked stack looks like once the janitor queries
+// under the wrong, recomputed customer). The old code reported this permanently Clean
+// - neither alerted nor swept, the leak invisible forever. The fix must never let an
+// unverified identity produce a Clean verdict: this must classify NeedsReview instead,
+// and say why, so a human decides rather than trusting a guess that found nothing.
+func TestClassifyMissingAppliedCustomerIsNeedsReviewNotClean(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, DRRegion: testDR,
+		// AppliedCustomer deliberately omitted: this is what every manifest written
+		// before this fix looks like.
+	})
+	deps := baseDeps(f, 0, nil) // recomputed identity finds nothing - the danger case
+
+	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	c := mustCandidate(t, rep, "run1-min_default/")
+	if c.State != StateNeedsReview {
+		t.Fatalf("state = %q, want needs-review (an unverified identity must never produce a clean verdict); reason=%q", c.State, c.Reason)
+	}
+	if c.State == StateClean {
+		t.Fatal("state must never be clean for a manifest with no recorded identity - that is exactly the silent-miss bug this fix closes")
+	}
+	if !strings.Contains(c.Reason, "applied-customer") {
+		t.Fatalf("reason = %q, want it to explain the missing applied-customer recording", c.Reason)
+	}
+}
+
+// TestClassifyMissingAppliedCustomerStillDetectsARealOrphan proves the fix is
+// surgical, not a blanket quarantine: a pre-fix manifest (no AppliedCustomer) whose
+// config has NOT drifted still correctly classifies Orphan when the recomputed
+// identity finds real, live resources - exactly the shape of the two genuine leaks
+// already confirmed against the live account in earlier review rounds. Downgrading
+// every old manifest to NeedsReview regardless of outcome would have hidden those
+// same leaks behind a human gate for no reason; only a "found nothing" result is
+// untrustworthy enough to withhold (see TestClassifyMissingAppliedCustomerIsNeedsReviewNotClean).
+func TestClassifyMissingAppliedCustomerStillDetectsARealOrphan(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, DRRegion: testDR,
+		// AppliedCustomer omitted, but nothing has drifted: the recomputed identity is
+		// still the real one, so a positive match here must be trusted.
+	})
+	deps := baseDeps(f, 3, nil)
+
+	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	c := mustCandidate(t, rep, "run1-min_default/")
+	if c.State != StateOrphan {
+		t.Fatalf("state = %q, want orphan (a genuine leak under an unchanged identity must still be caught); reason=%q", c.State, c.Reason)
+	}
+	if !strings.Contains(c.Reason, "unverified") {
+		t.Fatalf("reason = %q, want it to note the identity was recomputed rather than recorded", c.Reason)
+	}
+}
+
+// TestClassifyManifestMissingBothFieldsFailsClosed covers a manifest from before EITHER
+// durability fix existed (no AppliedCustomer, no KeepOnFailureRecorded), together with a
+// workflow entry that claims keep-on-failure=false (so, absent the identity gate, this
+// would otherwise sail through to a tag query and come back Orphan or Clean depending on
+// the fake). The missing identity must dominate and produce NeedsReview regardless of
+// what the keep-on-failure signal says - fail closed, never Clean, never a sweepable
+// Orphan built on a guessed identity.
+func TestClassifyManifestMissingBothFieldsFailsClosed(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		Region: testRegion, DRRegion: testDR,
+		// Neither AppliedCustomer nor KeepOnFailureRecorded set: an ancient manifest.
+	})
+	wf := JanitorWorkflowList{Items: []JanitorWorkflow{
+		wfWithParam("run1", "Failed", "keep-on-failure", "false"),
+	}}
+	deps := baseDeps(f, 0, nil) // 0 tagged resources: would read Clean if the gate were skipped
+
+	rep, err := Scan(context.Background(), deps, testOptions(now), wf)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	c := mustCandidate(t, rep, "run1-min_default/")
+	if c.State != StateNeedsReview {
+		t.Fatalf("state = %q, want needs-review (fail closed on a manifest missing both fields); reason=%q", c.State, c.Reason)
+	}
+}
+
+// customerAwareTagAPI answers GetResources based on the "Customer" tag filter value the
+// request actually carries, unlike fakeTagAPI (which ignores filters and returns a
+// fixed count regardless of who asked). Needed to prove classify() queries AWS with the
+// manifest's RECORDED identity and not a fresh recompute: the two customer values must
+// behave differently for the test to be able to tell them apart.
+type customerAwareTagAPI struct {
+	resourcesFor map[string]int
+}
+
+func (f *customerAwareTagAPI) GetResources(_ context.Context, in *resourcegroupstaggingapi.GetResourcesInput, _ ...func(*resourcegroupstaggingapi.Options)) (*resourcegroupstaggingapi.GetResourcesOutput, error) {
+	var customer string
+	for _, tf := range in.TagFilters {
+		if aws.ToString(tf.Key) == "Customer" && len(tf.Values) > 0 {
+			customer = tf.Values[0]
+		}
+	}
+	var list []rgtypes.ResourceTagMapping
+	for i := 0; i < f.resourcesFor[customer]; i++ {
+		list = append(list, rgtypes.ResourceTagMapping{
+			ResourceARN: aws.String("arn:aws:ec2:us-east-1:123456789012:instance/i-" + string(rune('a'+i))),
+		})
+	}
+	return &resourcegroupstaggingapi.GetResourcesOutput{ResourceTagMappingList: list}, nil
+}
+
+// TestClassifyUsesRecordedIdentityNotRecomputedMatrix is the direct regression test for
+// defect P2 itself: the matrix's config has since drifted from what this run actually
+// applied (simulated by seeding an AppliedCustomer the current matrix would never
+// recompute for this run id), and the account's real tagged resources sit under the
+// OLD, recorded customer value. The old, buggy behavior recomputes Config.Salted
+// against today's matrix, queries under the NEW value, finds nothing, and reports the
+// leak Clean forever. The fix must query under the recorded value, find the leak, and
+// classify it Orphan.
+func TestClassifyUsesRecordedIdentityNotRecomputedMatrix(t *testing.T) {
+	f := newFakeJanitorS3()
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	recomputed := appliedCustomerFor(t, "min_default", "run1") // what today's matrix salts to
+	const recorded = "smokeold1"                               // what the run actually applied, back when the config's customer flag was different
+	if recorded == recomputed {
+		t.Fatalf("test fixture bug: recorded and recomputed must differ (%q)", recorded)
+	}
+	seedManifest(t, f, primaryBucket(), "run1-min_default/", &RunManifest{
+		ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+		// No DRRegion: only one region is queried, so the resource count below is
+		// unambiguous (countTaggedDetailed queries every non-empty, distinct region on
+		// the manifest, and a real single-region config carries no dr_region either).
+		Region:          testRegion,
+		AppliedCustomer: recorded,
+	})
+	tag := &customerAwareTagAPI{resourcesFor: map[string]int{recorded: 3}} // nothing under "recomputed"
+	deps := JanitorDeps{
+		S3: f, Tags: map[string]TagAPI{testRegion: tag, testDR: tag},
+		Locks: newFakeLockAPI(), Matrix: testMatrix(),
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+
+	rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	c := mustCandidate(t, rep, "run1-min_default/")
+	if c.State != StateOrphan {
+		t.Fatalf("state = %q, want orphan (querying under the recomputed identity would silently miss this leak and report clean); reason=%q", c.State, c.Reason)
+	}
+	if c.Customer != recorded {
+		t.Fatalf("Customer = %q, want the recorded identity %q, not a recompute", c.Customer, recorded)
+	}
+	if c.Resources != 3 {
+		t.Fatalf("Resources = %d, want 3", c.Resources)
+	}
+	if !strings.Contains(c.Reason, "drift") {
+		t.Fatalf("reason = %q, want it to call out the identity drift explicitly", c.Reason)
 	}
 }
 

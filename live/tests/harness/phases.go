@@ -153,6 +153,17 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	}
 	rm.Namespace, rm.AccountID = namespace, p.AccountID
 	p.ExtraInputs = rm.ExtraInputs // a pre-existing manifest's inputs win (re-entrancy)
+	// Record the identity THIS phase actually applied with, once. cfg is already
+	// Config.Salted(p.RunID) (see PhaseParams.Config), so this is the real customer
+	// value the apply below uses - not something the janitor has to recompute later
+	// against whatever the matrix happens to say by then. Guarded so a re-entrant retry
+	// within the same run never overwrites the value the FIRST successful apply used,
+	// even if a later pod's checkout somehow differs.
+	if rm.AppliedCustomer == "" {
+		if customer, _ := cfg.FeatureFlags["customer"].(string); customer != "" {
+			rm.AppliedCustomer = customer
+		}
+	}
 
 	applyRef := toRef
 	initSub := true
@@ -336,6 +347,28 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	if !ok {
 		step("teardown: no manifest for %s — nothing to destroy", p.statePrefix(cfg))
 		return nil
+	}
+	// Defect P1 fix: persist the keep-on-failure decision to the manifest BEFORE acting
+	// on it, on every call, whatever it is. The manifest outlives the Workflow CR (Argo
+	// TTLs a failed one after three days - 10-scenario.yaml ttlStrategy), so this is the
+	// one place the decision to leave a stack up on purpose still lives once the CR is
+	// gone and the janitor's workflow-index lookup goes blank. The skip decision two
+	// lines down does not itself depend on this save succeeding (it reads the local
+	// keepOnFailure argument, not rm) - only a LATER read (the janitor) does - but when
+	// this call is about to skip a destroy specifically because keepOnFailure is true,
+	// losing that write would silently reopen the exact hole this fix closes for this
+	// run's whole remaining lifetime, so that combination fails loud rather than best-
+	// effort. Every other combination (nothing protective is riding on it) logs and
+	// moves on, same posture as writeAppliedMarker elsewhere in this function.
+	if rm.KeepOnFailure != keepOnFailure || !rm.KeepOnFailureRecorded {
+		rm.KeepOnFailure = keepOnFailure
+		rm.KeepOnFailureRecorded = true
+		if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
+			if failed && keepOnFailure {
+				return fmt.Errorf("teardown: could not durably record --keep-on-failure before skipping the destroy: %w", serr)
+			}
+			step("WARNING: could not record keep-on-failure to the manifest (%v) — a later janitor read may not see this run's choice", serr)
+		}
 	}
 	if failed && keepOnFailure {
 		step("teardown SKIPPED (--keep-on-failure): stack for %s left up for debugging", p.statePrefix(cfg))
