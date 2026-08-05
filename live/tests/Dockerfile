@@ -19,16 +19,18 @@
 ARG ALPINE_VERSION=3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
 ARG GO_VERSION=1.25
 
-# Fleet pins. tofu/terragrunt MUST match infra-live/_spacelift/stacks.tf: the pair moves
-# together (terragrunt 0.99.4 caps tofu at 1.11.x) and terragrunt 1.x double-assumes
-# iam_role. run.sh warns when the local terragrunt is off this pin; the image cannot drift.
-ARG TOFU_VERSION=1.11.8
-ARG TERRAGRUNT_VERSION=0.99.4
+# Fleet pins. tofu/terragrunt MUST match infra-live/_spacelift/stacks.tf. Terragrunt
+# 1.1.2 fixed the backend double-assume that made terragrunt 1.1.1 403 on every
+# iam_role-chained stack (infra-live ce145a6 / #158); the gov parker canary proved
+# the fix on 2026-08-05 before the fleet moved. run.sh warns when the local
+# terragrunt is off this pin; the image cannot drift.
+ARG TOFU_VERSION=1.12.5
+ARG TERRAGRUNT_VERSION=1.1.2
 # Matched to the toolchain the harness is known green on locally, so the container is a
 # fair comparison rather than a second variable.
 ARG HELM_VERSION=4.2.3
 ARG KUBECTL_VERSION=1.36.3
-ARG VAULT_VERSION=2.0.3
+ARG VAULT_VERSION=2.0.4
 
 # ---------------------------------------------------------------------------
 # Stage 1: tools. Every download is checksum-verified against the publisher's

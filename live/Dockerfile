@@ -1,13 +1,14 @@
 # OpenTofu, not Terraform: physical requires >= 1.11.1 and logical needs OpenTofu's
 # provider for_each, so the old tf-1.5.2 image could not init either layer.
 #
-# Pinned to the exact pair the Spacelift fleet runs. Terragrunt 1.1.1 double-assumes
-# iam_role and 403s at init on every stack that has one (infra-live #158), so these
-# versions move together only after the fleet compatibility path is proven.
+# Pinned to the exact pair the Spacelift fleet runs. Terragrunt 1.1.1 double-assumed
+# iam_role and 403'd at init on every stack that has one (infra-live #158); 1.1.2
+# fixed the backend double-assume, proven on the gov parker canary on 2026-08-05
+# before the fleet moved to it (infra-live #235).
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
-ARG TOFU_VERSION=1.11.8
-ARG TERRAGRUNT_VERSION=0.99.4
+ARG TOFU_VERSION=1.12.5
+ARG TERRAGRUNT_VERSION=1.1.2
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 ARG TARGETARCH

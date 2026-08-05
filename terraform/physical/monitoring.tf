@@ -423,7 +423,11 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
   # aurora migration task. Gating on enable_bi alone left a migration on an
   # enable_bi=false env alertless - with the STOP_TASK apply-error policies a
   # soak-phase stop must page, or it sits unnoticed past binlog retention.
-  count = var.enable_bi || local.aurora_migration_dms ? 1 : 0
+  # Keyed on dms_enabled, not enable_bi: pure-replication BI (enable_bi with
+  # bi_dms_enabled/bi_public_access false) owns no DMS resources, so the
+  # resources pattern below renders [] and EventBridge rejects the rule
+  # outright (InvalidEventPatternException: Empty arrays are not allowed).
+  count = local.dms_enabled || local.aurora_migration_dms ? 1 : 0
 
   name        = "${local.identifier}-dms-task-changed-rule"
   description = "Capture change state of DMS replications (BI serverless) and tasks (aurora migration)"
@@ -451,7 +455,8 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
 }
 
 resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
-  count = var.enable_bi || local.aurora_migration_dms ? 1 : 0
+  # Same gate as the rule above; must never exist without it.
+  count = local.dms_enabled || local.aurora_migration_dms ? 1 : 0
 
   rule      = aws_cloudwatch_event_rule.dms_task_state_changed_rule[0].name
   target_id = "DmsTaskChangedTarget"
@@ -470,14 +475,48 @@ resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
 #
 # missing=breaching is deliberate: a deprovisioned or stuck replication emits
 # nothing, and it must page before the source's binlog retention window makes a
-# resume impossible. The 6x300s window only softens the case where an
-# ESTABLISHED metric stops (last real datapoint must age out, ~30min). A new
-# metric identity - greenfield env, or any config replacement rotating the
-# dimension value - has no datapoints, so every lookback slot counts as
-# breaching and the alarm pages at its first evaluation, staying in ALARM
-# until the logical layer starts the replication. That page is accurate (BI
-# is not replicating) and expected during those windows; do not "fix" it by
-# switching to notBreaching, which trades it for silent BI death.
+# resume impossible. A new metric identity - greenfield env, or any config
+# replacement rotating the dimension value - has no datapoints, so every
+# lookback slot counts as breaching and the alarm pages at its first
+# evaluation, staying in ALARM until the logical layer starts the replication.
+# That page is accurate (BI is not replicating) and expected during those
+# windows; do not "fix" it by switching to notBreaching, which trades it for
+# silent BI death.
+#
+# datapoints_to_alarm is deliberately BELOW evaluation_periods, and that gap is
+# the whole point - do not "simplify" it back to 9/9 or 12/12. CloudWatch sizes
+# the two directions from the same pair, and it is not symmetric:
+#
+#   OK    -> ALARM   needs datapoints_to_alarm                 = 9 breaching
+#   ALARM -> OK      needs evaluation_periods - dta + 1        = 4 non-breaching
+#
+# At 6/6 the resolve side collapsed to ONE non-breaching datapoint, which made
+# these two alarms flap hard around every stop/start of the replication. DMS
+# publishes CDCLatency* sparsely while CDC is spinning up (observed: a single
+# 5-min bucket, then a 70-minute gap), and with missing=breaching a lone
+# datapoint was enough to drive ALARM->OK, then its ageing out drove OK->ALARM
+# again ~30min later. One planned stop/start produced 14 notifications across
+# the pair, none of which said anything the first page had not.
+#
+# 9-of-12 fixes the resolve side: clearing now takes 4 non-breaching datapoints
+# within the last 12 periods (60min), so one sparse datapoint can no longer do
+# it. Note M-of-N does not require consecutive datapoints - 4 healthy readings
+# anywhere in the hour will clear it, they do not have to be adjacent. It also
+# swallows the restart transient for free - a resumed replication opens with the
+# whole accumulated binlog gap as its first reading (observed 11851s, drained to
+# single digits in the next period), and that spike now lands while the alarm is
+# ALREADY ALARM, so it causes no state transition and pages nobody.
+#
+# Cost of the wider window: the "replication stopped" page arrives after ~45min
+# of silence instead of ~30 (both are floors - CloudWatch keeps re-evaluating
+# the last real datapoints for a few periods after a metric stops, which adds an
+# unpublished overhang to either config equally). That is immaterial against the
+# 24h binlog retention this alarm exists to protect (bi.tf sets 'binlog
+# retention hours' 24 on the source endpoints; the 48h in aurora-migration.tf is
+# a different feature). A stop that emits a state-change event is separately and
+# immediately caught by dms_task_state_changed_rule above, but a replication
+# that stalls or goes silent without a state change emits no event - that is the
+# case these alarms uniquely cover, and there the extra 15min is real.
 locals {
   bi_replication_config_id = local.dms_enabled ? join(":", [
     split(":", aws_dms_replication_config.this[0].arn)[4],
@@ -491,8 +530,8 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_source" {
   alarm_description   = "BI serverless replication ${local.identifier}: CDCLatencySource high or not reporting (missing=breaching)"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = 900 # seconds
-  evaluation_periods  = 6
-  datapoints_to_alarm = 6
+  evaluation_periods  = 12
+  datapoints_to_alarm = 9
   period              = 300
   namespace           = "AWS/DMS"
   metric_name         = "CDCLatencySource"
@@ -510,8 +549,8 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
   alarm_description   = "BI serverless replication ${local.identifier}: CDCLatencyTarget high or not reporting (missing=breaching)"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = 900 # seconds
-  evaluation_periods  = 6
-  datapoints_to_alarm = 6
+  evaluation_periods  = 12
+  datapoints_to_alarm = 9
   period              = 300
   namespace           = "AWS/DMS"
   metric_name         = "CDCLatencyTarget"
@@ -834,6 +873,14 @@ resource "aws_lambda_permission" "dms_restart_permission" {
 # --- DR replication health (count-gated on enable_dr) --- #
 
 # S3 CRR: pending bytes growing unboundedly means replication is failing/stuck.
+#
+# KNOWN NON-FUNCTIONAL: ReplicationLatency (like BytesPendingReplication and
+# OperationsPendingReplication, but unlike OperationsFailedReplication) is
+# published in the DESTINATION bucket's region, and this alarm lives in the
+# primary region, so it never sees a datapoint and notBreaching keeps it
+# silently OK. Moving it needs a DR-region notification path (the dr_paging
+# topic only exists when Aurora DR is on), so it stays here, documented,
+# until the central-metrics parity work covers cross-region signals.
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
   for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
 
@@ -860,11 +907,18 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
   tags = local.tags
 }
 
+# Dormant from 2026-06 until the replication rules gained their metrics block
+# (dr.tf): the metric did not exist before that, so this alarm had nothing to
+# watch. OperationsFailedReplication is the one replication metric published
+# in the SOURCE region, so unlike the latency alarm above this one is in the
+# right place, and it also counts Batch Replication task failures (though not
+# a job that never runs at all - the rollout runbook's describe-job check
+# covers that).
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
   for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
 
   alarm_name          = "${local.identifier}-dr-s3-replication-failed-${each.key}"
-  alarm_description   = "S3 DR replication operations failing for ${local.identifier} ${each.key} bucket"
+  alarm_description   = "S3 DR replication to ${aws_s3_bucket.dr_guide_buckets[each.key].id} is failing for ${local.identifier} ${each.key}. Failed operations are NOT retried indefinitely. Diagnose (role trust/policy, KMS, destination), read the batch-replication-report CSVs in the logging bucket, then re-drive the gap with a Batch Replication job (util/create-s3-batch.sh)."
   namespace           = "AWS/S3"
   metric_name         = "OperationsFailedReplication"
   statistic           = "Sum"

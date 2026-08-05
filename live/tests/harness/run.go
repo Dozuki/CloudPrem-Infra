@@ -518,9 +518,6 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 		return 0, "", Capabilities{}, err
 	}
 	caps := DetectCapabilities(outs)
-	if err := validation.CheckEndpoints(outs); err != nil {
-		return 0, "", caps, err
-	}
 	kubeDir := filepath.Dir(tg.WorkingDir)
 	kc, err := validation.Kubeconfig(outs.ClusterName, region, p.Profile, kubeDir)
 	if err != nil {
@@ -539,6 +536,11 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 	// only to report "still not ready". The timeout here is a backstop for a controller
 	// that never reconciles, not a readiness estimate.
 	//
+	// This must run BEFORE the endpoint poll: on a broken install the endpoints 503
+	// for the poll's full 60 minutes and validateStack returns without ever collecting
+	// the Flux verdict, which is the one error message that says why (the v8.14.0
+	// smtp/ESO failure burned hours exactly this way).
+	//
 	// Skipped when there is no HelmRelease — a pre-v7.19.0 baseline in an upgrade run
 	// installs through the TF helm provider, where the apply already waited.
 	if validation.HelmReleaseManaged(kc, p.Namespace, "dozuki") {
@@ -546,6 +548,12 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 		if herr := validation.AwaitHelmReleaseReady(kc, p.Namespace, "dozuki", 60*time.Minute); herr != nil {
 			return 0, "", caps, herr
 		}
+	}
+
+	// Only now poll the public endpoints: with the release Ready this is a check on
+	// the LB/Envoy path, not a proxy for install health.
+	if err := validation.CheckEndpoints(outs); err != nil {
+		return 0, "", caps, err
 	}
 
 	// Ephemeral test stacks must not page anyone: they inherit the production Sentry DSN

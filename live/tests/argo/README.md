@@ -62,6 +62,16 @@ spot reclaim, node replacement), which re-entrancy makes safe to repeat. A non-z
 from the harness is a real verdict; retrying it would burn another hour and report the same
 thing.
 
+**Teardown is the exception, and carries its own retry.** OnError is correct for provision
+and validate because their exit code IS the verdict. It is wrong for teardown: a non-zero
+exit there is a failed cleanup, not an answer, and the stack it failed to destroy sits on
+DDVtest's books against a ceiling of 10 VPCs until a human notices. So the `teardown` step
+in `10-scenario.yaml` carries its own `retryPolicy: Always`, on the exit-handler template
+rather than the shared one, so provision and validate are untouched. The budget is bounded
+on purpose (three attempts, wall-clock capped): the workflow holds `harness-semaphore`
+through the whole exit handler, so an unbounded retry on one run would starve the other
+slot instead of just leaking a VPC.
+
 **Teardown is an exit handler.** A final step does not run when an earlier step fails,
 which is precisely when teardown matters. And because teardown reads the manifest from S3,
 cleanup is not tied to the process that created the stack: this pod, a retry, or the Phase 4
@@ -116,6 +126,3 @@ measurements.
   janitor's own region-mismatch check (`harness/janitor.go`) keeps it from ever sweeping
   the `recover` config's DR-region rebuild for the same reason - it reports `needs-review`
   rather than guess at a destroy this CLI cannot yet drive.
-- **PR triggers.** The nightly cron (`40-nightly-cron.yaml`) and the janitor
-  (`50-janitor-cron.yaml`) are both live; a PR-triggered submit path is still manual
-  (`argo submit ... -p pr-repo=... -p pr-sha=...`).

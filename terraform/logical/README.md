@@ -3,7 +3,7 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.9.0 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.1 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 4.0 |
 | <a name="requirement_external"></a> [external](#requirement\_external) | ~> 2.0 |
@@ -14,7 +14,7 @@
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
 | <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.0 |
 | <a name="requirement_tls"></a> [tls](#requirement\_tls) | ~> 4.0 |
-| <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 4.0 |
+| <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
 ## Providers
 
@@ -28,7 +28,7 @@
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | ~> 3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 | <a name="provider_tls"></a> [tls](#provider\_tls) | ~> 4.0 |
-| <a name="provider_vault"></a> [vault](#provider\_vault) | ~> 4.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | ~> 5.0 |
 
 ## Modules
 
@@ -228,6 +228,7 @@ No modules.
 | <a name="input_tls_key"></a> [tls\_key](#input\_tls\_key) | Base64-encoded PEM TLS private key matching tls\_cert. Required when tls\_cert is set. Set as a masked Spacelift TF\_VAR on the env's logical stack, not in git. | `string` | `""` | no |
 | <a name="input_vault_address"></a> [vault\_address](#input\_vault\_address) | Vault server address accessible from within the cluster (PrivateLink). | `string` | n/a | yes |
 | <a name="input_verify_artifact_pins"></a> [verify\_artifact\_pins](#input\_verify\_artifact\_pins) | Fail the plan when a pinned artifact (image\_tag, nextjs\_tag, chart\_version) does not exist in the env's ECR registry. Escape hatch for registries that revoke cross-account DescribeImages; see artifact-pins.tf. | `bool` | `true` | no |
+| <a name="input_watchdog_heartbeat_enabled"></a> [watchdog\_heartbeat\_enabled](#input\_watchdog\_heartbeat\_enabled) | Route Alertmanager's Watchdog alert to the alert relay as a heartbeat. The relay recognizes alertname=Watchdog and records a CloudWatch datapoint instead of posting it, which is what lets a deadman alarm tell 'this environment stopped delivering alerts' apart from 'this environment has nothing to say'. Without it, an alert-delivery failure is indistinguishable from silence, and the alert that would report the failure has to travel the broken path to reach anyone. Off by default so a chart\_version bump never changes alert routing on its own. A no-op unless chart\_version is >= 2.8.0, the release that added the route. Turn this on and confirm heartbeat datapoints are arriving BEFORE arming the deadman alarm on the relay, or it pages immediately on missing data. | `bool` | `false` | no |
 | <a name="input_webnextjs_env"></a> [webnextjs\_env](#input\_webnextjs\_env) | Extra container env vars for the web-nextjs pods, merged into the chart's webNextjs.env map. Per-env service URLs live here (CREATOR\_PRO\_SERVICE\_API\_URL, MARKETPLACE\_SERVICE\_API\_URL, ...); an empty map renders nothing. The chart's SERVER\_SIDE\_MONOLITH\_API\_URL default is preserved by the merge. | `map(string)` | `{}` | no |
 | <a name="input_zendesk_jwt_signing_key"></a> [zendesk\_jwt\_signing\_key](#input\_zendesk\_jwt\_signing\_key) | Zendesk JWT signing key (Azure only; AWS syncs it into Vault from 1Password via infra-tf's vault-config). Seeded into the Key Vault 'zendesk' secret, which chart >= 1.13.0 reads unconditionally. | `string` | `""` | no |
 

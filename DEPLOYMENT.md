@@ -16,7 +16,7 @@ brew install opentofu terragrunt
 # (`run --all`, `--non-interactive`). The old `--terragrunt-*` flags were REMOVED in
 # 0.85.0 with no grace period, so an old binary fails with "flag provided but not
 # defined". Check with `terragrunt --version`; if brew gives you something older,
-# `tgenv install 1.1.1 && tgenv use 1.1.1`.
+# `tgenv install 1.1.2 && tgenv use 1.1.2`.
 
 # Everything else
 brew install awscli helm kubectl hashicorp/tap/vault
@@ -28,16 +28,17 @@ export TERRAGRUNT_TFPATH=tofu
 | Tool | Version | Verify |
 |------|---------|--------|
 | OpenTofu | 1.12.5 (module floor `>= 1.11.1`) | `tofu version` |
-| Terragrunt | >= 1.0 (fleet runs 1.1.1) | `terragrunt --version` |
+| Terragrunt | 1.1.2 (>= 0.78; 1.1.1 broke iam_role assumption fleet-wide, fixed in 1.1.2) | `terragrunt --version` |
 | AWS CLI | 2.x | `aws --version` |
 | Helm | 3.x | `helm version` |
 | kubectl | 1.28+ | `kubectl version --client` |
 | Vault CLI | 1.15+ | `vault version` |
 
-> **Toolchain note:** Production deploys run on **Spacelift**, which pins the
-> *logical* layer to Terraform 1.5.7 (the last MPL-licensed release). The modules
-> themselves only require Terraform/OpenTofu **>= 1.11.1** (physical — for the Aurora
-> module and write-only attributes) and **>= 1.5.0** (logical), so a single OpenTofu
+> **Toolchain note:** Production deploys run on **Spacelift**. Physical and logical
+> both run OpenTofu (the fleet pin above); only the Vault stacks and the
+> `_spacelift-bootstrap` admin stack stay on Terraform 1.5.7 (the last MPL-licensed
+> release). Both modules require Terraform/OpenTofu **>= 1.11.1** (write-only
+> attributes, and the vault provider 5.x floor on logical), so a single OpenTofu
 > binary runs both layers locally.
 
 ### AWS SSO Profiles
@@ -163,7 +164,7 @@ From the environment root, deploy both layers:
 
 ```bash
 cd live/standard/us-east-1/<env>
-terragrunt run-all apply
+terragrunt run --all apply
 ```
 
 Terragrunt automatically applies physical before logical based on the dependency declared in `common.hcl`. The full deploy takes **20-40 minutes** (EKS ~12 min, RDS ~10 min).
@@ -174,7 +175,7 @@ If you get backend configuration errors, you may need to export credentials expl
 
 ```bash
 eval "$(aws configure export-credentials --profile <profile> --format env)"
-TG_AWS_PROFILE='' AWS_PROFILE='' terragrunt run-all apply
+TG_AWS_PROFILE='' AWS_PROFILE='' terragrunt run --all apply
 ```
 
 > **Heads-up:** these exported `AWS_*` env vars expire (~1 hour) and **override**
@@ -226,7 +227,7 @@ The Vault CLI doesn't support AWS SSO profiles natively — the `eval` export is
 ```bash
 eval "$(aws configure export-credentials --profile <target-account-profile> --format env)"
 export VAULT_ADDR=http://127.0.0.1:8200
-TG_AWS_PROFILE='' AWS_PROFILE='' terragrunt run-all apply
+TG_AWS_PROFILE='' AWS_PROFILE='' terragrunt run --all apply
 ```
 
 ## Step 6: Verify
@@ -257,8 +258,8 @@ cd logical && terragrunt output dozuki_url
 Use environment variables to skip a layer:
 
 ```bash
-SKIP_LOGICAL=true terragrunt run-all apply    # Physical only
-SKIP_INFRA=true terragrunt run-all apply      # Skip everything (both layers)
+SKIP_LOGICAL=true terragrunt run --all apply    # Physical only
+SKIP_INFRA=true terragrunt run --all apply      # Skip everything (both layers)
 ```
 
 ## Tearing Down
@@ -276,7 +277,7 @@ terragrunt destroy
 Or from the environment root:
 
 ```bash
-terragrunt run-all destroy
+terragrunt run --all destroy
 ```
 
 **Warning:** If `protect_resources = true`, RDS, S3, and the NLB get deletion
