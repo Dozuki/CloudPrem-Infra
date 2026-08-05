@@ -46,6 +46,14 @@ type fakeJanitorS3 struct {
 	// alwaysTruncated models a paginator that never converges (a repeated token), so
 	// the page cap is what has to stop it.
 	alwaysTruncated bool
+	// nilTruncated models a response with no IsTruncated flag at all. Real S3 always
+	// sets it, so this is an S3-compatible layer or a mangled proxy - and the listing
+	// helper must refuse to guess whether that page was the last one rather than
+	// silently treat it as the end (a short listing reads exactly like no leak).
+	nilTruncated bool
+	// putErr, when set, makes every PutObject fail - the WriteSweepReport archive
+	// failure path, which is documented non-fatal.
+	putErr error
 }
 
 func newFakeJanitorS3() *fakeJanitorS3 {
@@ -72,6 +80,9 @@ func (f *fakeJanitorS3) GetObject(_ context.Context, in *s3.GetObjectInput, _ ..
 }
 
 func (f *fakeJanitorS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	if f.putErr != nil {
+		return nil, f.putErr
+	}
 	b, _ := io.ReadAll(in.Body)
 	f.bucket(*in.Bucket)[*in.Key] = b
 	return &s3.PutObjectOutput{}, nil
@@ -139,6 +150,9 @@ func (f *fakeJanitorS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Inp
 		out.Contents = append(out.Contents, s3types.Object{Key: aws.String(e.value)})
 	}
 	switch {
+	case f.nilTruncated:
+		// Leave IsTruncated nil, which is what a non-S3 layer can do and real S3
+		// never does.
 	case f.alwaysTruncated:
 		// Never converges: same token back every time.
 		out.IsTruncated = aws.Bool(true)
@@ -148,6 +162,11 @@ func (f *fakeJanitorS3) ListObjectsV2(_ context.Context, in *s3.ListObjectsV2Inp
 	case end < len(entries):
 		out.IsTruncated = aws.Bool(true)
 		out.NextContinuationToken = aws.String(strconv.Itoa(end))
+	default:
+		// The last page. Real S3 always sends IsTruncated=false here rather than
+		// omitting it, and eachListPage now holds callers to that contract, so the
+		// fake has to model it too.
+		out.IsTruncated = aws.Bool(false)
 	}
 	return out, nil
 }
@@ -1229,17 +1248,20 @@ func TestSweepRespectsMaxSweepsCap(t *testing.T) {
 	if recorder.calls != 1 {
 		t.Fatalf("Teardown called %d times, want 1 (max-sweeps cap)", recorder.calls)
 	}
-	swept, untouched := 0, 0
+	swept, capped := 0, 0
 	for _, c := range rep.Candidates {
-		switch c.SweepResult {
-		case "destroyed":
+		switch {
+		case c.SweepResult == sweepResultDestroyed:
 			swept++
-		case "":
-			untouched++
+		case strings.Contains(c.SweepResult, "max-sweeps cap met"):
+			// Not an empty SweepResult: every skip path in Sweep says which one it
+			// was, so a cap-skipped orphan is distinguishable from one the loop
+			// never reached.
+			capped++
 		}
 	}
-	if swept != 1 || untouched != 1 {
-		t.Fatalf("swept=%d untouched=%d, want 1/1", swept, untouched)
+	if swept != 1 || capped != 1 {
+		t.Fatalf("swept=%d capped=%d, want 1/1", swept, capped)
 	}
 	if rep.Swept != 1 {
 		t.Fatalf("rep.Swept = %d, want 1", rep.Swept)
@@ -1358,8 +1380,8 @@ func TestSweepStopsAfterMaxSweepsSuccesses(t *testing.T) {
 	if len(calls) != 2 || calls[0] != "run1" || calls[1] != "run2" {
 		t.Fatalf("Teardown calls = %v, want [run1 run2] - run3 must never be attempted once the cap is met", calls)
 	}
-	if rep.Candidates[2].SweepResult != "" {
-		t.Fatalf("run3.SweepResult = %q, want untouched", rep.Candidates[2].SweepResult)
+	if !strings.Contains(rep.Candidates[2].SweepResult, "max-sweeps cap met") {
+		t.Fatalf("run3.SweepResult = %q, want it to say the max-sweeps cap was already met", rep.Candidates[2].SweepResult)
 	}
 }
 
@@ -2466,6 +2488,9 @@ func TestSweepResidueAllEligibleDeletesFailedIsDistinctFromNothingEligible(t *te
 	if !strings.Contains(c.SweepResult, "attempted") || !strings.Contains(c.SweepResult, "all failed") {
 		t.Fatalf("SweepResult = %q, want it to say deletes were attempted and all failed", c.SweepResult)
 	}
+	if !strings.Contains(c.Reason, "tagging index") {
+		t.Fatalf("Reason = %q, want the index-lag caveat on the all-failed branch too", c.Reason)
+	}
 	if rep.Residue != 1 {
 		t.Fatalf("rep.Residue = %d, want 1", rep.Residue)
 	}
@@ -2781,6 +2806,28 @@ func TestListingFailsClosedOnTruncatedWithNoToken(t *testing.T) {
 	}
 }
 
+// TestListingFailsClosedOnANilIsTruncated holds a listing to the same standard as the
+// missing-token case above. Real S3 always sets IsTruncated; a nil one means the
+// response is not the contract this loop reasons about, and reading it as "final page"
+// is the identical silent short read with none of the loudness.
+func TestListingFailsClosedOnANilIsTruncated(t *testing.T) {
+	f := newFakeJanitorS3()
+	f.nilTruncated = true
+	f.put(primaryBucket(), "run1-min_default/harness-manifest.json", "{}")
+	f.put(primaryBucket(), "run1-min_default/standard/us-east-1/min/physical/terraform.tfstate", "{}")
+
+	_, err := listTopPrefixes(context.Background(), f, primaryBucket())
+	if err == nil {
+		t.Fatal("listTopPrefixes: expected an error when IsTruncated is nil, got nil")
+	}
+	if !strings.Contains(err.Error(), "IsTruncated") {
+		t.Fatalf("err = %v, want it to name the missing IsTruncated flag", err)
+	}
+	if _, err := listStateKeys(context.Background(), f, primaryBucket(), "run1-min_default/"); err == nil {
+		t.Fatal("listStateKeys: expected an error when IsTruncated is nil, got nil")
+	}
+}
+
 // TestListingStopsAtTheMaxPageCap: a paginator that hands back the same token forever
 // used to loop until the pod deadline killed the cycle, which reads to a human as "the
 // janitor hung" rather than "listing broke".
@@ -2814,33 +2861,117 @@ func TestSweepBudgetReplacesTheSetupEstimateWithTheMeasurement(t *testing.T) {
 		ProcessStart: now.Add(-30 * time.Minute),
 		Now:          func() time.Time { return now },
 	}
-	// 30 minutes measured happens to equal sweepSetupMargin, so this case also pins
-	// that the two agree rather than compound: the answer is the deadline minus 30m
-	// once, which is exactly DefaultSweepBudget().
-	if got, want := o.sweepBudget(), podDeadline-30*time.Minute; got != want {
-		t.Fatalf("sweepBudget() = %s, want %s (pod deadline minus the 30m measured)", got, want)
-	}
-	if got := o.sweepBudget(); got != DefaultSweepBudget() {
-		t.Fatalf("sweepBudget() = %s, want DefaultSweepBudget() = %s when the measurement matches the estimate", got, DefaultSweepBudget())
+	// The measured 30 minutes comes off the deadline, and so does the reserve for the
+	// part of the pod's life this process could not measure (image pull, repo clone,
+	// Vault login - all of it already spent when ProcessStart was stamped).
+	if got, want := o.sweepBudget(), podDeadline-30*time.Minute-sweepPreProcessReserve; got != want {
+		t.Fatalf("sweepBudget() = %s, want %s (pod deadline minus the 30m measured minus the %s pre-process reserve)", got, want, sweepPreProcessReserve)
 	}
 
-	// A fast setup gets the time back instead of paying the estimate anyway.
+	// A fast setup gets the time back instead of paying the 30-minute estimate anyway.
 	o.ProcessStart = now.Add(-5 * time.Minute)
-	if got, want := o.sweepBudget(), podDeadline-5*time.Minute; got != want {
-		t.Fatalf("sweepBudget() = %s, want %s (only the 5m actually spent)", got, want)
+	if got, want := o.sweepBudget(), podDeadline-5*time.Minute-sweepPreProcessReserve; got != want {
+		t.Fatalf("sweepBudget() = %s, want %s (only the 5m actually spent, plus the reserve)", got, want)
 	}
 
-	// Past the whole pod deadline: floor, never zero or negative. Zero would read as
-	// "never start anything", and silently doing nothing is its own failure mode.
+	// Past the whole pod deadline the budget goes NEGATIVE and stays there. The old
+	// positive floor is exactly what let a pod at its deadline start one more
+	// multi-hour destroy: the budget check compares elapsed-inside-Sweep, which is 0
+	// for the first candidate, so any positive number always permits the first attempt.
 	o.ProcessStart = now.Add(-8 * time.Hour)
-	if got := o.sweepBudget(); got != minSweepBudget {
-		t.Fatalf("sweepBudget() = %s, want the %s floor", got, minSweepBudget)
+	if got := o.sweepBudget(); got > 0 {
+		t.Fatalf("sweepBudget() = %s, want <= 0 once the pod deadline is spent (a positive floor always permits one more destroy)", got)
+	}
+
+	// The exact boundary: measured elapsed + reserve == the pod deadline.
+	o.ProcessStart = now.Add(-(podDeadline - sweepPreProcessReserve))
+	if got := o.sweepBudget(); got != 0 {
+		t.Fatalf("sweepBudget() = %s, want exactly 0 at the boundary", got)
 	}
 
 	// No ProcessStart recorded means no measurement, so the estimate-derived budget stands.
 	o.ProcessStart = time.Time{}
 	if got := o.sweepBudget(); got != DefaultSweepBudget() {
 		t.Fatalf("sweepBudget() = %s, want DefaultSweepBudget() = %s when there is nothing to measure", got, DefaultSweepBudget())
+	}
+}
+
+// TestSweepDoesNothingWhenThePodDeadlineIsAlreadySpent is major-2's other half: an
+// exhausted budget must produce zero Teardown calls AND say so on every candidate, not
+// silently skip. A pod at its deadline that starts a ~90-minute destroy is SIGKILLed
+// mid-run, which strands infra worse than the orphan it was trying to clean up.
+func TestSweepDoesNothingWhenThePodDeadlineIsAlreadySpent(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "a-min_default/", Bucket: primaryBucket(), RunID: "a", ConfigName: "min_default",
+			Identifier: "smokea-min", State: StateOrphan, Resources: 3, Customer: "smokea", Region: testRegion},
+		{Prefix: "b-min_default/", Bucket: primaryBucket(), RunID: "b", ConfigName: "min_default",
+			Identifier: "smokeb-min", State: StateOrphan, Resources: 3, Customer: "smokeb", Region: testRegion},
+	}}
+	deps := JanitorDeps{
+		Matrix: testMatrix(),
+		Tags:   map[string]TagAPI{testRegion: &fakeTagAPI{}},
+		Teardown: func(context.Context, PhaseParams, bool) error {
+			calls++
+			return nil
+		},
+	}
+	opts := testOptions(now)
+	opts.MaxSweeps = 5
+	// The process started one full pod deadline ago: nothing is left, not even the
+	// unmeasurable head start.
+	opts.ProcessStart = now.Add(-time.Duration(JanitorPodActiveDeadlineSeconds) * time.Second)
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("Teardown called %d times, want 0 when the pod deadline is already exhausted", calls)
+	}
+	for _, c := range rep.Candidates {
+		if !strings.Contains(c.SweepResult, "pod deadline exhausted") {
+			t.Fatalf("candidate %s: sweep_result = %q, want it to say the pod deadline was exhausted before the sweep began", c.Prefix, c.SweepResult)
+		}
+		if c.State != StateOrphan {
+			t.Fatalf("candidate %s: State = %q, want it left at orphan so the next cycle picks it up", c.Prefix, c.State)
+		}
+	}
+	if rep.Orphans != 2 || rep.Swept != 0 {
+		t.Fatalf("orphans=%d swept=%d, want 2/0", rep.Orphans, rep.Swept)
+	}
+}
+
+// TestSweepStillDestroysWithATinyPositiveBudget is the other edge of the same boundary:
+// a budget that is small but real still permits the first destroy. The skip-everything
+// path must trigger on "no time at all", not on "not much time".
+func TestSweepStillDestroysWithATinyPositiveBudget(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "a-min_default/", Bucket: primaryBucket(), RunID: "a", ConfigName: "min_default",
+			Identifier: "smokea-min", State: StateOrphan, Resources: 3, Customer: "smokea", Region: testRegion},
+	}}
+	deps := JanitorDeps{
+		Matrix: testMatrix(),
+		Tags:   map[string]TagAPI{testRegion: &fakeTagAPI{}},
+		Teardown: func(context.Context, PhaseParams, bool) error {
+			calls++
+			return nil
+		},
+	}
+	opts := testOptions(now)
+	// One second short of the whole deadline+reserve: budget is 1s, which is positive.
+	opts.ProcessStart = now.Add(-(time.Duration(JanitorPodActiveDeadlineSeconds)*time.Second - sweepPreProcessReserve - time.Second))
+
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("Teardown called %d times, want 1 (a small positive budget still permits the first destroy)", calls)
+	}
+	if rep.Candidates[0].SweepResult != sweepResultDestroyed {
+		t.Fatalf("sweep_result = %q, want %q", rep.Candidates[0].SweepResult, sweepResultDestroyed)
 	}
 }
 
@@ -2959,5 +3090,196 @@ func TestJanitorReportPrefixIsNeverACandidate(t *testing.T) {
 	}
 	if len(rep.Candidates) != 0 {
 		t.Fatalf("candidates = %+v, want none", rep.Candidates)
+	}
+}
+
+// ---- review round 7: inconclusive outcomes, mixed reclaims, and the -md5 assert ----
+
+// TestSweepPostDestroyVerificationFailureIsCountedInconclusive: a destroy that RAN but
+// whose verification query then failed is the least-understood outcome the janitor can
+// produce, and it used to increment no counter at all - so runJanitor exited 0 and the
+// CronWorkflow went green on "we destroyed something and cannot see what survived".
+func TestSweepPostDestroyVerificationFailureIsCountedInconclusive(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: 0, responses: []map[string]int{{}}}
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+
+	if err := Sweep(context.Background(), deps, testOptions(time.Now()), rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if rep.Candidates[0].State != StateUnknown {
+		t.Fatalf("State = %q, want unknown (fail closed)", rep.Candidates[0].State)
+	}
+	if rep.Inconclusive != 1 {
+		t.Fatalf("rep.Inconclusive = %d, want 1 - this is what drives the non-zero exit code", rep.Inconclusive)
+	}
+	if rep.Failed != 0 || rep.Swept != 0 || rep.Residue != 0 {
+		t.Fatalf("Failed=%d Swept=%d Residue=%d, want 0/0/0: the destroy itself did not fail, and no residue was established", rep.Failed, rep.Swept, rep.Residue)
+	}
+}
+
+// TestSweepResidueReVerifyFailureIsCountedInconclusive is the same rule one level
+// deeper: the targeted-reclaim path's own re-verify query failing is equally unknown.
+func TestSweepResidueReVerifyFailureIsCountedInconclusive(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: 1, responses: []map[string]int{
+		{"dms:endpoint": 1},
+	}}
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 1, Customer: "smokeaa", Region: testRegion},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: &fakeDMSReclaim{}},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+
+	if err := Sweep(context.Background(), deps, testOptions(time.Now()), rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if rep.Candidates[0].State != StateUnknown {
+		t.Fatalf("State = %q, want unknown", rep.Candidates[0].State)
+	}
+	if rep.Inconclusive != 1 {
+		t.Fatalf("rep.Inconclusive = %d, want 1", rep.Inconclusive)
+	}
+}
+
+// TestSweepMixedResidueOutcomeCarriesTheFailedCount: when some targeted deletes worked
+// and some errored, the failure count has to travel with the report. It is the one
+// signal separating a permissions or dependency problem from genuinely untouchable
+// residue, and it was surfaced only on the all-failed branch.
+func TestSweepMixedResidueOutcomeCarriesTheFailedCount(t *testing.T) {
+	tags := &fakeSequencedTagAPI{errOnCall: -1, responses: []map[string]int{
+		{"dms:endpoint": 2, "dms:subgrp": 1},
+		{"dms:subgrp": 1},
+	}}
+	dms := &fakeDMSReclaim{failSubgrp: true} // endpoints clear, the subnet group errors
+	rep := &Report{Candidates: []Candidate{
+		{Prefix: "run1-min_default/", Bucket: primaryBucket(), RunID: "run1", ConfigName: "min_default",
+			Identifier: "smokeaa-min", State: StateOrphan, Resources: 3, Customer: "smokeaa", Region: testRegion},
+	}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		DMS:      map[string]DMSReclaimAPI{testRegion: dms},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+
+	if err := Sweep(context.Background(), deps, testOptions(time.Now()), rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if !strings.Contains(c.SweepResult, "1 targeted delete(s) FAILED") {
+		t.Fatalf("SweepResult = %q, want the failed count in it", c.SweepResult)
+	}
+	if !strings.Contains(c.Reason, "1 targeted delete(s) FAILED") {
+		t.Fatalf("Reason = %q, want the failed count in it", c.Reason)
+	}
+	if !strings.Contains(c.SweepResult, "1 remain") {
+		t.Fatalf("SweepResult = %q, want it to still say what remains", c.SweepResult)
+	}
+	// The caveat rides every residue reason, this branch included: a residue line that
+	// does not repeat next cycle was the tagging index lagging, not a real survivor.
+	if !strings.Contains(c.Reason, "tagging index") {
+		t.Fatalf("Reason = %q, want the index-lag caveat on the mixed branch too", c.Reason)
+	}
+}
+
+// TestReclaimResidueByARNFlagsARegisteredTypeWithNoRegion: residueDeleters is a
+// regional-only registry (the client is chosen by the ARN's own region). A registered
+// type whose ARN carries no region used to fall through the client lookup and vanish as
+// a silent continue - invisible the day someone registers a global type.
+func TestReclaimResidueByARNFlagsARegisteredTypeWithNoRegion(t *testing.T) {
+	dms := &fakeDMSReclaim{}
+	attempted, failed, byType := reclaimResidueByARN(context.Background(),
+		map[string]DMSReclaimAPI{testRegion: dms},
+		// A registered type (dms:endpoint) with an EMPTY region field, the shape a
+		// global-ARN type would have.
+		[]string{"arn:aws:dms::123456789012:endpoint/global-shaped"})
+	if attempted != 0 {
+		t.Fatalf("attempted = %d, want 0 - there is no client to route a region-less ARN to", attempted)
+	}
+	if failed != 1 {
+		t.Fatalf("failed = %d, want 1 so the report says a registered type was not reclaimed", failed)
+	}
+	if len(byType) != 0 {
+		t.Fatalf("byType = %v, want empty", byType)
+	}
+	if len(dms.deletedEndpoints) != 0 {
+		t.Fatalf("DeleteEndpoint calls = %v, want none", dms.deletedEndpoints)
+	}
+}
+
+// TestAssertDigestIDRefusesANonMD5Id exercises the last gate before a DeleteItem with a
+// hand-built id. clearStateDigests composes the "-md5" one line above the assert, which
+// makes the assert unreachable from there by construction - the point of splitting it
+// out is that "unreachable" no longer means "unproven": a plain LockID is a real state
+// mutex and this package must never delete one.
+func TestAssertDigestIDRefusesANonMD5Id(t *testing.T) {
+	if _, err := assertDigestID("dozuki-terraform-state-us-east-1-076248559428/run1-min_default/physical/terraform.tfstate"); err == nil {
+		t.Fatal("assertDigestID accepted a plain LockID; that id is a live state mutex, not a digest")
+	}
+	got, err := digestItemID("bucket/key/terraform.tfstate")
+	if err != nil {
+		t.Fatalf("digestItemID on a normal lock id: %v", err)
+	}
+	if got != "bucket/key/terraform.tfstate-md5" {
+		t.Fatalf("digestItemID = %q, want the -md5 suffixed id", got)
+	}
+}
+
+// TestClearStateDigestsPartialSuccessReportsBoth: the helper is best-effort by
+// contract - one failing DeleteItem must not abandon the rest, and the first error
+// still has to come back so the caller can log it.
+func TestClearStateDigestsPartialSuccessReportsBoth(t *testing.T) {
+	f := newFakeJanitorS3()
+	bucket, prefix := primaryBucket(), "run1-min_default/"
+	f.put(bucket, prefix+"standard/us-east-1/min/physical/terraform.tfstate", "{}")
+	f.put(bucket, prefix+"standard/us-east-1/min/logical/terraform.tfstate", "{}")
+	// The DR location has no client wired, so it contributes the error while the
+	// primary location's two deletes still happen.
+	digests := &fakeDigestAPI{}
+	deps := JanitorDeps{S3: f, Digests: map[string]DigestAPI{testRegion: digests}}
+
+	n, err := clearStateDigests(context.Background(), deps, testOptions(time.Now()),
+		candidateBuckets(testAccount, testRegion, testDR), prefix)
+	if err == nil {
+		t.Fatal("expected the missing DR digest client to be reported")
+	}
+	if n != 2 {
+		t.Fatalf("cleared = %d, want 2: an error on one location must not abandon the other", n)
+	}
+	if len(digests.deleted) != 2 {
+		t.Fatalf("DeleteItem calls = %v, want the two primary-bucket digests", digests.deleted)
+	}
+}
+
+// TestWriteSweepReportSurfacesAPutFailure: the archive is best-effort at the CALL SITE
+// (main.go logs and carries on - failing to store the audit copy must not change what
+// the cycle already did to real infrastructure), which only works if the failure is
+// actually returned rather than swallowed here.
+func TestWriteSweepReportSurfacesAPutFailure(t *testing.T) {
+	f := newFakeJanitorS3()
+	f.putErr = errors.New("AccessDenied")
+	rep := &Report{SchemaVersion: JanitorReportSchemaVersion, Mode: "sweep", Swept: 1}
+
+	key, err := WriteSweepReport(context.Background(), JanitorDeps{S3: f}, testOptions(time.Now()), rep)
+	if err == nil {
+		t.Fatal("WriteSweepReport: expected the PutObject failure to be returned")
+	}
+	if key != "" {
+		t.Fatalf("key = %q, want empty on failure", key)
+	}
+	if _, nerr := WriteSweepReport(context.Background(), JanitorDeps{}, testOptions(time.Now()), rep); nerr == nil {
+		t.Fatal("WriteSweepReport with no S3 client: expected an error")
 	}
 }

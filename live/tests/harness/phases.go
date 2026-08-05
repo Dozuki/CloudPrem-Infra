@@ -141,6 +141,12 @@ func stateBucket(accountID, region string) string {
 	return os.Getenv("TG_BUCKET_PREFIX") + "dozuki-terraform-state-" + region + "-" + accountID
 }
 
+// StateBucket is stateBucket for callers outside this package. cmd/harness needs the
+// exact same names to build its bucket->region routing table for the janitor's
+// two-bucket scan: deriving them from the one function that also builds them here is
+// what keeps the router from guessing a region out of a bucket string.
+func StateBucket(accountID, region string) string { return stateBucket(accountID, region) }
+
 // awsConfigFor loads AWS config for an optional shared-config profile + region.
 func awsConfigFor(ctx context.Context, profile, region string) (aws.Config, error) {
 	opts := []func(*config.LoadOptions) error{config.WithRegion(region)}
@@ -512,15 +518,17 @@ func deleteContainerInsightsLogGroupsWithClient(ctx context.Context, api LogsRec
 // harness's Customer/deleteAfter tags either, so they are invisible to the janitor's own
 // tag-based detection; this is the only place any of them gets reclaimed.
 //
-// Region scoping: Teardown calls reclaimOutOfStateResourcesForRegion for p.Region only,
-// never the DR region. That is not an oversight - all four classes above are created in
-// the cluster's PRIMARY region or are IAM (global, no region at all): the CSI driver and
-// Karpenter provision EBS volumes and launch templates against the primary EKS cluster,
-// Lambda/DMS log groups follow the same primary-region resources they instrument, and
-// IAM roles have no region. Nothing today runs any of these four in the DR region. If a
-// future category-B class IS DR-region-scoped, add a second
-// reclaimOutOfStateResourcesForRegion call against p.Matrix.Defaults.DRRegion rather than
-// assuming this one call already covers it.
+// Region scoping: Teardown calls reclaimOutOfStateResourcesForRegion - and, on the same
+// contract, deleteContainerInsightsLogGroups - for p.Region only, never the DR region.
+// That is not an oversight. All four classes above are created in the cluster's PRIMARY
+// region or are IAM (global, no region at all): the CSI driver and Karpenter provision
+// EBS volumes and launch templates against the primary EKS cluster, Lambda/DMS log
+// groups follow the same primary-region resources they instrument, and IAM roles have
+// no region. The container-insights groups belong to the same primary-region EKS
+// cluster and its CloudWatch agent, so they share the contract exactly. Nothing today
+// runs any of these in the DR region. If a future class IS DR-region-scoped, add a
+// second call against p.Matrix.Defaults.DRRegion rather than assuming this one already
+// covers it.
 
 // EC2ReclaimAPI is the minimal EC2 surface for reclaiming CSI-created EBS volumes and
 // orphaned launch templates.

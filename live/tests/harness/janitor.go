@@ -135,6 +135,15 @@ type Report struct {
 	// lumping it into "failed" would tell a human to do the one thing that provably
 	// does not work.
 	Residue int `json:"residue"`
+	// Inconclusive counts candidates Sweep moved to StateUnknown: a destroy RAN and
+	// the post-destroy verification query then failed, so nobody knows what is still
+	// standing. Kept apart from Failed (the destroy itself did not fail) and from
+	// Residue (residue is a known quantity; this is the absence of one), but it drives
+	// the same non-zero exit code as Failed in runJanitor. Before this counter existed
+	// the branch incremented nothing at all, so "we destroyed something and cannot see
+	// what survived" was a green workflow - the one outcome in this file that most
+	// needs a human was the only one with no signal attached.
+	Inconclusive int `json:"inconclusive"`
 }
 
 // protectedStatePrefixes and protectedIdentifiers are the never-touch list. They are a
@@ -252,15 +261,19 @@ const JanitorPodActiveDeadlineSeconds = 12600
 // margin is what would let Sweep itself blow the pod deadline.
 const sweepSetupMargin = 30 * time.Minute
 
-// minSweepBudget is the floor sweepBudget() will not go below once it subtracts the
-// measured pre-Sweep elapsed time. A floor rather than "clamp to zero" because a zero
-// budget reads as "never start anything", and silently doing nothing is its own
-// failure mode (the same reasoning as DefaultSweepBudget's defensive branch). It is
-// deliberately small: Sweep's budget check compares elapsed-inside-Sweep against it,
-// and elapsed is 0 for the first candidate, so the floor never blocks the first
-// attempt - it just stops a second one almost immediately when the pod is already
-// nearly out of time, which is the direction to fail toward.
-const minSweepBudget = time.Minute
+// sweepPreProcessReserve covers the part of the pod's life that runs BEFORE this
+// process exists and that ProcessStart therefore cannot measure: the image pull and
+// container start, docker-entrypoint.sh's repo clone or incremental fetch, and the
+// Vault login. ProcessStart is stamped at runJanitor's first line, so every one of
+// those is already spent by the time there is anything to measure - subtracting only
+// the measured elapsed time would hand Sweep a budget that overruns the pod deadline
+// by exactly that unmeasured head start, and a destroy SIGKILLed mid-run strands infra
+// worse than one never started (the whole reason this budget exists).
+//
+// 10 minutes against a measured worst case of ~2 (pull + clone + vault login on a warm
+// node), rounded up hard because the cost of overestimating is a slightly smaller
+// budget while the cost of underestimating is a killed destroy.
+const sweepPreProcessReserve = 10 * time.Minute
 
 // DefaultSweepBudget derives Sweep's wall-clock budget from
 // JanitorPodActiveDeadlineSeconds by subtracting sweepSetupMargin, rather than being
@@ -305,9 +318,18 @@ func DefaultSweepBudget() time.Duration {
 // DefaultSweepBudget(), which has already subtracted the estimate. Subtracting from
 // DefaultSweepBudget() would charge setup twice - a fast 5-minute setup would still lose
 // the full 30-minute margin on top of its own 5 - and the point of measuring is to
-// replace the guess, not to stack on top of it. Never below minSweepBudget: the goal is
-// to attempt LESS when the pod is nearly out of time, not to turn a slow cycle into a
-// silent no-op.
+// replace the guess, not to stack on top of it. sweepPreProcessReserve still comes off
+// the top, because the measurement starts at process start and the pod's clock started
+// before that.
+//
+// The result can be zero or negative, and that is a real answer, not a bug to clamp
+// away: it means the pod deadline is already spent and Sweep must start NOTHING. The
+// previous version returned a small positive floor instead, which - because the budget
+// check compares elapsed-INSIDE-Sweep and elapsed is 0 for the first candidate - let a
+// pod at or past its deadline start one more multi-hour destroy and get SIGKILLed
+// mid-run, the exact failure this budget exists to prevent. Sweep records the
+// skip-everything outcome on each candidate instead (see its budget checks), so "did
+// nothing" is stated in the report rather than silent.
 func (o JanitorOptions) sweepBudget() time.Duration {
 	if o.SweepBudget > 0 {
 		return o.SweepBudget
@@ -315,11 +337,8 @@ func (o JanitorOptions) sweepBudget() time.Duration {
 	if o.ProcessStart.IsZero() {
 		return DefaultSweepBudget()
 	}
-	budget := time.Duration(JanitorPodActiveDeadlineSeconds)*time.Second - o.now().Sub(o.ProcessStart)
-	if budget < minSweepBudget {
-		return minSweepBudget
-	}
-	return budget
+	return time.Duration(JanitorPodActiveDeadlineSeconds)*time.Second -
+		o.now().Sub(o.ProcessStart) - sweepPreProcessReserve
 }
 
 // sweepMax is the SUCCESSFUL-destroy cap, with the same "<= 0 means the conservative
@@ -562,6 +581,11 @@ const maxListPages = 10000
 //     exist (digests left unclear). S3's contract says a truncated response always
 //     carries a token, so this only fires when something upstream is violating it - and
 //     that is exactly when guessing is worst.
+//   - a NIL IsTruncated is the same class of error, by the same standard. Real S3
+//     always sets the field on a ListObjectsV2 response, so nil means the response is
+//     not the contract this loop reasons about (an S3-compatible layer, a mangled
+//     proxy) - and reading nil as "final page", which this used to do, is the identical
+//     silent short read as the case above with none of the loudness.
 //   - a page cap, see maxListPages.
 //
 // The caller's input is copied per page rather than mutated, so a caller can safely
@@ -580,7 +604,11 @@ func eachListPage(ctx context.Context, api S3ListGetAPI, in *s3.ListObjectsV2Inp
 			return err
 		}
 		fn(out)
-		if out.IsTruncated == nil || !*out.IsTruncated {
+		if out.IsTruncated == nil {
+			return fmt.Errorf("listing %s (prefix %q) returned no IsTruncated flag: refusing to guess whether this page was the last one",
+				aws.ToString(in.Bucket), aws.ToString(in.Prefix))
+		}
+		if !*out.IsTruncated {
 			return nil
 		}
 		if out.NextContinuationToken == nil {
@@ -652,10 +680,15 @@ func classify(
 	runID := strings.TrimSuffix(prefix, suffix)
 
 	salted := cfg.Salted(runID)
-	customer, _ := salted.FeatureFlags["customer"].(string)
+	// computedCustomer, not "customer": this is TODAY's recompute from the matrix in
+	// the current checkout, which is not necessarily the identity the run applied
+	// under. queryCustomer below is the one the AWS query actually uses, and G8's
+	// identity-drift branch is entirely about the two disagreeing - naming them apart
+	// is what keeps that readable.
+	computedCustomer, _ := salted.FeatureFlags["customer"].(string)
 	identifier := ""
-	if customer != "" {
-		identifier = customer + "-" + cfg.Env
+	if computedCustomer != "" {
+		identifier = computedCustomer + "-" + cfg.Env
 	}
 
 	// G3, first call site. Abort the whole cycle, do not skip this one candidate.
@@ -666,7 +699,7 @@ func classify(
 	base := &Candidate{
 		Prefix: prefix, Bucket: bucket, RunID: runID, ConfigName: m.ConfigName,
 		Identifier: identifier, DeleteAfter: m.DeleteAfter,
-		Customer: customer, Region: m.Region, DRRegion: m.DRRegion,
+		Customer: computedCustomer, Region: m.Region, DRRegion: m.DRRegion,
 	}
 	if wf, ok := byWF[runID]; ok {
 		base.WorkflowPhase = wf.Status.Phase
@@ -692,7 +725,7 @@ func classify(
 	// run-unique and could collide with a long-lived stack. Refuse to reason about it
 	// rather than work out whether this particular one is safe.
 	unsaltedCustomer, _ := cfg.FeatureFlags["customer"].(string)
-	if customer == "" || unsaltedCustomer == customer {
+	if computedCustomer == "" || unsaltedCustomer == computedCustomer {
 		base.State = StateNeedsReview
 		base.Reason = "salted customer did not change from the base config value; identifier may not be run-unique"
 		return base, nil
@@ -792,7 +825,7 @@ func classify(
 	// calls "the worst outcome available here". Provision now writes the identity it
 	// actually applied into the manifest at apply time (phases.go, RunManifest.
 	// AppliedCustomer) - that recorded value is authoritative here whenever present.
-	queryCustomer := customer
+	queryCustomer := computedCustomer
 	identityNote := ""
 	// identityUnverified: this config salts a real customer identity, but the manifest
 	// predates recording what was actually applied (a pre-fix run, or a write that
@@ -812,7 +845,7 @@ func classify(
 	identityUnverified := unsaltedCustomer != "" && m.AppliedCustomer == ""
 	if !identityUnverified && unsaltedCustomer != "" {
 		queryCustomer = m.AppliedCustomer
-		if queryCustomer != customer {
+		if queryCustomer != computedCustomer {
 			// The matrix now salts this config to a different customer than the run
 			// recorded - the config's "customer" flag was very likely edited after this
 			// run applied. Trust the recorded value (it is what actually owns the AWS
@@ -824,7 +857,7 @@ func classify(
 			if perr := guardProtected(prefix, base.Identifier); perr != nil {
 				return nil, perr
 			}
-			identityNote = fmt.Sprintf(" [identity drift: this run recorded customer %q; config %q now salts to %q instead - using the run's recorded identity, not today's]", queryCustomer, m.ConfigName, customer)
+			identityNote = fmt.Sprintf(" [identity drift: this run recorded customer %q; config %q now salts to %q instead - using the run's recorded identity, not today's]", queryCustomer, m.ConfigName, computedCustomer)
 		}
 	} else if identityUnverified {
 		identityNote = " [identity unverified: manifest predates applied-customer recording, so this query used today's recomputed matrix value rather than a recorded one]"
@@ -1083,8 +1116,16 @@ var residueDeleters = map[string]func(context.Context, DMSReclaimAPI, string) er
 // stop the rest, and the caller's re-verify tag query - not this function's return value
 // - is what actually confirms what cleared.
 //
-// failed counts ARNs that WERE eligible (a registered deleter, a configured client) but
-// whose delete call itself returned an error, kept deliberately separate from attempted
+// Every entry in residueDeleters is a REGIONAL resource type, and that is a contract,
+// not a coincidence: the client is picked by the ARN's own region field, so a global
+// type (an IAM-style ARN, whose region field is empty) would find no client under the
+// "" key and be skipped with no signal at all. Registering one is therefore reported
+// as a failure below rather than silently ignored - the day someone adds a global type
+// here, the report says so instead of quietly doing nothing forever.
+//
+// failed counts ARNs that WERE eligible by type but did not get deleted: the delete
+// call returned an error, or the ARN carries no region to route it by (the global-type
+// case above). Kept deliberately separate from attempted
 // (successes only) so the caller can tell "nothing here was eligible for a targeted
 // delete" apart from "everything eligible was tried and every one of them failed" -
 // those read identically to a caller that only checks attempted == 0, discarding the
@@ -1113,7 +1154,17 @@ func reclaimResidueByARN(ctx context.Context, dms map[string]DMSReclaimAPI, arns
 		if !ok {
 			continue
 		}
-		client, ok := dms[arnRegion(a)]
+		region := arnRegion(a)
+		if region == "" {
+			// A registered type whose ARN has no region: either a global-ARN type was
+			// added to residueDeleters (which the registry's regional-only contract
+			// forbids) or the ARN is malformed. Both used to fall into the client
+			// lookup below and vanish as a silent `continue`.
+			step("WARNING: residue reclaim skipped %s %s: the ARN carries no region, but residueDeleters is regional-only", resourceType, a)
+			failed++
+			continue
+		}
+		client, ok := dms[region]
 		if !ok || client == nil {
 			continue
 		}
@@ -1387,6 +1438,27 @@ func lockState(ctx context.Context, locks map[string]LockAPI, api S3ListGetAPI, 
 // JanitorDeps.Digests), and DeleteItem against a missing item succeeds, so a
 // primary-only client would report a DR digest "cleared" and the destroy would still
 // abort on it.
+// digestItemID composes the "-md5" digest item id for a lock id. Composition and the
+// safety assert are separate functions on purpose: composing right above the assert
+// makes the assert unreachable from here (that is the point - it is belt and braces on
+// top of the DigestAPI/LockAPI interface split, for a future refactor that changes how
+// the id is built or passes one in from elsewhere), but a defense nothing can execute
+// is also a defense nothing can prove. assertDigestID takes the finished id, so a test
+// can hand it one that was composed wrong and watch it refuse.
+func digestItemID(lockID string) (string, error) {
+	return assertDigestID(lockID + "-md5")
+}
+
+// assertDigestID is the last gate before a DeleteItem: an id that does not end in
+// "-md5" is a plain LockID, i.e. a real state mutex, and this package must never
+// delete one of those unattended.
+func assertDigestID(digestID string) (string, error) {
+	if !strings.HasSuffix(digestID, "-md5") {
+		return "", fmt.Errorf("refusing to delete a digest id not ending in -md5: %q", digestID)
+	}
+	return digestID, nil
+}
+
 func clearStateDigests(ctx context.Context, d JanitorDeps, o JanitorOptions, locs []stateLocation, prefix string) (int, error) {
 	cleared := 0
 	var firstErr error
@@ -1407,14 +1479,10 @@ func clearStateDigests(ctx context.Context, d JanitorDeps, o JanitorOptions, loc
 			continue
 		}
 		for _, key := range stateKeys {
-			lockID := bucket + "/" + key
-			digestID := lockID + "-md5"
-			// Hard assert before every write, on top of the interface split (DigestAPI has
-			// no way to address a plain LockID at all - this is belt and braces against a
-			// future refactor that widens the composition above).
-			if !strings.HasSuffix(digestID, "-md5") {
+			digestID, aerr := digestItemID(bucket + "/" + key)
+			if aerr != nil {
 				if firstErr == nil {
-					firstErr = fmt.Errorf("refusing to delete a digest id not ending in -md5: %q", digestID)
+					firstErr = aerr
 				}
 				continue
 			}
@@ -1537,6 +1605,10 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 		// either, for the same reason: a candidate Sweep already knows it cannot fix
 		// must never be the thing that eats the one real orphan's turn.
 		if rep.Swept >= o.sweepMax() {
+			// Say so, like every other skip path here does. A cap-skipped orphan with an
+			// empty SweepResult is indistinguishable in the report (and in Slack) from
+			// one the loop never reached at all.
+			c.SweepResult = "skipped: max-sweeps cap met"
 			continue
 		}
 		if failedAttempts >= maxFailures {
@@ -1547,6 +1619,16 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			// still StateOrphan in the report and gets picked up again next cycle, same
 			// as the one that failed.
 			c.SweepResult = "skipped: max-sweep-failures reached this cycle"
+			continue
+		}
+		if budget <= 0 {
+			// The pod deadline was already spent before Sweep began (a long image pull,
+			// a slow clone, a Scan that ran long). Starting even the first destroy here
+			// means starting one that cannot finish: the pod is killed mid-teardown and
+			// the stack is left in a worse state than the reported orphan it was. Record
+			// it per candidate rather than returning early so the report - and the Slack
+			// card built from it - says explicitly that this cycle swept nothing and why.
+			c.SweepResult = "skipped: pod deadline exhausted before the sweep began; no time left to start a destroy that could finish"
 			continue
 		}
 		if elapsed := o.now().Sub(start); elapsed >= budget {
@@ -1643,6 +1725,7 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			// posture as every other inconclusive AWS call in this file.
 			c.State = StateUnknown
 			c.SweepResult = "destroy ran, but the post-destroy verification query failed: " + terr.Error()
+			rep.Inconclusive++
 		case r.total > 0 && r.anchored:
 			c.State = StateResidue
 			c.Resources = r.total
@@ -1682,13 +1765,24 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 					// query we could not complete must never be read as "it worked".
 					c.State = StateUnknown
 					c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s), but the re-verify query failed: %v", attempted, formatByType(attemptedByType), terr2)
+					rep.Inconclusive++
 					break
+				}
+				// The mixed outcome: some targeted deletes worked, some errored. The
+				// failed count has to travel with it. This function's own contract
+				// (reclaimResidueByARN) calls that count the one signal separating a
+				// permissions or dependency problem from genuinely untouchable residue,
+				// and reporting only what was attempted hides it on exactly the cycle
+				// where both things happened at once.
+				failedNote := ""
+				if failedReclaims > 0 {
+					failedNote = fmt.Sprintf("; %d targeted delete(s) FAILED - see the pod log for the AWS error(s)", failedReclaims)
 				}
 				c.Resources = r2.total
 				c.Reason = fmt.Sprintf(
-					"terraform destroy completed; attempted %d targeted delete(s) (%s); %d tagged resource(s) still standing (%s): needs manual cleanup%s",
-					attempted, formatByType(attemptedByType), r2.total, formatByType(r2.byType), residueIndexLagCaveat)
-				c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s), %d remain", attempted, formatByType(attemptedByType), r2.total)
+					"terraform destroy completed; attempted %d targeted delete(s) (%s)%s; %d tagged resource(s) still standing (%s): needs manual cleanup%s",
+					attempted, formatByType(attemptedByType), failedNote, r2.total, formatByType(r2.byType), residueIndexLagCaveat)
+				c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s)%s, %d remain", attempted, formatByType(attemptedByType), failedNote, r2.total)
 				rep.Residue++
 			}
 		default:

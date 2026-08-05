@@ -340,6 +340,16 @@ func (o TGOptions) clearNLBProtection() {
 // older baseline ref that did create one, so a reader who greps for MSK today and finds
 // nothing in terraform/ should not delete this as dead code.
 //
+// Prefix match, where clearNLBProtection right above it is an exact match, and that
+// asymmetry is deliberate: the two resources were never named the same way. The NLB
+// carried the bare identifier, while the MSK cluster carried a SUFFIX -
+// cluster_name = "${local.identifier}-kafka" in terraform/physical/kafka.tf, deleted in
+// 832cceb ("remove the webhooks feature and its MSK infrastructure"), which is the only
+// baseline this function can still encounter. An exact match on o.Identifier would
+// therefore find nothing, ever, and turn the whole function into a silent no-op. The
+// prefix is safe to match on because it is the run-salted identifier (Config.Salted
+// appends a run+config SHA suffix), so it cannot reach another stack's cluster.
+//
 // Shells out to the aws CLI, matching clearNLBProtection right above it, rather than
 // adding the kafka Go SDK: TGOptions has no AWS SDK client threaded into it today, and
 // adding one (plus a go.mod/go.sum entry) for two calls covering a resource type that no
