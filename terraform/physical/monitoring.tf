@@ -475,14 +475,48 @@ resource "aws_cloudwatch_event_target" "dms_task_state_changed_target" {
 #
 # missing=breaching is deliberate: a deprovisioned or stuck replication emits
 # nothing, and it must page before the source's binlog retention window makes a
-# resume impossible. The 6x300s window only softens the case where an
-# ESTABLISHED metric stops (last real datapoint must age out, ~30min). A new
-# metric identity - greenfield env, or any config replacement rotating the
-# dimension value - has no datapoints, so every lookback slot counts as
-# breaching and the alarm pages at its first evaluation, staying in ALARM
-# until the logical layer starts the replication. That page is accurate (BI
-# is not replicating) and expected during those windows; do not "fix" it by
-# switching to notBreaching, which trades it for silent BI death.
+# resume impossible. A new metric identity - greenfield env, or any config
+# replacement rotating the dimension value - has no datapoints, so every
+# lookback slot counts as breaching and the alarm pages at its first
+# evaluation, staying in ALARM until the logical layer starts the replication.
+# That page is accurate (BI is not replicating) and expected during those
+# windows; do not "fix" it by switching to notBreaching, which trades it for
+# silent BI death.
+#
+# datapoints_to_alarm is deliberately BELOW evaluation_periods, and that gap is
+# the whole point - do not "simplify" it back to 9/9 or 12/12. CloudWatch sizes
+# the two directions from the same pair, and it is not symmetric:
+#
+#   OK    -> ALARM   needs datapoints_to_alarm                 = 9 breaching
+#   ALARM -> OK      needs evaluation_periods - dta + 1        = 4 non-breaching
+#
+# At 6/6 the resolve side collapsed to ONE non-breaching datapoint, which made
+# these two alarms flap hard around every stop/start of the replication. DMS
+# publishes CDCLatency* sparsely while CDC is spinning up (observed: a single
+# 5-min bucket, then a 70-minute gap), and with missing=breaching a lone
+# datapoint was enough to drive ALARM->OK, then its ageing out drove OK->ALARM
+# again ~30min later. One planned stop/start produced 14 notifications across
+# the pair, none of which said anything the first page had not.
+#
+# 9-of-12 fixes the resolve side: clearing now takes 4 non-breaching datapoints
+# within the last 12 periods (60min), so one sparse datapoint can no longer do
+# it. Note M-of-N does not require consecutive datapoints - 4 healthy readings
+# anywhere in the hour will clear it, they do not have to be adjacent. It also
+# swallows the restart transient for free - a resumed replication opens with the
+# whole accumulated binlog gap as its first reading (observed 11851s, drained to
+# single digits in the next period), and that spike now lands while the alarm is
+# ALREADY ALARM, so it causes no state transition and pages nobody.
+#
+# Cost of the wider window: the "replication stopped" page arrives after ~45min
+# of silence instead of ~30 (both are floors - CloudWatch keeps re-evaluating
+# the last real datapoints for a few periods after a metric stops, which adds an
+# unpublished overhang to either config equally). That is immaterial against the
+# 24h binlog retention this alarm exists to protect (bi.tf sets 'binlog
+# retention hours' 24 on the source endpoints; the 48h in aurora-migration.tf is
+# a different feature). A stop that emits a state-change event is separately and
+# immediately caught by dms_task_state_changed_rule above, but a replication
+# that stalls or goes silent without a state change emits no event - that is the
+# case these alarms uniquely cover, and there the extra 15min is real.
 locals {
   bi_replication_config_id = local.dms_enabled ? join(":", [
     split(":", aws_dms_replication_config.this[0].arn)[4],
@@ -496,8 +530,8 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_source" {
   alarm_description   = "BI serverless replication ${local.identifier}: CDCLatencySource high or not reporting (missing=breaching)"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = 900 # seconds
-  evaluation_periods  = 6
-  datapoints_to_alarm = 6
+  evaluation_periods  = 12
+  datapoints_to_alarm = 9
   period              = 300
   namespace           = "AWS/DMS"
   metric_name         = "CDCLatencySource"
@@ -515,8 +549,8 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
   alarm_description   = "BI serverless replication ${local.identifier}: CDCLatencyTarget high or not reporting (missing=breaching)"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = 900 # seconds
-  evaluation_periods  = 6
-  datapoints_to_alarm = 6
+  evaluation_periods  = 12
+  datapoints_to_alarm = 9
   period              = 300
   namespace           = "AWS/DMS"
   metric_name         = "CDCLatencyTarget"
