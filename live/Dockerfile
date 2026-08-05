@@ -6,7 +6,7 @@
 # versions move together only after the fleet compatibility path is proven.
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
-ARG TOFU_VERSION=1.11.8
+ARG TOFU_VERSION=1.11.13
 ARG TERRAGRUNT_VERSION=0.99.4
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM

@@ -268,7 +268,7 @@ fi
 # a hard gate here would also strand anyone mid-upgrade. Keep these in step with
 # infra-live/_spacelift/stacks.tf (terraform_version / terragrunt_version) - that file is
 # the source of truth, this is a mirror.
-FLEET_TOFU_VERSION="1.11.8"
+FLEET_TOFU_VERSION="1.11.13"
 FLEET_TG_VERSION="0.99.4"
 tofu_raw="$("$TG_TF_PATH" version 2>/dev/null | head -1)"
 tofu_ver="$(printf '%s' "$tofu_raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"

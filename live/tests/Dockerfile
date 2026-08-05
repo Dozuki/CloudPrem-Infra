@@ -22,7 +22,7 @@ ARG GO_VERSION=1.25
 # Fleet pins. tofu/terragrunt MUST match infra-live/_spacelift/stacks.tf: the pair moves
 # together (terragrunt 0.99.4 caps tofu at 1.11.x) and terragrunt 1.x double-assumes
 # iam_role. run.sh warns when the local terragrunt is off this pin; the image cannot drift.
-ARG TOFU_VERSION=1.11.8
+ARG TOFU_VERSION=1.11.13
 ARG TERRAGRUNT_VERSION=0.99.4
 # Matched to the toolchain the harness is known green on locally, so the container is a
 # fair comparison rather than a second variable.

@@ -16,7 +16,7 @@ jobs:
         include:
           # The physical layer uses the rds-aurora module (master_password_wo),
           # which requires Terraform/OpenTofu >= 1.11.1 — run it on the fleet's
-          # OpenTofu 1.11.8.
+          # OpenTofu 1.11.13.
           - module: physical
             tool: tofu
           # The logical layer moved to OpenTofu: it uses provider for_each (azurerm
