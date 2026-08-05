@@ -2485,8 +2485,8 @@ func TestSweepResidueAllEligibleDeletesFailedIsDistinctFromNothingEligible(t *te
 	if c.SweepResult == "residue: needs manual cleanup" {
 		t.Fatalf("SweepResult = %q, must not read identically to the nothing-was-eligible case", c.SweepResult)
 	}
-	if !strings.Contains(c.SweepResult, "attempted") || !strings.Contains(c.SweepResult, "all failed") {
-		t.Fatalf("SweepResult = %q, want it to say deletes were attempted and all failed", c.SweepResult)
+	if !strings.Contains(c.SweepResult, "targeted delete") || !strings.Contains(c.SweepResult, "none succeeded") {
+		t.Fatalf("SweepResult = %q, want it to say targeted deletes happened and none succeeded", c.SweepResult)
 	}
 	if !strings.Contains(c.Reason, "tagging index") {
 		t.Fatalf("Reason = %q, want the index-lag caveat on the all-failed branch too", c.Reason)

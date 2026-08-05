@@ -193,7 +193,11 @@ func TestNotifyScriptSelectsTheRightCandidates(t *testing.T) {
 
 	// The destroyed candidate belongs under the informational heading, not the alarm
 	// one - the whole point of excluding sweep_result "destroyed" from the alarm set.
-	alarmSection := text[strings.Index(text, "NEEDS A HUMAN"):]
+	alarmIdx := strings.Index(text, "NEEDS A HUMAN")
+	if alarmIdx < 0 {
+		t.Fatalf("alarm heading missing from the rendered card:\n%s", text)
+	}
+	alarmSection := text[alarmIdx:]
 	if idx := strings.Index(alarmSection, "destroyed this cycle"); idx >= 0 {
 		if strings.Contains(alarmSection[:idx], "`run1`") {
 			t.Errorf("the destroyed candidate is listed under NEEDS A HUMAN:\n%s", text)

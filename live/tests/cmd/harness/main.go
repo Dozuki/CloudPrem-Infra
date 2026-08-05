@@ -497,7 +497,7 @@ type multiRegionS3 struct {
 	// unrecognized bucket could hit a different client every run, so the AWS error a
 	// human read varied run to run for one underlying bug.
 	fallback *s3.Client
-	// primaryBucket/primaryRegion are carried only for the error message below.
+	// primaryRegion is carried only for the error message below.
 	primaryRegion string
 }
 

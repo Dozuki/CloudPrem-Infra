@@ -1754,9 +1754,9 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 				rep.Residue++
 			case attempted == 0 && failedReclaims > 0:
 				c.Reason = fmt.Sprintf(
-					"terraform destroy completed; %d targeted delete(s) were attempted (%s) but every one failed - see the pod log for the AWS error(s); needs manual cleanup%s",
+					"terraform destroy completed; %d targeted delete(s) failed or could not be attempted (%s) - see the pod log for the AWS error(s); needs manual cleanup%s",
 					failedReclaims, formatByType(r.byType), residueIndexLagCaveat)
-				c.SweepResult = fmt.Sprintf("residue: %d targeted delete(s) attempted, all failed", failedReclaims)
+				c.SweepResult = fmt.Sprintf("residue: %d targeted delete(s), none succeeded", failedReclaims)
 				rep.Residue++
 			default:
 				r2, terr2 := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)

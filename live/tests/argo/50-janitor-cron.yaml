@@ -419,9 +419,10 @@ spec:
     # The gate that makes a broken scan visibly fail. runJanitor's own exit codes (see
     # cmd/harness/main.go) already distinguish a real problem (2 usage, 3 safety abort, 1
     # a sweep destroy failed OR a destroy whose post-destroy verification query failed,
-    # which is the same "a human has to look" verdict) from a normal report - Succeeded is the only phase that
-    # means "nothing here needs a human." This template has no continueOn, on purpose:
-    # it is the one step in this workflow whose failure is meant to propagate.
+    # which is the same "a human has to look" verdict) from a normal report. Succeeded
+    # is the only phase that means "nothing here needs a human." This template has no
+    # continueOn, on purpose: it is the one step in this workflow whose failure is
+    # meant to propagate.
     - name: verify-scan
       inputs:
         parameters:
