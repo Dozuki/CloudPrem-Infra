@@ -651,19 +651,12 @@ resource "aws_s3_bucket_versioning" "dr_logging_bucket" {
   }
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "dr_logging_bucket" {
-  count    = local.dr_enabled ? 1 : 0
-  provider = aws.dr
-
-  bucket = aws_s3_bucket.dr_logging_bucket[0].id
-  rule {
-    apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.dr_s3[0].arn
-      sse_algorithm     = "aws:kms"
-    }
-    bucket_key_enabled = true
-  }
-}
+# Deliberately NO SSE-KMS on this bucket, do not "fix" it: AWS requires an
+# access-log destination to use SSE-S3. With SSE-KMS default encryption the
+# log-delivery service principal cannot use the key (it is not an IAM
+# principal the key's root-delegation policy can reach) and AWS warns logs
+# may arrive encrypted with a key you cannot access - the delivery just
+# silently never works. SSE-S3 (the bucket default) is the supported path.
 
 # Same hygiene the primary logging bucket carries: without it a versioned
 # bucket receiving one log record per replicated PUT keeps every noncurrent
