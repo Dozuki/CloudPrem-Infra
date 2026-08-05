@@ -445,6 +445,11 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
     # emit different detail-types. Matching on source + this env's resource ARNs catches both
     # and cannot silently stop matching if AWS words the serverless detail-type differently
     # than we assumed - a rule that never fires is indistinguishable from a healthy one.
+    #
+    # The rule forwards everything; sns_to_slack.py is what filters, and it filters the two
+    # producers differently. Serverless events post only when critical, because the CDC
+    # latency alarms below catch anything that goes quiet. The migration task has no alarm
+    # at all, so its events keep the older denylist and stay chatty on purpose.
     "resources" : compact(concat(
       [for r in aws_dms_replication_config.this : r.arn],
       local.aurora_migration_dms ? [aws_dms_replication_task.aurora_migration[0].replication_task_arn] : []
@@ -717,11 +722,12 @@ resource "aws_lambda_function" "sns_to_slack" {
   tags = local.tags
 }
 
-# Correlate CloudWatch ALARM -> OK on the bot-token path so recovery edits the
-# original incident card and adds one thread event instead of creating a second,
-# disconnected root post. The webhook fallback cannot update messages and does
-# not use this table. Resolved rows remain briefly as idempotency tombstones and
-# expire automatically.
+# Correlate CloudWatch ALARM -> OK on the bot-token path so the recovery card threads
+# under the incident that fired instead of landing as a second, disconnected root post.
+# The ALARM card itself is never edited green: an audit found a week's worth of firing
+# records overwritten that way, so the red root stays as the record and the recovery is a
+# separate broadcast reply. The webhook fallback cannot thread and does not use this
+# table. Resolved rows remain briefly as idempotency tombstones and expire automatically.
 resource "aws_dynamodb_table" "slack_alarm_state" {
   count = local.slack_use_token ? 1 : 0
 

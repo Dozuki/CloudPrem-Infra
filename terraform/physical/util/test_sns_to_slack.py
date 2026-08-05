@@ -1,10 +1,21 @@
 """
-Fixture matrix for the DMS routing in sns_to_slack.py.
+Fixture matrix for the DMS routing and the CloudWatch alarm lifecycle in sns_to_slack.py.
 
-Run: python3 util/test_sns_to_slack.py   (no deps, no pytest, exits non-zero on failure)
+Run: python3 util/test_sns_to_slack.py   (no pytest; needs boto3 importable, exits non-zero
+on failure)
 
-This exists because the routing is substring matching against AWS's own event wording, and
-two of the phrases in DMS_ROUTINE_MESSAGES are prefixes of messages that MUST page:
+Two DMS producers share one EventBridge rule and one lambda, and they are filtered
+differently, so the fixtures come in two sets:
+
+  * PROVISIONED (the aurora migration task, a replication-task ARN). Denylist only. This
+    task has no CloudWatch alarm anywhere, so the card is its only alerting and a
+    regression that drops one of these is silent data loss.
+  * SERVERLESS (the BI replication, a replication-config ARN). Critical only. The CDC
+    latency alarms are the backstop for anything that goes quiet.
+
+The denylist half exists because the routing is substring matching against AWS's own event
+wording, and two of the phrases in DMS_ROUTINE_MESSAGES are prefixes of messages that MUST
+page:
 
     "provisioning its capacity"  is inside  "deprovisioning its capacity"
     "has been provisioned"       is inside  "has been deprovisioned"
@@ -17,10 +28,14 @@ Messages below are AWS's documented wording for both source types (Replication a
 ReplicationTask, from the DMS user guide's EventBridge event tables) plus the scale-block
 variants observed live, which are not in the published tables.
 
+The lifecycle half pins the resolve semantics: a red ALARM root is posted once and never
+edited, because editing it green erased the record that the incident happened at all.
+
 The module is loaded by path rather than imported so this file does not depend on the
 package layout of whatever directory terraform zips it into.
 """
 
+import json
 import os
 import sys
 import importlib.util
@@ -38,23 +53,37 @@ _spec.loader.exec_module(sns_to_slack)
 
 DROP = sns_to_slack.DMS_ROUTINE_MESSAGES
 
+# The aurora migration task and the BI serverless replication, which are the two producers
+# behind the single EventBridge rule that feeds this lambda.
+TASK_ARN = "arn:aws:dms:us-east-1:111:replication-task:EXAMPLETASKID"
+SERVERLESS_ARN = "arn:aws:dms:us-east-1:111:replication-config:EXAMPLECONFIGID"
 
-def classify(detail_message, detail_type="DMS Replication State Change"):
+
+def classify(detail_message, detail_type="DMS Replication State Change",
+             resource_arn=TASK_ARN):
     """Mirror of the routing in lambda_handler's detail-type branch.
 
     Kept in step with sns_to_slack.py by hand. If the handler's logic changes, this must
     change with it - the point of the fixtures below is the message-to-outcome mapping,
-    not this three-line reimplementation.
+    not this reimplementation. run_dms_event below drives the real handler, so a drift
+    between the two shows up as a disagreement rather than a false pass.
     """
     haystack = f"{detail_message} {detail_type}".lower()
     critical = ("ERROR" in detail_message or "FATAL" in detail_message
                 or "fail" in haystack or "deprovision" in haystack)
-    if not critical and any(p in haystack for p in DROP):
+    if ":replication-config:" in resource_arn:
+        if not critical:
+            return "DROP"
+    elif not critical and any(p in haystack for p in DROP):
         return "DROP"
     return "PAGE" if critical else "POST"
 
 
 # (message, expected outcome, why it matters)
+#
+# PROVISIONED path (replication-task ARN). This is the aurora migration task, which has no
+# CloudWatch alarm of any kind, so nothing here may start dropping. Every expectation below
+# is the behaviour that shipped before the serverless split and must survive it unchanged.
 CASES = [
     # --- the reported noise, and every scaling decision ---
     ("The replication, 'm3-gca', cannot scale down as the replication is already at the "
@@ -124,6 +153,44 @@ CASES = [
      "'has been modified' must NOT match the 'is being modified' denylist entry"),
 ]
 
+# SERVERLESS path (replication-config ARN). Critical posts, everything else is dropped -
+# including states the provisioned path still posts, because the bi_cdc_latency_source and
+# bi_cdc_latency_target alarms go ALARM on their own within about 45 minutes if the
+# replication stops reporting. Deprovision is the state that must not wait for them.
+SERVERLESS_CASES = [
+    # --- the routine churn this gate exists to delete, roughly 225 messages a week ---
+    ("The replication, 'bi-replication', cannot scale down as the replication is already "
+     "at the provided Minimum DMS Capacity Units, '2'.", "DROP", "scale-cycle churn"),
+    ("DMS replication scaling up event.", "DROP", "scale-cycle churn"),
+    ("DMS replication is initializing.", "DROP", "provisioning pipeline step"),
+    ("DMS replication has been provisioned.", "DROP", "provisioning pipeline step"),
+    ("DMS replication is being modified.", "DROP", "emitted by our own DCU applies"),
+
+    # --- states the provisioned path still posts, now covered by the CDC latency alarms ---
+    ("DMS replication has stopped", "DROP", "alarm goes breaching within ~45min"),
+    ("DMS replication has started", "DROP", "no human acts on a restart confirmation"),
+    ("DMS replication is running.", "DROP", "no human acts on a healthy state"),
+    ("DMS replication has been created.", "DROP", "lifecycle, alarm covers the outcome"),
+    ("The replication, 'bi-replication', cannot scale up as the replication is already at "
+     "the provided Maximum DMS Capacity Units, '32'.", "DROP",
+     "capacity pressure is the -dms-capacity-saturated alarm's job, not a card"),
+
+    # --- one case per critical token, which is the whole whitelist ---
+    ("Last Error  Task error notification received from subtask 0, thread 0 "
+     "[reptask/replicationtask.c:2891] [1020101] ERROR: out of memory", "PAGE",
+     "ERROR token"),
+    ("FATAL: the replication instance ran out of storage.", "PAGE",
+     "FATAL token, carries no other failure word"),
+    ("DMS replication has failed.", "PAGE", "fail token, serverless carries no ERROR"),
+    ("DMS replication has been deprovisioned.", "PAGE",
+     "deprovision token - the one BI state nothing recovers from"),
+
+    # --- THE SUBSTRING TRAPS survive the new gate too ---
+    ("DMS replication is deprovisioning its capacity", "PAGE",
+     "prefixed by 'provisioning its capacity' - the transition into the unrecoverable "
+     "state, and the alarm only reports it ~45min later as 'not reporting'"),
+]
+
 
 def alarm_fixture(state="ALARM"):
     return {
@@ -148,6 +215,226 @@ def alarm_fixture(state="ALARM"):
             "Dimensions": [{"name": "LoadBalancer", "value": "app/checkout/abc"}],
         },
     }
+
+
+def run_dms_event(detail_message, resource_arn,
+                  detail_type="DMS Replication State Change"):
+    """Drive the real lambda_handler over a DMS event on the webhook path.
+
+    The fixture matrix above tests a mirror of the routing; this runs the handler itself,
+    so the two disagree loudly if the mirror drifts. Returns the payloads that reached
+    Slack and the ARNs get_task_name was called with - the second list is the assertion
+    that a drop happens BEFORE the DMS lookup, which costs an API call on every event.
+    """
+    event = {'Records': [{'Sns': {'Message': json.dumps({
+        'detail-type': detail_type,
+        'detail': {'detailMessage': detail_message},
+        'resources': [resource_arn],
+    })}}]}
+    posted, lookups = [], []
+    with mock.patch.dict(os.environ, {'AWS_ACCOUNT_ID': '111', 'IDENTIFIER': 'test-env',
+                                      'AWS_REGION': 'us-east-1'}), \
+         mock.patch.object(sns_to_slack, 'SLACK_BOT_TOKEN_SSM_PARAM', ''), \
+         mock.patch.object(sns_to_slack, 'SLACK_CHANNEL_ID', ''), \
+         mock.patch.object(sns_to_slack, 'get_account_alias', return_value='prod'), \
+         mock.patch.object(sns_to_slack, 'get_task_name',
+                           side_effect=lambda arn: lookups.append(arn) or 'replication'), \
+         mock.patch.object(sns_to_slack, '_post_webhook', side_effect=posted.append):
+        sns_to_slack.lambda_handler(event, None)
+    return posted, lookups
+
+
+def deliver_cloudwatch(state, prior, reaction_error=None):
+    """Run _deliver_cloudwatch_bot with every Slack and DynamoDB call captured."""
+    updates, posts, states, reactions = [], [], [], []
+
+    def _post(token, payload, thread_ts=None, reply_broadcast=False):
+        posts.append({'payload': payload, 'thread_ts': thread_ts,
+                      'broadcast': reply_broadcast})
+        return '333.444'
+
+    def _react(token, message_ts, name):
+        reactions.append((message_ts, name))
+        if reaction_error:
+            raise RuntimeError(reaction_error)
+
+    with mock.patch.object(sns_to_slack, '_get_alarm_state', return_value=prior), \
+         mock.patch.object(sns_to_slack, '_update_bot',
+                           side_effect=lambda token, ts, payload: updates.append((ts, payload))), \
+         mock.patch.object(sns_to_slack, '_post_bot', side_effect=_post), \
+         mock.patch.object(sns_to_slack, '_add_reaction', side_effect=_react), \
+         mock.patch.object(sns_to_slack, '_put_alarm_state',
+                           side_effect=lambda *args: states.append(args)):
+        sns_to_slack._deliver_cloudwatch_bot(
+            'xoxb', alarm_fixture(state), '3m-usac', 'us-east-1', '111', 'prod')
+    return updates, posts, states, reactions
+
+
+def slack_body_checks():
+    """What the Slack wrappers actually put on the wire.
+
+    The lifecycle checks below patch _post_bot and _add_reaction, so they prove the call
+    was made with the right arguments and nothing about the request body. A broadcast that
+    never reaches chat.postMessage looks identical to them, and looks identical in the
+    channel to no fix at all.
+    """
+    calls = []
+    with mock.patch.object(sns_to_slack, 'SLACK_CHANNEL_ID', 'C123'), \
+         mock.patch.object(sns_to_slack, '_slack_api',
+                           side_effect=lambda method, token, body:
+                           calls.append((method, body)) or {'ts': '333.444'}):
+        sns_to_slack._post_bot('xoxb', {'text': 'root'})
+        sns_to_slack._post_bot('xoxb', {'text': 'recovery'}, thread_ts='111.222',
+                               reply_broadcast=True)
+        sns_to_slack._add_reaction('xoxb', '111.222', 'white_check_mark')
+
+    root, reply, reaction = calls[0][1], calls[1][1], calls[2][1]
+    return [
+        ("root post carries no thread or broadcast",
+         calls[0][0] == 'chat.postMessage' and 'thread_ts' not in root
+         and 'reply_broadcast' not in root),
+        ("recovery post carries thread_ts on the wire", reply.get('thread_ts') == '111.222'),
+        ("recovery post carries reply_broadcast on the wire",
+         reply.get('reply_broadcast') is True),
+        ("reaction calls reactions.add on the root",
+         calls[2][0] == 'reactions.add' and reaction.get('timestamp') == '111.222'
+         and reaction.get('name') == 'white_check_mark'
+         and reaction.get('channel') == 'C123'),
+    ]
+
+
+def dms_routing_checks():
+    """End-to-end checks on the serverless-vs-provisioned split in lambda_handler."""
+    checks = []
+
+    # Deliberately a message the denylist does NOT contain, and which the provisioned path
+    # still posts. If the criticality gate is removed, the denylist cannot cover for it.
+    posted, lookups = run_dms_event('DMS replication has stopped', SERVERLESS_ARN)
+    checks.extend([
+        ("serverless non-critical is dropped", posted == []),
+        ("serverless drop skips the DMS name lookup", lookups == []),
+    ])
+
+    posted, _ = run_dms_event('DMS replication has stopped', TASK_ARN)
+    checks.append(("the same message on the provisioned path still posts", len(posted) == 1))
+
+    posted, lookups = run_dms_event(
+        "The replication, 'bi-replication', cannot scale down as the replication is "
+        "already at the provided Minimum DMS Capacity Units, '2'.", SERVERLESS_ARN)
+    checks.extend([
+        ("serverless scale churn is dropped", posted == []),
+        ("serverless scale churn skips the DMS name lookup", lookups == []),
+    ])
+
+    # One check per token in the critical test, because the whitelist is now the only
+    # thing keeping a serverless event alive.
+    for token, message in (
+        ('ERROR', 'Task error notification received [1020101] ERROR: out of memory'),
+        ('FATAL', 'FATAL: the replication instance ran out of storage.'),
+        ('fail', 'DMS replication has failed.'),
+        ('deprovision', 'DMS replication has been deprovisioned.'),
+    ):
+        posted, _ = run_dms_event(message, SERVERLESS_ARN)
+        checks.append((f'serverless {token} still posts',
+                       len(posted) == 1 and '<!channel>' in str(posted[0])))
+
+    # The substring collisions the denylist ordering used to protect. The serverless gate
+    # must not reintroduce them from the other direction.
+    for message in ('DMS replication is deprovisioning its capacity',
+                    'DMS replication has been deprovisioned.'):
+        for arn, path in ((SERVERLESS_ARN, 'serverless'), (TASK_ARN, 'provisioned')):
+            posted, _ = run_dms_event(message, arn)
+            checks.append((f'{path} pages on "{message[-28:]}"',
+                           len(posted) == 1 and '<!channel>' in str(posted[0])))
+
+    # The no-regression case that matters most: the migration task has no alarm behind it.
+    posted, lookups = run_dms_event('Replication task stopped', TASK_ARN,
+                                    detail_type='DMS Replication Task State Change')
+    checks.extend([
+        ("provisioned non-critical still posts", len(posted) == 1),
+        ("provisioned non-critical does not page", '<!channel>' not in str(posted[0] if posted else '')),
+        ("provisioned post resolves its name", lookups == [TASK_ARN]),
+    ])
+
+    posted, lookups = run_dms_event('DMS replication scaling up event.', TASK_ARN)
+    checks.extend([
+        ("provisioned denylist still drops", posted == []),
+        ("provisioned drop skips the DMS name lookup", lookups == []),
+    ])
+    return checks
+
+
+def lifecycle_checks():
+    """The resolve semantics: the red root is written once and never rewritten."""
+    checks = []
+    firing = {"message_ts": "111.222", "started_at": "2026-08-01T12:00:00.000+0000",
+              "status": "ALARM"}
+
+    updates, posts, states, reactions = deliver_cloudwatch("OK", firing)
+    card = str(posts[0]['payload']) if posts else ''
+    checks.extend([
+        ("resolution posts one card", len(posts) == 1),
+        ("resolution card is the full green card",
+         posts and posts[0]['payload'].get('attachments', [{}])[0].get('color')
+         == sns_to_slack.COLOR_RESOLVED
+         and all(x in card for x in ('✅ RESOLVED', 'OUTCOME', 'DURATION', '8m'))),
+        ("resolution threads under the root", posts and posts[0]['thread_ts'] == "111.222"),
+        ("resolution broadcasts to the channel", posts and posts[0]['broadcast'] is True),
+        # The audit that motivated this: 10 firing records overwritten in one week.
+        ("resolution never edits the red root", updates == []),
+        ("resolution reacts on the root", reactions == [("111.222", "white_check_mark")]),
+        ("resolution keeps idempotency tombstone",
+         bool(states) and states[0][1] == "111.222" and states[0][-1] == "RESOLVED"),
+    ])
+
+    # reactions:write can be revoked, the root can be too old, Slack can 5xx. None of
+    # that may cost us the resolution card, so the failure is swallowed at the call site
+    # rather than allowed out of _deliver_cloudwatch_bot.
+    try:
+        updates, posts, states, reactions = deliver_cloudwatch(
+            "OK", firing, reaction_error="missing_scope")
+        escaped = False
+    except Exception:  # noqa: BLE001 - the point of the check is that this cannot happen
+        updates, posts, states, reactions = [], [], [], []
+        escaped = True
+    checks.extend([
+        ("reaction failure does not escape the handler", not escaped),
+        ("reaction failure still posts the resolution card", len(posts) == 1),
+        ("reaction failure does not edit the root", updates == []),
+        # If this raised, the tombstone would never be written and the Lambda retry
+        # would post a second green card.
+        ("reaction failure still writes the tombstone",
+         bool(states) and states[0][-1] == "RESOLVED"),
+    ])
+
+    resolved = dict(firing, status="RESOLVED")
+    updates, posts, states, reactions = deliver_cloudwatch("OK", resolved)
+    checks.extend([
+        ("duplicate OK posts no second card", posts == []),
+        ("duplicate OK adds no second reaction", reactions == []),
+        ("duplicate OK edits nothing", updates == []),
+        ("duplicate OK rewrites the tombstone only",
+         bool(states) and states[0][-1] == "RESOLVED"),
+    ])
+
+    # Repeat ALARM keeps editing: it is duplicate SNS delivery of the same firing event,
+    # and the edit is what stops the same incident appearing twice. It never goes green.
+    updates, posts, states, reactions = deliver_cloudwatch("ALARM", firing)
+    checks.extend([
+        ("repeat ALARM edits the root", len(updates) == 1 and updates[0][0] == "111.222"),
+        ("repeat ALARM posts nothing new", posts == []),
+        ("repeat ALARM adds no reaction", reactions == []),
+        ("repeat ALARM stays ALARM", bool(states) and states[0][-1] == "ALARM"),
+    ])
+
+    updates, posts, states, reactions = deliver_cloudwatch("ALARM", None)
+    checks.extend([
+        ("first ALARM posts a root, unthreaded",
+         len(posts) == 1 and posts[0]['thread_ts'] is None
+         and posts[0]['broadcast'] is False),
+        ("first ALARM edits nothing", updates == []),
+    ])
+    return checks
 
 
 def renderer_checks():
@@ -191,43 +478,31 @@ def renderer_checks():
         {"schema": "secret raw payload"}, "3m-usac", "us-east-1")
     checks.append(("unknown payload stays out of Slack", "secret raw payload" not in str(fallback)))
 
-    updates, posts, states = [], [], []
-    prior = {"message_ts": "111.222", "started_at": "2026-08-01T12:00:00.000+0000",
-             "status": "ALARM"}
-    with mock.patch.object(sns_to_slack, "_get_alarm_state", return_value=prior), \
-         mock.patch.object(sns_to_slack, "_update_bot",
-                           side_effect=lambda token, ts, payload: updates.append((ts, payload))), \
-         mock.patch.object(sns_to_slack, "_post_bot",
-                           side_effect=lambda token, payload, thread_ts=None:
-                           posts.append((payload, thread_ts)) or "333.444"), \
-         mock.patch.object(sns_to_slack, "_put_alarm_state",
-                           side_effect=lambda *args: states.append(args)):
-        sns_to_slack._deliver_cloudwatch_bot(
-            "xoxb", alarm_fixture("OK"), "3m-usac", "us-east-1", "111", "prod")
-    checks.extend([
-        ("resolution updates root", len(updates) == 1 and updates[0][0] == "111.222"),
-        ("resolution posts thread event", len(posts) == 1 and posts[0][1] == "111.222"),
-        ("resolution keeps idempotency tombstone", bool(states) and states[0][-1] == "RESOLVED"),
-    ])
     return checks
 
 
 def main():
     failures = []
     for message, expected, why in CASES:
-        got = classify(message)
+        got = classify(message, resource_arn=TASK_ARN)
         if got != expected:
-            failures.append((message, expected, got, why))
+            failures.append((message, expected, got, f"provisioned: {why}"))
 
-    checks = renderer_checks()
+    for message, expected, why in SERVERLESS_CASES:
+        got = classify(message, resource_arn=SERVERLESS_ARN)
+        if got != expected:
+            failures.append((message, expected, got, f"serverless: {why}"))
+
+    checks = (renderer_checks() + slack_body_checks() + dms_routing_checks()
+              + lifecycle_checks())
     for name, passed in checks:
         if not passed:
-            failures.append((name, "PASS", "FAIL", "renderer/lifecycle contract"))
+            failures.append((name, "PASS", "FAIL", "renderer/routing/lifecycle contract"))
 
     for message, expected, got, why in failures:
         print(f"FAIL  expected {expected}, got {got}\n      {message[:100]}\n      ({why})")
 
-    total = len(CASES) + len(checks)
+    total = len(CASES) + len(SERVERLESS_CASES) + len(checks)
     print(f"\n{total - len(failures)}/{total} passed")
     return 1 if failures else 0
 
