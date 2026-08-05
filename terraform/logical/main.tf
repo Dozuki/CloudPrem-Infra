@@ -8,8 +8,9 @@ terraform {
   # required_version cannot say "OpenTofu specifically" - Terraform 1.9 also satisfies
   # this and would then fail later on the for_each itself. The floor is here to reject
   # clearly-too-old engines early, not to pick the engine; that is the stack's tool
-  # setting (OPEN_TOFU in infra-live).
-  required_version = ">= 1.9.0"
+  # setting (OPEN_TOFU in infra-live). 1.11 floor: the vault provider ~> 5.0 needs
+  # ephemeral resources / write-only attributes, same reason as the physical layer.
+  required_version = ">= 1.11.1"
 
   required_providers {
     aws = {
