@@ -254,13 +254,20 @@ spec:
       # strand the same stack. Both are safe to repeat because teardown reloads the run
       # manifest from S3 and destroy is convergent.
       #
-      # Three attempts. The failures worth repeating are AWS-side and clear in minutes (ENI
-      # detach lag, DependencyViolation, an NLB still protected) after the harness has
-      # exhausted its own narrow internal retry. The ones that never clear (a state lock
-      # held by a dead process, expired credentials) fail in seconds, so burning three of
-      # those is cheap. Backoff starts at 2m rather than seconds because destroyModule
-      # already spent its internal retry budget on the fast-transient class before the
-      # phase exited; whatever is left needs AWS minutes.
+      # Up to three attempts, and read that as "up to". The failures worth repeating are
+      # AWS-side and clear in minutes (ENI detach lag, DependencyViolation, an NLB still
+      # protected) after the harness has exhausted its own narrow internal retry, so in the
+      # common case all three fit easily. The ones that never clear (a state lock held by a
+      # dead process, expired credentials) fail in seconds, so burning three of those is
+      # cheap. But a teardown that runs near its full 3h deadline gets two attempts, not
+      # three: the second finishes past the window below and the third is never scheduled.
+      # That is accepted rather than fixed by shortening the per-attempt deadline, because
+      # a destroy waiting on a slow RDS deletion is exactly the case where cutting the
+      # attempt short would create the orphan this retry exists to prevent.
+      #
+      # Backoff starts at 2m rather than seconds because destroyModule already spent its
+      # internal retry budget on the fast-transient class before the phase exited; whatever
+      # is left needs AWS minutes.
       #
       # maxDuration is measured from the FIRST attempt's start, not per attempt, and it is
       # NOT the real ceiling. The controller refuses to schedule a retry once the workflow
