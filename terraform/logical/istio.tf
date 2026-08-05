@@ -98,10 +98,22 @@ resource "helm_release" "istiod" {
       # on the custom pools it untaints.
       nodeSelector = { "karpenter.sh/nodepool" = "system" }
       tolerations  = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
+      # DoNotSchedule, not ScheduleAnyway: soft spread let Karpenter pack both
+      # autoscaleMin=2 replicas onto one node (confirmed live on dev-min and
+      # gov-parker), which under STRICT mTLS takes the untaint controller and
+      # the mesh CA down together on that single node's loss - on gov the SCP
+      # denies ec2:TerminateInstances, so recovery there is a manual NodeClaim
+      # delete. This does not deadlock the built-in system pool: unlike the
+      # custom spot/on-demand pools above, the system pool carries no
+      # cni.istio.io/not-ready startupTaint (that taint is added by this repo
+      # only to the pools it defines, kubernetes.tf), so a Pending 2nd replica
+      # is bog-standard Karpenter scale-from-zero - it gets a fresh node with
+      # nothing blocking the schedule. Verified by rendering this chart+values
+      # with helm template: the constraint lands on the Deployment as written.
       topologySpreadConstraints = [{
         maxSkew           = 1
         topologyKey       = "kubernetes.io/hostname"
-        whenUnsatisfiable = "ScheduleAnyway"
+        whenUnsatisfiable = "DoNotSchedule"
         labelSelector     = { matchLabels = { app = "istiod" } }
       }]
       # Chart defaults are 500m/2Gi requests. Observed usage across 5 healthy
