@@ -28,16 +28,17 @@ export TERRAGRUNT_TFPATH=tofu
 | Tool | Version | Verify |
 |------|---------|--------|
 | OpenTofu | 1.11.8 (module floor `>= 1.11.1`) | `tofu version` |
-| Terragrunt | >= 1.0 (fleet runs 0.99.4) | `terragrunt --version` |
+| Terragrunt | 0.99.4 (>= 0.78, < 1.0; 1.x broke iam_role assumption fleet-wide) | `terragrunt --version` |
 | AWS CLI | 2.x | `aws --version` |
 | Helm | 3.x | `helm version` |
 | kubectl | 1.28+ | `kubectl version --client` |
 | Vault CLI | 1.15+ | `vault version` |
 
-> **Toolchain note:** Production deploys run on **Spacelift**, which pins the
-> *logical* layer to Terraform 1.5.7 (the last MPL-licensed release). The modules
-> themselves only require Terraform/OpenTofu **>= 1.11.1** (physical — for the Aurora
-> module and write-only attributes) and **>= 1.5.0** (logical), so a single OpenTofu
+> **Toolchain note:** Production deploys run on **Spacelift**. Physical and logical
+> both run OpenTofu (the fleet pin above); only the Vault stacks and the
+> `_spacelift-bootstrap` admin stack stay on Terraform 1.5.7 (the last MPL-licensed
+> release). Both modules require Terraform/OpenTofu **>= 1.11.1** (write-only
+> attributes, and the vault provider 5.x floor on logical), so a single OpenTofu
 > binary runs both layers locally.
 
 ### AWS SSO Profiles
