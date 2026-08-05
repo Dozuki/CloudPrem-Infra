@@ -23,7 +23,9 @@ rules:
     resources: ['workflows']
     # get/list/watch are what the resource template polls with to decide the child's
     # outcome; without them it can create a child and then never learn it finished.
-    verbs: ['create', 'get', 'list', 'watch']
+    # patch is what the supersede step uses to set shutdown: Stop on older runs for
+    # the same PR; it grants no delete, so history is never removable this way.
+    verbs: ['create', 'get', 'list', 'watch', 'patch']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -109,6 +111,8 @@ spec:
   templates:
     - name: matrix
       steps:
+        - - name: supersede
+            template: supersede-older
         - - name: scenario
             template: submit-child
             # Every config in parallel. The children queue on the semaphore, so this does
@@ -119,6 +123,66 @@ spec:
               parameters:
                 - name: config
                   value: '{{item}}'
+
+    # Stop superseded runs for the same PR before this one takes any capacity. A
+    # release-please force-push resubmits the matrix while the previous submission may
+    # be mid-provision, and its children then hold the harness semaphore for hours
+    # testing a sha that is no longer the PR head. The children's staleness gate only
+    # protects QUEUED runs (it fires at admission); anything already past it runs to
+    # completion. This closes that gap: stop every OLDER matrix sharing this name
+    # prefix (harness-pr<N>-) plus its children.
+    #
+    # Stop, never terminate: Stop still runs the scenario's teardown exit handler, and
+    # the workflow-level semaphore is held until the whole workflow (teardown included)
+    # finishes, so a superseded stack is fully destroyed before a waiting child can
+    # take its slot. Per-run state isolation (run-id = workflow name) means an apply
+    # interrupted by the Stop can only ever affect its own stack, and the orphan
+    # janitor remains the backstop if a destroy fails. Best-effort by design: every
+    # failure path exits 0, because correctness never depends on this step - it only
+    # reclaims capacity earlier than the runs would release it themselves.
+    - name: supersede-older
+      activeDeadlineSeconds: 120
+      script:
+        image: '{{workflow.parameters.image}}'
+        command: [/bin/bash]
+        source: |
+          set -uo pipefail
+          SELF='{{workflow.name}}'
+          PR_SHA='{{workflow.parameters.pr-sha}}'
+          if [ -z "$PR_SHA" ]; then
+            echo "not a PR run; nothing to supersede"; exit 0
+          fi
+          # harness-pr456-xh2gz -> harness-pr456-; generateName suffixes carry no dashes.
+          PREFIX="${SELF%-*}-"
+          SELF_TS=$(kubectl -n argo get workflow "$SELF" \
+            -o jsonpath='{.metadata.creationTimestamp}') || { echo "cannot read own timestamp"; exit 0; }
+          STALE=$(kubectl -n argo get workflows -l 'harness/trigger=pr' -o json \
+            | jq -r --arg p "$PREFIX" --arg self "$SELF" --arg ts "$SELF_TS" \
+              '.items[]
+               | select(.metadata.name != $self)
+               | select(.metadata.name | startswith($p))
+               | select(.metadata.creationTimestamp < $ts)
+               | select((.status.phase // "Pending") | IN("Pending", "Running"))
+               | .metadata.name') || { echo "cannot list workflows"; exit 0; }
+          if [ -z "$STALE" ]; then
+            echo "no older running matrix for ${PREFIX}*"; exit 0
+          fi
+          for wf in $STALE; do
+            echo "superseding ${wf}"
+            kubectl -n argo get workflows -l "harness/parent=${wf}" -o json \
+              | jq -r '.items[]
+                       | select((.status.phase // "Pending") | IN("Pending", "Running"))
+                       | .metadata.name' \
+              | while read -r child; do
+                  [ -z "$child" ] && continue
+                  echo "  stopping child ${child}"
+                  kubectl -n argo patch workflow "$child" --type merge \
+                    -p '{"spec":{"shutdown":"Stop"}}' || true
+                done
+            kubectl -n argo patch workflow "$wf" --type merge \
+              -p '{"spec":{"shutdown":"Stop"}}' || true
+          done
+          exit 0
 
     - name: submit-child
       inputs:
