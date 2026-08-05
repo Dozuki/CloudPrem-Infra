@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.14.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.13.0...v8.14.0) (2026-08-05)
+
+
+### Features
+
+* **logical:** pod-level do-not-disrupt on the on-demand tier, flip pool to WhenEmptyOrUnderutilized ([#447](https://github.com/Dozuki/CloudPrem-Infra/issues/447)) ([24c9617](https://github.com/Dozuki/CloudPrem-Infra/commit/24c961757e2d2c08eb3a4492d2977130cdeed2c4))
+
+
+### Bug Fixes
+
+* **logical:** stop managing the vault smtp password, fall back to sendgrid ([#441](https://github.com/Dozuki/CloudPrem-Infra/issues/441)) ([3d619d5](https://github.com/Dozuki/CloudPrem-Infra/commit/3d619d5572632d53d20bd64d510ec9f96678bf1f))
+
 ## [8.13.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.12.1...v8.13.0) (2026-08-04)
 
 
