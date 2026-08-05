@@ -98,20 +98,27 @@ resource "helm_release" "istiod" {
       # on the custom pools it untaints.
       nodeSelector = { "karpenter.sh/nodepool" = "system" }
       tolerations  = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
-      # DoNotSchedule, not ScheduleAnyway: soft spread let Karpenter pack both
-      # autoscaleMin=2 replicas onto one node (confirmed live on dev-min and
-      # gov-parker), which under STRICT mTLS takes the untaint controller and
-      # the mesh CA down together on that single node's loss - on gov the SCP
-      # denies ec2:TerminateInstances, so recovery there is a manual NodeClaim
-      # delete. This does not deadlock the built-in system pool: unlike the
-      # custom spot/on-demand pools above, the system pool carries no
-      # cni.istio.io/not-ready startupTaint (that taint is added by this repo
-      # only to the pools it defines, kubernetes.tf), so a Pending 2nd replica
-      # is bog-standard Karpenter scale-from-zero - it gets a fresh node with
-      # nothing blocking the schedule. Verified by rendering this chart+values
-      # with helm template: the constraint lands on the Deployment as written.
+      # DoNotSchedule + minDomains 2, not ScheduleAnyway: on a one-node system
+      # pool (dev-min, m3-qa, m3-usac, m3-emea today) the nodeSelector above
+      # restricts eligible domains to that single node, so with the default
+      # minDomains=1 the observed-domain count already meets the floor - the
+      # global minimum used for skew is just that one node's own count, skew
+      # is always 0, and ANY number of istiod pods there satisfies maxSkew 1.
+      # ScheduleAnyway never had a second node to prefer; it wasn't a
+      # preference Karpenter was overriding. minDomains 2 (GA since k8s 1.30,
+      # fleet runs 1.35.6) makes Pod Topology Spread treat a missing second
+      # domain as 0 pods, so the second replica goes Pending until Karpenter
+      # provisions a second system node - ordinary scale-from-zero, since the
+      # system pool carries none of the custom pools' cni.istio.io/not-ready
+      # startupTaint (that taint is only added to the pools this repo defines,
+      # kubernetes.tf). Under STRICT mTLS this matters because one node
+      # hosting both replicas is a single point of failure for the untaint
+      # controller and the mesh CA together; on gov the SCP denies
+      # ec2:TerminateInstances, so recovery from a stuck node there is a
+      # manual NodeClaim delete.
       topologySpreadConstraints = [{
         maxSkew           = 1
+        minDomains        = 2
         topologyKey       = "kubernetes.io/hostname"
         whenUnsatisfiable = "DoNotSchedule"
         labelSelector     = { matchLabels = { app = "istiod" } }
