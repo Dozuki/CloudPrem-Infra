@@ -8,6 +8,8 @@ drives the identical `harness <phase>` subcommands, so the two paths stay compar
 00-phase-templates.yaml   config, semaphore, and the harness-phase template (one per subcommand)
 10-scenario.yaml          harness-scenario: one config end to end, teardown as an exit handler
 20-matrix.yaml            harness-matrix: fans out over configs, submits one child workflow each
+40-nightly-cron.yaml      the nightly clock for harness-matrix
+50-janitor-cron.yaml      harness-janitor: the Phase 4 orphan sweeper (dry-run by default)
 ```
 
 Apply:
@@ -65,6 +67,16 @@ which is precisely when teardown matters. And because teardown reads the manifes
 cleanup is not tied to the process that created the stack: this pod, a retry, or the Phase 4
 janitor can all clean up a given run. That is the structural fix for the trap in `run.sh`.
 
+**The janitor is the backstop for a teardown that doesn't retry its way out.** The exit
+handler above plus its own retry (this same `run` template, `retryPolicy: OnError`) covers
+a destroy that fails transiently. Neither covers a destroy that fails for a reason no retry
+fixes - a state lock held by a dead process, expired credentials, a pod killed between apply
+and the manifest write. Those abandon a stack permanently: seven of them leaking over three
+days exhausted DDVtest's 10-VPC ceiling and took the nightly down with VpcLimitExceeded.
+`harness-janitor` (`50-janitor-cron.yaml`) runs nightly, never matches on a name, and
+defaults to a dry-run report - see `harness/janitor.go` for the full predicate and
+`harness/janitor_test.go` for its test coverage.
+
 **One semaphore across every entry point.** DDVtest allows 10 VPCs per region and a test
 stack is about one (recovery is two). A nightly matrix plus a couple of PR runs will
 exhaust that mid-apply and surface as a confusing quota error inside a terragrunt run. The
@@ -84,6 +96,10 @@ measurements.
 
 - **The recovery scenario.** `cmd/harness` exposes `provision/upgrade/validate/teardown`
   with `--scenario upgrade|fresh`; `RunRecovery` has no phase equivalent, so the `recover`
-  and `recover_source` configs stay on `run.sh` until the CLI grows a phase for them.
-- **Cron and PR triggers**, and the backstop janitor. Those are Phase 4. Everything here is
-  submit-driven so far.
+  and `recover_source` configs stay on `run.sh` until the CLI grows a phase for them. The
+  janitor's own region-mismatch check (`harness/janitor.go`) keeps it from ever sweeping
+  the `recover` config's DR-region rebuild for the same reason - it reports `needs-review`
+  rather than guess at a destroy this CLI cannot yet drive.
+- **PR triggers.** The nightly cron (`40-nightly-cron.yaml`) and the janitor
+  (`50-janitor-cron.yaml`) are both live; a PR-triggered submit path is still manual
+  (`argo submit ... -p pr-repo=... -p pr-sha=...`).

@@ -58,3 +58,29 @@ func TestPostStatusUsesEvidenceSubcommand(t *testing.T) {
 		t.Error("post-status's relay payload no longer carries log_excerpt")
 	}
 }
+
+// TestMatrixConfigsSaltProducesUniqueCustomer guards Config.Salted's documented no-op
+// path (config.go): a base customer already at or past the 10-char terraform cap salts
+// to itself. The janitor (harness/janitor.go) already refuses to reason about a candidate
+// whose salted customer did not change - it reports needs-review rather than guess - but a
+// non-unique identifier is a real collision risk for whatever else derives IAM/Vault/k8s
+// resource names from it, not just the janitor. Every config's customer must leave Salted
+// room to mutate it.
+func TestMatrixConfigsSaltProducesUniqueCustomer(t *testing.T) {
+	m, err := LoadMatrix("../matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	for _, c := range m.Configs {
+		customer, ok := c.FeatureFlags["customer"].(string)
+		if !ok || customer == "" {
+			t.Errorf("config %q has no (or a non-string) customer feature flag; the janitor cannot derive an identity for it", c.Name)
+			continue
+		}
+		salted := c.Salted("janitor-invariant-probe")
+		got, _ := salted.FeatureFlags["customer"].(string)
+		if got == customer {
+			t.Errorf("config %q: customer %q is at/past the 10-char salt cap (Salted is a no-op on it); two runs of this config would collide on the same resource identifier", c.Name, customer)
+		}
+	}
+}
