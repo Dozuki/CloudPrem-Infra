@@ -10,9 +10,20 @@
 #   argo submit -n argo --from workflowtemplate/harness-matrix \
 #     -p configs='["min_default"]' -p to-ref=<sha>
 ---
-# The workflow service account can run pods but cannot create Workflows; the argo-workflows
-# chart's workflow RBAC does not cover that. Without this the fan-out fails with a
-# forbidden error on the first child.
+# Dedicated identity for the matrix orchestrator. The Role below carries create (the
+# fan-out) and now patch (the supersede step); binding it to the shared argo-workflow
+# SA would hand both to every scenario/phase/notify pod too, including ones running
+# Terraform against real stacks. Scenario children keep argo-workflow, which retains
+# only the chart's executor role - they never needed workflow verbs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harness-matrix
+  namespace: argo
+---
+# The matrix's pods cannot create Workflows via the argo-workflows chart's workflow
+# RBAC alone; without create the fan-out fails with a forbidden error on the first
+# child.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -38,7 +49,24 @@ roleRef:
   name: harness-submit-children
 subjects:
   - kind: ServiceAccount
-    name: argo-workflow
+    name: harness-matrix
+    namespace: argo
+---
+# Every workflow pod needs the argo-workflows chart's executor role
+# (workflowtaskresults create/patch); the chart binds it to argo-workflow only, so
+# the dedicated SA gets its own binding to the same chart-managed Role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harness-matrix-executor
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argo-workflows-workflow
+subjects:
+  - kind: ServiceAccount
+    name: harness-matrix
     namespace: argo
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -48,7 +76,7 @@ metadata:
   namespace: argo
 spec:
   entrypoint: matrix
-  serviceAccountName: argo-workflow
+  serviceAccountName: harness-matrix
   # The matrix blocks on its children (successCondition below), so the exit handler
   # sees the aggregate verdict: commit status back to the PR when pr-sha is set, and a
   # Slack post either way. Both the cron and PR entry points get this for free.
@@ -113,6 +141,14 @@ spec:
       steps:
         - - name: supersede
             template: supersede-older
+            # The script body is fail-open, but pod-level failures (deadline kill on
+            # a hung API call, image pull, eviction) are outside its reach - without
+            # continueOn any of those would fail this step, halt the step-group, and
+            # leave the PR with no harness run plus a false failure status. This
+            # step must be incapable of harming the run it precedes.
+            continueOn:
+              failed: true
+              error: true
         - - name: scenario
             template: submit-child
             # Every config in parallel. The children queue on the semaphore, so this does
@@ -145,42 +181,85 @@ spec:
       script:
         image: '{{workflow.parameters.image}}'
         command: [/bin/bash]
+        # Parameters arrive via env, never by textual substitution into the shell
+        # source: a value carrying a quote in a direct template submission (the GH
+        # path regex-validates, direct submits do not) cannot break out of quoting.
+        env:
+          - name: SELF
+            value: '{{workflow.name}}'
+          - name: PR_SHA
+            value: '{{workflow.parameters.pr-sha}}'
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits: { memory: 128Mi }
         source: |
           set -uo pipefail
-          SELF='{{workflow.name}}'
-          PR_SHA='{{workflow.parameters.pr-sha}}'
+          KC="kubectl -n argo --request-timeout=10s"
           if [ -z "$PR_SHA" ]; then
             echo "not a PR run; nothing to supersede"; exit 0
           fi
-          # harness-pr456-xh2gz -> harness-pr456-; generateName suffixes carry no dashes.
-          PREFIX="${SELF%-*}-"
-          SELF_TS=$(kubectl -n argo get workflow "$SELF" \
-            -o jsonpath='{.metadata.creationTimestamp}') || { echo "cannot read own timestamp"; exit 0; }
-          STALE=$(kubectl -n argo get workflows -l 'harness/trigger=pr' -o json \
-            | jq -r --arg p "$PREFIX" --arg self "$SELF" --arg ts "$SELF_TS" \
+          # Identity is contractual, not conventional: the name must be the GH
+          # submitter's shape AND the harness/pr label must be present, or nothing
+          # is selected. No name-prefix parsing.
+          if ! [[ "$SELF" =~ ^harness-pr[0-9]+-[^-]+$ ]]; then
+            echo "name '$SELF' is not harness-pr<N>-<suffix>; skipping supersede"; exit 0
+          fi
+          ME=$($KC get workflow "$SELF" -o json) || { echo "cannot read own workflow"; exit 0; }
+          PR_NUM=$(jq -r '.metadata.labels."harness/pr" // empty' <<<"$ME")
+          SELF_TS=$(jq -r '.metadata.creationTimestamp // empty' <<<"$ME")
+          if [ -z "$PR_NUM" ] || [ -z "$SELF_TS" ]; then
+            echo "own harness/pr label or timestamp missing; skipping supersede"; exit 0
+          fi
+          # Older same-PR matrices in ANY phase: a Failed parent can still own
+          # running children, so the child sweep below must see it. Timestamp ties
+          # are left alone on purpose - generateName suffixes do not encode
+          # creation order, so any name tiebreak could stop the NEWER run.
+          STALE=$($KC get workflows -l "harness/trigger=pr,harness/pr=${PR_NUM}" -o json \
+            | jq -r --arg self "$SELF" --arg ts "$SELF_TS" \
               '.items[]
                | select(.metadata.name != $self)
-               | select(.metadata.name | startswith($p))
                | select(.metadata.creationTimestamp < $ts)
-               | select((.status.phase // "Pending") | IN("Pending", "Running"))
-               | .metadata.name') || { echo "cannot list workflows"; exit 0; }
+               | .metadata.name') || { echo "cannot list matrices"; exit 0; }
           if [ -z "$STALE" ]; then
-            echo "no older running matrix for ${PREFIX}*"; exit 0
+            echo "no older matrix for pr ${PR_NUM}"; exit 0
           fi
-          for wf in $STALE; do
+          # One atomic PATCH sets the superseded marker AND the graceful stop, so
+          # the notify exit handler can never observe the stop without the marker
+          # (post-status suppresses its failure noise on that label).
+          MARK='{"metadata":{"labels":{"harness/superseded":"true"}},"spec":{"shutdown":"Stop"}}'
+          # Parents FIRST: quiesce child scheduling before sweeping, else a child
+          # created after our listing could linger unseen. Stop on a terminal
+          # parent is a no-op; the marker still lands for its notify handler.
+          while IFS= read -r wf; do
+            [ -z "$wf" ] && continue
             echo "superseding ${wf}"
-            kubectl -n argo get workflows -l "harness/parent=${wf}" -o json \
-              | jq -r '.items[]
-                       | select((.status.phase // "Pending") | IN("Pending", "Running"))
-                       | .metadata.name' \
-              | while read -r child; do
-                  [ -z "$child" ] && continue
-                  echo "  stopping child ${child}"
-                  kubectl -n argo patch workflow "$child" --type merge \
-                    -p '{"spec":{"shutdown":"Stop"}}' || true
-                done
-            kubectl -n argo patch workflow "$wf" --type merge \
-              -p '{"spec":{"shutdown":"Stop"}}' || true
+            $KC patch workflow "$wf" --type merge -p "$MARK" \
+              || echo "warn: failed to patch parent ${wf}"
+          done <<< "$STALE"
+          # Bounded child sweep: children are ownerless by design, so stop them
+          # directly; retries catch ones created in the window before their parent
+          # quiesced. Only children not already shutting down count as active -
+          # a stopped child stays Running through its teardown and must not keep
+          # the loop spinning.
+          for attempt in 1 2 3; do
+            ACTIVE=0
+            while IFS= read -r wf; do
+              [ -z "$wf" ] && continue
+              CHILDREN=$($KC get workflows -l "harness/parent=${wf}" -o json \
+                | jq -r '.items[]
+                         | select((.status.phase // "Pending") | IN("Pending", "Running"))
+                         | select(.spec.shutdown == null)
+                         | .metadata.name') || { echo "warn: cannot list children of ${wf}"; continue; }
+              while IFS= read -r child; do
+                [ -z "$child" ] && continue
+                ACTIVE=1
+                echo "  stopping child ${child} (attempt ${attempt})"
+                $KC patch workflow "$child" --type merge -p "$MARK" \
+                  || echo "warn: failed to patch child ${child}"
+              done <<< "$CHILDREN"
+            done <<< "$STALE"
+            [ "$ACTIVE" = 0 ] && break
+            sleep 5
           done
           exit 0
 
@@ -249,6 +328,17 @@ spec:
         args:
           - |
             set -uo pipefail
+            # A superseded run (stopped by a newer submission for the same PR) must
+            # not post its red verdict anywhere: not a status on its old sha, not a
+            # PR comment, not Slack. The marker label rides the SAME atomic PATCH as
+            # the stop, so it is always visible by the time this handler runs. A
+            # stopped workflow renders phase Failed ("Stopped with strategy 'Stop'"),
+            # so the label - not the phase - is the only reliable discriminator.
+            SUPERSEDED=$(kubectl -n argo --request-timeout=10s get workflow '{{workflow.name}}' -o json 2>/dev/null \
+              | jq -r '.metadata.labels."harness/superseded" // empty')
+            if [ "$SUPERSEDED" = "true" ]; then
+              echo "superseded run; skipping status, comment and slack"; exit 0
+            fi
             export VAULT_ADDR='{{workflow.parameters.vault-addr}}'
             export AWS_REGION=us-east-1
             vault login -method=aws role=deployer region=us-east-1 >/dev/null || { echo "vault login failed"; exit 0; }
