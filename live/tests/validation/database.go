@@ -34,9 +34,16 @@ import (
 // only then does DMS provision capacity and run its own Testing Connection phase. Greenfield
 // runs have taken ~40 minutes end to end, all of it healthy, which the 15m budget scored as a
 // stuck replication. The number is still only a backstop for something that never progresses.
+//
+// 80m, not 60m: the 2026-08-05 nightly was still at "replication_starting" 42 minutes into
+// this wait, healthy, and needed more runway - 60m leaves too little slack over the observed
+// crawl for a budget whose only job is catching a task that never progresses. The ceiling is
+// the validate pod's activeDeadlineSeconds (5400s in 10-scenario.yaml) minus the ~3 minutes
+// validate spends before this wait; the budget must stay comfortably inside that so the run
+// dies on this timeout's named verdict, never on an anonymous pod deadline kill.
 const (
 	dmsWaitTimeout           = 15 * time.Minute
-	dmsServerlessWaitTimeout = 60 * time.Minute
+	dmsServerlessWaitTimeout = 80 * time.Minute
 	dmsPollEvery             = 15 * time.Second
 )
 
