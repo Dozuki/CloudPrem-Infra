@@ -19,7 +19,7 @@ locals {
 # Look up endpoint service AZs for same-region deployments to filter subnets.
 # Cross-region lookups don't work (data source doesn't support service_region),
 # so we skip the filter and pass all subnets. AWS maps all consumer AZs for
-# cross-region endpoints. APAC and EMEA always take the cross-region path.
+# cross-region endpoints. Environments outside the Mimir region always take the cross-region path.
 data "aws_vpc_endpoint_service" "mimir" {
   count        = var.enable_mimir && !local.mimir_is_cross_region ? 1 : 0
   service_name = var.mimir_endpoint_service_name

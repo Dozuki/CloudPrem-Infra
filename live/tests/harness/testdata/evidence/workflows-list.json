@@ -19,7 +19,7 @@
         "artifactRepositoryRef": {
           "artifactRepository": {
             "s3": {
-              "bucket": "dozuki-argo-artifacts-010601635461",
+              "bucket": "dozuki-argo-artifacts-000000000000",
               "endpoint": "s3.amazonaws.com",
               "region": "us-east-1",
               "useSDKCreds": true
@@ -638,7 +638,7 @@
         "artifactRepositoryRef": {
           "artifactRepository": {
             "s3": {
-              "bucket": "dozuki-argo-artifacts-010601635461",
+              "bucket": "dozuki-argo-artifacts-000000000000",
               "endpoint": "s3.amazonaws.com",
               "region": "us-east-1",
               "useSDKCreds": true

@@ -245,7 +245,7 @@ resource "aws_dms_replication_config" "this" {
   # replication_settings only takes effect on CREATE (see ignore_changes below), so an
   # edit to dms_config.json reaches existing replications only by hand:
   # stop-replication, modify-replication-config with the patched settings doc, then
-  # resume. The 3M fleet got PartitionSize=1000000 that way on 2026-08-04; it caps
+  # resume. The fleet got PartitionSize=1000000 that way on 2026-08-04; it caps
   # validation partition state on large tables (a 10M-row table is 10 partitions
   # instead of 1000). Tables under 1M rows are one partition either way.
   replication_settings = file("static/dms_config.json")
@@ -449,7 +449,7 @@ module "bi_aurora" {
       instance_class      = "db.serverless"
       publicly_accessible = var.bi_public_access
       # Parity with the primary cluster's writer (aurora.tf): the module default is off, so
-      # this was the one instance in the stack without PI (noticed on usac 2026-08-03 while
+      # this was the one instance in the stack without PI (noticed on a commercial env 2026-08-03 while
       # watching the DMS full load hammer it). Free at the 7-day tier, in-place enable.
       # Enhanced Monitoring stays off here deliberately: ACU + standard metrics cover a
       # burst-idle serverless target, and OS-level detail is not worth a per-instance agent.

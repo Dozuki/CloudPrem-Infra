@@ -40,7 +40,7 @@ import time
 import boto3
 
 # A replication that fails again within this window of an auto-restart is fast-failing
-# for a persistent reason (usac 2026-08-03: CPU-bound at the DCU cap - every restart
+# for a persistent reason (a commercial env 2026-08-03: CPU-bound at the DCU cap - every restart
 # re-ran the full load into the same wall, and each reload-target is a fresh full read
 # of the production source). First failure still restarts immediately; repeats wait for
 # a human. 30 minutes outlives one provision cycle (~15 min) plus enough runtime to

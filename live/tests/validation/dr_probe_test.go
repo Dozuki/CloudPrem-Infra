@@ -54,8 +54,8 @@ func TestBuildProbeZip(t *testing.T) {
 }
 
 func TestSwapARNRegion(t *testing.T) {
-	in := "arn:aws:secretsmanager:us-east-1:076248559428:secret:local-database-AbCdEf"
-	want := "arn:aws:secretsmanager:us-west-2:076248559428:secret:local-database-AbCdEf"
+	in := "arn:aws:secretsmanager:us-east-1:076000000000:secret:local-database-AbCdEf"
+	want := "arn:aws:secretsmanager:us-west-2:076000000000:secret:local-database-AbCdEf"
 	if got := swapARNRegion(in, "us-west-2"); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

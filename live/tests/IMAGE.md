@@ -28,7 +28,7 @@ docker run --rm --platform linux/amd64 \
   -e VAULT_ADDR=http://vault.internal.dozuki.com:8200 \
   cpi-harness:dev provision --run-id <id> --config min_default \
     --scenario upgrade --from-ref v8.3.0 --to-ref v8.3.1 \
-    --account-id 076248559428 --state-bucket <bucket>
+    --account-id 076000000000 --state-bucket <bucket>
 ```
 
 The entrypoint is the server-side half of `run.sh`. It arms the az-shim, clones or fetches
@@ -104,7 +104,7 @@ the cost of a volume to manage and warm. Baked is simpler and pulls once per nod
 
 ## Registry
 
-Publish to the **dozukicloud** ECR (069174876992), which already holds the image and chart
+Publish to the **dozukicloud** ECR, which already holds the image and chart
 repos and already has GitHub-OIDC release roles, and grant the Argo cluster cross-account
 pull through the existing `dozukicloud-ecr-policies` stack.
 

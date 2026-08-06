@@ -419,11 +419,11 @@ locals {
       # Not EBS-backed, but the HPA control plane: metrics-server serves metrics.k8s.io
       # and prometheus-adapter serves external.metrics.k8s.io, and both are single
       # replica. On the spot pool their consolidation churn left every HPA computing on
-      # stale/absent metrics (m3-usac: FailedGetExternalMetric x45 over 5d, 30-min
+      # stale/absent metrics (a commercial env: FailedGetExternalMetric x45 over 5d, 30-min
       # metric gaps). A PDB is the wrong tool at 1 replica (it only delays the eviction
       # until the force-delete); do-not-disrupt is the protection, same as the volumes
       # above - now that the pool itself is WhenEmptyOrUnderutilized, these two need
-      # their own pod-level exclusion or the exact m3-usac incident reproduces on
+      # their own pod-level exclusion or that same incident reproduces on
       # every consolidation pass. Deep-merged below - base sets args under metrics-server.
       "metrics-server" = {
         nodeSelector   = local.stateful_node_selector
@@ -728,7 +728,7 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
           { paths = [""], target = { kind = "Job" } },
           # HPAs own spec.replicas on the app tier (app-hpa, nextjs memory-HPA);
           # the chart's static count differs whenever an HPA has scaled, which
-          # made every reconcile warn DriftDetected (first seen live on apac).
+          # made every reconcile warn DriftDetected (first seen live on a commercial env).
           { paths = ["/spec/replicas"], target = { kind = "Deployment" } },
         ]
       }

@@ -7,14 +7,14 @@ import (
 
 func inputsFixture() Inputs {
 	return Inputs{
-		SnapshotARN: "arn:aws:rds:us-west-2:076248559428:cluster-snapshot:harness-recovery-x",
+		SnapshotARN: "arn:aws:rds:us-west-2:076000000000:cluster-snapshot:harness-recovery-x",
 		Buckets: map[string]string{
 			"image": "smokesrc-min-image-dr-abc",
 			"obj":   "smokesrc-min-obj-dr-abc",
 			"pdf":   "smokesrc-min-pdf-dr-abc",
 			"doc":   "smokesrc-min-doc-dr-abc",
 		},
-		S3KMSKeyARN: "arn:aws:kms:us-west-2:076248559428:key/1111",
+		S3KMSKeyARN: "arn:aws:kms:us-west-2:076000000000:key/1111",
 	}
 }
 

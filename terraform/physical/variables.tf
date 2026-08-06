@@ -376,7 +376,7 @@ variable "bi_dms_min_dcu" {
     This is the floor that bills continuously while the replication runs, so it is the number
     that decides steady-state cost - max only bills when a burst uses it.
 
-    2 by default. The 3M BI replications measured under 5% CPU for 92-100% of hours, so the
+    2 by default. The measured BI replications ran under 5% CPU for 92-100% of hours, so the
     floor carries the ongoing CDC and full loads scale up from there. Raise it for a busy
     source: too low a floor means DMS is still provisioning when a spike arrives, and a
     sustained CapacityUtilization at max can fail the replication outright.
@@ -701,8 +701,8 @@ variable "aurora_migration_state" {
 }
 
 variable "aurora_migration_dms_instance_type" {
-  # xlarge default: c5.large (4GB) OOM-crash-looped apac's full load AND
-  # OOM-killed latam's fence validation epoch mid-cutover (source fenced,
+  # xlarge default: c5.large (4GB) OOM-crash-looped one env's full load AND
+  # OOM-killed another env's fence validation epoch mid-cutover (source fenced,
   # customers waiting on the resize). The bigger box costs cents per soak day.
   description = "Replication instance class for the Aurora migration DMS rig."
   type        = string
