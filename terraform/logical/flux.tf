@@ -85,8 +85,14 @@ locals {
     sentry = { customerName = coalesce(var.customer, "Dozuki") }
 
     images = {
-      app       = { repository = var.image_repository, tag = var.image_tag }
-      webnextjs = { tag = var.nextjs_tag }
+      flavor = var.app_image_flavor
+      app = {
+        repository = var.image_repository
+        path       = var.app_image_flavor == "slim" ? "monolith-app" : "app"
+        tag        = var.image_tag
+      }
+      webnextjs  = { tag = var.nextjs_tag }
+      beanstalkd = { tag = var.beanstalkd_tag }
     }
 
     ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
