@@ -382,6 +382,23 @@ func TestNotifyScriptCapBoundaries(t *testing.T) {
 		t.Errorf("the eleventh candidate leaked past the cap:\n%s", text)
 	}
 
+	// A destroyed section past the cap: same renderer, but pin it anyway so the
+	// least-watched section cannot drift away from the others.
+	done := mk("done", 12, StateOrphan, 0)
+	for i := range done {
+		done[i].SweepResult = "destroyed"
+	}
+	text = run(done)
+	if got := strings.Count(text, "- `done"); got != 10 {
+		t.Errorf("destroyed section rendered %d lines, want 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 2 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("destroyed trailer missing or wrong:\n%s", text)
+	}
+	if !strings.Contains(text, "12 destroyed this cycle") {
+		t.Errorf("headline must carry the true destroyed total of 12:\n%s", text)
+	}
+
 	// Mixed sections: 12 orphans cap at 10 while all 3 review lines survive.
 	mixed := append(mk("alarm", 12, StateOrphan, 1), mk("rev", 3, StateNeedsReview, 0)...)
 	text = run(mixed)
