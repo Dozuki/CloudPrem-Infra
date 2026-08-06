@@ -398,3 +398,39 @@ func TestNotifyScriptCapBoundaries(t *testing.T) {
 		t.Errorf("mixed headline totals wrong:\n%s", text)
 	}
 }
+
+// TestNotifyScriptFlattensEmbeddedNewlines pins the LINE_DEF gsub: sweep_result
+// carries raw err.Error() text on failed destroys and terraform errors span lines,
+// so the section cap is a physical-line cap only if the renderer flattens embedded
+// newlines instead of letting one candidate render as several lines.
+func TestNotifyScriptFlattensEmbeddedNewlines(t *testing.T) {
+	rep := Report{
+		SchemaVersion: JanitorReportSchemaVersion,
+		Mode:          "report",
+		At:            time.Now().UTC().Format(time.RFC3339),
+		Account:       testAccount,
+		Candidates: []Candidate{{
+			Prefix: "nl00-min_default/", RunID: "nl00",
+			ConfigName: "min_default", Identifier: "smokenl00-min",
+			DeleteAfter: "2026-08-01T00:00:00Z", State: StateOrphan, Resources: 2,
+			SweepResult: "failed: exit status 1\nError: deleting subnet\nstill has dependencies",
+		}},
+	}
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal newline report: %v", err)
+	}
+	text, out := runNotify(t, string(b), "Succeeded", "report")
+	if text == "" {
+		t.Fatalf("nothing posted for the newline report\n%s", out)
+	}
+	if strings.Contains(text, "exit status 1\nError") {
+		t.Errorf("embedded newline survived into the rendered line:\n%s", text)
+	}
+	if !strings.Contains(text, "failed: exit status 1 Error: deleting subnet still has dependencies") {
+		t.Errorf("flattened sweep_result missing or wrong:\n%s", text)
+	}
+	if got := strings.Count(text, "- `nl00"); got != 1 {
+		t.Errorf("candidate rendered %d marker lines, want 1:\n%s", got, text)
+	}
+}

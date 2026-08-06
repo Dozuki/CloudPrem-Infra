@@ -322,8 +322,11 @@ spec:
             # sections. Every field is defaulted: a needs-review candidate built from an
             # unreadable manifest carries no run_id, config_name or delete_after at all,
             # and jq's + on null would abort the whole pipeline (empty Slack card) for
-            # exactly the candidate that most needs printing.
-            LINE_DEF='def line: "- `" + (if (.run_id // "") != "" then .run_id else (.prefix // "?") end) + "` (" + (.config_name // "?") + ") " + (.state // "?") + ": " + ((.resources // 0)|tostring) + " tagged resources, delete_after " + (if (.delete_after // "") != "" then .delete_after else "(none)" end) + (if (.sweep_result // "") != "" then " -> " + .sweep_result else "" end);'
+            # exactly the candidate that most needs printing. The rendered line is then
+            # flattened with gsub: sweep_result carries raw err.Error() text on failed
+            # destroys and terraform errors span lines, so without it one candidate can
+            # render as several physical lines and quietly defeat the section cap below.
+            LINE_DEF='def line: ("- `" + (if (.run_id // "") != "" then .run_id else (.prefix // "?") end) + "` (" + (.config_name // "?") + ") " + (.state // "?") + ": " + ((.resources // 0)|tostring) + " tagged resources, delete_after " + (if (.delete_after // "") != "" then .delete_after else "(none)" end) + (if (.sweep_result // "") != "" then " -> " + .sweep_result else "" end)) | gsub("[\r\n]+"; " ");'
             jq_count() { printf '%s' "$REPORT" | jq -r "[.candidates[]? | $1] | length" 2>/dev/null; }
             # Cap each section at 10 lines. The first real cycle carried a 46-item
             # pre-fix backlog and the flat join blew past Slack's message length,
