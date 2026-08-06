@@ -49,6 +49,10 @@ env:
   PR_REPO: ${{ github.event_name == 'pull_request' && github.repository || '' }}
   PR_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
   PR_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || '' }}
+  # Supersession identity for the matrix's supersede step: it selects older runs by
+  # this label, never by parsing workflow names. Empty on dispatch runs, which never
+  # supersede anything.
+  PR_NUM: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
   NAME_HINT: ${{ github.event_name == 'pull_request' && format('pr{0}', github.event.pull_request.number) || 'manual' }}
 
 jobs:
@@ -244,6 +248,87 @@ jobs:
       - name: Point kubectl at the ops cluster
         run: aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION"
 
+      # Runs BEFORE the new matrix is created, which is what makes it safe: every
+      # matrix carrying this PR's label is older than the run about to exist, by
+      # construction. No self-exclusion, no name parsing, no timestamp tiebreak.
+      # "By construction" leans on the workflow-level concurrency block above
+      # (group per PR, cancel-in-progress: false): it serializes whole runs per
+      # PR, so no other run can create a matrix between this supersede and the
+      # create below. TestSupersedeInvariantsSubmitterSide asserts that block
+      # stays; changing it invalidates this step's ordering guarantee.
+      #
+      # One window this ordering opens: if the create below fails after the stop
+      # here, the PR briefly has old runs stopped and no new one. That failure is
+      # loud (the job goes red on the PR) and a re-run resubmits; not worth code.
+      # It also keeps the patch verb on the submitter's own RBAC identity
+      # (30-submitter-rbac.yaml) instead of the shared argo-workflow SA that
+      # Terraform-running phase pods use.
+      #
+      # Stop, never Terminate: Stop still runs the scenario teardown exit handler,
+      # and the workflow-level semaphore is held until that teardown finishes, so a
+      # superseded stack is always destroyed before a waiting child takes its slot.
+      # The harness/superseded marker rides the SAME patch as the stop, so the
+      # notify handler can never observe the stop without the marker.
+      #
+      # Fail-open on every path: a broken supersede must never block the submission
+      # it precedes. Worst case is the pre-change status quo (stale runs drain on
+      # their own). Children are swept only for parents whose patch SUCCEEDED - a
+      # marked child under an unmarked parent would let the parent post a stale red
+      # verdict with no suppression, which is worse than leaving both running.
+      - name: Stop superseded matrix runs for this PR
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          KC="kubectl -n argo --request-timeout=10s"
+          MARK='{"metadata":{"labels":{"harness/superseded":"true"}},"spec":{"shutdown":"Stop"}}'
+          STALE=$($KC get workflows -l "harness/trigger=pr,harness/pr=${PR_NUM}" -o json \
+            | jq -r '.items[].metadata.name') || { echo "cannot list matrices; skipping supersede"; exit 0; }
+          if [ -z "$STALE" ]; then
+            echo "no prior matrix for pr ${PR_NUM}"; exit 0
+          fi
+          # Parents first, and only successfully patched parents feed the child
+          # sweep (a partial state where children stop but the parent survives
+          # unmarked defeats the suppression invariant).
+          PATCHED=""
+          while IFS= read -r wf; do
+            [ -z "$wf" ] && continue
+            ok=false
+            for attempt in 1 2 3; do
+              if $KC patch workflow "$wf" --type merge -p "$MARK"; then ok=true; break; fi
+              sleep 2
+            done
+            if [ "$ok" = true ]; then
+              echo "superseded ${wf}"
+              PATCHED="${PATCHED}${wf}"$'\n'
+            else
+              echo "warn: could not mark ${wf}; leaving its children untouched"
+            fi
+          done <<< "$STALE"
+          [ -z "$PATCHED" ] && exit 0
+          # All three passes ALWAYS run: an empty listing is what a submit-child
+          # pod mid-create looks like, so breaking early would strand exactly the
+          # late child the extra passes exist for. Already-stopping children are
+          # excluded so they are not re-patched every pass.
+          for attempt in 1 2 3; do
+            while IFS= read -r wf; do
+              [ -z "$wf" ] && continue
+              CHILDREN=$($KC get workflows -l "harness/parent=${wf}" -o json \
+                | jq -r '.items[]
+                         | select((.status.phase // "Pending") | IN("Pending", "Running"))
+                         | select(.spec.shutdown == null)
+                         | .metadata.name') || { echo "warn: cannot list children of ${wf}"; continue; }
+              while IFS= read -r child; do
+                [ -z "$child" ] && continue
+                echo "  stopping child ${child} (pass ${attempt})"
+                $KC patch workflow "$child" --type merge -p "$MARK" \
+                  || echo "warn: failed to patch child ${child}"
+              done <<< "$CHILDREN"
+            done <<< "$PATCHED"
+            [ "$attempt" -lt 3 ] && sleep 5
+          done
+          exit 0
+
       - name: Submit the harness matrix workflow
         id: submit
         run: |
@@ -256,6 +341,7 @@ jobs:
             namespace: argo
             labels:
               harness/trigger: ${{ github.event_name == 'pull_request' && 'pr' || 'manual' }}
+              harness/pr: '${PR_NUM}'
           spec:
             workflowTemplateRef:
               name: harness-matrix

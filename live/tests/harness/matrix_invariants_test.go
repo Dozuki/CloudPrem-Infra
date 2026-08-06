@@ -130,3 +130,186 @@ func TestJanitorCronMatchesTheGoConstants(t *testing.T) {
 		t.Error(`the notify script no longer excludes sweep_result "destroyed" from the alarm set; a clean destroy would render under a "teardown FAILED" headline (Sweep leaves State=orphan on purpose)`)
 	}
 }
+
+// TestSupersedeInvariantsSubmitterSide locks the shape of the supersede step in
+// .github/workflows/upgrade-tests.yml. Supersession runs in the SUBMITTER (before
+// the new matrix is created, under the harness-pr-submitter identity), not in the
+// matrix template - that placement is what removes the patch verb from workload
+// pods and makes every same-PR matrix older than the run being submitted by
+// construction. Each assertion is a property the consensus review identified as
+// load-bearing.
+func TestSupersedeInvariantsSubmitterSide(t *testing.T) {
+	b, err := os.ReadFile("../../../.github/workflows/upgrade-tests.yml")
+	if err != nil {
+		t.Fatalf("read upgrade-tests.yml: %v", err)
+	}
+	y := string(b)
+
+	// The supersede step must run BEFORE the matrix is created: ordering is the
+	// substitute for self-exclusion and timestamp tiebreaks.
+	supersede := strings.Index(y, "Stop superseded matrix runs for this PR")
+	submit := strings.Index(y, "Submit the harness matrix workflow")
+	if supersede == -1 {
+		t.Fatal("the supersede step is gone from the submitter")
+	}
+	if submit == -1 {
+		t.Fatal("the submit step is gone from the submitter")
+	}
+	if supersede > submit {
+		// Fatal, not Error: the region slice below is meaningless when the order
+		// inverts, and slicing it would panic and take the whole binary down.
+		t.Fatal("supersede no longer runs before the matrix is created; ordering is its only self-exclusion")
+	}
+
+	// The ordering guarantee is only real because the workflow serializes runs
+	// per PR: with cancel-in-progress or a changed group key, another run could
+	// create a matrix between this run's supersede and its create, and nothing
+	// else (no self-exclusion, no tiebreak) would catch it.
+	if !strings.Contains(y, "group: upgrade-tests-${{ github.event.pull_request.number || github.run_id }}") {
+		t.Error("the per-PR concurrency group changed; supersede-before-create is no longer serialized")
+	}
+	if !strings.Contains(y, "cancel-in-progress: false") {
+		t.Error("cancel-in-progress is no longer false; a cancelled run can leave its matrix orphaned and unsuppressed")
+	}
+
+	// A broken supersede must never block the submission it precedes.
+	region := y[supersede:submit]
+	if !strings.Contains(region, "continue-on-error: true") {
+		t.Error("supersede lost continue-on-error; a failure would block the PR's harness run")
+	}
+
+	// Graceful stop only: Terminate skips the teardown exit handler and would
+	// leak live stacks. The superseded marker must ride the same patch.
+	if strings.Contains(region, "Terminate") {
+		t.Error("supersede uses Terminate; teardown exit handlers would be skipped")
+	}
+	if !strings.Contains(region, `"shutdown":"Stop"`) {
+		t.Error("supersede no longer patches shutdown: Stop")
+	}
+	if !strings.Contains(region, `"harness/superseded":"true"`) {
+		t.Error("supersede no longer sets the harness/superseded marker; post-status would post false failures for stopped runs")
+	}
+
+	// Identity is the label contract, never name parsing.
+	if !strings.Contains(region, "harness/trigger=pr,harness/pr=") {
+		t.Error("supersede no longer selects by the harness/pr label contract")
+	}
+
+	// Children are swept only under successfully patched parents: a marked child
+	// beneath an unmarked parent lets the parent post a stale red verdict with no
+	// suppression.
+	if !strings.Contains(region, "PATCHED") {
+		t.Error("supersede lost its PATCHED set; children of a failed parent patch would be stopped while the parent survives unmarked")
+	}
+
+	// Bounded API calls; a hung API server must not hang the submit job.
+	if !strings.Contains(region, "--request-timeout=10s") {
+		t.Error("supersede's kubectl calls lost their request timeout")
+	}
+}
+
+// TestPostStatusSuppressionInvariants: the matrix's notify handler must suppress
+// all external posts for a superseded run, re-check after the slow evidence
+// window, and fail OPEN (a normal run's verdict must always post - the pending
+// status from submission would otherwise hang the PR head forever).
+func TestPostStatusSuppressionInvariants(t *testing.T) {
+	b, err := os.ReadFile("../argo/20-matrix.yaml")
+	if err != nil {
+		t.Fatalf("read 20-matrix.yaml: %v", err)
+	}
+	y := string(b)
+	if !strings.Contains(y, "superseded run; skipping") {
+		t.Error("post-status no longer suppresses notifications for superseded runs")
+	}
+	if !strings.Contains(y, "superseded during evidence collection") {
+		t.Error("post-status lost its pre-post re-check; the vault/evidence window would hide a supersession patch")
+	}
+	if !strings.Contains(y, "posting anyway (fail-open)") {
+		t.Error("post-status lost its fail-open path; a kubectl blip would silently swallow a NORMAL run's verdict")
+	}
+}
+
+// TestSupersedeLabelContractEmitterSide guards the half of the label contract the
+// matrix cannot see: the GitHub submitter must keep emitting the harness/pr label,
+// or the supersede script takes its "own harness/pr label missing" branch and
+// no-ops forever - silently, which is exactly the pre-PR behavior.
+func TestSupersedeLabelContractEmitterSide(t *testing.T) {
+	b, err := os.ReadFile("../../../.github/workflows/upgrade-tests.yml")
+	if err != nil {
+		t.Fatalf("read upgrade-tests.yml: %v", err)
+	}
+	y := string(b)
+	if !strings.Contains(y, "PR_NUM:") {
+		t.Error("upgrade-tests.yml no longer defines PR_NUM; the submitted matrix loses its supersession identity")
+	}
+	if !strings.Contains(y, "harness/pr: '${PR_NUM}'") {
+		t.Error("upgrade-tests.yml no longer stamps harness/pr on the submitted matrix; supersede selects nothing")
+	}
+}
+
+// TestMatrixRBACContract locks two facts a reshuffle can silently break. First,
+// the janitor cron runs as argo-workflow and pipes `kubectl get workflows` into
+// its ownership check; losing that binding's reads does not fail loudly, it makes
+// the janitor abort on its G2 empty-body check every night while the cron looks
+// green. Second, no template here may name a ServiceAccount other than
+// argo-workflow: the argo-privilege-gate admission policy forbids it, and EKS Pod
+// Identity is associated with argo-workflow only - a dedicated SA passes today's
+// Warn-mode gate, then can never re-apply once the gate enforces, and its
+// post-status pod has no AWS identity to log into Vault with.
+func TestMatrixRBACContract(t *testing.T) {
+	b, err := os.ReadFile("../argo/20-matrix.yaml")
+	if err != nil {
+		t.Fatalf("read 20-matrix.yaml: %v", err)
+	}
+	y := string(b)
+
+	role := strings.Index(y, "name: harness-submit-children")
+	if role == -1 {
+		t.Fatal("harness-submit-children Role is gone; the janitor's workflow listing 403s and the fan-out cannot create children")
+	}
+	region := y[role:]
+	for _, verb := range []string{"'get'", "'list'", "'watch'", "'create'"} {
+		if !strings.Contains(region, verb) {
+			t.Errorf("harness-submit-children lost verb %s", verb)
+		}
+	}
+	// patch must NOT be on the shared workload SA's Role: it belongs to the GitHub
+	// submitter's identity only (30-submitter-rbac.yaml). A patch verb here hands
+	// every Terraform-running phase pod the ability to stop or relabel any
+	// workflow in the namespace.
+	if strings.Contains(region, "'patch'") {
+		t.Error("harness-submit-children regained patch; supersession must stay on harness-pr-submitter, off workload pods")
+	}
+	if !strings.Contains(region, "name: argo-workflow") {
+		t.Error("harness-submit-children no longer binds argo-workflow; the janitor cron and the matrix both lose access")
+	}
+
+	sub, err := os.ReadFile("../argo/30-submitter-rbac.yaml")
+	if err != nil {
+		t.Fatalf("read 30-submitter-rbac.yaml: %v", err)
+	}
+	if !strings.Contains(string(sub), "'patch'") {
+		t.Error("harness-pr-submitter lost patch; the submitter cannot stop superseded runs")
+	}
+	// Every serviceAccountName in the file - workflow-level or per-template - must
+	// be argo-workflow. Checking occurrences rather than one literal catches the
+	// likelier regression: a single step template quietly naming its own SA.
+	saCount := 0
+	for _, line := range strings.Split(y, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if name, ok := strings.CutPrefix(trimmed, "serviceAccountName:"); ok {
+			saCount++
+			if strings.TrimSpace(name) != "argo-workflow" {
+				t.Errorf("a template names ServiceAccount %q; the admission gate rejects it on enforce and pod identity never attaches", strings.TrimSpace(name))
+			}
+		}
+	}
+	if saCount == 0 {
+		t.Error("no serviceAccountName found; the matrix would fall to the restricted default and lose its workflow RBAC")
+	}
+	// An unindented kind: line is a top-level object declaration; the indented
+	// "- kind: ServiceAccount" inside a RoleBinding's subjects list is fine.
+	if strings.HasPrefix(y, "kind: ServiceAccount\n") || strings.Contains(y, "\nkind: ServiceAccount\n") {
+		t.Error("20-matrix.yaml defines a ServiceAccount object; only argo-workflow is admitted and pod-identity-backed")
+	}
+}

@@ -13,6 +13,19 @@
 # The workflow service account can run pods but cannot create Workflows; the argo-workflows
 # chart's workflow RBAC does not cover that. Without this the fan-out fails with a
 # forbidden error on the first child.
+#
+# Everything here stays on the shared argo-workflow SA on purpose. A dedicated matrix
+# SA was designed and rejected: the argo-privilege-gate admission policy
+# (infra-tf/modules/argo-ops-cluster/admission.tf) forbids any template from naming a
+# ServiceAccount other than argo-workflow/the restricted default - fine while the gate
+# warns, a template that can never re-apply once it enforces - and EKS Pod Identity is
+# associated with argo-workflow only, so a new SA's post-status pod would fail its
+# vault login silently and leave the PR status pending forever.
+#
+# Deliberately NO patch verb here. Supersession (stopping older same-PR matrices)
+# lives in the GitHub submitter job (.github/workflows/upgrade-tests.yml), whose own
+# harness-pr-submitter Role carries patch - it binds only the GitHub OIDC identity,
+# so no workload pod (Terraform phases included) can stop or relabel a workflow.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -23,6 +36,9 @@ rules:
     resources: ['workflows']
     # get/list/watch are what the resource template polls with to decide the child's
     # outcome; without them it can create a child and then never learn it finished.
+    # The janitor cron (50-janitor-cron.yaml) also runs as argo-workflow and depends
+    # on this same get/list for its ownership listing - removing reads here sends the
+    # janitor dark, not loudly.
     verbs: ['create', 'get', 'list', 'watch']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -185,6 +201,38 @@ spec:
         args:
           - |
             set -uo pipefail
+            # A superseded run (stopped by a newer submission for the same PR) must
+            # not post its red verdict anywhere: not a status on its old sha, not a
+            # PR comment, not Slack. The marker label rides the SAME atomic PATCH as
+            # the stop, so it is always visible by the time this handler runs. A
+            # stopped workflow renders phase Failed ("Stopped with strategy 'Stop'"),
+            # so the label - not the phase - is the only reliable discriminator.
+            #
+            # Retried, then FAIL-OPEN: on a persistent lookup failure the handler
+            # posts anyway. Failing closed would leave a NORMAL run's verdict
+            # unposted - the status set to pending at submission would hang the PR
+            # head forever. Accepted residual, eyes open: on a SAME-sha
+            # resubmission (rerun/reopen) both runs share one status context, so a
+            # stale red that slips through can block the merge gate until the new
+            # run finishes - a bounded delay that clears itself, never a wrong
+            # green, and it needs the supersede patch AND this lookup to both fail
+            # persistently. Low probability, bounded impact, fail-safe direction.
+            check_superseded() {
+              local out
+              for _attempt in 1 2 3; do
+                if out=$(kubectl -n argo --request-timeout=10s get workflow '{{workflow.name}}' -o json 2>/dev/null); then
+                  jq -r '.metadata.labels."harness/superseded" // empty' <<<"$out"
+                  return 0
+                fi
+                sleep 2
+              done
+              echo "warn: could not read own workflow after 3 attempts; posting anyway (fail-open)" >&2
+              echo ""
+            }
+            SUPERSEDED=$(check_superseded)
+            if [ "$SUPERSEDED" = "true" ]; then
+              echo "superseded run; skipping status, comment and slack"; exit 0
+            fi
             export VAULT_ADDR='{{workflow.parameters.vault-addr}}'
             export AWS_REGION=us-east-1
             vault login -method=aws role=deployer region=us-east-1 >/dev/null || { echo "vault login failed"; exit 0; }
@@ -230,6 +278,16 @@ spec:
                   }]' 2>/dev/null) || CHILD_JSON='[]'
             fi
             [ -z "$CHILD_JSON" ] && CHILD_JSON='[]'
+
+            # Second look right before the external posts: vault login and evidence
+            # collection above take minutes, and a supersession patch landing in
+            # that window would otherwise go unseen. Narrows the check-then-post
+            # race to seconds; the residual (superseded while the curl is in
+            # flight) is accepted - such a run finished its scenario naturally.
+            SUPERSEDED=$(check_superseded)
+            if [ "$SUPERSEDED" = "true" ]; then
+              echo "superseded during evidence collection; skipping status, comment and slack"; exit 0
+            fi
 
             if [ -n '{{workflow.parameters.pr-sha}}' ] && [ -n "$GH_TOKEN" ]; then
               curl -sf -X POST \
