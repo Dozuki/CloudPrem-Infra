@@ -83,6 +83,14 @@ func AddWorktree(repoDir, baseDir, ref string, initSubmodules bool) (*Worktree, 
 	checkout := ref
 	if hasRemoteBranch(repoDir, ref) {
 		checkout = "origin/" + ref
+	} else if !resolvesToCommit(repoDir, checkout) {
+		// A PR-head SHA stops arriving via FetchOrigin the moment the PR merges:
+		// GitHub deletes the branch, and refs/pull/*/head (where the commit stays
+		// reachable server-side) is never part of a normal fetch. GitHub does serve
+		// fetch-by-SHA for commits reachable from any advertised ref, pull refs
+		// included, so ask for the object itself. Best-effort: if this fails too,
+		// the worktree add below reports the unresolvable ref as before.
+		fetchRefDirect(repoDir, ref)
 	}
 	// Reuse an existing worktree at this path instead of failing. On a FAILED run the
 	// worktree is deliberately kept (see removeUnlessFailed) so the teardown can destroy
@@ -135,6 +143,31 @@ func (w *Worktree) removeUnlessFailed(repoDir string, runErr *error) {
 func (w *Worktree) HasSubmodule() bool {
 	_, err := os.Stat(filepath.Join(w.Dir, ".gitmodules"))
 	return err == nil
+}
+
+// resolvesToCommit reports whether ref already names a commit in the local object
+// store (tag, SHA, or any other committish).
+func resolvesToCommit(repoDir, ref string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	cmd.Dir = repoDir
+	return cmd.Run() == nil
+}
+
+// fetchRefDirect fetches a single ref (typically a raw SHA) from origin. Same HTTPS
+// rewrite and hard timeout as FetchOrigin, and non-fatal for the same reason: the
+// caller's checkout produces the authoritative error if the ref stays unresolvable.
+func fetchRefDirect(repoDir, ref string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git",
+		"-c", "url.https://github.com/.insteadOf=git@github.com:",
+		"fetch", "origin", ref)
+	cmd.Dir = repoDir
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, ">> warning: direct fetch of %s from origin failed: %v\n", ref, err)
+	}
 }
 
 // hasRemoteBranch reports whether refs/remotes/origin/<ref> exists (i.e. ref names
