@@ -20,10 +20,12 @@
 # ServiceAccount other than argo-workflow/the restricted default - fine while the gate
 # warns, a template that can never re-apply once it enforces - and EKS Pod Identity is
 # associated with argo-workflow only, so a new SA's post-status pod would fail its
-# vault login silently and leave the PR status pending forever. Isolating the write
-# verbs from the Terraform-running phase pods is still worth doing, but it takes an
-# infra-tf change (admission allowlist + pod identity association) applied in lockstep,
-# not a unilateral SA swap here.
+# vault login silently and leave the PR status pending forever.
+#
+# Deliberately NO patch verb here. Supersession (stopping older same-PR matrices)
+# lives in the GitHub submitter job (.github/workflows/upgrade-tests.yml), whose own
+# harness-pr-submitter Role carries patch - it binds only the GitHub OIDC identity,
+# so no workload pod (Terraform phases included) can stop or relabel a workflow.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -37,9 +39,7 @@ rules:
     # The janitor cron (50-janitor-cron.yaml) also runs as argo-workflow and depends
     # on this same get/list for its ownership listing - removing reads here sends the
     # janitor dark, not loudly.
-    # patch is what the supersede step uses to set shutdown: Stop on older runs for
-    # the same PR; it grants no delete, so history is never removable this way.
-    verbs: ['create', 'get', 'list', 'watch', 'patch']
+    verbs: ['create', 'get', 'list', 'watch']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -125,16 +125,6 @@ spec:
   templates:
     - name: matrix
       steps:
-        - - name: supersede
-            template: supersede-older
-            # The script body is fail-open, but pod-level failures (deadline kill on
-            # a hung API call, image pull, eviction) are outside its reach - without
-            # continueOn any of those would fail this step, halt the step-group, and
-            # leave the PR with no harness run plus a false failure status. This
-            # step must be incapable of harming the run it precedes.
-            continueOn:
-              failed: true
-              error: true
         - - name: scenario
             template: submit-child
             # Every config in parallel. The children queue on the semaphore, so this does
@@ -145,114 +135,6 @@ spec:
               parameters:
                 - name: config
                   value: '{{item}}'
-
-    # Stop superseded runs for the same PR before this one takes any capacity. A
-    # release-please force-push resubmits the matrix while the previous submission may
-    # be mid-provision, and its children then hold the harness semaphore for hours
-    # testing a sha that is no longer the PR head. The children's staleness gate only
-    # protects QUEUED runs (it fires at admission); anything already past it runs to
-    # completion. This closes that gap: stop every OLDER matrix sharing this name
-    # prefix (harness-pr<N>-) plus its children.
-    #
-    # Stop, never terminate: Stop still runs the scenario's teardown exit handler, and
-    # the workflow-level semaphore is held until the whole workflow (teardown included)
-    # finishes, so a superseded stack is fully destroyed before a waiting child can
-    # take its slot. Per-run state isolation (run-id = workflow name) means an apply
-    # interrupted by the Stop can only ever affect its own stack, and the orphan
-    # janitor remains the backstop if a destroy fails. Best-effort by design: every
-    # failure path exits 0, because correctness never depends on this step - it only
-    # reclaims capacity earlier than the runs would release it themselves.
-    - name: supersede-older
-      # 300, not 120: the observed worst case is five stale matrices (PR #456), and the
-      # bounded sweep's ceiling is 3 attempts x (N parents x 10s request timeout) + two
-      # 5s sleeps - already past 120s at N=5 with a slow API server. continueOn keeps a
-      # deadline kill from failing the run, but the kill leaves children unstopped with
-      # no retry, so the budget errs long instead.
-      activeDeadlineSeconds: 300
-      script:
-        image: '{{workflow.parameters.image}}'
-        command: [/bin/bash]
-        # Parameters arrive via env, never by textual substitution into the shell
-        # source: a value carrying a quote in a direct template submission (the GH
-        # path regex-validates, direct submits do not) cannot break out of quoting.
-        env:
-          - name: SELF
-            value: '{{workflow.name}}'
-          - name: PR_SHA
-            value: '{{workflow.parameters.pr-sha}}'
-        resources:
-          requests: { cpu: 50m, memory: 64Mi }
-          limits: { memory: 128Mi }
-        source: |
-          set -uo pipefail
-          KC="kubectl -n argo --request-timeout=10s"
-          if [ -z "$PR_SHA" ]; then
-            echo "not a PR run; nothing to supersede"; exit 0
-          fi
-          # Identity is contractual, not conventional: the name must be the GH
-          # submitter's shape AND the harness/pr label must be present, or nothing
-          # is selected. No name-prefix parsing.
-          if ! [[ "$SELF" =~ ^harness-pr[0-9]+-[^-]+$ ]]; then
-            echo "name '$SELF' is not harness-pr<N>-<suffix>; skipping supersede"; exit 0
-          fi
-          ME=$($KC get workflow "$SELF" -o json) || { echo "cannot read own workflow"; exit 0; }
-          PR_NUM=$(jq -r '.metadata.labels."harness/pr" // empty' <<<"$ME")
-          SELF_TS=$(jq -r '.metadata.creationTimestamp // empty' <<<"$ME")
-          if [ -z "$PR_NUM" ] || [ -z "$SELF_TS" ]; then
-            echo "own harness/pr label or timestamp missing; skipping supersede"; exit 0
-          fi
-          # Older same-PR matrices in ANY phase: a Failed parent can still own
-          # running children, so the child sweep below must see it. Timestamp ties
-          # are left alone on purpose - generateName suffixes do not encode
-          # creation order, so any name tiebreak could stop the NEWER run.
-          STALE=$($KC get workflows -l "harness/trigger=pr,harness/pr=${PR_NUM}" -o json \
-            | jq -r --arg self "$SELF" --arg ts "$SELF_TS" \
-              '.items[]
-               | select(.metadata.name != $self)
-               | select(.metadata.creationTimestamp < $ts)
-               | .metadata.name') || { echo "cannot list matrices"; exit 0; }
-          if [ -z "$STALE" ]; then
-            echo "no older matrix for pr ${PR_NUM}"; exit 0
-          fi
-          # One atomic PATCH sets the superseded marker AND the graceful stop, so
-          # the notify exit handler can never observe the stop without the marker
-          # (post-status suppresses its failure noise on that label).
-          MARK='{"metadata":{"labels":{"harness/superseded":"true"}},"spec":{"shutdown":"Stop"}}'
-          # Parents FIRST: quiesce child scheduling before sweeping, else a child
-          # created after our listing could linger unseen. Stop on a terminal
-          # parent is a no-op; the marker still lands for its notify handler.
-          while IFS= read -r wf; do
-            [ -z "$wf" ] && continue
-            echo "superseding ${wf}"
-            $KC patch workflow "$wf" --type merge -p "$MARK" \
-              || echo "warn: failed to patch parent ${wf}"
-          done <<< "$STALE"
-          # Bounded child sweep: children are ownerless by design, so stop them
-          # directly; the later passes catch ones created in the window before their
-          # parent quiesced. All three passes ALWAYS run - an empty listing is not
-          # proof of quiescence, it is exactly what a submit-child pod mid-create
-          # looks like, so breaking on empty would strand precisely the late child
-          # the extra passes exist for. Only children not already shutting down are
-          # patched - a stopped child stays Running through its teardown and must
-          # not be re-patched every pass.
-          for attempt in 1 2 3; do
-            while IFS= read -r wf; do
-              [ -z "$wf" ] && continue
-              CHILDREN=$($KC get workflows -l "harness/parent=${wf}" -o json \
-                | jq -r '.items[]
-                         | select((.status.phase // "Pending") | IN("Pending", "Running"))
-                         | select(.spec.shutdown == null)
-                         | .metadata.name') || { echo "warn: cannot list children of ${wf}"; continue; }
-              while IFS= read -r child; do
-                [ -z "$child" ] && continue
-                echo "  stopping child ${child} (attempt ${attempt})"
-                $KC patch workflow "$child" --type merge -p "$MARK" \
-                  || echo "warn: failed to patch child ${child}"
-              done <<< "$CHILDREN"
-            done <<< "$STALE"
-            [ "$attempt" -lt 3 ] && sleep 5
-          done
-          exit 0
 
     - name: submit-child
       inputs:
@@ -325,8 +207,25 @@ spec:
             # the stop, so it is always visible by the time this handler runs. A
             # stopped workflow renders phase Failed ("Stopped with strategy 'Stop'"),
             # so the label - not the phase - is the only reliable discriminator.
-            SUPERSEDED=$(kubectl -n argo --request-timeout=10s get workflow '{{workflow.name}}' -o json 2>/dev/null \
-              | jq -r '.metadata.labels."harness/superseded" // empty')
+            #
+            # Retried, then FAIL-OPEN: on a persistent lookup failure the handler
+            # posts anyway. Failing closed would leave a NORMAL run's verdict
+            # unposted - the status set to pending at submission would hang the PR
+            # head forever, which is worse than a rare stale-red on a superseded
+            # (dead) sha.
+            check_superseded() {
+              local out
+              for _attempt in 1 2 3; do
+                if out=$(kubectl -n argo --request-timeout=10s get workflow '{{workflow.name}}' -o json 2>/dev/null); then
+                  jq -r '.metadata.labels."harness/superseded" // empty' <<<"$out"
+                  return 0
+                fi
+                sleep 2
+              done
+              echo "warn: could not read own workflow after 3 attempts; posting anyway (fail-open)" >&2
+              echo ""
+            }
+            SUPERSEDED=$(check_superseded)
             if [ "$SUPERSEDED" = "true" ]; then
               echo "superseded run; skipping status, comment and slack"; exit 0
             fi
@@ -375,6 +274,16 @@ spec:
                   }]' 2>/dev/null) || CHILD_JSON='[]'
             fi
             [ -z "$CHILD_JSON" ] && CHILD_JSON='[]'
+
+            # Second look right before the external posts: vault login and evidence
+            # collection above take minutes, and a supersession patch landing in
+            # that window would otherwise go unseen. Narrows the check-then-post
+            # race to seconds; the residual (superseded while the curl is in
+            # flight) is accepted - such a run finished its scenario naturally.
+            SUPERSEDED=$(check_superseded)
+            if [ "$SUPERSEDED" = "true" ]; then
+              echo "superseded during evidence collection; skipping status, comment and slack"; exit 0
+            fi
 
             if [ -n '{{workflow.parameters.pr-sha}}' ] && [ -n "$GH_TOKEN" ]; then
               curl -sf -X POST \

@@ -10,7 +10,12 @@ metadata:
 rules:
   - apiGroups: ['argoproj.io']
     resources: ['workflows']
-    verbs: ['create', 'get', 'list']
+    # patch belongs HERE, not on the shared argo-workflow SA: the submitter job
+    # stops superseded same-PR matrices (shutdown: Stop + harness/superseded)
+    # before creating the new one, and this Role binds only the GitHub OIDC
+    # identity - no workload pod (Terraform phases included) can patch a
+    # workflow. No delete: history is never removable this way.
+    verbs: ['create', 'get', 'list', 'patch']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -131,65 +131,85 @@ func TestJanitorCronMatchesTheGoConstants(t *testing.T) {
 	}
 }
 
-// TestSupersedeStepInvariants locks the shape of the supersede-older step in
-// argo/20-matrix.yaml. Each assertion is a property the consensus review of the
-// change identified as load-bearing; losing any of them silently reintroduces a
-// failure mode that was observed live.
-func TestSupersedeStepInvariants(t *testing.T) {
+// TestSupersedeInvariantsSubmitterSide locks the shape of the supersede step in
+// .github/workflows/upgrade-tests.yml. Supersession runs in the SUBMITTER (before
+// the new matrix is created, under the harness-pr-submitter identity), not in the
+// matrix template - that placement is what removes the patch verb from workload
+// pods and makes every same-PR matrix older than the run being submitted by
+// construction. Each assertion is a property the consensus review identified as
+// load-bearing.
+func TestSupersedeInvariantsSubmitterSide(t *testing.T) {
+	b, err := os.ReadFile("../../../.github/workflows/upgrade-tests.yml")
+	if err != nil {
+		t.Fatalf("read upgrade-tests.yml: %v", err)
+	}
+	y := string(b)
+
+	// The supersede step must run BEFORE the matrix is created: ordering is the
+	// substitute for self-exclusion and timestamp tiebreaks.
+	supersede := strings.Index(y, "Stop superseded matrix runs for this PR")
+	submit := strings.Index(y, "Submit the harness matrix workflow")
+	if supersede == -1 {
+		t.Fatal("the supersede step is gone from the submitter")
+	}
+	if submit != -1 && supersede > submit {
+		t.Error("supersede no longer runs before the matrix is created; ordering is its only self-exclusion")
+	}
+
+	// A broken supersede must never block the submission it precedes.
+	region := y[supersede:submit]
+	if !strings.Contains(region, "continue-on-error: true") {
+		t.Error("supersede lost continue-on-error; a failure would block the PR's harness run")
+	}
+
+	// Graceful stop only: Terminate skips the teardown exit handler and would
+	// leak live stacks. The superseded marker must ride the same patch.
+	if strings.Contains(region, "Terminate") {
+		t.Error("supersede uses Terminate; teardown exit handlers would be skipped")
+	}
+	if !strings.Contains(region, `"shutdown":"Stop"`) {
+		t.Error("supersede no longer patches shutdown: Stop")
+	}
+	if !strings.Contains(region, `"harness/superseded":"true"`) {
+		t.Error("supersede no longer sets the harness/superseded marker; post-status would post false failures for stopped runs")
+	}
+
+	// Identity is the label contract, never name parsing.
+	if !strings.Contains(region, "harness/trigger=pr,harness/pr=") {
+		t.Error("supersede no longer selects by the harness/pr label contract")
+	}
+
+	// Children are swept only under successfully patched parents: a marked child
+	// beneath an unmarked parent lets the parent post a stale red verdict with no
+	// suppression.
+	if !strings.Contains(region, "PATCHED") {
+		t.Error("supersede lost its PATCHED set; children of a failed parent patch would be stopped while the parent survives unmarked")
+	}
+
+	// Bounded API calls; a hung API server must not hang the submit job.
+	if !strings.Contains(region, "--request-timeout=10s") {
+		t.Error("supersede's kubectl calls lost their request timeout")
+	}
+}
+
+// TestPostStatusSuppressionInvariants: the matrix's notify handler must suppress
+// all external posts for a superseded run, re-check after the slow evidence
+// window, and fail OPEN (a normal run's verdict must always post - the pending
+// status from submission would otherwise hang the PR head forever).
+func TestPostStatusSuppressionInvariants(t *testing.T) {
 	b, err := os.ReadFile("../argo/20-matrix.yaml")
 	if err != nil {
 		t.Fatalf("read 20-matrix.yaml: %v", err)
 	}
 	y := string(b)
-
-	// The step must exist and must run before the fan-out. Compare the step
-	// entries (template: refs), not "name:" strings - a scenario PARAMETER
-	// definition appears earlier in the file.
-	supersede := strings.Index(y, "template: supersede-older")
-	fanout := strings.Index(y, "template: submit-child")
-	if supersede == -1 {
-		t.Fatal("supersede step is gone from the matrix")
-	}
-	if fanout != -1 && supersede > fanout {
-		t.Error("supersede no longer runs before the scenario fan-out")
-	}
-
-	// Pod-level failures (deadline kill, image pull, eviction) must never block
-	// the fan-out: the step is capacity hygiene, not a gate.
-	if !strings.Contains(y, "continueOn:") {
-		t.Error("supersede lost its continueOn; a pod-level failure would block the fan-out and post a false failure to the PR head")
-	}
-
-	// Graceful stop only: Terminate skips the teardown exit handler and would
-	// leak live stacks.
-	if strings.Contains(y, `"shutdown":"Terminate"`) || strings.Contains(y, "shutdown: Terminate") {
-		t.Error("supersede uses Terminate; teardown exit handlers would be skipped")
-	}
-	if !strings.Contains(y, `"shutdown":"Stop"`) {
-		t.Error("supersede no longer patches shutdown: Stop")
-	}
-
-	// The superseded marker must ride the same patch as the stop, and identity
-	// must come from the label contract, never name parsing.
-	if !strings.Contains(y, `"harness/superseded":"true"`) {
-		t.Error("supersede no longer sets the harness/superseded marker; post-status would post false failures for stopped runs")
-	}
-	if !strings.Contains(y, "harness/trigger=pr,harness/pr=") {
-		t.Error("supersede no longer selects by the harness/pr label contract")
-	}
-	if !strings.Contains(y, `.metadata.name != $self`) {
-		t.Error("supersede lost its self-exclusion")
-	}
-
-	// Every kubectl call is bounded; a hung API server must not eat the
-	// activeDeadline and fail the pod.
-	if !strings.Contains(y, "--request-timeout=10s") {
-		t.Error("supersede's kubectl calls lost their request timeout")
-	}
-
-	// post-status must suppress notifications for superseded runs.
-	if !strings.Contains(y, "harness/superseded") || !strings.Contains(y, "superseded run; skipping") {
+	if !strings.Contains(y, "superseded run; skipping") {
 		t.Error("post-status no longer suppresses notifications for superseded runs")
+	}
+	if !strings.Contains(y, "superseded during evidence collection") {
+		t.Error("post-status lost its pre-post re-check; the vault/evidence window would hide a supersession patch")
+	}
+	if !strings.Contains(y, "posting anyway (fail-open)") {
+		t.Error("post-status lost its fail-open path; a kubectl blip would silently swallow a NORMAL run's verdict")
 	}
 }
 
@@ -232,13 +252,28 @@ func TestMatrixRBACContract(t *testing.T) {
 		t.Fatal("harness-submit-children Role is gone; the janitor's workflow listing 403s and the fan-out cannot create children")
 	}
 	region := y[role:]
-	for _, verb := range []string{"'get'", "'list'", "'watch'", "'create'", "'patch'"} {
+	for _, verb := range []string{"'get'", "'list'", "'watch'", "'create'"} {
 		if !strings.Contains(region, verb) {
 			t.Errorf("harness-submit-children lost verb %s", verb)
 		}
 	}
+	// patch must NOT be on the shared workload SA's Role: it belongs to the GitHub
+	// submitter's identity only (30-submitter-rbac.yaml). A patch verb here hands
+	// every Terraform-running phase pod the ability to stop or relabel any
+	// workflow in the namespace.
+	if strings.Contains(region, "'patch'") {
+		t.Error("harness-submit-children regained patch; supersession must stay on harness-pr-submitter, off workload pods")
+	}
 	if !strings.Contains(region, "name: argo-workflow") {
 		t.Error("harness-submit-children no longer binds argo-workflow; the janitor cron and the matrix both lose access")
+	}
+
+	sub, err := os.ReadFile("../argo/30-submitter-rbac.yaml")
+	if err != nil {
+		t.Fatalf("read 30-submitter-rbac.yaml: %v", err)
+	}
+	if !strings.Contains(string(sub), "'patch'") {
+		t.Error("harness-pr-submitter lost patch; the submitter cannot stop superseded runs")
 	}
 	// Every serviceAccountName in the file - workflow-level or per-template - must
 	// be argo-workflow. Checking occurrences rather than one literal catches the
