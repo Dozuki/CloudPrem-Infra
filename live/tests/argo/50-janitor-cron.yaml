@@ -325,7 +325,15 @@ spec:
             # exactly the candidate that most needs printing.
             LINE_DEF='def line: "- `" + (if (.run_id // "") != "" then .run_id else (.prefix // "?") end) + "` (" + (.config_name // "?") + ") " + (.state // "?") + ": " + ((.resources // 0)|tostring) + " tagged resources, delete_after " + (if (.delete_after // "") != "" then .delete_after else "(none)" end) + (if (.sweep_result // "") != "" then " -> " + .sweep_result else "" end);'
             jq_count() { printf '%s' "$REPORT" | jq -r "[.candidates[]? | $1] | length" 2>/dev/null; }
-            jq_lines() { printf '%s' "$REPORT" | jq -r "$LINE_DEF [.candidates[]? | $1 | line] | join(\"\n\")" 2>/dev/null; }
+            # Cap each section at 10 lines. The first real cycle carried a 46-item
+            # pre-fix backlog and the flat join blew past Slack's message length,
+            # splitting the report into a multi-message wall that reads as spam and
+            # trains people to ignore the channel. The section headline still carries
+            # the full count, and the complete list is always in the scan pod log and
+            # the workflow's JSON report output, so nothing is lost, only untruncated
+            # display. 10 keeps a normal cycle (0-2 findings) identical to before.
+            SECTION_CAP=10
+            jq_lines() { printf '%s' "$REPORT" | jq -r --argjson cap "$SECTION_CAP" "$LINE_DEF [.candidates[]? | $1 | line] | (.[0:\$cap] | join(\"\n\")) + (if length > \$cap then \"\n- ...and \" + ((length - \$cap)|tostring) + \" more; full list in the scan pod log and the JSON report output\" else \"\" end)" 2>/dev/null; }
 
             A=$(jq_count "$ALARM_SEL") || A=0
             R=$(jq_count "$REVIEW_SEL") || R=0
