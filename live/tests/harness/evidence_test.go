@@ -167,7 +167,7 @@ func TestScrubKeepsDiagnosticSurvivors(t *testing.T) {
 	survivors := []string{
 		"8f347c78fb11039a9737c30e956fa16e5f57cd78", // 40-hex git SHA
 		"arn:aws:dms:us-east-1:000000000000:replication-config:REPLICATIONCONFIGID",
-		"dozuki-argo-artifacts-010601635461",
+		"dozuki-argo-artifacts-000000000000",
 		"smokef9b3-bi-reader",
 		// KMS diagnostics are the most common real failure shape; a bare "key"
 		// alternation redacted all three of these.
@@ -228,9 +228,9 @@ func TestBuildSelectsArtifactKeyPerFailedPodNode(t *testing.T) {
 	sort.Strings(got)
 
 	want := []string{
-		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log",
-		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log",
-		"dozuki-argo-artifacts-010601635461/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log",
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log",
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log",
+		"dozuki-argo-artifacts-000000000000/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log",
 	}
 	sort.Strings(want)
 	if len(got) != len(want) {
@@ -371,9 +371,9 @@ func TestBuildRespectsWireBudget(t *testing.T) {
 func TestBuildDMSDiagnosticSurvivesTruncation(t *testing.T) {
 	list := loadWorkflowList(t, "workflows-list.json")
 	logs := map[string]string{
-		"dozuki-argo-artifacts-010601635461/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log": readTestdata(t, "min-default-upgrade.log"),
-		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log":             readTestdata(t, "min-default-upgrade.log"),
-		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log":              readTestdata(t, "bi-ha-destroy-tail.log"),
+		"dozuki-argo-artifacts-000000000000/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log": readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log":             readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log":              readTestdata(t, "bi-ha-destroy-tail.log"),
 	}
 	stub := &stubFetcher{logs: logs}
 	children := Build(context.Background(), list, stub, BuildOptions{})
@@ -397,9 +397,9 @@ func TestBuildDMSDiagnosticSurvivesTruncation(t *testing.T) {
 func TestBuildOutputIsDeterministic(t *testing.T) {
 	list := loadWorkflowList(t, "workflows-list.json")
 	logs := map[string]string{
-		"dozuki-argo-artifacts-010601635461/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log": readTestdata(t, "min-default-upgrade.log"),
-		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log":             readTestdata(t, "min-default-upgrade.log"),
-		"dozuki-argo-artifacts-010601635461/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log":              readTestdata(t, "bi-ha-destroy-tail.log"),
+		"dozuki-argo-artifacts-000000000000/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log": readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log":             readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log":              readTestdata(t, "bi-ha-destroy-tail.log"),
 	}
 
 	run := func() []byte {

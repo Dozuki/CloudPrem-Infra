@@ -69,7 +69,7 @@ versions:
     chart_version: "0.4.1"   # 0.4.0 MPC gateway edge (#55) + configurable app-tier securityContext (#56); 0.3.12 typed tls-secret (#54)
     image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"   # e.g. <acct>.dkr.ecr.us-east-1.amazonaws.com
   v8.3.0:
-    # The chart the fleet actually pairs with v8.3.0 (mpc-dev-min, mpc-3m-gca). Pinning it
+    # The chart the fleet actually pairs with v8.3.0 (mpc-dev-min and a commercial env). Pinning it
     # here makes the upgrade run exercise the REAL transition - CPI 8.3.0/chart 2.2.0 ->
     # CPI 8.3.1/chart 2.2.2 - instead of holding the chart still across the bump. It also
     # keeps the baseline honest: chart 2.2.1 consumes an ops basic-auth value that only
@@ -112,7 +112,7 @@ configs:
       rds_adopt_dr_cmk: false
       alarm_email: "devops@dozuki.com"
       # Vault is mandatory in the physical/logical layers (no disable flag).
-      # Mirror the _mcp/dev (DDVtest 076248559428) env: shared standard Vault
+      # Mirror the _mcp/dev (DDVtest) env: shared standard Vault
       # PrivateLink service + address. DDVtest must be an allowed principal on
       # the service and Vault must hold this stack's secrets to converge.
       customer: "smoke"              # unique identity (smoke-min) — avoids the live dev-min/dozuki-min; logical self-seeds its Vault secrets

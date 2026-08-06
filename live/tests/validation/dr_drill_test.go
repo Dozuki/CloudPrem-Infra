@@ -6,7 +6,7 @@ import (
 )
 
 func TestClusterIDFromArn(t *testing.T) {
-	got := clusterIDFromArn("arn:aws:rds:us-west-2:076248559428:cluster:smoke-full-dr")
+	got := clusterIDFromArn("arn:aws:rds:us-west-2:076000000000:cluster:smoke-full-dr")
 	if got != "smoke-full-dr" {
 		t.Errorf("clusterIDFromArn = %q, want smoke-full-dr", got)
 	}

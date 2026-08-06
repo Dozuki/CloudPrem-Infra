@@ -46,7 +46,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
       # ARN instead of the replication, with nothing in the logs anyone reads.
       "dms:DescribeReplicationConfigs",
       # dms_restart.py's restart cooldown reads its own log group back for the AUTO-RESTART
-      # marker (stateless flap-breaker; usac 2026-08-03 restarted a CPU-walled full load in
+      # marker (stateless flap-breaker; a commercial env 2026-08-03 restarted a CPU-walled full load in
       # a loop). The check fails open, so missing this grant looks like the cooldown simply
       # not working - restarts loop again - not like an error anyone gets paged for.
       "logs:FilterLogEvents"
@@ -435,7 +435,7 @@ resource "aws_cloudwatch_event_rule" "dms_task_state_changed_rule" {
   # Scoped to THIS env's task ARNs: DMS state-change events are account+region
   # wide, so an unscoped pattern forwards every other env's task events too -
   # each env's slack lambda then stamps its own identifier on a foreign task
-  # (an m3-apac migration OOM alerted as m3-gca).
+  # (one env's migration OOM alerted under another env's identifier).
   event_pattern = jsonencode({
     "source" : [
       "aws.dms"
@@ -584,14 +584,14 @@ resource "aws_cloudwatch_metric_alarm" "bi_cdc_latency_target" {
 # alarm as evidence that utilization sat above 90% for an hour; it cannot show that.
 # Switch the statistic to Average if the sustained reading is ever what is wanted.
 #
-# Known blind spot: on the one full load observed here (gca, 2026-07-31 19:18-19:24Z) DMS
+# Known blind spot: on the one full load observed here (a commercial env, 2026-07-31 19:18-19:24Z) DMS
 # published no CapacityUtilization datapoints at all - the metric did not start until
 # 20:45Z. Whether that generalises to every full load is unverified, but assume this alarm
 # may be silent during one, which is exactly when utilization peaks. That gap is covered
 # elsewhere rather than here: a full-load OOM emits "DMS replication has failed", which
 # pages via sns_to_slack.py and triggers the restart lambda.
 #
-# Bigger blind spot, proven on usac 2026-08-03: a DCU is a memory-denominated unit, and
+# Bigger blind spot, proven on a commercial env 2026-08-03: a DCU is a memory-denominated unit, and
 # this metric tracks memory occupancy of the provision. A CPU-bound replication (20.6k
 # small tables, validation on) died FATAL after 25 minutes of CPUUtilization at 89-94%
 # while THIS metric read 7-13% the whole time. This alarm cannot see that failure mode
@@ -625,7 +625,7 @@ resource "aws_cloudwatch_metric_alarm" "bi_dms_capacity_saturated" {
   tags                = local.tags
 }
 
-# CPU saturation - the failure mode CapacityUtilization is blind to. usac 2026-08-03:
+# CPU saturation - the failure mode CapacityUtilization is blind to. A commercial env, 2026-08-03:
 # the first BI full load at max 32 DCU held CPUUtilization at 89-94% from 15:55Z, the
 # autoscaler logged "cannot scale up as the replication is already at the provided
 # Maximum" at 16:03Z, and the replication died at ~16:20Z with an empty Last Error
@@ -645,7 +645,7 @@ resource "aws_cloudwatch_metric_alarm" "bi_dms_capacity_saturated" {
 # replication that had been in ALARM.
 #
 # This alarm WILL fire during a healthy mid-load scale-up, and that is a considered
-# trade, not an oversight (usac 2026-08-03 17:29Z, 25 minutes after the alarm was
+# trade, not an oversight (a commercial env 2026-08-03 17:29Z, 25 minutes after the alarm was
 # created): the autoscaler itself needs ~15 min of pegged CPU before it reacts, plus
 # 5-10 to attach capacity, so a window quiet through scale-ups needs ~30 min - and the
 # one observed fatal ran peg-to-death in 25. There is no separating window. Read it as:
@@ -857,7 +857,7 @@ resource "aws_lambda_function" "dms_restart" {
   # sitting unnoticed past binlog retention kills the migration), but the
   # lambda's reload-target restart is destructive to a staged migration: it
   # re-runs a full load into a target the runner has already loaded, with the
-  # FK-off Initstmt long removed (live-fired on m3-emea 2026-07-29 after a
+  # FK-off Initstmt long removed (live-fired on a commercial env 2026-07-29 after a
   # validation-sweep OOM). The migration runner owns that task's lifecycle.
   environment {
     variables = {

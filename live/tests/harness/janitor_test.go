@@ -276,7 +276,7 @@ func oneDigestPerRegion(d *fakeDigestAPI) map[string]DigestAPI {
 // ---- shared fixtures ----
 
 const (
-	testAccount = "076248559428"
+	testAccount = "076000000000"
 	testRegion  = "us-east-1"
 	testDR      = "us-west-2"
 )
@@ -3225,7 +3225,7 @@ func TestReclaimResidueByARNFlagsARegisteredTypeWithNoRegion(t *testing.T) {
 // out is that "unreachable" no longer means "unproven": a plain LockID is a real state
 // mutex and this package must never delete one.
 func TestAssertDigestIDRefusesANonMD5Id(t *testing.T) {
-	if _, err := assertDigestID("dozuki-terraform-state-us-east-1-076248559428/run1-min_default/physical/terraform.tfstate"); err == nil {
+	if _, err := assertDigestID("dozuki-terraform-state-us-east-1-076000000000/run1-min_default/physical/terraform.tfstate"); err == nil {
 		t.Fatal("assertDigestID accepted a plain LockID; that id is a live state mutex, not a digest")
 	}
 	got, err := digestItemID("bucket/key/terraform.tfstate")

@@ -25,8 +25,8 @@ locals {
   # with no hand-seeding. Azure/onprem supplied certs stay chart-rendered.
   tls_vault_seeded = local.tls_supplied && var.cloud == "aws"
   # tls-secret owned by ESO, from Vault: TF-seeded (above), or the legacy
-  # hand-seeded mode (customer_tls_externally_managed; 3m/qa) kept until its
-  # cert is migrated into stack vars.
+  # hand-seeded mode (customer_tls_externally_managed; a commercial env) kept
+  # until its cert is migrated into stack vars.
   tls_from_vault = var.customer_tls_externally_managed || local.tls_vault_seeded
   # Any manual TLS -> cert-manager/ACME (dns_validation) stays out of the way.
   tls_manual = local.tls_supplied || local.tls_selfsigned || local.tls_from_vault

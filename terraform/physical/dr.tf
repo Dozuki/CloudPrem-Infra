@@ -51,7 +51,7 @@ locals {
   # rds_kms_key_arn denied it a CMK for a reason that has nothing to do with it, and since the
   # key is immutable at create the only way back is a snapshot-restore swap later.
   #
-  # That is not hypothetical: it is why all four migrated 3M clusters sit on the AWS-managed
+  # That is not hypothetical: it is why all four migrated clusters sit on the AWS-managed
   # key. Reading rds_adopt_dr_cmk = false on those envs suggested they had opted out, but this
   # local would have overridden them to the managed key even set true.
   #

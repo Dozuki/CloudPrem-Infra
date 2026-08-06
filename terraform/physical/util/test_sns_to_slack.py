@@ -81,14 +81,14 @@ def classify(detail_message, detail_type="DMS Replication State Change",
 # is the behaviour that shipped before the serverless split and must survive it unchanged.
 CASES = [
     # --- the reported noise, and every scaling decision ---
-    ("The replication, 'm3-gca', cannot scale down as the replication is already at the "
+    ("The replication, 'acme-bi', cannot scale down as the replication is already at the "
      "provided Minimum DMS Capacity Units, '2'.", "DROP", "the alert that started this"),
     ("DMS replication scaling up event.", "DROP", "routine autoscaling"),
     ("DMS replication scaling down event.", "DROP", "routine autoscaling"),
     ("DMS replication scaling event completed.", "DROP", "routine autoscaling"),
 
     # --- scale-blocked-at-MAX is deliberately NOT dropped: opposite meaning ---
-    ("The replication, 'm3-gca', cannot scale up as the replication is already at the "
+    ("The replication, 'acme-bi', cannot scale up as the replication is already at the "
      "provided Maximum DMS Capacity Units, '32'.", "POST",
      "ceiling is binding - the strongest point-in-time under-provisioning signal"),
 
@@ -189,9 +189,9 @@ SERVERLESS_CASES = [
 
 def alarm_fixture(state="ALARM"):
     return {
-        "AlarmName": "3m-usac-api-5xx",
+        "AlarmName": "acme-prod-api-5xx",
         "AlarmDescription": "Checkout API error rate is elevated. https://runbooks.example/api-5xx",
-        "AlarmArn": "arn:aws:cloudwatch:us-east-1:111:alarm:3m-usac-api-5xx",
+        "AlarmArn": "arn:aws:cloudwatch:us-east-1:111:alarm:acme-prod-api-5xx",
         "OldStateValue": "OK" if state == "ALARM" else "ALARM",
         "NewStateValue": state,
         "NewStateReason": ("Threshold Crossed: 8 datapoints were above 5"
@@ -271,7 +271,7 @@ def deliver_cloudwatch(state, prior, reaction_error=None):
          mock.patch.object(sns_to_slack, '_put_alarm_state',
                            side_effect=lambda *args: states.append(args)):
         sns_to_slack._deliver_cloudwatch_bot(
-            'xoxb', alarm_fixture(state), '3m-usac', 'us-east-1', '111', 'prod')
+            'xoxb', alarm_fixture(state), 'acme-prod', 'us-east-1', '111', 'prod')
     return updates, posts, states, reactions
 
 
@@ -557,11 +557,11 @@ def renderer_checks():
     checks = []
 
     active, _ = sns_to_slack.cloudwatch_card(
-        alarm_fixture(), "3m-usac", "us-east-1", "111", "prod")
+        alarm_fixture(), "acme-prod", "us-east-1", "111", "prod")
     active_text = str(active)
     checks.extend([
         ("critical rail", active["attachments"][0]["color"] == sns_to_slack.COLOR_CRITICAL),
-        ("critical header", "🔴 CRITICAL · CloudWatch · 3m-usac" in active_text),
+        ("critical header", "🔴 CRITICAL · CloudWatch · acme-prod" in active_text),
         ("critical UX sections", all(x in active_text for x in
                                      ("IMPACT", "SERVICE", "RESOURCE", "EVIDENCE"))),
         ("critical real actions", "Open CloudWatch" in active_text and "Runbook" in active_text),
@@ -569,12 +569,12 @@ def renderer_checks():
     ])
 
     resolved, _ = sns_to_slack.cloudwatch_card(
-        alarm_fixture("OK"), "3m-usac", "us-east-1", "111", "prod",
+        alarm_fixture("OK"), "acme-prod", "us-east-1", "111", "prod",
         started_at="2026-08-01T12:00:00.000+0000")
     resolved_text = str(resolved)
     checks.extend([
         ("resolved rail", resolved["attachments"][0]["color"] == sns_to_slack.COLOR_RESOLVED),
-        ("resolved header", "✅ RESOLVED · CloudWatch · 3m-usac" in resolved_text),
+        ("resolved header", "✅ RESOLVED · CloudWatch · acme-prod" in resolved_text),
         ("resolved outcome", all(x in resolved_text for x in ("OUTCOME", "DURATION", "8m"))),
         ("resolved does not page", "<!channel>" not in resolved_text),
     ])
@@ -582,16 +582,16 @@ def renderer_checks():
     dms_event = {"detail-type": "DMS Replication State Change",
                  "detail": {"detailMessage": "DMS replication has failed."}}
     dms = sns_to_slack.dms_card(
-        dms_event, "3m-usac", "us-east-1", "111", "prod", "bi-replication",
+        dms_event, "acme-prod", "us-east-1", "111", "prod", "bi-replication",
         True, "https://console.aws.amazon.com/dms")
     dms_text = str(dms)
     checks.extend([
-        ("DMS unified header", "🔴 CRITICAL · DMS · 3m-usac" in dms_text),
+        ("DMS unified header", "🔴 CRITICAL · DMS · acme-prod" in dms_text),
         ("DMS unified actions", "Open DMS" in dms_text),
     ])
 
     fallback = sns_to_slack.unknown_card(
-        {"schema": "secret raw payload"}, "3m-usac", "us-east-1")
+        {"schema": "secret raw payload"}, "acme-prod", "us-east-1")
     checks.append(("unknown payload stays out of Slack", "secret raw payload" not in str(fallback)))
 
     return checks
