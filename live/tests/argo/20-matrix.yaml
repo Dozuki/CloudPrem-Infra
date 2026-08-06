@@ -211,8 +211,12 @@ spec:
             # Retried, then FAIL-OPEN: on a persistent lookup failure the handler
             # posts anyway. Failing closed would leave a NORMAL run's verdict
             # unposted - the status set to pending at submission would hang the PR
-            # head forever, which is worse than a rare stale-red on a superseded
-            # (dead) sha.
+            # head forever. Accepted residual, eyes open: on a SAME-sha
+            # resubmission (rerun/reopen) both runs share one status context, so a
+            # stale red that slips through can block the merge gate until the new
+            # run finishes - a bounded delay that clears itself, never a wrong
+            # green, and it needs the supersede patch AND this lookup to both fail
+            # persistently. Low probability, bounded impact, fail-safe direction.
             check_superseded() {
               local out
               for _attempt in 1 2 3; do
