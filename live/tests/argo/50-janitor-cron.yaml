@@ -330,8 +330,8 @@ spec:
             # splitting the report into a multi-message wall that reads as spam and
             # trains people to ignore the channel. The section headline still carries
             # the full count, and the complete list is always in the scan pod log and
-            # the workflow's JSON report output, so nothing is lost, only untruncated
-            # display. 10 keeps a normal cycle (0-2 findings) identical to before.
+            # the workflow's JSON report output, so nothing is lost; only the Slack
+            # display is capped. 10 keeps a normal cycle (0-2 findings) identical to before.
             SECTION_CAP=10
             jq_lines() { printf '%s' "$REPORT" | jq -r --argjson cap "$SECTION_CAP" "$LINE_DEF [.candidates[]? | $1 | line] | (.[0:\$cap] | join(\"\n\")) + (if length > \$cap then \"\n- ...and \" + ((length - \$cap)|tostring) + \" more; full list in the scan pod log and the JSON report output\" else \"\" end)" 2>/dev/null; }
 

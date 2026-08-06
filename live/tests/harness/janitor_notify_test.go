@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -283,5 +284,43 @@ func TestNotifyScriptSurvivesAMidSweepAbortReport(t *testing.T) {
 	}
 	if !strings.Contains(text, "`run1`") || !strings.Contains(text, "failed: destroy") {
 		t.Errorf("message does not carry the candidate that failed:\n%s", text)
+	}
+}
+
+// TestNotifyScriptCapsLongSections pins the SECTION_CAP behavior added after the
+// first real cycle (46 pre-fix needs-review candidates) split the Slack post into a
+// multi-message wall: sections render at most 10 lines plus an exact "...and N more"
+// trailer, while the headline still carries the true total.
+func TestNotifyScriptCapsLongSections(t *testing.T) {
+	rep := Report{
+		SchemaVersion: JanitorReportSchemaVersion,
+		Mode:          "report",
+		At:            time.Now().UTC().Format(time.RFC3339),
+		Account:       testAccount,
+	}
+	for i := 0; i < 15; i++ {
+		rep.Candidates = append(rep.Candidates, Candidate{
+			Prefix: fmt.Sprintf("capred%02d-min_default/", i), RunID: fmt.Sprintf("capred%02d", i),
+			ConfigName: "min_default", Identifier: fmt.Sprintf("smokecap%02d-min", i),
+			DeleteAfter: "2026-08-01T00:00:00Z", State: StateNeedsReview,
+			Reason: "manifest predates applied-customer recording",
+		})
+	}
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal cap report: %v", err)
+	}
+	text, out := runNotify(t, string(b), "Succeeded", "report")
+	if text == "" {
+		t.Fatalf("nothing was posted for a 15-candidate needs-review report\n%s", out)
+	}
+	if !strings.Contains(text, "15 need review") {
+		t.Errorf("headline does not carry the true total of 15:\n%s", text)
+	}
+	if got := strings.Count(text, "- `capred"); got != 10 {
+		t.Errorf("rendered %d candidate lines, want the SECTION_CAP of 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 5 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("cap trailer missing or wrong:\n%s", text)
 	}
 }
