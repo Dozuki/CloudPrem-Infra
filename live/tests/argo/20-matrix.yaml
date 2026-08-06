@@ -10,20 +10,20 @@
 #   argo submit -n argo --from workflowtemplate/harness-matrix \
 #     -p configs='["min_default"]' -p to-ref=<sha>
 ---
-# Dedicated identity for the matrix orchestrator. The Role below carries create (the
-# fan-out) and now patch (the supersede step); binding it to the shared argo-workflow
-# SA would hand both to every scenario/phase/notify pod too, including ones running
-# Terraform against real stacks. Scenario children keep argo-workflow, which retains
-# only the chart's executor role - they never needed workflow verbs.
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: harness-matrix
-  namespace: argo
----
-# The matrix's pods cannot create Workflows via the argo-workflows chart's workflow
-# RBAC alone; without create the fan-out fails with a forbidden error on the first
-# child.
+# The workflow service account can run pods but cannot create Workflows; the argo-workflows
+# chart's workflow RBAC does not cover that. Without this the fan-out fails with a
+# forbidden error on the first child.
+#
+# Everything here stays on the shared argo-workflow SA on purpose. A dedicated matrix
+# SA was designed and rejected: the argo-privilege-gate admission policy
+# (infra-tf/modules/argo-ops-cluster/admission.tf) forbids any template from naming a
+# ServiceAccount other than argo-workflow/the restricted default - fine while the gate
+# warns, a template that can never re-apply once it enforces - and EKS Pod Identity is
+# associated with argo-workflow only, so a new SA's post-status pod would fail its
+# vault login silently and leave the PR status pending forever. Isolating the write
+# verbs from the Terraform-running phase pods is still worth doing, but it takes an
+# infra-tf change (admission allowlist + pod identity association) applied in lockstep,
+# not a unilateral SA swap here.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -34,6 +34,9 @@ rules:
     resources: ['workflows']
     # get/list/watch are what the resource template polls with to decide the child's
     # outcome; without them it can create a child and then never learn it finished.
+    # The janitor cron (50-janitor-cron.yaml) also runs as argo-workflow and depends
+    # on this same get/list for its ownership listing - removing reads here sends the
+    # janitor dark, not loudly.
     # patch is what the supersede step uses to set shutdown: Stop on older runs for
     # the same PR; it grants no delete, so history is never removable this way.
     verbs: ['create', 'get', 'list', 'watch', 'patch']
@@ -49,24 +52,7 @@ roleRef:
   name: harness-submit-children
 subjects:
   - kind: ServiceAccount
-    name: harness-matrix
-    namespace: argo
----
-# Every workflow pod needs the argo-workflows chart's executor role
-# (workflowtaskresults create/patch); the chart binds it to argo-workflow only, so
-# the dedicated SA gets its own binding to the same chart-managed Role.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: harness-matrix-executor
-  namespace: argo
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: argo-workflows-workflow
-subjects:
-  - kind: ServiceAccount
-    name: harness-matrix
+    name: argo-workflow
     namespace: argo
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -76,7 +62,7 @@ metadata:
   namespace: argo
 spec:
   entrypoint: matrix
-  serviceAccountName: harness-matrix
+  serviceAccountName: argo-workflow
   # The matrix blocks on its children (successCondition below), so the exit handler
   # sees the aggregate verdict: commit status back to the PR when pr-sha is set, and a
   # Slack post either way. Both the cron and PR entry points get this for free.
@@ -177,7 +163,12 @@ spec:
     # failure path exits 0, because correctness never depends on this step - it only
     # reclaims capacity earlier than the runs would release it themselves.
     - name: supersede-older
-      activeDeadlineSeconds: 120
+      # 300, not 120: the observed worst case is five stale matrices (PR #456), and the
+      # bounded sweep's ceiling is 3 attempts x (N parents x 10s request timeout) + two
+      # 5s sleeps - already past 120s at N=5 with a slow API server. continueOn keeps a
+      # deadline kill from failing the run, but the kill leaves children unstopped with
+      # no retry, so the budget errs long instead.
+      activeDeadlineSeconds: 300
       script:
         image: '{{workflow.parameters.image}}'
         command: [/bin/bash]
@@ -237,12 +228,14 @@ spec:
               || echo "warn: failed to patch parent ${wf}"
           done <<< "$STALE"
           # Bounded child sweep: children are ownerless by design, so stop them
-          # directly; retries catch ones created in the window before their parent
-          # quiesced. Only children not already shutting down count as active -
-          # a stopped child stays Running through its teardown and must not keep
-          # the loop spinning.
+          # directly; the later passes catch ones created in the window before their
+          # parent quiesced. All three passes ALWAYS run - an empty listing is not
+          # proof of quiescence, it is exactly what a submit-child pod mid-create
+          # looks like, so breaking on empty would strand precisely the late child
+          # the extra passes exist for. Only children not already shutting down are
+          # patched - a stopped child stays Running through its teardown and must
+          # not be re-patched every pass.
           for attempt in 1 2 3; do
-            ACTIVE=0
             while IFS= read -r wf; do
               [ -z "$wf" ] && continue
               CHILDREN=$($KC get workflows -l "harness/parent=${wf}" -o json \
@@ -252,14 +245,12 @@ spec:
                          | .metadata.name') || { echo "warn: cannot list children of ${wf}"; continue; }
               while IFS= read -r child; do
                 [ -z "$child" ] && continue
-                ACTIVE=1
                 echo "  stopping child ${child} (attempt ${attempt})"
                 $KC patch workflow "$child" --type merge -p "$MARK" \
                   || echo "warn: failed to patch child ${child}"
               done <<< "$CHILDREN"
             done <<< "$STALE"
-            [ "$ACTIVE" = 0 ] && break
-            sleep 5
+            [ "$attempt" -lt 3 ] && sleep 5
           done
           exit 0
 

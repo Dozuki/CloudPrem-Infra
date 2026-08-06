@@ -192,3 +192,56 @@ func TestSupersedeStepInvariants(t *testing.T) {
 		t.Error("post-status no longer suppresses notifications for superseded runs")
 	}
 }
+
+// TestSupersedeLabelContractEmitterSide guards the half of the label contract the
+// matrix cannot see: the GitHub submitter must keep emitting the harness/pr label,
+// or the supersede script takes its "own harness/pr label missing" branch and
+// no-ops forever - silently, which is exactly the pre-PR behavior.
+func TestSupersedeLabelContractEmitterSide(t *testing.T) {
+	b, err := os.ReadFile("../../../.github/workflows/upgrade-tests.yml")
+	if err != nil {
+		t.Fatalf("read upgrade-tests.yml: %v", err)
+	}
+	y := string(b)
+	if !strings.Contains(y, "PR_NUM:") {
+		t.Error("upgrade-tests.yml no longer defines PR_NUM; the submitted matrix loses its supersession identity")
+	}
+	if !strings.Contains(y, "harness/pr: '${PR_NUM}'") {
+		t.Error("upgrade-tests.yml no longer stamps harness/pr on the submitted matrix; supersede selects nothing")
+	}
+}
+
+// TestMatrixRBACContract locks two facts a reshuffle can silently break. First,
+// the janitor cron runs as argo-workflow and pipes `kubectl get workflows` into
+// its ownership check; losing that binding's reads does not fail loudly, it makes
+// the janitor abort on its G2 empty-body check every night while the cron looks
+// green. Second, no template here may name a ServiceAccount other than
+// argo-workflow: the argo-privilege-gate admission policy forbids it, and EKS Pod
+// Identity is associated with argo-workflow only - a dedicated SA passes today's
+// Warn-mode gate, then can never re-apply once the gate enforces, and its
+// post-status pod has no AWS identity to log into Vault with.
+func TestMatrixRBACContract(t *testing.T) {
+	b, err := os.ReadFile("../argo/20-matrix.yaml")
+	if err != nil {
+		t.Fatalf("read 20-matrix.yaml: %v", err)
+	}
+	y := string(b)
+
+	role := strings.Index(y, "name: harness-submit-children")
+	if role == -1 {
+		t.Fatal("harness-submit-children Role is gone; the janitor's workflow listing 403s and the fan-out cannot create children")
+	}
+	region := y[role:]
+	for _, verb := range []string{"'get'", "'list'", "'watch'", "'create'", "'patch'"} {
+		if !strings.Contains(region, verb) {
+			t.Errorf("harness-submit-children lost verb %s", verb)
+		}
+	}
+	if !strings.Contains(region, "name: argo-workflow") {
+		t.Error("harness-submit-children no longer binds argo-workflow; the janitor cron and the matrix both lose access")
+	}
+	if !strings.Contains(y, "serviceAccountName: argo-workflow") ||
+		strings.Contains(y, "kind: ServiceAccount\nmetadata:\n  name: harness-") {
+		t.Error("a template names a non-argo-workflow ServiceAccount; the admission gate rejects it on enforce and pod identity never attaches")
+	}
+}
