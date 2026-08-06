@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -283,5 +284,170 @@ func TestNotifyScriptSurvivesAMidSweepAbortReport(t *testing.T) {
 	}
 	if !strings.Contains(text, "`run1`") || !strings.Contains(text, "failed: destroy") {
 		t.Errorf("message does not carry the candidate that failed:\n%s", text)
+	}
+}
+
+// TestNotifyScriptCapsLongSections pins the SECTION_CAP behavior added after the
+// first real cycle (46 pre-fix needs-review candidates) split the Slack post into a
+// multi-message wall: sections render at most 10 lines plus an exact "...and N more"
+// trailer, while the headline still carries the true total.
+func TestNotifyScriptCapsLongSections(t *testing.T) {
+	rep := Report{
+		SchemaVersion: JanitorReportSchemaVersion,
+		Mode:          "report",
+		At:            time.Now().UTC().Format(time.RFC3339),
+		Account:       testAccount,
+	}
+	for i := 0; i < 15; i++ {
+		rep.Candidates = append(rep.Candidates, Candidate{
+			Prefix: fmt.Sprintf("capred%02d-min_default/", i), RunID: fmt.Sprintf("capred%02d", i),
+			ConfigName: "min_default", Identifier: fmt.Sprintf("smokecap%02d-min", i),
+			DeleteAfter: "2026-08-01T00:00:00Z", State: StateNeedsReview,
+			Reason: "manifest predates applied-customer recording",
+		})
+	}
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal cap report: %v", err)
+	}
+	text, out := runNotify(t, string(b), "Succeeded", "report")
+	if text == "" {
+		t.Fatalf("nothing was posted for a 15-candidate needs-review report\n%s", out)
+	}
+	if !strings.Contains(text, "15 need review") {
+		t.Errorf("headline does not carry the true total of 15:\n%s", text)
+	}
+	if got := strings.Count(text, "- `capred"); got != 10 {
+		t.Errorf("rendered %d candidate lines, want the SECTION_CAP of 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 5 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("cap trailer missing or wrong:\n%s", text)
+	}
+}
+
+// TestNotifyScriptCapBoundaries pins the exact cap edges and per-section
+// independence: 10 candidates render with no trailer, 11 render ten lines plus an
+// "...and 1 more" trailer with the eleventh ID absent, and a long alarm section is
+// capped without touching a short review section in the same message.
+func TestNotifyScriptCapBoundaries(t *testing.T) {
+	mk := func(prefix string, n int, state CandidateState, resources int) []Candidate {
+		var cs []Candidate
+		for i := 0; i < n; i++ {
+			cs = append(cs, Candidate{
+				Prefix: fmt.Sprintf("%s%02d-min_default/", prefix, i), RunID: fmt.Sprintf("%s%02d", prefix, i),
+				ConfigName: "min_default", Identifier: fmt.Sprintf("smoke%s%02d-min", prefix, i),
+				DeleteAfter: "2026-08-01T00:00:00Z", State: state, Resources: resources,
+				Reason: "boundary fixture",
+			})
+		}
+		return cs
+	}
+	run := func(cs []Candidate) string {
+		rep := Report{
+			SchemaVersion: JanitorReportSchemaVersion, Mode: "report",
+			At: time.Now().UTC().Format(time.RFC3339), Account: testAccount, Candidates: cs,
+		}
+		b, err := json.Marshal(rep)
+		if err != nil {
+			t.Fatalf("marshal boundary report: %v", err)
+		}
+		text, out := runNotify(t, string(b), "Succeeded", "report")
+		if text == "" {
+			t.Fatalf("nothing posted for a boundary report\n%s", out)
+		}
+		return text
+	}
+
+	// Exactly 10: every line renders, no trailer.
+	text := run(mk("ten", 10, StateNeedsReview, 0))
+	if got := strings.Count(text, "- `ten"); got != 10 {
+		t.Errorf("10-candidate section rendered %d lines, want all 10:\n%s", got, text)
+	}
+	if strings.Contains(text, "...and") {
+		t.Errorf("10-candidate section must not carry a trailer:\n%s", text)
+	}
+
+	// Exactly 11: ten lines, "...and 1 more", true headline, eleventh ID absent.
+	text = run(mk("elv", 11, StateNeedsReview, 0))
+	if got := strings.Count(text, "- `elv"); got != 10 {
+		t.Errorf("11-candidate section rendered %d lines, want 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 1 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("11-candidate trailer missing or wrong:\n%s", text)
+	}
+	if !strings.Contains(text, "11 need review") {
+		t.Errorf("headline must carry the true total of 11:\n%s", text)
+	}
+	if strings.Contains(text, "`elv10`") {
+		t.Errorf("the eleventh candidate leaked past the cap:\n%s", text)
+	}
+
+	// A destroyed section past the cap: same renderer, but pin it anyway so the
+	// least-watched section cannot drift away from the others.
+	done := mk("done", 12, StateOrphan, 0)
+	for i := range done {
+		done[i].SweepResult = "destroyed"
+	}
+	text = run(done)
+	if got := strings.Count(text, "- `done"); got != 10 {
+		t.Errorf("destroyed section rendered %d lines, want 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 2 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("destroyed trailer missing or wrong:\n%s", text)
+	}
+	if !strings.Contains(text, "12 destroyed this cycle") {
+		t.Errorf("headline must carry the true destroyed total of 12:\n%s", text)
+	}
+
+	// Mixed sections: 12 orphans cap at 10 while all 3 review lines survive.
+	mixed := append(mk("alarm", 12, StateOrphan, 1), mk("rev", 3, StateNeedsReview, 0)...)
+	text = run(mixed)
+	if got := strings.Count(text, "- `alarm"); got != 10 {
+		t.Errorf("alarm section rendered %d lines, want 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 2 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("alarm trailer missing or wrong:\n%s", text)
+	}
+	if got := strings.Count(text, "- `rev"); got != 3 {
+		t.Errorf("review section rendered %d lines, want all 3 (cap must be per-section):\n%s", got, text)
+	}
+	if !strings.Contains(text, "12 test stack(s) need a human") || !strings.Contains(text, "3 need review") {
+		t.Errorf("mixed headline totals wrong:\n%s", text)
+	}
+}
+
+// TestNotifyScriptFlattensEmbeddedNewlines pins the LINE_DEF gsub: sweep_result
+// carries raw err.Error() text on failed destroys and terraform errors span lines,
+// so the section cap is a physical-line cap only if the renderer flattens embedded
+// newlines instead of letting one candidate render as several lines.
+func TestNotifyScriptFlattensEmbeddedNewlines(t *testing.T) {
+	rep := Report{
+		SchemaVersion: JanitorReportSchemaVersion,
+		Mode:          "report",
+		At:            time.Now().UTC().Format(time.RFC3339),
+		Account:       testAccount,
+		Candidates: []Candidate{{
+			Prefix: "nl00-min_default/", RunID: "nl00",
+			ConfigName: "min_default", Identifier: "smokenl00-min",
+			DeleteAfter: "2026-08-01T00:00:00Z", State: StateOrphan, Resources: 2,
+			SweepResult: "failed: exit status 1\nError: deleting subnet\nstill has dependencies",
+		}},
+	}
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal newline report: %v", err)
+	}
+	text, out := runNotify(t, string(b), "Succeeded", "report")
+	if text == "" {
+		t.Fatalf("nothing posted for the newline report\n%s", out)
+	}
+	if strings.Contains(text, "exit status 1\nError") {
+		t.Errorf("embedded newline survived into the rendered line:\n%s", text)
+	}
+	if !strings.Contains(text, "failed: exit status 1 Error: deleting subnet still has dependencies") {
+		t.Errorf("flattened sweep_result missing or wrong:\n%s", text)
+	}
+	if got := strings.Count(text, "- `nl00"); got != 1 {
+		t.Errorf("candidate rendered %d marker lines, want 1:\n%s", got, text)
 	}
 }
