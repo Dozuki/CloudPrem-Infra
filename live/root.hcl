@@ -170,4 +170,10 @@ inputs = merge(
   local.account_vars.locals,
   local.region_vars.locals,
   local.environment_vars.locals,
+  # aws_profile must be the RESOLVED local, not account.hcl's literal. The locals above
+  # honor a TG_AWS_PROFILE override (the harness sets it to its chained-role profile) but
+  # the raw account_vars merge would forward the workstation default ("default") into
+  # var.aws_profile, and physical's DR backfill local-exec exports that name to the aws
+  # CLI, which fails hard in any environment where the profile does not exist.
+  { aws_profile = local.aws_profile },
 )

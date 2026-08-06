@@ -86,6 +86,14 @@ func (o TGOptions) env() []string {
 		"TG_AWS_ACCT_ID="+o.AccountID,
 		"TG_AWS_REGION="+o.Region,
 		"TG_AWS_PROFILE="+o.Profile,
+		// TF_VAR_aws_profile too, not just TG_AWS_PROFILE: root.hcl's inputs merge in
+		// refs at or below v8.15.0 forwards account.hcl's workstation literal
+		// ("default") into var.aws_profile, and physical's DR backfill local-exec
+		// exports that name to the aws CLI, which has no such profile here. Terragrunt
+		// (verified on the pinned 0.99.4) lets an ambient TF_VAR_* beat inputs, and the
+		// worktree under test is immutable at its ref, so this env var is the only
+		// handle that reaches every testable ref.
+		"TF_VAR_aws_profile="+o.Profile,
 		"TG_BUCKET_PREFIX="+o.BucketPrefix,
 		"TG_STATE_PREFIX="+o.StatePrefix,
 		"TG_NON_INTERACTIVE=true",
