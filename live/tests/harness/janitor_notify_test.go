@@ -324,3 +324,77 @@ func TestNotifyScriptCapsLongSections(t *testing.T) {
 		t.Errorf("cap trailer missing or wrong:\n%s", text)
 	}
 }
+
+// TestNotifyScriptCapBoundaries pins the exact cap edges and per-section
+// independence: 10 candidates render with no trailer, 11 render ten lines plus an
+// "...and 1 more" trailer with the eleventh ID absent, and a long alarm section is
+// capped without touching a short review section in the same message.
+func TestNotifyScriptCapBoundaries(t *testing.T) {
+	mk := func(prefix string, n int, state CandidateState, resources int) []Candidate {
+		var cs []Candidate
+		for i := 0; i < n; i++ {
+			cs = append(cs, Candidate{
+				Prefix: fmt.Sprintf("%s%02d-min_default/", prefix, i), RunID: fmt.Sprintf("%s%02d", prefix, i),
+				ConfigName: "min_default", Identifier: fmt.Sprintf("smoke%s%02d-min", prefix, i),
+				DeleteAfter: "2026-08-01T00:00:00Z", State: state, Resources: resources,
+				Reason: "boundary fixture",
+			})
+		}
+		return cs
+	}
+	run := func(cs []Candidate) string {
+		rep := Report{
+			SchemaVersion: JanitorReportSchemaVersion, Mode: "report",
+			At: time.Now().UTC().Format(time.RFC3339), Account: testAccount, Candidates: cs,
+		}
+		b, err := json.Marshal(rep)
+		if err != nil {
+			t.Fatalf("marshal boundary report: %v", err)
+		}
+		text, out := runNotify(t, string(b), "Succeeded", "report")
+		if text == "" {
+			t.Fatalf("nothing posted for a boundary report\n%s", out)
+		}
+		return text
+	}
+
+	// Exactly 10: every line renders, no trailer.
+	text := run(mk("ten", 10, StateNeedsReview, 0))
+	if got := strings.Count(text, "- `ten"); got != 10 {
+		t.Errorf("10-candidate section rendered %d lines, want all 10:\n%s", got, text)
+	}
+	if strings.Contains(text, "...and") {
+		t.Errorf("10-candidate section must not carry a trailer:\n%s", text)
+	}
+
+	// Exactly 11: ten lines, "...and 1 more", true headline, eleventh ID absent.
+	text = run(mk("elv", 11, StateNeedsReview, 0))
+	if got := strings.Count(text, "- `elv"); got != 10 {
+		t.Errorf("11-candidate section rendered %d lines, want 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 1 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("11-candidate trailer missing or wrong:\n%s", text)
+	}
+	if !strings.Contains(text, "11 need review") {
+		t.Errorf("headline must carry the true total of 11:\n%s", text)
+	}
+	if strings.Contains(text, "`elv10`") {
+		t.Errorf("the eleventh candidate leaked past the cap:\n%s", text)
+	}
+
+	// Mixed sections: 12 orphans cap at 10 while all 3 review lines survive.
+	mixed := append(mk("alarm", 12, StateOrphan, 1), mk("rev", 3, StateNeedsReview, 0)...)
+	text = run(mixed)
+	if got := strings.Count(text, "- `alarm"); got != 10 {
+		t.Errorf("alarm section rendered %d lines, want 10:\n%s", got, text)
+	}
+	if !strings.Contains(text, "- ...and 2 more; full list in the scan pod log and the JSON report output") {
+		t.Errorf("alarm trailer missing or wrong:\n%s", text)
+	}
+	if got := strings.Count(text, "- `rev"); got != 3 {
+		t.Errorf("review section rendered %d lines, want all 3 (cap must be per-section):\n%s", got, text)
+	}
+	if !strings.Contains(text, "12 test stack(s) need a human") || !strings.Contains(text, "3 need review") {
+		t.Errorf("mixed headline totals wrong:\n%s", text)
+	}
+}
