@@ -251,6 +251,15 @@ jobs:
       # Runs BEFORE the new matrix is created, which is what makes it safe: every
       # matrix carrying this PR's label is older than the run about to exist, by
       # construction. No self-exclusion, no name parsing, no timestamp tiebreak.
+      # "By construction" leans on the workflow-level concurrency block above
+      # (group per PR, cancel-in-progress: false): it serializes whole runs per
+      # PR, so no other run can create a matrix between this supersede and the
+      # create below. TestSupersedeInvariantsSubmitterSide asserts that block
+      # stays; changing it invalidates this step's ordering guarantee.
+      #
+      # One window this ordering opens: if the create below fails after the stop
+      # here, the PR briefly has old runs stopped and no new one. That failure is
+      # loud (the job goes red on the PR) and a re-run resubmits; not worth code.
       # It also keeps the patch verb on the submitter's own RBAC identity
       # (30-submitter-rbac.yaml) instead of the shared argo-workflow SA that
       # Terraform-running phase pods use.

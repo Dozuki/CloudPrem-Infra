@@ -152,8 +152,24 @@ func TestSupersedeInvariantsSubmitterSide(t *testing.T) {
 	if supersede == -1 {
 		t.Fatal("the supersede step is gone from the submitter")
 	}
-	if submit != -1 && supersede > submit {
-		t.Error("supersede no longer runs before the matrix is created; ordering is its only self-exclusion")
+	if submit == -1 {
+		t.Fatal("the submit step is gone from the submitter")
+	}
+	if supersede > submit {
+		// Fatal, not Error: the region slice below is meaningless when the order
+		// inverts, and slicing it would panic and take the whole binary down.
+		t.Fatal("supersede no longer runs before the matrix is created; ordering is its only self-exclusion")
+	}
+
+	// The ordering guarantee is only real because the workflow serializes runs
+	// per PR: with cancel-in-progress or a changed group key, another run could
+	// create a matrix between this run's supersede and its create, and nothing
+	// else (no self-exclusion, no tiebreak) would catch it.
+	if !strings.Contains(y, "group: upgrade-tests-${{ github.event.pull_request.number || github.run_id }}") {
+		t.Error("the per-PR concurrency group changed; supersede-before-create is no longer serialized")
+	}
+	if !strings.Contains(y, "cancel-in-progress: false") {
+		t.Error("cancel-in-progress is no longer false; a cancelled run can leave its matrix orphaned and unsuppressed")
 	}
 
 	// A broken supersede must never block the submission it precedes.
