@@ -16,8 +16,8 @@
 #               fail-forward net until the env's final db_engine="aurora" flip retires it
 #               (a deliberate apply that trips the db-replace-guard OPA label on purpose).
 #
-# The task settings/mappings are the values proven by the 2026-07-26 gca rehearsal
-# (docs: 3m-aurora-dms-migration-design): DO_NOTHING prep (schema is pre-loaded natively),
+# The task settings/mappings are the values proven by the 2026-07-26 rehearsal
+# (see the aurora DMS migration design doc): DO_NOTHING prep (schema is pre-loaded natively),
 # BatchApplyEnabled=false + target FK-checks-off Initstmt during load (MySQL does not
 # binlog cascaded child rows - the runner removes the Initstmt, while stopped, after
 # deferred FKs are active), auto-stop after cached changes, limited LOB @128KB, row
@@ -136,7 +136,7 @@ resource "aws_dms_replication_subnet_group" "aurora_migration" {
 
 resource "aws_dms_replication_instance" "aurora_migration" {
   # Modifications (e.g. an instance-class bump when a load OOMs) must take
-  # effect NOW, not at the maintenance window - the apac full load crash-looped
+  # effect NOW, not at the maintenance window - a commercial env's full load crash-looped
   # for an hour while a scheduled resize sat waiting.
   apply_immediately = true
 
@@ -286,7 +286,7 @@ resource "terraform_data" "aurora_migration_phase" {
   lifecycle {
     # The BI replica secret mixes hosts/credentials across engines if a
     # non-DMS BI path is active during a migration (its host selector keys on
-    # db_engine, its credentials on local.db_*). The 3M fleet is BI-via-DMS;
+    # db_engine, its credentials on local.db_*). The migrating fleet is BI-via-DMS;
     # anything else must not migrate until that seam is reworked.
     precondition {
       condition     = var.aurora_migration_state == "off" || !var.enable_bi || local.dms_enabled

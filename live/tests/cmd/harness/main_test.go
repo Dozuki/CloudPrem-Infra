@@ -56,7 +56,7 @@ func TestDispatchEvidenceRejectsMalformedInput(t *testing.T) {
 // so matching is exact and an unrecognized bucket falls back to ONE named client rather
 // than whatever a randomized map range hands back first.
 func TestMultiRegionS3RoutesByExactBucketName(t *testing.T) {
-	const acct = "076248559428"
+	const acct = "076000000000"
 	primary := s3.New(s3.Options{Region: "us-east-1"})
 	dr := s3.New(s3.Options{Region: "us-west-2"})
 	// "us-west-2" is deliberately alongside a region whose name it contains, the shape
@@ -97,7 +97,7 @@ func TestMultiRegionS3RoutesByExactBucketName(t *testing.T) {
 // TestMultiRegionS3RequiresAPrimaryClient: a router with no fallback would fail every
 // unrecognized bucket deep inside a scan. A configuration error belongs at startup.
 func TestMultiRegionS3RequiresAPrimaryClient(t *testing.T) {
-	if _, err := newMultiRegionS3("076248559428", "us-east-1", map[string]*s3.Client{
+	if _, err := newMultiRegionS3("076000000000", "us-east-1", map[string]*s3.Client{
 		"us-west-2": s3.New(s3.Options{Region: "us-west-2"}),
 	}); err == nil {
 		t.Fatal("newMultiRegionS3 accepted a client set with no primary-region client")

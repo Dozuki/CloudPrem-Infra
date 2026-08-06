@@ -17,7 +17,7 @@ func TestMemStoreRoundTrip(t *testing.T) {
 		Scenario: "upgrade", ConfigName: "min_default",
 		FromRef: "v6.0.3", ToRef: "v6.1-release",
 		DeleteAfter: "2026-06-25T00:00:00Z", AppliedRef: "v6.0.3",
-		BaselineRev: 0, Namespace: "dozuki", AccountID: "076248559428",
+		BaselineRev: 0, Namespace: "dozuki", AccountID: "076000000000",
 		Region: "us-east-1", DRRegion: "us-west-2",
 	}
 	if err := s.Save(ctx, "run1-min/", want); err != nil {
@@ -65,7 +65,7 @@ func TestManifestBackwardCompatMissingNewFields(t *testing.T) {
 	s := NewMemStore()
 	// Hand-authored JSON with none of the three new keys present, standing in for a
 	// manifest an old build of Provision/Teardown actually wrote to S3.
-	old := `{"scenario":"fresh","config_name":"min_default","to_ref":"v6.1-release","delete_after":"2026-06-25T00:00:00Z","applied_ref":"v6.1-release","namespace":"dozuki","account_id":"076248559428","region":"us-east-1","dr_region":"us-west-2"}`
+	old := `{"scenario":"fresh","config_name":"min_default","to_ref":"v6.1-release","delete_after":"2026-06-25T00:00:00Z","applied_ref":"v6.1-release","namespace":"dozuki","account_id":"076000000000","region":"us-east-1","dr_region":"us-west-2"}`
 	s.mu.Lock()
 	s.m["run1-min/"] = []byte(old)
 	s.mu.Unlock()
