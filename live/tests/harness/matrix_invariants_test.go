@@ -240,8 +240,25 @@ func TestMatrixRBACContract(t *testing.T) {
 	if !strings.Contains(region, "name: argo-workflow") {
 		t.Error("harness-submit-children no longer binds argo-workflow; the janitor cron and the matrix both lose access")
 	}
-	if !strings.Contains(y, "serviceAccountName: argo-workflow") ||
-		strings.Contains(y, "kind: ServiceAccount\nmetadata:\n  name: harness-") {
-		t.Error("a template names a non-argo-workflow ServiceAccount; the admission gate rejects it on enforce and pod identity never attaches")
+	// Every serviceAccountName in the file - workflow-level or per-template - must
+	// be argo-workflow. Checking occurrences rather than one literal catches the
+	// likelier regression: a single step template quietly naming its own SA.
+	saCount := 0
+	for _, line := range strings.Split(y, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if name, ok := strings.CutPrefix(trimmed, "serviceAccountName:"); ok {
+			saCount++
+			if strings.TrimSpace(name) != "argo-workflow" {
+				t.Errorf("a template names ServiceAccount %q; the admission gate rejects it on enforce and pod identity never attaches", strings.TrimSpace(name))
+			}
+		}
+	}
+	if saCount == 0 {
+		t.Error("no serviceAccountName found; the matrix would fall to the restricted default and lose its workflow RBAC")
+	}
+	// An unindented kind: line is a top-level object declaration; the indented
+	// "- kind: ServiceAccount" inside a RoleBinding's subjects list is fine.
+	if strings.HasPrefix(y, "kind: ServiceAccount\n") || strings.Contains(y, "\nkind: ServiceAccount\n") {
+		t.Error("20-matrix.yaml defines a ServiceAccount object; only argo-workflow is admitted and pod-identity-backed")
 	}
 }
