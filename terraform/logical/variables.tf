@@ -573,6 +573,31 @@ variable "db_migrations_active_deadline_seconds" {
   default     = 3600
 }
 
+variable "flux_upgrade_timeout" {
+  description = <<-EOT
+    Per-attempt timeout for the dozuki HelmRelease's upgrade. The default is unchanged from what
+    was hardcoded before, so leaving it alone is a no-op; envs that want a failed rollout to roll
+    back sooner set it in env.hcl.
+
+    Why the default is this large: disableWait=false makes helm block on every resource in the
+    release, including the db-migrations Job, so this must clear the slowest legitimate migration
+    or a timeout rolls back mid-migration (old app image against a half-migrated schema). The
+    real floor is db_migrations_active_deadline_seconds (3600 today, so ~1h) plus headroom for
+    pulls and pod readiness, NOT the chart's own 14400 default that CPI overrides. Raise both
+    together before an exceptional migration.
+
+    Why an env may still want it short: on an env with no large migration to run, a crashlooping
+    rollout just burns the whole window before helm gives up (dev-slim, 2026-08-07, 04:07-08:37).
+    Note remediation.retries=2 multiplies this by up to 3 for the full failure cycle. Detection
+    does not depend on this value: FluxHelmReleaseStuck already fires after 30m of ready=Unknown.
+
+    Upgrade only. install keeps its own timeout: a fresh install always runs the full schema
+    import, and install remediation uninstalls rather than rolls back.
+  EOT
+  type        = string
+  default     = "4h30m"
+}
+
 variable "flux_chart_version" {
   description = "fluxcd-community/flux2 chart version for the app-delivery controllers. 2.19.0 = Flux 2.9.1 (helm-controller v1.6.2, Helm 4/SSA line), validated adopting the release cleanly on min under Helm 3 and 4."
   type        = string
