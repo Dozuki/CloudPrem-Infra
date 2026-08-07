@@ -724,7 +724,13 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # upgrade, while rollback only runs on remediation. It is also the knob reached
       # for to punch through immutable-field errors, where it makes things worse, not
       # better (see below).
-      upgrade = { disableWait = false, timeout = "4h30m", crds = "CreateReplace", force = false, remediation = { retries = 2, remediateLastFailure = false } }
+      # upgrade.timeout is per-attempt and now env-tunable (var.flux_upgrade_timeout, default
+      # unchanged at 4h30m). Its floor is db_migrations_active_deadline_seconds plus headroom, not
+      # an arbitrary number: helm blocks on the db-migrations Job, so a timeout below the Job's own
+      # deadline cuts a migration off part way. retries=2 multiplies it by up to 3 for a full
+      # cycle, and per remediateLastFailure=false below the terminal failure is not rolled back at
+      # all, so a short timeout does not buy a clean revert.
+      upgrade = { disableWait = false, timeout = var.flux_upgrade_timeout, crds = "CreateReplace", force = false, remediation = { retries = 2, remediateLastFailure = false } }
       # Both force knobs pinned false explicitly. That is already the Helm default, but the
       # semantics are widely misread, so they get written down rather than inherited.
       # What force actually does, checked against source (helm v3.19.0 pkg/kube/client.go
