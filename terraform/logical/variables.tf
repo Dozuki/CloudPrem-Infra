@@ -568,7 +568,7 @@ variable "delete_after" {
 }
 
 variable "db_migrations_active_deadline_seconds" {
-  description = "activeDeadlineSeconds for the chart's db-migrations Job. The chart default (900) is too short for the Q1->Q2 forward migration on a large snapshot-restored DB (~100 GB dies DeadlineExceeded). Default here is generous; the job exits when migrations finish, so a high ceiling costs nothing on small DBs."
+  description = "activeDeadlineSeconds for the chart's db-migrations Job. The chart ships 14400 (4h); this overrides it down to 1h, so 1h is the effective deadline everywhere. The Job exits as soon as migrations finish, so a higher ceiling costs nothing on small DBs, but a slow one (large snapshot-restored DB, version-jump migration) dies DeadlineExceeded, so raise it per-env before an exceptional migration. This is also the floor for flux_upgrade_timeout, since helm waits on this Job."
   type        = number
   default     = 3600
 }
