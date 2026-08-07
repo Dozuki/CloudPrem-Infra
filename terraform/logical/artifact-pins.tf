@@ -29,8 +29,16 @@ data "aws_ecr_image" "app_pin" {
   count           = local.verify_ecr_pins && var.image_tag != "" ? 1 : 0
   region          = local.pin_ecr_region
   registry_id     = local.pin_registry_id
-  repository_name = "app"
+  repository_name = var.app_image_flavor == "slim" ? "monolith-app" : "app"
   image_tag       = var.image_tag
+}
+
+data "aws_ecr_image" "beanstalkd_pin" {
+  count           = local.verify_ecr_pins && var.app_image_flavor == "slim" && var.beanstalkd_tag != "" ? 1 : 0
+  region          = local.pin_ecr_region
+  registry_id     = local.pin_registry_id
+  repository_name = "beanstalkd"
+  image_tag       = var.beanstalkd_tag
 }
 
 data "aws_ecr_image" "nextjs_pin" {

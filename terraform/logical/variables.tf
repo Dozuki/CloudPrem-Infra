@@ -115,6 +115,26 @@ variable "image_repository" {
   type        = string
 }
 
+variable "app_image_flavor" {
+  description = "App image family: legacy (vm-in-a-can app repo) or slim (monolith-app family). Slim switches the chart's images.app.path to monolith-app and enables the dedicated beanstalkd image, so it also requires beanstalkd_tag and chart_version >= 2.11.0 (first chart with images.flavor support)."
+  type        = string
+  default     = "legacy"
+  validation {
+    condition     = contains(["legacy", "slim"], var.app_image_flavor)
+    error_message = "app_image_flavor must be legacy or slim."
+  }
+}
+
+variable "beanstalkd_tag" {
+  description = "Tag for the dedicated beanstalkd fork image (repo <registry>/beanstalkd). Required when app_image_flavor is slim; ignored on legacy."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.app_image_flavor != "slim" || trimspace(var.beanstalkd_tag) != ""
+    error_message = "beanstalkd_tag is required when app_image_flavor is slim."
+  }
+}
+
 variable "nextjs_extra_env" {
   description = "Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs."
   type        = map(string)
