@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.16.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.15.0...v8.16.0) (2026-08-07)
+
+
+### Features
+
+* **logical:** app_image_flavor for the slim image family ([#464](https://github.com/Dozuki/CloudPrem-Infra/issues/464)) ([d6b3343](https://github.com/Dozuki/CloudPrem-Infra/commit/d6b334344b94a8e988b09d63096a290357a61db8))
+
+
+### Bug Fixes
+
+* **harness:** keep the resolved aws profile from losing to account.hcl's literal ([df9101c](https://github.com/Dozuki/CloudPrem-Infra/commit/df9101c225faf05adf3a7a1b1c09a0186d2a4125))
+
 ## [8.15.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.14.0...v8.15.0) (2026-08-05)
 
 
