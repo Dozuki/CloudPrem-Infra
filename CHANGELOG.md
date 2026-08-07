@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.17.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.16.0...v8.17.0) (2026-08-07)
+
+
+### Features
+
+* **logical:** make the dozuki HelmRelease upgrade timeout env-tunable ([#465](https://github.com/Dozuki/CloudPrem-Infra/issues/465)) ([a0c7295](https://github.com/Dozuki/CloudPrem-Infra/commit/a0c7295d9bdb20229ae0e428b940a70f8b4924d0))
+
 ## [8.16.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.15.0...v8.16.0) (2026-08-07)
 
 
