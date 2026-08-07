@@ -84,16 +84,24 @@ locals {
 
     sentry = { customerName = coalesce(var.customer, "Dozuki") }
 
-    images = {
-      flavor = var.app_image_flavor
-      app = {
-        repository = var.image_repository
-        path       = var.app_image_flavor == "slim" ? "monolith-app" : "app"
-        tag        = var.image_tag
-      }
-      webnextjs  = { tag = var.nextjs_tag }
-      beanstalkd = { tag = var.beanstalkd_tag }
-    }
+    # The slim keys (flavor, app.path, beanstalkd) are only emitted when the flavor is
+    # slim, so a legacy env's rendered values stay byte-identical to the pre-flavor
+    # shape. That matters because the flux_values Secret below is watched
+    # (reconcile.fluxcd.io/watch): any new leaf, even one the chart defaults anyway,
+    # changes the Secret and triggers a Helm upgrade on every legacy env at its next
+    # infra bump. Conditionals stay split per key: a single conditional mixing a
+    # string and an object attribute fails type unification against {}.
+    images = merge(
+      {
+        app = merge(
+          { repository = var.image_repository, tag = var.image_tag },
+          var.app_image_flavor == "slim" ? { path = "monolith-app" } : {},
+        )
+        webnextjs = { tag = var.nextjs_tag }
+      },
+      var.app_image_flavor == "slim" ? { flavor = "slim" } : {},
+      var.app_image_flavor == "slim" ? { beanstalkd = { tag = var.beanstalkd_tag } } : {},
+    )
 
     ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
 
@@ -492,6 +500,21 @@ resource "kubernetes_secret_v1" "flux_values" {
     }
   }
   data = { "values.yaml" = yamlencode(local.app_values) }
+
+  # slim needs the chart's images.flavor contract, first shipped in chart 2.11.0. A
+  # pre-flavor chart silently ignores images.flavor and renders the legacy beanstalkd
+  # and crond entrypoints against the slim image (which carries neither), so the plan
+  # passes and the workloads can't start. Fail that combination at plan time instead.
+  lifecycle {
+    precondition {
+      condition = var.app_image_flavor != "slim" || try(
+        tonumber(split(".", var.chart_version)[0]) > 2 ||
+        (tonumber(split(".", var.chart_version)[0]) == 2 && tonumber(split(".", var.chart_version)[1]) >= 11),
+        false
+      )
+      error_message = "app_image_flavor=slim requires chart_version >= 2.11.0 (first release with images.flavor support)."
+    }
+  }
 }
 
 # GHCR pull secret in flux-system for the Azure/generic OCIRepository (source-controller pulls the
@@ -925,12 +948,19 @@ resource "kubectl_manifest" "flux_slack_alert" {
       # notification - otherwise fleet messages are indistinguishable.
       # Just env + versions: summary and cluster duplicated env on every fleet
       # stack (eks_cluster_id == customer-environment), tripling the same value.
-      eventMetadata = {
-        env             = "${var.customer}-${var.environment}"
-        chart           = var.chart_version
-        app-image       = var.image_tag
-        webnextjs-image = var.nextjs_tag
-      }
+      # Slim keys merge in conditionally so legacy manifests stay unchanged.
+      eventMetadata = merge(
+        {
+          env             = "${var.customer}-${var.environment}"
+          chart           = var.chart_version
+          app-image       = var.image_tag
+          webnextjs-image = var.nextjs_tag
+        },
+        var.app_image_flavor == "slim" ? {
+          app-flavor       = "slim"
+          beanstalkd-image = var.beanstalkd_tag
+        } : {},
+      )
       eventSources = [
         { kind = "HelmRelease", name = "*" },
         { kind = "OCIRepository", name = "*" },
