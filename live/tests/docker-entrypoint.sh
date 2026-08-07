@@ -148,15 +148,42 @@ if [ -n "${HARNESS_ASSUME_ROLE_ARN:-}" ]; then
   # credential_source=EcsContainer reads AWS_CONTAINER_CREDENTIALS_FULL_URI, which is what
   # EKS Pod Identity injects. It is mutually exclusive with source_profile, and the SDK
   # rejects the pair, so this is deliberately the only key here.
+  # The run label IS the run id, and the run id addresses Terraform state: phases.go builds
+  # the state prefix as RunID + "-" + ConfigName + "/" (see janitor.go's reverse of it). So a
+  # malformed run id is never merely cosmetic - it points the run at a state prefix that does
+  # not exist, which would destroy nothing while reporting success. Reject it loudly here
+  # rather than sanitizing it, because sanitizing a state address silently changes WHICH
+  # stack a teardown targets. Whitespace is the failure seen in the wild: a submitter passed
+  # "<run_id> <config_name>" space-joined as a single --run-id.
+  case "${HARNESS_RUN_LABEL:-phase}" in
+    *[!A-Za-z0-9._-]*)
+      log "ERROR: HARNESS_RUN_LABEL '${HARNESS_RUN_LABEL}' is not a valid run id"
+      log "ERROR: allowed characters are A-Z a-z 0-9 . _ - and nothing else (no spaces)"
+      log "ERROR: the run id addresses Terraform state as <run-id>-<config>/ - a malformed"
+      log "ERROR: one would target a nonexistent prefix and tear down nothing. If you meant"
+      log "ERROR: to pass a config name, pass it as --config, not joined onto --run-id."
+      exit 1 ;;
+  esac
+  # Even with a valid run id, role_session_name is not free-form: STS enforces [\w+=,.@-]*
+  # and a 64-char cap, and nothing here previously enforced the length. Clip to 56 so the
+  # "harness-" prefix keeps the whole value inside 64. The tr is belt-and-braces for the
+  # character class now that the case above rejects the realistic offenders.
+  _session="harness-$(printf '%s' "${HARNESS_RUN_LABEL:-phase}" | tr -c '[:alnum:]_+=,.@-' '-' | cut -c1-56)"
   cat >"${HOME:-/root}/.aws/config" <<EOF
 [profile ${_profile}]
 role_arn = ${HARNESS_ASSUME_ROLE_ARN}
 credential_source = EcsContainer
-role_session_name = harness-${HARNESS_RUN_LABEL:-phase}
+role_session_name = ${_session}
 EOF
-  log "AWS: profile ${_profile} chains into ${HARNESS_ASSUME_ROLE_ARN}"
-  if ! aws --profile "${_profile}" sts get-caller-identity >/dev/null 2>&1; then
-    log "ERROR: cannot assume ${HARNESS_ASSUME_ROLE_ARN} - check the role's trust policy admits this pod's role"
+  log "AWS: profile ${_profile} chains into ${HARNESS_ASSUME_ROLE_ARN} (session ${_session})"
+  # Capture stderr instead of discarding it. This check used to run with >/dev/null 2>&1
+  # and print a hardcoded guess about the trust policy, which sent a real incident down
+  # the wrong path for hours: the actual error was a one-line ValidationError on the
+  # session name. Whatever the AWS CLI says, say it.
+  if ! _sts_err=$(aws --profile "${_profile}" sts get-caller-identity 2>&1 >/dev/null); then
+    log "ERROR: cannot assume ${HARNESS_ASSUME_ROLE_ARN} using session name '${_session}'"
+    log "ERROR: aws returned: ${_sts_err}"
+    log "ERROR: if that is a ValidationError, the run label is malformed; if AccessDenied, check the role's trust policy admits this pod's role"
     exit 1
   fi
   log "AWS: assumed $(aws --profile "${_profile}" sts get-caller-identity --query Arn --output text)"
