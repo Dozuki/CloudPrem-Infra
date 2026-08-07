@@ -576,20 +576,26 @@ variable "db_migrations_active_deadline_seconds" {
 variable "flux_upgrade_timeout" {
   description = <<-EOT
     Per-attempt timeout for the dozuki HelmRelease's upgrade. The default is unchanged from what
-    was hardcoded before, so leaving it alone is a no-op; envs that want a failed rollout to roll
-    back sooner set it in env.hcl.
+    was hardcoded before, so leaving it alone is a no-op; envs that want a failed rollout to reach
+    its terminal state sooner set it in env.hcl.
 
     Why the default is this large: disableWait=false makes helm block on every resource in the
-    release, including the db-migrations Job, so this must clear the slowest legitimate migration
-    or a timeout rolls back mid-migration (old app image against a half-migrated schema). The
-    real floor is db_migrations_active_deadline_seconds (3600 today, so ~1h) plus headroom for
-    pulls and pod readiness, NOT the chart's own 14400 default that CPI overrides. Raise both
-    together before an exceptional migration.
+    release, including the db-migrations Job, so this must clear the slowest legitimate migration.
+    Set it below that and an upgrade carrying a real migration gets cut off part way through. The
+    floor is db_migrations_active_deadline_seconds (3600 today, so ~1h) plus headroom for pulls
+    and pod readiness, NOT the chart's own 14400 default that CPI overrides. Raise both together
+    before an exceptional migration.
+
+    Do not read a short timeout as "it just rolls back". remediation.retries=2 with
+    remediateLastFailure=false means Flux rolls back between the first two failed attempts (old
+    app image against a partly migrated schema) and then performs NO rollback on the third, so a
+    terminal failure leaves the release failed with live state partially applied, pending operator
+    recovery. Cutting a migration short is bad in either branch.
 
     Why an env may still want it short: on an env with no large migration to run, a crashlooping
     rollout just burns the whole window before helm gives up (dev-slim, 2026-08-07, 04:07-08:37).
-    Note remediation.retries=2 multiplies this by up to 3 for the full failure cycle. Detection
-    does not depend on this value: FluxHelmReleaseStuck already fires after 30m of ready=Unknown.
+    retries=2 multiplies this by up to 3 for the full failure cycle. Detection does not depend on
+    this value: FluxHelmReleaseStuck already fires after 30m of ready=Unknown.
 
     Upgrade only. install keeps its own timeout: a fresh install always runs the full schema
     import, and install remediation uninstalls rather than rolls back.
