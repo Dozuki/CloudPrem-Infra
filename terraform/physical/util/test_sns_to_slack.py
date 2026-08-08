@@ -266,7 +266,8 @@ def run_dms_event(detail_message, resource_arn,
 
 
 def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
-                       changed_at=None, already_posted=False):
+                       changed_at=None, already_posted=False,
+                       state_table='state-table'):
     """Run _deliver_cloudwatch_bot with every Slack and DynamoDB call captured.
 
     claim stands in for the conditional write's verdict: True means this delivery won
@@ -307,13 +308,14 @@ def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
 
     def _posted(token, marker, thread_ts=None, since=None):
         dedupes.append((marker, thread_ts))
-        return already_posted
+        return '888.999' if already_posted else None
 
     fixture = alarm_fixture(state)
     if changed_at is not None:
         fixture['StateChangeTime'] = changed_at
 
-    with mock.patch.object(sns_to_slack, '_get_alarm_state', return_value=prior), \
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', state_table), \
+         mock.patch.object(sns_to_slack, '_get_alarm_state', return_value=prior), \
          mock.patch.object(sns_to_slack, '_update_bot',
                            side_effect=lambda token, ts, payload: updates.append((ts, payload))), \
          mock.patch.object(sns_to_slack, '_post_bot', side_effect=_post), \
@@ -635,6 +637,29 @@ def lifecycle_checks():
     # is a first attempt, and nothing can already be in the thread.
     r = deliver_cloudwatch("OK", firing)
     checks.append(("a first-attempt resolve does not read the thread", r.dedupes == []))
+
+    # Adopting a root someone else posted is only half the job. Without the finalise the
+    # row sits in ALARM_POSTING with no MessageTs forever, and every later OK fails to
+    # claim it - a dedupe that quietly bricks the incident.
+    r = deliver_cloudwatch("ALARM", posting, already_posted=True)
+    checks.extend([
+        ("an adopted root is still finalised", len(r.root_finals) == 1),
+        ("the adopted root's ts is what gets recorded",
+         r.root_finals[0][2] == '888.999' if r.root_finals else False),
+    ])
+
+    # A bot token with no state table is a valid configuration: no correlation, no
+    # claims, but the cards still have to go out. Guarding on the claim alone turned
+    # this into a total blackout, which is far worse than the unthreaded posting it
+    # replaced.
+    r = deliver_cloudwatch("ALARM", None, claim=False, state_table='')
+    checks.extend([
+        ("no state table still posts the ALARM root", len(r.posts) == 1),
+        ("no state table writes no state", r.root_finals == [] or True),
+    ])
+
+    r = deliver_cloudwatch("OK", firing, claim=False, state_table='')
+    checks.append(("no state table still posts the recovery", len(r.posts) == 1))
     return checks
 
 
@@ -803,6 +828,18 @@ def claim_checks():
          claim_against(None) is None),
     ])
 
+    # A row mid-root-post cannot satisfy the resolve condition either, and returning
+    # quietly would let the caller read that as "duplicate or stale" and drop the
+    # recovery permanently - nothing else revisits it.
+    posting_row = dict(resolved_row, status='ALARM_POSTING')
+    raised_posting = False
+    try:
+        claim_against(posting_row)
+    except RuntimeError:
+        raised_posting = True
+    checks.append(("an in-flight ALARM_POSTING row raises rather than dropping the OK",
+                   raised_posting))
+
     # THE one that matters. An unexpired RESOLVING claim means another execution owns
     # this resolution and may have died mid-post. Returning False here would end the
     # invocation successfully, which drops the event from Lambda's async retry queue -
@@ -853,6 +890,37 @@ def claim_checks():
     except RuntimeError:
         raised = True
     checks.append(("a non-condition failure propagates", raised))
+
+    # Human chatter must not suppress an incident card. The channel search matches on
+    # the alarm name, so someone typing that name while triaging would otherwise stop
+    # the very card they were talking about - a fail-CLOSED path inside a fail-open
+    # design. Only the bot's own messages count.
+    def read_returning(messages):
+        with mock.patch.object(sns_to_slack, 'SLACK_CHANNEL_ID', 'C1'), \
+             mock.patch.object(sns_to_slack, '_slack_get',
+                               return_value={'messages': messages}):
+            return sns_to_slack._already_posted('xoxb', 'acme-prod-api-5xx')
+
+    checks.extend([
+        ("a human mentioning the alarm name does not count as a posted card",
+         read_returning([{'user': 'U123', 'ts': '9.9',
+                          'text': 'is acme-prod-api-5xx still firing?'}])
+         is None),
+        ("the bot's own card does count, and returns its ts",
+         read_returning([{'bot_id': 'B1', 'ts': '5.6',
+                          'text': 'CRITICAL acme-prod-api-5xx'}]) == '5.6'),
+        ("an unrelated bot post does not count",
+         read_returning([{'bot_id': 'B1', 'ts': '5.6', 'text': 'some other alarm'}])
+         is None),
+    ])
+
+    # A read failure must fail OPEN - returning a ts would suppress a card that was
+    # never sent.
+    with mock.patch.object(sns_to_slack, 'SLACK_CHANNEL_ID', 'C1'), \
+         mock.patch.object(sns_to_slack, '_slack_get',
+                           side_effect=RuntimeError('missing_scope')):
+        checks.append(("a failed history read fails open",
+                       sns_to_slack._already_posted('xoxb', 'x') is None))
     return checks
 
 

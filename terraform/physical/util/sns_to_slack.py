@@ -431,7 +431,11 @@ def _slack_get(method, token, params):
 
 
 def _already_posted(token, marker, thread_ts=None, since=None):
-    """True when a message carrying `marker` is already in the channel or thread.
+    """The ts of an existing message carrying `marker`, or None.
+
+    Returns the timestamp rather than a bool because the ALARM takeover path needs it:
+    finding the root someone else posted is only half the job, the row still has to be
+    finalised to point at it or it stays stuck mid-post forever.
 
     This is what makes a retry idempotent at the Slack boundary. The DynamoDB claim can
     only say "nobody else is posting right now"; it cannot say whether OUR previous
@@ -439,10 +443,14 @@ def _already_posted(token, marker, thread_ts=None, since=None):
     is exactly "Slack accepted it and we never learned that". Only Slack knows, so ask
     Slack - but only on a takeover, where a previous attempt actually existed.
 
-    Fails OPEN (returns False, so the caller posts). A missing history scope, a Slack
+    Fails OPEN (returns None, so the caller posts). A missing history scope, a Slack
     5xx, or a thread that cannot be read must not swallow a recovery card: a duplicate
     card is an annoyance, a missing one is the bug this whole change exists to prevent.
     That degradation is why the scope is not a hard dependency.
+
+    Only bot-authored messages count. The channel-history search matches on the alarm
+    name, and a human typing that name while triaging would otherwise suppress the very
+    card they were talking about - a fail-CLOSED path hiding inside a fail-open design.
     """
     try:
         if thread_ts:
@@ -458,8 +466,11 @@ def _already_posted(token, marker, thread_ts=None, since=None):
                 'messages') or []
     except Exception as exc:  # noqa: BLE001 - never let a read failure drop a card
         print(f'could not check Slack for an existing "{marker}" post: {exc}')
-        return False
-    return any(marker in json.dumps(message) for message in messages)
+        return None
+    for message in messages:
+        if message.get('bot_id') and marker in json.dumps(message):
+            return message.get('ts')
+    return None
 
 
 def _post_bot(token, payload, thread_ts=None, reply_broadcast=False):
@@ -718,7 +729,13 @@ def _claim_resolution(alarm_key, event_at):
         # The condition fails for three different reasons and they do NOT share an
         # outcome, so read the row rather than assuming the benign one.
         prior = _get_alarm_state(alarm_key)
-        if prior and prior.get('status') == 'RESOLVING':
+        if prior and prior.get('status') in ('RESOLVING', 'ALARM_POSTING'):
+            # ALARM_POSTING counts here too. A row mid-root-post cannot satisfy this
+            # condition, and returning None would let the caller read that as "duplicate
+            # or stale" and drop the recovery outright - permanently, because nothing
+            # else revisits it. The root's own invocation (or its retry) finalises the
+            # row to ALARM, and this event's retry then claims it normally.
+            #
             # Someone holds an unexpired claim. Either they are still posting, or they
             # died between claiming and posting - and nothing here can tell which.
             #
@@ -734,7 +751,7 @@ def _claim_resolution(alarm_key, event_at):
             # has expired (the retry wins the claim and posts). Both converge. Silence
             # only converges when the holder happened to survive.
             raise RuntimeError(
-                f'{alarm_key} is claimed by an in-flight resolution; retrying')
+                f'{alarm_key} is claimed by an in-flight post; retrying')
         # RESOLVED means the resolution already happened, and a still-ALARM row means
         # this event is older than the one applied. Both mean "post nothing", and
         # neither is an error. Every other failure - throttling, a missing table,
@@ -940,21 +957,34 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         # two deliveries that both see no row would otherwise both post one, and only
         # one timestamp would survive the write.
         claim_token = _claim_alarm_root(alarm_key, event_at)
-        if not claim_token:
+        # No table means no correlation and therefore no claim to win - but the card
+        # still has to go out. Without this guard a bot token configured without a state
+        # table drops every alarm, which is worse than the unthreaded posting it replaced.
+        if SLACK_STATE_TABLE and not claim_token:
             print(f'skipping duplicate or stale ALARM for {alarm_key}')
             return
 
         # Only on a takeover, where a previous attempt may have posted before dying.
         # A fresh claim cannot have a root already in the channel.
-        if (prior and prior.get('status') == 'ALARM_POSTING'
-                and _already_posted(token, metadata['alarm_name'],
-                                    since=str(int(time.time()) - STALE_POST_WINDOW))):
+        existing_ts = None
+        if prior and prior.get('status') == 'ALARM_POSTING':
+            existing_ts = _already_posted(
+                token, metadata['alarm_name'],
+                since=str(int(time.time()) - STALE_POST_WINDOW))
+
+        started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
+        if existing_ts:
+            # The attempt that died got its root out before it went. Adopt that message
+            # rather than posting a second one - and finalise, or the row sits in
+            # ALARM_POSTING with no MessageTs forever and every later OK fails to claim
+            # it. Skipping the finalise is how a dedupe turns into a stuck incident.
             print(f'root for {metadata["alarm_name"]} is already in the channel; '
-                  f'not posting a second one')
+                  f'adopting {existing_ts} instead of posting a second one')
+            _finalize_alarm_root(alarm_key, claim_token, existing_ts, started_at,
+                                 event_at)
             return
 
         message_ts = _post_bot(token, payload)
-        started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
         _finalize_alarm_root(alarm_key, claim_token, message_ts, started_at, event_at)
         return
 
@@ -970,7 +1000,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         # write, so exactly one delivery wins it and the rest return here having sent
         # nothing.
         claim_token = _claim_resolution(alarm_key, event_at)
-        if not claim_token:
+        if SLACK_STATE_TABLE and not claim_token:
             print(f'skipping duplicate or stale OK for {alarm_key}')
             return
 
