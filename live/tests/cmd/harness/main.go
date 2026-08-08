@@ -32,7 +32,8 @@ const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|jani
              (Phase 4 orphan sweeper; reads a WorkflowList json on stdin, defaults to a
              dry-run report; needs neither --run-id nor --config)
   reaper-worker: --action-queue-url --result-queue-url --control-table --account-id
-                 --region --dr-region --self-workflow (reads WorkflowList JSON on stdin)
+                 --region --dr-region --self-workflow --actions-enabled
+                 (reads WorkflowList JSON on stdin only when actions are enabled)
   reaper-drain-cancelled: --action-queue-url --result-queue-url --control-table
                            --archive-bucket --account-id --region`
 
@@ -225,9 +226,9 @@ func runEvidence(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // uses - no client-go against the Argo cluster), recomputes each candidate's identity
 // with the exact same code the apply used (Config.Salted), and only ever acts on a
 // candidate that is simultaneously stale, unowned by any live workflow or fresh lock, and
-// still holding real tagged AWS resources. Defaults to a dry-run report; --sweep and the
-// harness-config `janitor_mode` ConfigMap key both have to say so before anything is
-// destroyed.
+// still holding real tagged AWS resources. The CLI defaults to a dry-run report; the
+// Argo daily entrypoint fixes --sweep=false, and only the separate Resource Reaper
+// worker reaches selected teardown after its durable action and final-veto checks.
 //
 // Exit codes: 2 is a usage error (bad flags). 3 is a SAFETY ABORT - the account identity
 // did not match, the workflow list could not be trusted, or a candidate resolved to a
@@ -477,6 +478,12 @@ func finishJanitorReport(
 			code = 1
 		}
 		return emitJanitorJSON(rep, code, jsonOut, stdout, stderr)
+	}
+	if reaperShadow {
+		engineReport.Shadow = true
+		for index := range engineReport.CleanupUnits {
+			engineReport.CleanupUnits[index].Evidence.Shadow = true
+		}
 	}
 	key, err := harness.WriteEngineReport(ctx, reaperWriter, reaperBucket, engineReport)
 	if err != nil {

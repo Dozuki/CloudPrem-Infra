@@ -32,6 +32,7 @@ type reaperWorkerFlags struct {
 	matrixPath     string
 	lockTable      string
 	selfWorkflow   string
+	actionsEnabled bool
 }
 
 func parseReaperWorkerFlags(rest []string, stderr io.Writer) (reaperWorkerFlags, int) {
@@ -49,6 +50,7 @@ func parseReaperWorkerFlags(rest []string, stderr io.Writer) (reaperWorkerFlags,
 	fs.StringVar(&flags.matrixPath, "matrix", "live/tests/matrix.yaml", "harness matrix path")
 	fs.StringVar(&flags.lockTable, "lock-table", "dozuki-terraform-lock", "terraform state lock table")
 	fs.StringVar(&flags.selfWorkflow, "self-workflow", "", "this worker workflow name")
+	fs.BoolVar(&flags.actionsEnabled, "actions-enabled", false, "permit one Resource Reaper queue receive")
 	if err := fs.Parse(rest); err != nil {
 		return flags, 2
 	}
@@ -83,6 +85,10 @@ func runReaperWorker(rest []string, stdin io.Reader, stdout, stderr io.Writer) i
 	flags, code := parseReaperWorkerFlags(rest, stderr)
 	if code != 0 {
 		return code
+	}
+	if !flags.actionsEnabled {
+		fmt.Fprintln(stdout, `{"status":"disabled"}`)
+		return 0
 	}
 	workflows, err := readWorkerWorkflows(stdin, flags.selfWorkflow)
 	if err != nil {

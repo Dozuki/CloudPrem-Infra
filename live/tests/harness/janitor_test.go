@@ -1492,7 +1492,7 @@ func TestDefaultSweepBudgetDerivesFromPodDeadline(t *testing.T) {
 	}
 	// 50-janitor-cron.yaml's own comment claims this literal; keep the claim honest.
 	if JanitorPodActiveDeadlineSeconds != 12600 {
-		t.Fatalf("JanitorPodActiveDeadlineSeconds = %d, want 12600 to match 50-janitor-cron.yaml activeDeadlineSeconds - update the YAML comment (and literal) if this ever changes", JanitorPodActiveDeadlineSeconds)
+		t.Fatalf("JanitorPodActiveDeadlineSeconds = %d, want 12600 to match the 50-janitor-cron.yaml execute template deadline - update the YAML comment (and literal) if this ever changes", JanitorPodActiveDeadlineSeconds)
 	}
 }
 

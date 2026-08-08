@@ -242,10 +242,11 @@ func (o JanitorOptions) now() time.Time {
 	return time.Now()
 }
 
-// JanitorPodActiveDeadlineSeconds MUST match the `scan` container's
+// JanitorPodActiveDeadlineSeconds MUST match the Resource Reaper `execute` template's
 // activeDeadlineSeconds in 50-janitor-cron.yaml - that YAML value carries a comment
-// pointing back here for the same reason. This is the single source of truth; the
-// YAML is the consumer. If the pod deadline ever needs to change, change it here
+// pointing back here for the same reason. The report-only scan has a smaller, separate
+// deadline and never calls Sweep. This is the destructive worker's source of truth; the
+// YAML is the consumer. If the worker deadline ever needs to change, change it here
 // first and let DefaultSweepBudget's derivation carry the new number into Sweep
 // automatically, then copy the same literal into the YAML (Go cannot reach into a
 // YAML manifest at build time, so the copy is manual - but there is only one number
@@ -254,8 +255,8 @@ const JanitorPodActiveDeadlineSeconds = 12600
 
 // sweepSetupMargin is reserved for everything in the pod that runs BEFORE Sweep's own
 // clock starts and so is never inside its budget: image pull/container start, the
-// workspace repo clone or incremental fetch (docker-entrypoint.sh, unconditional even
-// in report mode), Vault login, and Scan itself (S3 listings + tag lookups, "minutes"
+// workspace repo clone or incremental fetch (docker-entrypoint.sh), Vault login, and
+// the worker's fresh Scan (S3 listings + tag lookups, "minutes"
 // per 50-janitor-cron.yaml's own comment). 30 minutes is generous against all of
 // that put together, and generous is the right direction to round: undercounting the
 // margin is what would let Sweep itself blow the pod deadline.

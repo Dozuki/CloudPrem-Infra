@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,6 +59,237 @@ func notifyScript(t *testing.T) string {
 	}
 	t.Fatal("no post-report template with a container script found in 50-janitor-cron.yaml")
 	return ""
+}
+
+func argoManifest(t *testing.T, name string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("../argo", name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(body)
+}
+
+type janitorManifestDoc struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name        string            `yaml:"name"`
+		Annotations map[string]string `yaml:"annotations"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Suspend                 bool     `yaml:"suspend"`
+		Schedules               []string `yaml:"schedules"`
+		ConcurrencyPolicy       string   `yaml:"concurrencyPolicy"`
+		StartingDeadlineSeconds int      `yaml:"startingDeadlineSeconds"`
+		WorkflowSpec            struct {
+			Entrypoint            string `yaml:"entrypoint"`
+			ActiveDeadlineSeconds int    `yaml:"activeDeadlineSeconds"`
+		} `yaml:"workflowSpec"`
+		Volumes []struct {
+			Name     string `yaml:"name"`
+			EmptyDir struct {
+				SizeLimit string `yaml:"sizeLimit"`
+			} `yaml:"emptyDir"`
+		} `yaml:"volumes"`
+		Templates []struct {
+			Name                  string `yaml:"name"`
+			ActiveDeadlineSeconds int    `yaml:"activeDeadlineSeconds"`
+			Metadata              struct {
+				Annotations map[string]string `yaml:"annotations"`
+			} `yaml:"metadata"`
+			Container struct {
+				Args      []string `yaml:"args"`
+				Resources struct {
+					Requests map[string]string `yaml:"requests"`
+					Limits   map[string]string `yaml:"limits"`
+				} `yaml:"resources"`
+			} `yaml:"container"`
+		} `yaml:"templates"`
+	} `yaml:"spec"`
+}
+
+func janitorManifestDocs(t *testing.T) []janitorManifestDoc {
+	t.Helper()
+	manifest := argoManifest(t, "50-janitor-cron.yaml")
+	dec := yaml.NewDecoder(strings.NewReader(manifest))
+	var docs []janitorManifestDoc
+	for {
+		var doc janitorManifestDoc
+		if err := dec.Decode(&doc); err != nil {
+			if err != io.EOF {
+				t.Fatalf("decode 50-janitor-cron.yaml: %v", err)
+			}
+			break
+		}
+		docs = append(docs, doc)
+	}
+	return docs
+}
+
+func TestResourceReaperJanitorYAMLContract(t *testing.T) {
+	config := argoManifest(t, "00-phase-templates.yaml")
+	janitor := argoManifest(t, "50-janitor-cron.yaml")
+
+	for _, key := range []string{
+		"reaper_report_bucket:",
+		"reaper_action_queue_url:",
+		"reaper_result_queue_url:",
+		"reaper_control_table:",
+		"reaper_shadow: 'true'",
+		"reaper_actions_enabled: 'false'",
+		"reaper_direct_slack_enabled: 'true'",
+	} {
+		if !strings.Contains(config, key) {
+			t.Errorf("harness ConfigMap is missing explicit Resource Reaper setting %q", key)
+		}
+	}
+	if strings.Contains(config, "janitor_mode:") {
+		t.Fatal("obsolete janitor_mode ConfigMap key remains")
+	}
+	for _, forbidden := range []string{"- name: mode", "-p mode=sweep", "--sweep=true"} {
+		if strings.Contains(janitor, forbidden) {
+			t.Errorf("legacy direct sweep entrypoint remains: %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"reaper-direct-slack-enabled",
+	} {
+		if !strings.Contains(janitor, required) {
+			t.Errorf("daily report contract is missing %q", required)
+		}
+	}
+	if !strings.Contains(janitor, "when: \"'{{workflow.parameters.reaper-direct-slack-enabled}}' == 'true'\"") {
+		t.Fatal("legacy direct Slack comparison is not explicitly guarded for removal at cutover")
+	}
+}
+
+func TestResourceReaperActionWorkerYAMLContract(t *testing.T) {
+	manifest := argoManifest(t, "50-janitor-cron.yaml")
+	checkIndex := strings.Index(manifest, `if [ "${REAPER_ACTIONS_ENABLED}" != true ]`)
+	receiveIndex := strings.Index(manifest, "/usr/local/bin/docker-entrypoint.sh reaper-worker")
+	if checkIndex < 0 || receiveIndex < 0 || checkIndex > receiveIndex {
+		t.Fatal("actions-disabled gate must appear before the worker can receive a message")
+	}
+	if !strings.Contains(manifest, "VisibilityTimeoutSeconds: 13500") && !strings.Contains(workerCLISource(t), "VisibilityTimeoutSeconds: 13500") {
+		t.Fatal("worker and manifest no longer document the 13,500-second queue visibility contract")
+	}
+	if strings.Contains(manifest, "volumeClaimTemplates:") {
+		t.Fatal("five-minute empty queue checks must not provision persistent volumes")
+	}
+
+	var workflowFound, scanFound, queueCheckFound, executeFound, dailyFound, workerFound bool
+	for _, doc := range janitorManifestDocs(t) {
+		switch {
+		case doc.Kind == "WorkflowTemplate" && doc.Metadata.Name == "harness-janitor":
+			workflowFound = true
+			if len(doc.Spec.Volumes) != 1 || doc.Spec.Volumes[0].Name != "workspace" || doc.Spec.Volumes[0].EmptyDir.SizeLimit != "10Gi" {
+				t.Fatalf("harness workspace must be one size-limited 10Gi emptyDir: %#v", doc.Spec.Volumes)
+			}
+			for _, tpl := range doc.Spec.Templates {
+				switch tpl.Name {
+				case "scan":
+					scanFound = true
+					if tpl.ActiveDeadlineSeconds != 1800 {
+						t.Errorf("scan activeDeadlineSeconds = %d, want 1800", tpl.ActiveDeadlineSeconds)
+					}
+					script := strings.Join(tpl.Container.Args, "\n")
+					for _, flag := range []string{"--sweep=false", "--reaper-report-bucket"} {
+						if !strings.Contains(script, flag) {
+							t.Errorf("scan command is missing %q", flag)
+						}
+					}
+					assertResources(t, "scan", tpl.Container.Resources.Requests, tpl.Container.Resources.Limits,
+						map[string]string{"cpu": "1", "memory": "4Gi", "ephemeral-storage": "10Gi"},
+						map[string]string{"memory": "6Gi", "ephemeral-storage": "12Gi"})
+				case "queue-check":
+					queueCheckFound = true
+					if tpl.ActiveDeadlineSeconds != 120 {
+						t.Errorf("queue-check activeDeadlineSeconds = %d, want 120", tpl.ActiveDeadlineSeconds)
+					}
+					assertResources(t, "queue-check", tpl.Container.Resources.Requests, tpl.Container.Resources.Limits,
+						map[string]string{"cpu": "100m", "memory": "256Mi"},
+						map[string]string{"memory": "256Mi"})
+				case "execute":
+					executeFound = true
+					if tpl.ActiveDeadlineSeconds != 12600 {
+						t.Errorf("execute activeDeadlineSeconds = %d, want 12600", tpl.ActiveDeadlineSeconds)
+					}
+					if got := tpl.Metadata.Annotations["karpenter.sh/do-not-disrupt"]; got != "true" {
+						t.Errorf("execute do-not-disrupt annotation = %q, want true", got)
+					}
+					script := strings.Join(tpl.Container.Args, "\n")
+					for _, flag := range []string{"reaper-worker", "--action-queue-url", "--result-queue-url", "--control-table"} {
+						if !strings.Contains(script, flag) {
+							t.Errorf("execute command is missing %q", flag)
+						}
+					}
+					assertResources(t, "execute", tpl.Container.Resources.Requests, tpl.Container.Resources.Limits,
+						map[string]string{"cpu": "1", "memory": "4Gi", "ephemeral-storage": "10Gi"},
+						map[string]string{"memory": "6Gi", "ephemeral-storage": "12Gi"})
+				default:
+					if tpl.Container.Resources.Requests["ephemeral-storage"] != "" || tpl.Container.Resources.Limits["ephemeral-storage"] != "" {
+						t.Errorf("template %q unexpectedly reserves workspace ephemeral storage", tpl.Name)
+					}
+				}
+			}
+		case doc.Kind == "CronWorkflow" && doc.Metadata.Name == "harness-janitor":
+			dailyFound = true
+			if doc.Spec.Suspend {
+				t.Error("daily report CronWorkflow must remain active in shadow mode")
+			}
+			if doc.Spec.StartingDeadlineSeconds != 600 || doc.Spec.WorkflowSpec.ActiveDeadlineSeconds != 2400 {
+				t.Errorf("daily deadlines = start %d workflow %d, want 600 and 2400", doc.Spec.StartingDeadlineSeconds, doc.Spec.WorkflowSpec.ActiveDeadlineSeconds)
+			}
+			if doc.Spec.ConcurrencyPolicy != "Forbid" {
+				t.Errorf("daily concurrencyPolicy = %q, want Forbid", doc.Spec.ConcurrencyPolicy)
+			}
+		case doc.Kind == "CronWorkflow" && doc.Metadata.Name == "harness-reaper-worker":
+			workerFound = true
+			if !doc.Spec.Suspend {
+				t.Error("action worker CronWorkflow must remain suspended until cutover")
+			}
+			if doc.Spec.WorkflowSpec.Entrypoint != "consume-one" || doc.Spec.WorkflowSpec.ActiveDeadlineSeconds != 14400 {
+				t.Errorf("worker workflow = entrypoint %q deadline %d, want consume-one and 14400", doc.Spec.WorkflowSpec.Entrypoint, doc.Spec.WorkflowSpec.ActiveDeadlineSeconds)
+			}
+			if doc.Spec.ConcurrencyPolicy != "Forbid" || len(doc.Spec.Schedules) != 1 || doc.Spec.Schedules[0] != "*/5 * * * *" {
+				t.Errorf("worker schedule/concurrency = %#v/%q, want five-minute Forbid", doc.Spec.Schedules, doc.Spec.ConcurrencyPolicy)
+			}
+		}
+	}
+	if !workflowFound || !scanFound || !queueCheckFound || !executeFound || !dailyFound || !workerFound {
+		t.Fatalf("missing expected janitor documents: workflow=%t scan=%t queue-check=%t execute=%t daily=%t worker=%t", workflowFound, scanFound, queueCheckFound, executeFound, dailyFound, workerFound)
+	}
+}
+
+func assertResources(t *testing.T, template string, gotRequests, gotLimits, wantRequests, wantLimits map[string]string) {
+	t.Helper()
+	if !sameStringMap(gotRequests, wantRequests) {
+		t.Errorf("%s requests = %#v, want %#v", template, gotRequests, wantRequests)
+	}
+	if !sameStringMap(gotLimits, wantLimits) {
+		t.Errorf("%s limits = %#v, want %#v", template, gotLimits, wantLimits)
+	}
+}
+
+func sameStringMap(got, want map[string]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, value := range want {
+		if got[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func workerCLISource(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile("../cmd/harness/reaper_worker.go")
+	if err != nil {
+		t.Fatalf("read reaper_worker.go: %v", err)
+	}
+	return string(body)
 }
 
 // runNotify executes the script with REPORT/SCAN_STATUS/MODE set, against stub vault

@@ -33,6 +33,7 @@ type EngineReport struct {
 	ObservedAt    string              `json:"observed_at"`
 	Account       string              `json:"account"`
 	Status        string              `json:"status"`
+	Shadow        bool                `json:"shadow,omitempty"`
 	CleanupUnits  []EngineCleanupUnit `json:"cleanup_units"`
 	Errors        []string            `json:"errors"`
 }
@@ -61,6 +62,7 @@ type HarnessEngineEvidence struct {
 	KeepOnFailure         bool   `json:"keep_on_failure"`
 	LockPresent           bool   `json:"lock_present"`
 	State                 string `json:"state"`
+	Shadow                bool   `json:"shadow,omitempty"`
 	SweepResult           string `json:"sweep_result,omitempty"`
 	ResidueIndexLagCaveat string `json:"residueIndexLagCaveat,omitempty"`
 }

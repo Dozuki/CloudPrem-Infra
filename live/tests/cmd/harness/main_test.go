@@ -19,6 +19,15 @@ func (failingReaperWriter) PutObject(context.Context, *s3.PutObjectInput, ...fun
 	return nil, errors.New("report bucket denied")
 }
 
+type recordingReaperWriter struct {
+	input *s3.PutObjectInput
+}
+
+func (writer *recordingReaperWriter) PutObject(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	writer.input = input
+	return &s3.PutObjectOutput{}, nil
+}
+
 func TestDispatchUnknownSubcommand(t *testing.T) {
 	var b bytes.Buffer
 	if code := dispatch([]string{"frobnicate"}, strings.NewReader(""), io.Discard, &b); code == 0 {
@@ -85,6 +94,38 @@ func TestJanitorAcceptsReaperShadowFlagsBeforeOwnershipGate(t *testing.T) {
 	}
 }
 
+func TestJanitorShadowReportMarksEveryCleanupUnit(t *testing.T) {
+	report := &harness.Report{
+		SchemaVersion: harness.JanitorReportSchemaVersion,
+		Mode:          "report",
+		At:            "2026-08-08T13:00:00Z",
+		Account:       "076248559428",
+		Candidates: []harness.Candidate{{
+			Bucket: "dozuki-terraform-state-us-east-1-076248559428",
+			Prefix: "run-min_default/", RunID: "run", ConfigName: "min_default",
+			Region: "us-east-1", State: harness.StateNeedsReview, Reason: "review",
+		}},
+	}
+	writer := &recordingReaperWriter{}
+	if code := finishJanitorReport(context.Background(), report, 0, false, "reports", true, writer, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("code=%d", code)
+	}
+	if writer.input == nil {
+		t.Fatal("shadow report was not written")
+	}
+	body, err := io.ReadAll(writer.input.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var engineReport harness.EngineReport
+	if err := json.Unmarshal(body, &engineReport); err != nil {
+		t.Fatal(err)
+	}
+	if !engineReport.Shadow || len(engineReport.CleanupUnits) != 1 || !engineReport.CleanupUnits[0].Evidence.Shadow {
+		t.Fatalf("cleanup_units=%+v", engineReport.CleanupUnits)
+	}
+}
+
 func TestReaperPublishFailureReturnsNonzeroAfterLegacyJSON(t *testing.T) {
 	report := &harness.Report{
 		SchemaVersion: harness.JanitorReportSchemaVersion,
@@ -133,9 +174,25 @@ func TestReaperWorkerCLIUsesJanitorOwnershipGate(t *testing.T) {
 		"--control-table", "control",
 		"--account-id", "076248559428",
 		"--self-workflow", "worker-1",
+		"--actions-enabled=true",
 	}, strings.NewReader(`{"items":[]}`), io.Discard, &stderr)
 	if code != 3 || !strings.Contains(stderr.String(), "not found among 0 workflows") {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestReaperWorkerCLIExitsBeforeOwnershipOrAWSWhenActionsDisabled(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := dispatch([]string{
+		"reaper-worker",
+		"--action-queue-url", "actions",
+		"--result-queue-url", "results",
+		"--control-table", "control",
+		"--account-id", "076248559428",
+		"--self-workflow", "worker-1",
+	}, strings.NewReader("not workflow json"), &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), `"status":"disabled"`) || stderr.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 

@@ -6,7 +6,7 @@
 # launcher; this drives the identical `harness <phase>` subcommands from a pod.
 #
 # Usage:
-#   docker-entrypoint.sh provision|upgrade|validate|teardown|janitor [flags...] -> harness
+#   docker-entrypoint.sh provision|upgrade|validate|teardown|janitor|reaper-worker|reaper-drain-cancelled [flags...] -> harness
 #   docker-entrypoint.sh cpi-dr [flags...]                               -> DR CLI
 #   docker-entrypoint.sh bash|sh|<anything else>                         -> exec as given
 set -euo pipefail
@@ -26,13 +26,13 @@ fi
 # Passthrough for anything that is not a harness phase, so the image doubles as a debug
 # shell and as the host for cpi-dr and the cleanup backstops.
 #
-# janitor rides the same path as a phase on purpose, even in report (dry-run) mode. It
-# needs the DDVtest profile chain below to read S3/tags/locks, and in sweep mode it calls
-# the same Teardown a phase pod uses, so it needs the repo clone and the Vault token too.
-# One setup path means flipping report -> sweep changes nothing about how credentials are
-# obtained: a credential problem surfaces during the dry-run cycles, not after the flip.
+# Janitor and reaper-worker ride the same path as a phase on purpose. The report-only
+# janitor needs the DDVtest profile chain to read S3/tags/locks; the queue-controlled
+# worker can call the same Teardown a phase pod uses, so it also needs the repository and
+# Vault token. One setup path makes credential failures surface in shadow report cycles
+# before Resource Reaper actions are enabled.
 case "${1:-}" in
-  provision | upgrade | validate | teardown | janitor) BIN=harness ;;
+  provision | upgrade | validate | teardown | janitor | reaper-worker | reaper-drain-cancelled) BIN=harness ;;
   cpi-dr)
     shift
     exec cpi-dr "$@"

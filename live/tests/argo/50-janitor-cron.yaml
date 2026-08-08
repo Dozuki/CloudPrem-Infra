@@ -18,18 +18,10 @@
 # cycle rather than skip one candidate if it is ever tripped. See harness/janitor.go for
 # the full predicate.
 #
-# DEFAULT IS DRY RUN, on two levels: the janitor CLI's own --sweep defaults to false
-# (janitor.go, and Sweep() itself now refuses to run at all when it is not explicitly
-# true), and this workflow only ever passes --sweep=true when the `mode` parameter
-# resolves to 'sweep' - whose DEFAULT comes from the janitor_mode key in harness-config
-# (committed as 'report'). That default is a scheduled cron run's only path here, so the
-# nightly cycle never sweeps until a human commits janitor_mode: sweep. It is not a
-# second switch a submitter cannot also flip in the same breath, though: `argo submit
-# --from workflowtemplate/harness-janitor -p mode=sweep` overrides the parameter at
-# submission time same as any other Argo parameter, independent of what janitor_mode
-# is committed as - so a manual sweep run is one explicit `-p mode=sweep`, not two
-# separate approvals. Watch several days of reports, including one with a real orphan
-# in it, before committing janitor_mode: sweep or running one by hand.
+# This daily workflow is permanently report-only. It publishes normalized findings to
+# Resource Reaper, which owns every approval, hold, and destructive action. The separate
+# harness-reaper-worker below is the only destructive Argo entry point, and it can act
+# only on one durable FIFO request after a final fresh scan and control-plane veto.
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
@@ -47,11 +39,6 @@ spec:
   # nothing.
   arguments:
     parameters:
-      - name: mode
-        valueFrom:
-          configMapKeyRef:
-            name: harness-config
-            key: janitor_mode
       # One destroy per cycle. Leaks are rare and each one is evidence a teardown failed
       # somewhere - the report is what tells a human that, not a bigger sweep budget.
       # Raise this deliberately, never reflexively.
@@ -71,37 +58,28 @@ spec:
         valueFrom: { configMapKeyRef: { name: harness-config, key: vault_addr } }
       - name: slack-channel
         valueFrom: { configMapKeyRef: { name: harness-config, key: slack_channel } }
-  # Report mode finishes in minutes (a handful of S3 listings + tag lookups). Sweep mode
-  # can run MULTIPLE Teardown calls in-process now (harness/janitor.go Sweep bounds
-  # attempts by wall clock, not by count, since one Teardown's own historical worst case
-  # ran ~90 minutes with only the Aurora tail left before a deadline killed it -
-  # 10-scenario.yaml's own teardown deadline is 10800s for exactly that reason - and two
-  # slow failures plus one slow success used to be able to exceed this pod's deadline
-  # with nothing to stop it). 12600 is THE authoritative number: harness.go's
-  # JanitorPodActiveDeadlineSeconds constant must equal this literal exactly (its own
-  # comment points back here), and Sweep's wall-clock budget (DefaultSweepBudget) is
-  # derived from that constant minus a fixed setup margin, not tuned here separately.
-  # If this number ever changes, change JanitorPodActiveDeadlineSeconds in
-  # harness/janitor.go FIRST and copy the new literal here - the derivation then
-  # updates Sweep's budget automatically, so there is exactly one number to keep in
-  # sync by hand, not two.
-  activeDeadlineSeconds: 12600
+      - name: reaper-report-bucket
+        valueFrom: { configMapKeyRef: { name: harness-config, key: reaper_report_bucket } }
+      - name: reaper-shadow
+        valueFrom: { configMapKeyRef: { name: harness-config, key: reaper_shadow } }
+      - name: reaper-direct-slack-enabled
+        valueFrom: { configMapKeyRef: { name: harness-config, key: reaper_direct_slack_enabled } }
+      - name: reaper-action-queue-url
+        valueFrom: { configMapKeyRef: { name: harness-config, key: reaper_action_queue_url } }
+      - name: reaper-result-queue-url
+        valueFrom: { configMapKeyRef: { name: harness-config, key: reaper_result_queue_url } }
+      - name: reaper-control-table
+        valueFrom: { configMapKeyRef: { name: harness-config, key: reaper_control_table } }
   ttlStrategy:
     secondsAfterSuccess: 86400
     secondsAfterFailure: 259200
-  podMetadata:
-    annotations:
-      # A sweep destroy killed halfway strands the very stack this workflow exists to
-      # clean up - the same reasoning as harness-scenario, doubly so here.
-      karpenter.sh/do-not-disrupt: 'true'
-  volumeClaimTemplates:
-    - metadata:
-        name: workspace
-      spec:
-        accessModes: ['ReadWriteOnce']
-        resources:
-          requests:
-            storage: 10Gi
+  # Scan and action execution each use the repository only within one pod. An
+  # ephemeral workspace avoids provisioning a 10Gi EBS PVC on every five-minute
+  # empty queue check.
+  volumes:
+    - name: workspace
+      emptyDir:
+        sizeLimit: 10Gi
   templates:
     - name: janitor
       steps:
@@ -119,6 +97,7 @@ spec:
               error: true
         - - name: notify
             template: post-report
+            when: "'{{workflow.parameters.reaper-direct-slack-enabled}}' == 'true'"
             # A notification failure must never fail the cycle - the report already
             # reached the pod log and the JSON artifact either way.
             continueOn:
@@ -149,6 +128,9 @@ spec:
                   value: '{{steps.scan.status}}'
 
     - name: scan
+      # Reserve ten minutes inside the 2,400-second workflow deadline for pod
+      # startup plus the failure-notification and verification steps.
+      activeDeadlineSeconds: 1800
       outputs:
         parameters:
           - name: report
@@ -161,8 +143,10 @@ spec:
         args:
           - |
             set -uo pipefail
-            SWEEP_FLAG=--sweep=false
-            [ '{{workflow.parameters.mode}}' = sweep ] && SWEEP_FLAG=--sweep=true
+            REAPER_FLAGS=(--reaper-report-bucket '{{workflow.parameters.reaper-report-bucket}}')
+            if [ '{{workflow.parameters.reaper-shadow}}' = true ]; then
+              REAPER_FLAGS+=(--reaper-shadow)
+            fi
 
             # The ownership check is only as good as this list, so it is piped in rather
             # than fetched by the Go binary: the exact proven pattern `harness evidence`
@@ -187,7 +171,7 @@ spec:
               --repo-dir /workspace/repo \
               --self-workflow '{{workflow.name}}' \
               --max-sweeps '{{workflow.parameters.max-sweeps}}' \
-              --json "${SWEEP_FLAG}" < /tmp/wf.json | tee /tmp/out.txt
+              --json --sweep=false "${REAPER_FLAGS[@]}" < /tmp/wf.json | tee /tmp/out.txt
             RC=${PIPESTATUS[0]}
             # runJanitor's last stdout line is the JSON report (--json); everything
             # before it is the human-readable table, in both report and sweep mode.
@@ -209,8 +193,10 @@ spec:
           requests:
             cpu: '1'
             memory: '4Gi'
+            ephemeral-storage: 10Gi
           limits:
             memory: '6Gi'
+            ephemeral-storage: 12Gi
 
     # Finding an orphan means a teardown FAILED somewhere. The point of this step is that
     # the underlying bug gets seen by a human, not that the mess quietly disappears.
@@ -415,7 +401,7 @@ spec:
           - name: SCAN_STATUS
             value: '{{inputs.parameters.scan-status}}'
           - name: MODE
-            value: '{{workflow.parameters.mode}}'
+            value: report
           - name: VAULT_ADDR
             value: '{{workflow.parameters.vault-addr}}'
           - name: SLACK_CHANNEL
@@ -457,6 +443,122 @@ spec:
             memory: 64Mi
           limits:
             memory: 128Mi
+
+    - name: consume-one
+      steps:
+        - - name: queue-check
+            template: queue-check
+        - - name: execute
+            template: execute
+            when: "'{{steps.queue-check.outputs.parameters.available}}' == 'true'"
+
+    # Avoid cloning the repository and acquiring Vault credentials when the action
+    # switch is disabled or the FIFO is empty. GetQueueAttributes does not receive or
+    # hide a message; the heavy executor remains the sole consumer.
+    - name: queue-check
+      activeDeadlineSeconds: 120
+      outputs:
+        parameters:
+          - name: available
+            valueFrom:
+              path: /tmp/reaper-action-available
+      container:
+        image: '{{workflow.parameters.image}}'
+        command: ['/bin/bash', '-c']
+        args:
+          - |
+            set -euo pipefail
+            if [ "${REAPER_ACTIONS_ENABLED}" != true ]; then
+              echo false > /tmp/reaper-action-available
+              exit 0
+            fi
+            CREDS="$(aws sts assume-role \
+              --region '{{workflow.parameters.region}}' \
+              --role-arn '{{workflow.parameters.assume-role-arn}}' \
+              --role-session-name reaper-queue-check)"
+            export AWS_ACCESS_KEY_ID="$(jq -r .Credentials.AccessKeyId <<<"$CREDS")"
+            export AWS_SECRET_ACCESS_KEY="$(jq -r .Credentials.SecretAccessKey <<<"$CREDS")"
+            export AWS_SESSION_TOKEN="$(jq -r .Credentials.SessionToken <<<"$CREDS")"
+            COUNT="$(aws sqs get-queue-attributes \
+              --region '{{workflow.parameters.region}}' \
+              --queue-url '{{workflow.parameters.reaper-action-queue-url}}' \
+              --attribute-names ApproximateNumberOfMessages \
+              --query 'Attributes.ApproximateNumberOfMessages' \
+              --output text)"
+            if [ "${COUNT:-0}" -gt 0 ]; then
+              echo true > /tmp/reaper-action-available
+            else
+              echo false > /tmp/reaper-action-available
+            fi
+        env:
+          # Read directly from the ConfigMap, not a workflow parameter. Submitters
+          # may choose this template's entrypoint but cannot override this rollout gate.
+          - name: REAPER_ACTIONS_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: harness-config
+                key: reaper_actions_enabled
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 256Mi
+
+    - name: execute
+      # Coupled safety contract: SQS visibility is 13,500 seconds, leaving a
+      # 15-minute margin beyond this executor deadline.
+      activeDeadlineSeconds: 12600
+      metadata:
+        annotations:
+          karpenter.sh/do-not-disrupt: 'true'
+      container:
+        image: '{{workflow.parameters.image}}'
+        command: ['/bin/bash', '-c']
+        args:
+          - |
+            set -uo pipefail
+            kubectl -n argo get workflows -o json > /tmp/wf.json || : > /tmp/wf.json
+            /usr/local/bin/docker-entrypoint.sh reaper-worker \
+              --action-queue-url '{{workflow.parameters.reaper-action-queue-url}}' \
+              --result-queue-url '{{workflow.parameters.reaper-result-queue-url}}' \
+              --control-table '{{workflow.parameters.reaper-control-table}}' \
+              --account-id '{{workflow.parameters.ddvtest-account-id}}' \
+              --region '{{workflow.parameters.region}}' \
+              --dr-region '{{workflow.parameters.dr-region}}' \
+              --profile ddvtest \
+              --repo-dir /workspace/repo \
+              --actions-enabled="${REAPER_ACTIONS_ENABLED}" \
+              --self-workflow '{{workflow.name}}' < /tmp/wf.json
+        env:
+          - name: HARNESS_RUN_LABEL
+            value: '{{workflow.name}}'
+          - name: HARNESS_REPO_DIR
+            value: /workspace/repo
+          - name: HARNESS_ASSUME_ROLE_ARN
+            value: '{{workflow.parameters.assume-role-arn}}'
+          - name: VAULT_ADDR
+            value: '{{workflow.parameters.vault-addr}}'
+          - name: VAULT_AWS_ROLE
+            value: deployer
+          # Defense in depth against direct submission of the execute entrypoint:
+          # the Go worker exits before workflow parsing, AWS, or SQS when this is false.
+          - name: REAPER_ACTIONS_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                name: harness-config
+                key: reaper_actions_enabled
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace
+        resources:
+          requests:
+            cpu: '1'
+            memory: '4Gi'
+            ephemeral-storage: 10Gi
+          limits:
+            memory: '6Gi'
+            ephemeral-storage: 12Gi
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
@@ -479,12 +581,46 @@ spec:
   # stale listing. Forbid means Argo refuses to start a second janitor cycle while one
   # is still running, rather than trusting a lockfile that does not exist.
   concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 3600
+  startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 7
   workflowMetadata:
     labels:
       harness/trigger: janitor
   workflowSpec:
+    # Even the latest accepted 09:10 start must finish by 09:50, leaving ten
+    # minutes before Resource Reaper's 10:00 consolidated deadline.
+    activeDeadlineSeconds: 2400
+    workflowTemplateRef:
+      name: harness-janitor
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: harness-reaper-worker
+  namespace: argo
+spec:
+  # Keep shadow mode genuinely inert. Task 10 unsuspends this in the same reviewed
+  # change that enables reaper_actions_enabled; the in-pod and Go gates remain.
+  suspend: true
+  schedules:
+    - '*/5 * * * *'
+  timezone: America/New_York
+  # This is the deployment-level fence that prevents a lost SQS receipt from starting
+  # another executor while the original Workflow (and possibly its destroy) still runs.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  workflowMetadata:
+    labels:
+      harness/trigger: reaper-worker
+  workflowSpec:
+    entrypoint: consume-one
+    # Reserve thirty minutes for the queue-check, image pull, node provisioning, and
+    # pod scheduling so the destructive execute leaf still receives its full
+    # 12,600-second deadline even on a cold node.
+    activeDeadlineSeconds: 14400
     workflowTemplateRef:
       name: harness-janitor

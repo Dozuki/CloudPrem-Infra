@@ -9,7 +9,7 @@ drives the identical `harness <phase>` subcommands, so the two paths stay compar
 10-scenario.yaml          harness-scenario: one config end to end, teardown as an exit handler
 20-matrix.yaml            harness-matrix: fans out over configs, submits one child workflow each
 40-nightly-cron.yaml      the nightly clock for harness-matrix
-50-janitor-cron.yaml      harness-janitor: the Phase 4 orphan sweeper (dry-run by default)
+50-janitor-cron.yaml      report-only janitor + Resource Reaper controlled action worker
 ```
 
 Apply:
@@ -83,9 +83,15 @@ a destroy that fails transiently. Neither covers a destroy that fails for a reas
 fixes - a state lock held by a dead process, expired credentials, a pod killed between apply
 and the manifest write. Those abandon a stack permanently: seven of them leaking over three
 days exhausted DDVtest's 10-VPC ceiling and took the nightly down with VpcLimitExceeded.
-`harness-janitor` (`50-janitor-cron.yaml`) runs nightly, never matches on a name, and
-defaults to a dry-run report - see `harness/janitor.go` for the full predicate and
-`harness/janitor_test.go` for its test coverage.
+`harness-janitor` (`50-janitor-cron.yaml`) runs nightly, never matches on a name, always
+uses `--sweep=false`, and publishes Engine Report v1 to Resource Reaper. The separate
+`harness-reaper-worker` is installed suspended during shadow validation. Once enabled,
+it checks its FIFO every five minutes and starts the heavy executor
+only when actions are enabled and a message exists. That executor consumes at most one
+durable Reaper action, repeats the full scan/version/ownership checks, and installs a
+final control-plane veto immediately before the existing selected sweep path. There is
+no Argo parameter that bypasses Reaper. See `harness/janitor.go` and
+`harness/reaper_worker.go` for the enforced predicates and their test coverage.
 
 **A sweep cleans more than the terragrunt destroy.** `PhaseParams.Teardown` runs the same
 destroy every phase pod's exit handler runs, but a sweep also carries the out-of-band
