@@ -107,7 +107,7 @@
     "TableErrorPolicy":"SUSPEND_TABLE",
     "TableErrorEscalationPolicy":"STOP_TASK",
     "TableErrorEscalationCount": 500,
-    "RecoverableErrorCount": 0,
+    "RecoverableErrorCount": -1,
     "RecoverableErrorInterval": 5,
     "RecoverableErrorThrottling": true,
     "RecoverableErrorThrottlingMax": 1800,

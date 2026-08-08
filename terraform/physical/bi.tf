@@ -245,9 +245,23 @@ resource "aws_dms_replication_config" "this" {
   # replication_settings only takes effect on CREATE (see ignore_changes below), so an
   # edit to dms_config.json reaches existing replications only by hand:
   # stop-replication, modify-replication-config with the patched settings doc, then
-  # resume. The 3M fleet got PartitionSize=1000000 that way on 2026-08-04; it caps
+  # resume. The live fleet got PartitionSize=1000000 that way on 2026-08-04; it caps
   # validation partition state on large tables (a 10M-row table is 10 partitions
   # instead of 1000). Tables under 1M rows are one partition either way.
+  #
+  # ErrorBehavior.RecoverableErrorCount is the other value in there worth knowing about.
+  # It was 0 - "never attempt to restart a task" - from the original import until
+  # 2026-08-08, which disabled DMS's OWN retry of an environmental error. The failure
+  # that exposed it: MySQL closes idle connections at wait_timeout (8h engine default,
+  # not overridden on the BI cluster parameter groups), DMS does not notice, and the next
+  # CDC change hits a dead socket and dies with "MySQL server has gone away". At 0 the
+  # task went straight to FATAL and the restart lambda reload-target'd it, re-reading
+  # every table off the production source to recover a dead socket. AWS's default is -1,
+  # which retries a lost connection nine times - the first retry reconnects. Do not
+  # "fix" this class of failure by raising wait_timeout instead; every MySQL server reaps
+  # idle connections and a replication that cannot survive that is broken regardless.
+  # Every live replication was hand-patched to -1 on 2026-08-08; this makes new stacks
+  # match them.
   replication_settings = file("static/dms_config.json")
   # See the greenfield note above before flipping this to true.
   start_replication = false
