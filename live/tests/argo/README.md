@@ -1,7 +1,7 @@
 # Running the harness on Argo Workflows
 
 Manifests for running the harness phases as pods on the Argo ops cluster
-(`argo-ops`, management account 010601635461). `run.sh` remains the local launcher and
+(`argo-ops`, the management account). `run.sh` remains the local launcher and
 drives the identical `harness <phase>` subcommands, so the two paths stay comparable.
 
 ```

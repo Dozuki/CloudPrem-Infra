@@ -99,7 +99,7 @@ resource "helm_release" "istiod" {
       nodeSelector = { "karpenter.sh/nodepool" = "system" }
       tolerations  = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
       # DoNotSchedule + minDomains 2, not ScheduleAnyway: on a one-node system
-      # pool (dev-min, m3-qa, m3-usac, m3-emea today) the nodeSelector above
+      # pool (dev-min and three commercial MPC envs today) the nodeSelector above
       # restricts eligible domains to that single node, so with the default
       # minDomains=1 the observed-domain count already meets the floor - the
       # global minimum used for skew is just that one node's own count, skew

@@ -1,7 +1,7 @@
 name: 'Harness image'
 
 # Builds and publishes the harness runtime image (live/tests/Dockerfile) to the ECR repo
-# in dozukicloud (069174876992), which workflow pods on the Argo ops cluster pull.
+# in dozukicloud, which workflow pods on the Argo ops cluster pull.
 #
 # Digest, not tag, is the contract. The repository allows mutable tags so `latest` can
 # move, so this job prints the digest and the WorkflowTemplates pin that: a moving tag must

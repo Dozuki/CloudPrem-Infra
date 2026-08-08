@@ -172,8 +172,8 @@ resource "helm_release" "envoy_gateway" {
     # Controller (control-plane) resources. The gateway-helm default is a 100m CPU
     # request, which crashlooped the controller under load: CPU-starved on a busy
     # node it couldn't answer its 1s liveness probe in time, kubelet killed it, and
-    # every kill dropped the xDS stream so the whole data plane went down (took apac
-    # down mid-cutover). A 500m request gives it guaranteed scheduling headroom so the
+    # every kill dropped the xDS stream so the whole data plane went down (took one
+    # env down mid-cutover). A 500m request gives it guaranteed scheduling headroom so the
     # probe stays responsive; no CPU limit so reconciliation can burst. (The chart
     # does not expose the controller's probe timeouts, so we fix this via resources;
     # verify this value path against the pinned gateway-helm chart on version bumps.)

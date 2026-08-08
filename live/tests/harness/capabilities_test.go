@@ -11,7 +11,7 @@ func TestDetectCapabilities_presence(t *testing.T) {
 		DMSTaskARN:        "arn:aws:dms:...:task/x",
 		GuideBuckets:      []string{"b1"},
 		DRBucketNames:     []string{"dr1"},
-		BIAuroraClusterID: "m3-qa-bi",
+		BIAuroraClusterID: "acme-qa-bi",
 	}
 	got := DetectCapabilities(full)
 	if !got.HasDMS || !got.HasGuideBuckets || !got.HasDR || !got.HasBIAurora {

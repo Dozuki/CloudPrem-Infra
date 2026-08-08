@@ -4,7 +4,7 @@
 #   FROM_REF=v6.0 TO_REF=v6.1-release CONFIGS=min_default ./run.sh
 #
 # Vault: the logical layer's vault provider seeds per-stack secrets in the central
-# Vault (in the dozuki/0106 account). Locally that's reached via a kubectl
+# Vault (in the dozuki management account). Locally that's reached via a kubectl
 # port-forward + AWS-auth login. This script brings the tunnel up, logs in, and
 # tears the tunnel down on exit — fully hands-off off your AWS SSO session.
 #
@@ -15,10 +15,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# The harness only ever targets the DDVtest account (076248559428) — used for
-# state/resource/artifacts-bucket names and passed to the tests as AccountID.
-# Default it so it needn't be passed every run; override for another test account.
-export DDVTEST_ACCOUNT_ID="${DDVTEST_ACCOUNT_ID:-076248559428}"
 export RUN_INTEGRATION=1
 export RUN_ID="${RUN_ID:-local-$(date +%s)}"
 
@@ -122,6 +118,47 @@ else
 fi
 # -----------------------------------------------------------------------------
 
+# The harness only ever targets the DDVtest account - used for state/resource/
+# artifacts-bucket names and passed to the tests as AccountID. Read from whichever
+# account the profile lands in rather than carried as a literal in a public repo.
+# Set DDVTEST_ACCOUNT_ID yourself to target another test account, or to skip the
+# lookup. Runs after the SSO check so an expired session reports as an expired
+# session rather than as an STS failure.
+if [ -z "${DDVTEST_ACCOUNT_ID:-}" ]; then
+  # The REQUIRED_BINS sweep is much further down, so check the one tool this needs here.
+  # Without it a missing CLI reads as "could not resolve the account", which sends the
+  # operator looking at their SSO session instead of at their PATH.
+  command -v aws >/dev/null || {
+    echo "missing required tool: aws (needed to resolve the test account id)" >&2
+    echo "       Install it, or export DDVTEST_ACCOUNT_ID=<12-digit account> to skip." >&2
+    exit 1
+  }
+  # stderr is kept, not discarded: an expired token or a denied sts:GetCallerIdentity says
+  # exactly what is wrong, and swallowing it leaves only the generic message below. tr -d
+  # strips the CR that some environments append, which the exact-width match would reject.
+  _sts_err="$(mktemp)"
+  DDVTEST_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text \
+    2>"$_sts_err" | tr -d '\r' || true)"
+  if [ -z "$DDVTEST_ACCOUNT_ID" ] && [ -s "$_sts_err" ]; then
+    echo "ERROR: sts:GetCallerIdentity failed for AWS_PROFILE='$AWS_PROFILE'." >&2
+    sed '/^[[:space:]]*$/d; s/^/       aws: /' "$_sts_err" >&2
+  fi
+  rm -f "$_sts_err"
+fi
+# Validated unconditionally, not just on the resolved path. An explicit override is the
+# documented escape hatch, and a typo in it would otherwise sail straight into every
+# bucket name below and build a plausible-looking one that points nowhere.
+case "$DDVTEST_ACCOUNT_ID" in
+  [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+  *)
+    echo "ERROR: DDVTEST_ACCOUNT_ID must be a 12-digit AWS account id (got '${DDVTEST_ACCOUNT_ID:-}')." >&2
+    echo "       Refresh the profile, or export DDVTEST_ACCOUNT_ID=<12-digit account>." >&2
+    exit 1
+    ;;
+esac
+export DDVTEST_ACCOUNT_ID
+echo ">> Test account: $DDVTEST_ACCOUNT_ID (profile '$AWS_PROFILE')"
+
 VAULT_KUBE_CONTEXT="${VAULT_KUBE_CONTEXT:-vault-standard}"
 VAULT_AWS_PROFILE="${VAULT_AWS_PROFILE:-dozuki}"
 VAULT_AWS_ROLE="${VAULT_AWS_ROLE:-admin}"
@@ -176,7 +213,7 @@ trap cleanup EXIT
 
 setup_vault() {
   # The vault kube context AND the vault AWS-auth login both authenticate as
-  # VAULT_AWS_PROFILE (dozuki / 0106 — the account the Vault cluster lives in).
+  # VAULT_AWS_PROFILE (dozuki — the management account the Vault cluster lives in).
   # If that SSO session is expired, the port-forward's get-token fails and the
   # tunnel silently never comes up. Check up front with an actionable message.
   if ! aws sts get-caller-identity --profile "$VAULT_AWS_PROFILE" >/dev/null 2>&1; then
