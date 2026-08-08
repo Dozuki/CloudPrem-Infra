@@ -474,7 +474,7 @@ resource "aws_s3_bucket_replication_configuration" "dr" {
     }
 
     destination {
-      bucket        = each.value.arn
+      bucket        = aws_s3_bucket.dr_guide_buckets[each.key].arn
       storage_class = "STANDARD"
       encryption_configuration {
         replica_kms_key_id = aws_kms_key.dr_s3[0].arn
