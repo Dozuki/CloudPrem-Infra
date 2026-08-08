@@ -108,8 +108,9 @@ jobs:
           set -uo pipefail
 
           keep_everything() {
-            echo "scenario gating unavailable ($1); keeping the full PR set $CONFIGS"
-            echo "scenario gating unavailable ($1); kept the full PR set \`$CONFIGS\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "scenario gating unavailable ($1); keeping the full PR set $CONFIGS and defaulting to full-spinup"
+            echo "EXECUTION_MODE=full-spinup" >> "$GITHUB_ENV"
+            echo "scenario gating unavailable ($1); kept the full PR set \`$CONFIGS\` with full-spinup execution" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
 
@@ -152,13 +153,23 @@ jobs:
           echo "$CHANGED"
 
           HARNESS_CHANGED=false
+          PHYSICAL_CHANGED=false
           while IFS= read -r f; do
             [[ -z "$f" ]] && continue
             if [[ "$f" == live/tests/* || "$f" == .github/workflows/upgrade-tests.yml ]]; then
               HARNESS_CHANGED=true
-              break
+            fi
+            if [[ "$f" == terraform/physical/* || "$f" == modules/* || "$f" == vpc* || "$f" == eks* || "$f" == db* || "$f" == dms* ]]; then
+              PHYSICAL_CHANGED=true
             fi
           done <<< "$CHANGED"
+
+          if [[ "$PHYSICAL_CHANGED" == "true" || "$HARNESS_CHANGED" == "true" || "$HARNESS_FULL_LABEL" == "true" ]]; then
+            EXECUTION_MODE="full-spinup"
+          else
+            EXECUTION_MODE="warm"
+          fi
+          echo "EXECUTION_MODE=$EXECUTION_MODE" >> "$GITHUB_ENV"
 
           # live/tests/matrix.yaml is itself under live/tests/**, so any edit to the path
           # map below is already covered by HARNESS_CHANGED and never needs its own entry.
@@ -227,7 +238,7 @@ jobs:
           NEW_CONFIGS=$(printf '%s\n' "${SELECTED[@]}" | jq -R . | jq -s -c .) \
             || keep_everything "cannot rebuild the configs array"
           echo "CONFIGS=$NEW_CONFIGS" >> "$GITHUB_ENV"
-          echo "selected PR scenarios: $NEW_CONFIGS" >> "$GITHUB_STEP_SUMMARY"
+          echo "selected PR scenarios: $NEW_CONFIGS (execution mode: $EXECUTION_MODE)" >> "$GITHUB_STEP_SUMMARY"
 
       # The submit heredoc expands these; refuse anything that could smuggle shell or
       # YAML through a dispatch input. PR-path values are a hex SHA and org/repo, which
@@ -238,6 +249,7 @@ jobs:
           [[ "$CONFIGS" =~ ^\[([[:space:]]*\"[a-z0-9_]+\"[[:space:]]*,?)*[[:space:]]*\]$ ]] || { echo "bad configs: $CONFIGS"; exit 1; }
           [[ "$FROM_REF" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "bad from-ref"; exit 1; }
           [[ "$TO_REF" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "bad to-ref"; exit 1; }
+          [[ "${EXECUTION_MODE:-full-spinup}" =~ ^(warm|full-spinup)$ ]] || { echo "bad execution mode: $EXECUTION_MODE"; exit 1; }
 
       - name: Assume the submitter role
         uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v6
@@ -248,33 +260,6 @@ jobs:
       - name: Point kubectl at the ops cluster
         run: aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION"
 
-      # Runs BEFORE the new matrix is created, which is what makes it safe: every
-      # matrix carrying this PR's label is older than the run about to exist, by
-      # construction. No self-exclusion, no name parsing, no timestamp tiebreak.
-      # "By construction" leans on the workflow-level concurrency block above
-      # (group per PR, cancel-in-progress: false): it serializes whole runs per
-      # PR, so no other run can create a matrix between this supersede and the
-      # create below. TestSupersedeInvariantsSubmitterSide asserts that block
-      # stays; changing it invalidates this step's ordering guarantee.
-      #
-      # One window this ordering opens: if the create below fails after the stop
-      # here, the PR briefly has old runs stopped and no new one. That failure is
-      # loud (the job goes red on the PR) and a re-run resubmits; not worth code.
-      # It also keeps the patch verb on the submitter's own RBAC identity
-      # (30-submitter-rbac.yaml) instead of the shared argo-workflow SA that
-      # Terraform-running phase pods use.
-      #
-      # Stop, never Terminate: Stop still runs the scenario teardown exit handler,
-      # and the workflow-level semaphore is held until that teardown finishes, so a
-      # superseded stack is always destroyed before a waiting child takes its slot.
-      # The harness/superseded marker rides the SAME patch as the stop, so the
-      # notify handler can never observe the stop without the marker.
-      #
-      # Fail-open on every path: a broken supersede must never block the submission
-      # it precedes. Worst case is the pre-change status quo (stale runs drain on
-      # their own). Children are swept only for parents whose patch SUCCEEDED - a
-      # marked child under an unmarked parent would let the parent post a stale red
-      # verdict with no suppression, which is worse than leaving both running.
       - name: Stop superseded matrix runs for this PR
         if: github.event_name == 'pull_request'
         continue-on-error: true
@@ -287,9 +272,6 @@ jobs:
           if [ -z "$STALE" ]; then
             echo "no prior matrix for pr ${PR_NUM}"; exit 0
           fi
-          # Parents first, and only successfully patched parents feed the child
-          # sweep (a partial state where children stop but the parent survives
-          # unmarked defeats the suppression invariant).
           PATCHED=""
           while IFS= read -r wf; do
             [ -z "$wf" ] && continue
@@ -306,10 +288,6 @@ jobs:
             fi
           done <<< "$STALE"
           [ -z "$PATCHED" ] && exit 0
-          # All three passes ALWAYS run: an empty listing is what a submit-child
-          # pod mid-create looks like, so breaking early would strand exactly the
-          # late child the extra passes exist for. Already-stopping children are
-          # excluded so they are not re-patched every pass.
           for attempt in 1 2 3; do
             while IFS= read -r wf; do
               [ -z "$wf" ] && continue
@@ -351,6 +329,8 @@ jobs:
                   value: '${CONFIGS}'
                 - name: scenario
                   value: upgrade
+                - name: execution-mode
+                  value: '${EXECUTION_MODE:-full-spinup}'
                 - name: from-ref
                   value: '${FROM_REF}'
                 - name: to-ref
@@ -362,7 +342,7 @@ jobs:
           EOF
           )
           echo "workflow=${WF#workflow.argoproj.io/}" >> "$GITHUB_OUTPUT"
-          echo "Submitted ${WF}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Submitted ${WF} (execution mode: ${EXECUTION_MODE:-full-spinup})" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Mark the head SHA pending
         if: github.event_name == 'pull_request'

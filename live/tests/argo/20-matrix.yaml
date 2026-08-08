@@ -82,6 +82,8 @@ spec:
         value: '["min_default","bi_ha","full"]'
       - name: scenario
         value: upgrade
+      - name: execution-mode
+        value: full-spinup
       - name: from-ref
         value: 'auto:latest-1'
       # On a PR this is the head SHA: the staged release is what wants testing.
@@ -169,6 +171,8 @@ spec:
                   value: '{{inputs.parameters.config}}'
                 - name: scenario
                   value: '{{workflow.parameters.scenario}}'
+                - name: execution-mode
+                  value: '{{workflow.parameters.execution-mode}}'
                 - name: from-ref
                   value: '{{workflow.parameters.from-ref}}'
                 - name: to-ref

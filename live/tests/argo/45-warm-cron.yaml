@@ -1,0 +1,66 @@
+# Business-Hours Warm Infrastructure Lifecycle Crons
+# Spin-up at 09:00 AM Mon-Fri, Teardown at 06:00 PM Mon-Fri (US/Eastern)
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: harness-warm-spinup
+  namespace: argo
+spec:
+  schedules:
+    - '0 9 * * 1-5'
+  timezone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowMetadata:
+    labels:
+      harness/trigger: warm-spinup
+  workflowSpec:
+    workflowTemplateRef:
+      name: harness-scenario
+    arguments:
+      parameters:
+        - name: config
+          value: min_default
+        - name: scenario
+          value: upgrade
+        - name: execution-mode
+          value: full-spinup
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: harness-warm-teardown
+  namespace: argo
+spec:
+  schedules:
+    - '0 18 * * 1-5'
+  timezone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowMetadata:
+    labels:
+      harness/trigger: warm-teardown
+  workflowSpec:
+    serviceAccountName: argo-workflow
+    # Mutex lock: Teardown acquires the EXACT SAME semaphore as PR runs,
+    # guaranteeing that physical destruction never runs while a PR is mid-flight.
+    synchronization:
+      semaphores:
+        - configMapKeyRef:
+            name: harness-semaphore
+            key: concurrent-stacks
+    workflowTemplateRef:
+      name: harness-phase
+    arguments:
+      parameters:
+        - name: phase
+          value: teardown
+        - name: config
+          value: min_default
+        - name: run-id
+          value: harness-warm-pool
