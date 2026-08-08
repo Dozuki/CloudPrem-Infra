@@ -1504,6 +1504,108 @@ func clearStateDigests(ctx context.Context, d JanitorDeps, o JanitorOptions, loc
 	return cleared, firstErr
 }
 
+// Janitor binds the dependencies needed to re-scan and sweep exactly one Reaper
+// finding. ScanFunc and FinalVeto are injected seams for deterministic safety tests;
+// production leaves ScanFunc nil and supplies a control-plane veto immediately before
+// the existing Sweep path is allowed to mutate anything.
+type Janitor struct {
+	Deps            JanitorDeps
+	Options         JanitorOptions
+	Workflows       JanitorWorkflowList
+	ScanFunc        func(context.Context, JanitorDeps, JanitorOptions, JanitorWorkflowList) (*Report, error)
+	FinalVeto       func(context.Context, Candidate) error
+	actionRequest   ReaperActionRequest
+	actionFinalVeto func(context.Context, ReaperActionRequest, Candidate) error
+}
+
+func (janitor *Janitor) PrepareReaperAction(request ReaperActionRequest, veto func(context.Context, ReaperActionRequest, Candidate) error) {
+	janitor.actionRequest = request
+	janitor.actionFinalVeto = veto
+}
+
+func (janitor *Janitor) scan(ctx context.Context) (*Report, error) {
+	if janitor.ScanFunc != nil {
+		return janitor.ScanFunc(ctx, janitor.Deps, janitor.Options, janitor.Workflows)
+	}
+	return Scan(ctx, janitor.Deps, janitor.Options, janitor.Workflows)
+}
+
+// SweepSelected re-runs Scan, revalidates the current finding, and delegates one
+// candidate to the existing bounded Sweep implementation. It never trusts the report
+// that originally produced the Slack action.
+func (janitor *Janitor) SweepSelected(ctx context.Context, output *Report, prefix, expectedVersion string) (Candidate, error) {
+	fresh, err := janitor.scan(ctx)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("%w: fresh janitor scan: %v", ErrRetryable, err)
+	}
+	cleanPrefix := strings.Trim(prefix, "/")
+	var matches []Candidate
+	for _, candidate := range fresh.Candidates {
+		if strings.Trim(candidate.Prefix, "/") == cleanPrefix {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(matches) == 0 {
+		return Candidate{}, ErrAlreadyGone
+	}
+	if len(matches) != 1 {
+		return Candidate{}, fmt.Errorf("%w: prefix %q matched %d candidates", ErrBlocked, prefix, len(matches))
+	}
+	candidate := matches[0]
+	decision, _, err := decisionForCandidate(candidate)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("%w: %v", ErrBlocked, err)
+	}
+	if decision == "already_gone" {
+		return candidate, ErrAlreadyGone
+	}
+	if decision != "eligible" || candidate.State != StateOrphan || candidate.KeepOnFailure {
+		return candidate, ErrBlocked
+	}
+	if FindingVersion(candidate, decision) != expectedVersion {
+		return candidate, ErrStale
+	}
+	if err := guardProtected(candidate.Prefix, candidate.Identifier); err != nil {
+		return candidate, fmt.Errorf("%w: %v", ErrBlocked, err)
+	}
+	if janitor.FinalVeto != nil {
+		if err := janitor.FinalVeto(ctx, candidate); err != nil {
+			return candidate, err
+		}
+	}
+	if janitor.actionFinalVeto != nil {
+		if err := janitor.actionFinalVeto(ctx, janitor.actionRequest, candidate); err != nil {
+			return candidate, err
+		}
+	}
+
+	selected := &Report{
+		SchemaVersion: fresh.SchemaVersion,
+		Mode:          "sweep",
+		At:            fresh.At,
+		Account:       fresh.Account,
+		Candidates:    []Candidate{candidate},
+		Orphans:       1,
+	}
+	options := janitor.Options
+	options.Sweep = true
+	options.MaxSweeps = 1
+	if err := Sweep(ctx, janitor.Deps, options, selected); err != nil {
+		return selected.Candidates[0], err
+	}
+	if output != nil {
+		*output = *selected
+	}
+	result := selected.Candidates[0]
+	if strings.HasPrefix(result.SweepResult, "failed:") {
+		return result, fmt.Errorf("%w: %s", ErrTeardown, result.SweepResult)
+	}
+	if result.State == StateOrphan && result.SweepResult != sweepResultDestroyed {
+		return result, fmt.Errorf("%w: %s", ErrBlocked, result.SweepResult)
+	}
+	return result, nil
+}
+
 // Sweep destroys the orphans a prior Scan found, capped at MaxSweeps. It calls the
 // existing PhaseParams.Teardown (via d.Teardown) with failed=true so the full diagnostics
 // dump happens BEFORE the stack goes away: an orphan is evidence that a teardown failed,

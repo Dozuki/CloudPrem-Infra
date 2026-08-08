@@ -116,6 +116,37 @@ func TestReaperPublishFailureReturnsNonzeroAfterLegacyJSON(t *testing.T) {
 	}
 }
 
+func TestReaperWorkerCLIRequiresControlPlaneFlags(t *testing.T) {
+	var stderr bytes.Buffer
+	code := dispatch([]string{"reaper-worker"}, strings.NewReader(""), io.Discard, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "--action-queue-url") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestReaperWorkerCLIUsesJanitorOwnershipGate(t *testing.T) {
+	var stderr bytes.Buffer
+	code := dispatch([]string{
+		"reaper-worker",
+		"--action-queue-url", "actions",
+		"--result-queue-url", "results",
+		"--control-table", "control",
+		"--account-id", "076248559428",
+		"--self-workflow", "worker-1",
+	}, strings.NewReader(`{"items":[]}`), io.Discard, &stderr)
+	if code != 3 || !strings.Contains(stderr.String(), "not found among 0 workflows") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestReaperDrainCancelledCLIRequiresArchiveBucket(t *testing.T) {
+	var stderr bytes.Buffer
+	code := dispatch([]string{"reaper-drain-cancelled"}, strings.NewReader(""), io.Discard, &stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "--archive-bucket") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
 // ---- janitor bucket routing ----
 
 // TestMultiRegionS3RoutesByExactBucketName: the router used to pick a client by

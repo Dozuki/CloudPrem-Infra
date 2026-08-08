@@ -20,7 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
-const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|janitor> [flags]
+const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|janitor|reaper-worker|reaper-drain-cancelled> [flags]
   common: --run-id --config --repo-dir --account-id --profile --region --matrix --state-bucket [--mem-store]
   provision: --scenario <upgrade|fresh> --from-ref --to-ref --namespace
   teardown:  --keep-on-failure --failed
@@ -30,7 +30,11 @@ const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|jani
              [--max-sweep-failures] [--sweep-budget]
              [--reaper-report-bucket <bucket>] [--reaper-shadow]
              (Phase 4 orphan sweeper; reads a WorkflowList json on stdin, defaults to a
-             dry-run report; needs neither --run-id nor --config)`
+             dry-run report; needs neither --run-id nor --config)
+  reaper-worker: --action-queue-url --result-queue-url --control-table --account-id
+                 --region --dr-region --self-workflow (reads WorkflowList JSON on stdin)
+  reaper-drain-cancelled: --action-queue-url --result-queue-url --control-table
+                           --archive-bucket --account-id --region`
 
 func main() { os.Exit(dispatch(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
@@ -48,6 +52,12 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if sub == "janitor" {
 		return runJanitor(rest, stdin, stdout, stderr)
+	}
+	if sub == "reaper-worker" {
+		return runReaperWorker(rest, stdin, stdout, stderr)
+	}
+	if sub == "reaper-drain-cancelled" {
+		return runReaperDrainCancelled(rest, stdout, stderr)
 	}
 
 	fs := flag.NewFlagSet(sub, flag.ContinueOnError)
