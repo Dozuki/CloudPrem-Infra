@@ -210,9 +210,12 @@ resource "aws_dms_endpoint" "target" {
 # One sharp edge that has no provisioned equivalent: a serverless replication left stopped or
 # failed for 48 HOURS is deprovisioned and can no longer be resumed - recovery is recreating
 # this resource, not a start call. Coverage for that is deliberately NOT a second alarm: the
-# state-change rule in monitoring.tf no longer filters on detail-type, so every serverless
-# state change (stopped, failed, deprovisioned) already reaches Slack, and a dedicated rule
-# would just double-alert the one event we least want buried in duplicates. Instead the
+# state-change rule in monitoring.tf forwards every serverless state change, and the ones
+# that matter here still reach Slack: sns_to_slack.py posts a serverless event only when it
+# is critical, and both "failed" and "deprovisioned" are. "Stopped" is now dropped - the
+# bi_cdc_latency alarms are what catch a replication that has gone quiet, about 45 minutes
+# later. A dedicated rule would just double-alert the one event we least want buried in
+# duplicates. Instead the
 # restart lambda recognises the deprovisioned state and declines to attempt an impossible
 # restart, so the alert stands on its own rather than being masked by a lambda error.
 #

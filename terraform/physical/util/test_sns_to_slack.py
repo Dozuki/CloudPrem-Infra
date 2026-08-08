@@ -38,6 +38,7 @@ package layout of whatever directory terraform zips it into.
 import json
 import os
 import sys
+import time
 import importlib.util
 from unittest import mock
 
@@ -60,23 +61,17 @@ SERVERLESS_ARN = "arn:aws:dms:us-east-1:111:replication-config:EXAMPLECONFIGID"
 
 
 def classify(detail_message, detail_type="DMS Replication State Change",
-             resource_arn=TASK_ARN):
-    """Mirror of the routing in lambda_handler's detail-type branch.
+             resource_arn=TASK_ARN, category=""):
+    """Thin adapter over the REAL classifier in sns_to_slack.py.
 
-    Kept in step with sns_to_slack.py by hand. If the handler's logic changes, this must
-    change with it - the point of the fixtures below is the message-to-outcome mapping,
-    not this reimplementation. run_dms_event below drives the real handler, so a drift
-    between the two shows up as a disagreement rather than a false pass.
+    This used to be a hand-copied mirror of lambda_handler's routing, which is a trap: the
+    mirror kept passing while the handler drifted underneath it, so the fixtures below
+    proved only that the copy agreed with itself. Now the fixtures drive production code
+    and the copy cannot rot.
     """
-    haystack = f"{detail_message} {detail_type}".lower()
-    critical = ("ERROR" in detail_message or "FATAL" in detail_message
-                or "fail" in haystack or "deprovision" in haystack)
-    if ":replication-config:" in resource_arn:
-        if not critical:
-            return "DROP"
-    elif not critical and any(p in haystack for p in DROP):
-        return "DROP"
-    return "PAGE" if critical else "POST"
+    outcome, _ = sns_to_slack.classify_dms_event(
+        detail_message, detail_type, resource_arn, category)
+    return outcome
 
 
 # (message, expected outcome, why it matters)
@@ -218,7 +213,7 @@ def alarm_fixture(state="ALARM"):
 
 
 def run_dms_event(detail_message, resource_arn,
-                  detail_type="DMS Replication State Change"):
+                  detail_type="DMS Replication State Change", category=None):
     """Drive the real lambda_handler over a DMS event on the webhook path.
 
     The fixture matrix above tests a mirror of the routing; this runs the handler itself,
@@ -228,11 +223,15 @@ def run_dms_event(detail_message, resource_arn,
 
     resource_arn takes a single ARN, a list of them for a multi-resource event, or None to
     omit the 'resources' key the way an event that carries none does.
+
+    category populates AWS's structured detail.category when given.
     """
     message = {
         'detail-type': detail_type,
         'detail': {'detailMessage': detail_message},
     }
+    if category is not None:
+        message['detail']['category'] = category
     if resource_arn is not None:
         message['resources'] = (list(resource_arn) if isinstance(resource_arn, list)
                                 else [resource_arn])
@@ -403,6 +402,35 @@ def dms_routing_checks():
         ("that post links to the provisioned console",
          posted and 'taskDetails' in str(posted[0])),
     ])
+
+    # The shape AWS actually emits. The fixture ARN above spells it :replication-task:,
+    # but dms_restart.py's ARN note records the real one as :task:<id>, and ":task:" is
+    # not a substring of ":replication-task:" - the character before `task` is a hyphen.
+    # So a lookup that only knew the long form would miss every real multi-resource task
+    # event, which is exactly the case the lookup exists for.
+    real_task_arn = "arn:aws:dms:us-east-1:111:task:EXAMPLETASKID"
+    posted, lookups = run_dms_event(
+        'Replication task stopped', ["arn:aws:sns:us-east-1:111:some-topic", real_task_arn],
+        detail_type='DMS Replication Task State Change')
+    checks.extend([
+        ("a real :task: ARN past index 0 still posts", len(posted) == 1),
+        ("that post resolves its name from the :task: ARN", lookups == [real_task_arn]),
+    ])
+
+    # AWS's structured classification, which catches a failure worded in a way the prose
+    # list never anticipated. This is the backstop for the whole criticality gate.
+    posted, _ = run_dms_event('Something nobody wrote a token for.', SERVERLESS_ARN,
+                              category='Failure')
+    checks.append(("serverless detail.category=Failure posts on novel wording",
+                   len(posted) == 1))
+
+    # Substring collisions the word-bounded match must NOT read as critical. Each of these
+    # contains error/fatal/fail as a substring but says the opposite.
+    for message in ('Replication failover completed normally.',
+                    'A nonfatal condition was observed and cleared.',
+                    'The load completed error-free.'):
+        posted, _ = run_dms_event(message, SERVERLESS_ARN)
+        checks.append((f'"{message[:28]}" is not critical', posted == []))
     return checks
 
 
@@ -479,6 +507,37 @@ def lifecycle_checks():
     return checks
 
 
+def state_ttl_checks():
+    """Only the tombstone carries a TTL.
+
+    An ALARM row is the live correlation to the red root, not a tombstone. Expiring it
+    strands the incident: the eventual recovery finds no prior and posts an unthreaded
+    green root with DURATION: Unknown - the same record loss this change exists to stop,
+    on a slower clock. These drive the real _put_alarm_state and read the item it builds.
+    """
+    written = []
+
+    class _FakeDDB:
+        def put_item(self, **kwargs):
+            written.append(kwargs['Item'])
+
+    checks = []
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
+        sns_to_slack._put_alarm_state('k', '111.222', '2026-08-01T12:00:00+00:00', 'ALARM')
+        sns_to_slack._put_alarm_state('k', '111.222', '2026-08-01T12:00:00+00:00', 'RESOLVED')
+
+    alarm_item, resolved_item = written
+    checks.extend([
+        ("an ALARM row carries no TTL", 'ExpiresAt' not in alarm_item),
+        ("an ALARM row still records its root ts", alarm_item['MessageTs']['S'] == '111.222'),
+        ("a RESOLVED row carries a TTL", 'ExpiresAt' in resolved_item),
+        ("the RESOLVED TTL is in the future",
+         int(resolved_item['ExpiresAt']['N']) > int(time.time())),
+    ])
+    return checks
+
+
 def renderer_checks():
     checks = []
 
@@ -536,7 +595,7 @@ def main():
             failures.append((message, expected, got, f"serverless: {why}"))
 
     checks = (renderer_checks() + slack_body_checks() + dms_routing_checks()
-              + lifecycle_checks())
+              + lifecycle_checks() + state_ttl_checks())
     for name, passed in checks:
         if not passed:
             failures.append((name, "PASS", "FAIL", "renderer/routing/lifecycle contract"))

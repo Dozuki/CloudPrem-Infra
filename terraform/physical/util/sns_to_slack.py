@@ -454,19 +454,109 @@ def _get_alarm_state(alarm_key):
     }
 
 
+def classify_dms_event(detail_message, detail_type, resource_arn, category=''):
+    """Decide what a DMS event does. Returns (outcome, critical).
+
+    outcome is 'DROP', 'POST' or 'PAGE'; critical drives the card's colour and @channel.
+
+    This is a module-level function rather than inline in lambda_handler so the tests can
+    call the real decision instead of a hand-copied mirror of it. The mirror was the
+    liability: it passed while the handler drifted underneath it.
+
+    One EventBridge rule feeds two producers, and only one has a CloudWatch backstop, so
+    they get different filters.
+
+    Serverless (a replication-config, the BI replication): post only what is critical.
+    Everything else is scale and lifecycle narration, roughly 225 messages a week, and no
+    human acts on any of it. Anything that goes quiet is still caught - the
+    bi_cdc_latency_source/target alarms key on ReplicationConfigId with
+    treat_missing_data = "breaching" at 9 of 12 x 300s, so a stopped, silent or
+    deprovisioned replication alarms on its own inside about 45 minutes. That backstop is
+    why a whitelist by criticality is safe here. Deprovision counts as critical and so
+    still posts immediately: it is the one BI state nothing recovers from, and the latency
+    alarm would report it 45 minutes later as "latency high or not reporting" instead.
+
+    Provisioned task (the aurora migration): denylist only, unchanged. It has NO CloudWatch
+    alarm anywhere, so this card is its only alerting and nothing may be dropped that was
+    not already dropped.
+
+    A resource_arn of 'N/A' (an event carrying no resources) falls to the provisioned
+    branch and still posts, which is the safe direction now that a wrong answer here costs
+    a dropped card rather than just a wrong console link.
+
+    Criticality takes AWS's own classification first and prose second. `detail.category` is
+    a structured field ("Failure" for the failure category), so it catches a failure worded
+    in some way the token list never anticipated - the whole risk of a gate that now
+    decides whether a serverless card is sent at all.
+
+    The prose fallback is word-bounded rather than a bare substring. "ERROR"/"FATAL" used to
+    be compared against the raw message, so they matched only AWS's uppercase prefixes and a
+    message worded "Error:" was dropped in silence. Case-folding fixes that but reintroduces
+    the opposite problem: a plain substring test reads "nonfatal" as fatal and "error-free"
+    as an error. The guards are [\\w-] rather than \\b because a hyphen IS a word boundary,
+    so \\b alone still matches inside both. Excluding the hyphen takes the whole family of
+    hyphenated opposites, and "failover" falls out too because the suffix group stops at
+    real failure words. AWS's real failure wording is followed by ":" or a space
+    ("ERROR: out of memory", "Last Error  Task error notification"), so nothing real is lost.
+
+    deprovision stays a substring on purpose: it has to match "deprovisioning" (the
+    transition into the unrecoverable state) as well as "deprovisioned".
+    """
+    haystack = f"{detail_message} {detail_type}".casefold()
+    critical = (
+        str(category).casefold() == 'failure'
+        or re.search(r'(?<![\w-])(?:error|fatal|fail(?:ed|ure|ures|ing)?)(?![\w-])',
+                     haystack) is not None
+        or 'deprovision' in haystack
+    )
+
+    # The denylist is consulted only after the failure tokens - see the substring note on
+    # DMS_ROUTINE_MESSAGES, where two entries are prefixes of messages that must page.
+    if ":replication-config:" in resource_arn:
+        if not critical:
+            return 'DROP', critical
+    elif not critical and any(p in haystack for p in DMS_ROUTINE_MESSAGES):
+        return 'DROP', critical
+    return ('PAGE' if critical else 'POST'), critical
+
+
+def _pick_dms_arn(resources):
+    """Pick the DMS resource ARN out of an event's `resources` list.
+
+    Index 0 was the old rule and is still the fallback. It stopped being good enough once
+    the config case started deciding delivery rather than just a console link: a non-DMS
+    ARN sitting at index 0 would drop the card outright. Config is checked first because
+    it is the case that gates delivery.
+
+    Both task spellings are matched. AWS emits `:task:` (see the ARN note in
+    dms_restart.py); `:replication-task:` is the longer form the fixtures carry, and
+    `":task:"` is not a substring of it because the character before `task` is a hyphen.
+    """
+    for marker in (":replication-config:", ":task:", ":replication-task:"):
+        for arn in resources:
+            if marker in arn:
+                return arn
+    return resources[0] if resources else 'N/A'
+
+
 def _put_alarm_state(alarm_key, message_ts, started_at, status):
     if not SLACK_STATE_TABLE:
         return
-    boto3.client('dynamodb').put_item(
-        TableName=SLACK_STATE_TABLE,
-        Item={
-            'AlarmKey': {'S': alarm_key},
-            'MessageTs': {'S': message_ts},
-            'StartedAt': {'S': started_at or datetime.now(timezone.utc).isoformat()},
-            'Status': {'S': status},
-            'ExpiresAt': {'N': str(int(time.time()) + STATE_TTL_SECONDS)},
-        },
-    )
+    item = {
+        'AlarmKey': {'S': alarm_key},
+        'MessageTs': {'S': message_ts},
+        'StartedAt': {'S': started_at or datetime.now(timezone.utc).isoformat()},
+        'Status': {'S': status},
+    }
+    # TTL only on the tombstone. The row is a tombstone once RESOLVED, but while an alarm
+    # is still ALARM it is the live correlation to the root card, and expiring it strands
+    # the incident: the eventual recovery finds no prior, so it posts an unthreaded green
+    # root with DURATION: Unknown and no reaction - the exact record loss this change
+    # exists to stop, just on a slower clock. An alarm can legitimately burn longer than
+    # the TTL, so the row must outlive it.
+    if status != 'ALARM':
+        item['ExpiresAt'] = {'N': str(int(time.time()) + STATE_TTL_SECONDS)}
+    boto3.client('dynamodb').put_item(TableName=SLACK_STATE_TABLE, Item=item)
 
 
 def _deliver_cloudwatch_bot(token, message_json, identifier, region,
@@ -558,16 +648,7 @@ def lambda_handler(event, context):
         detail_type = message_json.get('detail-type', 'N/A')
         detail_message = (message_json.get('detail') or {}).get('detailMessage', 'N/A')
         resources = message_json.get('resources') or []
-        # Pick the DMS ARN wherever it sits, rather than trusting index 0. Every event AWS
-        # sends today carries exactly one resource, so this reads the same answer; it
-        # matters because what it feeds is no longer just a link. The config case decides
-        # delivery, so guessing provisioned there drops the card outright. Both cases feed
-        # get_task_name and the console URL, so a non-DMS ARN at index 0 (a topic, say)
-        # would resolve a name from the wrong resource and deep-link to nothing.
-        resource_arn = next(
-            (r for r in resources
-             if ":replication-config:" in r or ":replication-task:" in r),
-            resources[0] if resources else 'N/A')
+        resource_arn = _pick_dms_arn(resources)
 
         # Page the channel only on failures. A plain "Replication task stopped"
         # is routine (operator stops, the migration's automatic
@@ -579,54 +660,17 @@ def lambda_handler(event, context):
         # apply that recreates the config. Matched on both the detail message and the
         # detail-type, and it catches "deprovisioning" too: that is the transition into the
         # unrecoverable state, not a routine stop, so it is worth the page.
-        haystack = f"{detail_message} {detail_type}".lower()
-        # All four tokens match the lowered haystack. "ERROR"/"FATAL" used to be compared
-        # against the raw message, so they only matched AWS's uppercase prefixes - a gate
-        # that read wider than it was. That was survivable while critical only chose
-        # whether to @channel; on the serverless path it now decides whether the card is
-        # sent at all, and a message worded "Error:" would have been dropped in silence.
-        # Widening only ever adds a post, never removes one, and no DMS_ROUTINE_MESSAGES
-        # entry contains either word, so the denylist path is unaffected. On the
-        # provisioned side the effect is that a lowercase-worded error now pages instead
-        # of posting quietly, which is the correct end of that trade for a task with no
-        # alarm behind it.
-        critical = ("error" in haystack or "fatal" in haystack
-                    or "fail" in haystack or "deprovision" in haystack)
-
-        # One EventBridge rule feeds two producers, and only one of them has a
-        # CloudWatch backstop, so they get different filters.
         #
-        # Serverless (a replication-config, the BI replication): post only what is
-        # critical. Everything else is scale and lifecycle narration, roughly 225
-        # messages a week, and no human acts on any of it. Anything that goes quiet is
-        # still caught: the bi_cdc_latency_source/target alarms key on
-        # ReplicationConfigId with treat_missing_data = "breaching" at 9 of 12 x 300s,
-        # so a stopped, silent or deprovisioned replication alarms on its own inside
-        # about 45 minutes. That backstop is why a whitelist by criticality is safe
-        # here, and why it replaces growing DMS_ROUTINE_MESSAGES phrase by phrase.
-        # Deprovision counts as critical and so still posts immediately, which matters:
-        # it is the one BI state nothing recovers from, and the latency alarm would
-        # report it 45 minutes later as "latency high or not reporting" instead.
-        #
-        # Provisioned task (the aurora migration): unchanged, denylist only. It has NO
-        # CloudWatch alarm anywhere, so this card is its only alerting and nothing may
-        # be dropped that was not already dropped.
-        #
-        # Both drops happen before the name lookup, not after: get_task_name calls DMS
-        # on every event, and the dropped ones are the overwhelming majority. The
-        # denylist is still consulted only after the failure tokens - see the substring
-        # note on DMS_ROUTINE_MESSAGES.
-        # 'N/A' when the event carries no resources at all. That falls to the provisioned
-        # branch and still posts, which is the safe direction now that a wrong answer here
-        # costs a dropped card rather than just a wrong console link: the task path drops
-        # nothing the denylist did not already drop.
+        # The decision itself lives in classify_dms_event so the tests can call it rather
+        # than reimplement it. Both drops happen before the name lookup, not after:
+        # get_task_name calls DMS on every event and the dropped ones are the majority.
+        detail_category = (message_json.get('detail') or {}).get('category', '')
+        outcome, critical = classify_dms_event(
+            detail_message, detail_type, resource_arn, detail_category)
         serverless = ":replication-config:" in resource_arn
-        if serverless:
-            if not critical:
-                print(f"skipping non-critical serverless DMS event: {detail_message}")
-                return
-        elif not critical and any(p in haystack for p in DMS_ROUTINE_MESSAGES):
-            print(f"skipping routine DMS state change: {detail_message}")
+        if outcome == 'DROP':
+            kind = 'non-critical serverless' if serverless else 'routine'
+            print(f"skipping {kind} DMS event: {detail_message}")
             return
 
         replication_task_name = get_task_name(resource_arn)
