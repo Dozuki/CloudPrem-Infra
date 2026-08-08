@@ -433,6 +433,8 @@ def dms_routing_checks():
                     'Event: task-failed on the source endpoint.',
                     'Replication failures exceeded the retry budget.',
                     'The task is failing repeatedly.',
+                    'The replication stopped some tables due to errors.',
+                    'The task errored out during the full load.',
                     'A fatal condition stopped the replication.',
                     'error-code 1020101 encountered during CDC.'):
         posted, _ = run_dms_event(message, SERVERLESS_ARN)

@@ -515,7 +515,7 @@ def classify_dms_event(detail_message, detail_type, resource_arn, category=''):
     critical = (
         str(category).casefold() == 'failure'
         or re.search(
-            r'(?<!\w)(?<!non-)(?:error|fatal|fail(?:s|ed|ure|ures|ing)?)(?!\w)(?!-free)',
+            r'(?<!\w)(?<!non-)(?:error(?:s|ed|ing)?|fatal|fail(?:s|ed|ure|ures|ing)?)(?!\w)(?!-free)',
             haystack) is not None
         or 'deprovision' in haystack
     )
