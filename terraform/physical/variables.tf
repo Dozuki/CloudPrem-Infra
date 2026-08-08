@@ -120,7 +120,7 @@ variable "slack_webhook_url" {
 }
 
 variable "slack_bot_token" {
-  description = "Slack bot token (chat:write) for SNS alerts via chat.postMessage. Stored as an SSM SecureString the lambda reads at runtime; takes precedence over slack_webhook_url when set together with slack_channel_id."
+  description = "Slack bot token (chat:write, plus reactions:write to mark resolved alarms) for SNS alerts via chat.postMessage. Stored as an SSM SecureString the lambda reads at runtime; takes precedence over slack_webhook_url when set together with slack_channel_id."
   type        = string
   default     = ""
   sensitive   = true
