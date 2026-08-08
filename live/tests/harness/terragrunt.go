@@ -137,6 +137,16 @@ func wrapTGError(err error, out string) error {
 }
 
 func (o TGOptions) Apply() error {
+	return o.execApply("run", "--all", "apply", "--non-interactive")
+}
+
+func (o TGOptions) ApplyLogical() error {
+	logicalOpts := o
+	logicalOpts.WorkingDir = filepath.Join(o.WorkingDir, "logical")
+	return logicalOpts.execApply("apply", "--non-interactive")
+}
+
+func (o TGOptions) execApply(args ...string) error {
 	// Retry only the EKS access-entry propagation race (see kubeAuthRaceRE);
 	// terraform apply is idempotent, so a re-apply just finishes the remaining
 	// resources once the access entry is effective.
@@ -150,7 +160,7 @@ func (o TGOptions) Apply() error {
 		// works but buys nothing here. The destroy path below keeps its -auto-approve
 		// because `destroy` is a shortcut command, which does accept it (both verified
 		// against a real 1.1.1 binary).
-		out, err = o.execCapture("run", "--all", "apply", "--non-interactive")
+		out, err = o.execCapture(args...)
 		if err == nil {
 			return nil
 		}

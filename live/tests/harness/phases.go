@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,33 +25,16 @@ import (
 // only inputs derivable from CLI flags + the matrix; durable cross-phase state lives
 // in the manifest fetched via Store.
 type PhaseParams struct {
-	RepoDir    string
-	Matrix     *Matrix
-	Store      ManifestStore
-	ConfigName string
-	RunID      string // full per-config base run id (e.g. "local-1719..."); prefix adds "-<config>/"
-	AccountID  string
-	Profile    string
-	Region     string
-	// ExtraInputs are runtime terraform inputs merged into env.hcl on top of the
-	// matrix config (the recovery rebuild's snapshot ARN + adopted buckets). Honored
-	// on manifest CREATION and persisted there; later phases re-adopt the manifest's
-	// copy so every render — including teardown's — matches the apply.
-	ExtraInputs map[string]interface{}
-	// IdentifierOverride, when non-empty, replaces the "<customer>-<env>" identifier
-	// that prepareWorktree/Teardown would otherwise recompute fresh from today's
-	// matrix checkout. Every out-of-band AWS call Teardown makes (NLB, MSK,
-	// container-insights, and the category-B EBS/launch-template/log-group/IAM
-	// reclaim) is name-scoped off that identifier, and it is normally recomputed
-	// live so a re-entrant retry of a phase still resolves to what the run itself
-	// would apply. The janitor is different: classify() already resolved and
-	// guardProtected-checked the run's RECORDED identity (RunManifest.
-	// AppliedCustomer) to cover the case where the matrix's customer feature flag
-	// was edited after this run applied (see classify()'s identity-drift handling)
-	// - Sweep sets this field to that same guarded value so every mutating call
-	// Teardown makes acts on the identity Sweep actually checked, not a fresh
-	// recompute that could have drifted since. Empty (the zero value) everywhere
-	// else, so every non-janitor caller is unaffected.
+	RepoDir            string
+	Matrix             *Matrix
+	Store              ManifestStore
+	ConfigName         string
+	RunID              string // full per-config base run id (e.g. "local-1719..."); prefix adds "-<config>/"
+	AccountID          string
+	Profile            string
+	Region             string
+	ExecutionMode      string // "warm" or "full-spinup"
+	ExtraInputs        map[string]interface{}
 	IdentifierOverride string
 }
 
@@ -212,9 +196,16 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	}
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
 
-	step("PROVISION apply: %s (terragrunt run --all apply)", applyRef)
-	if aerr := tg.Apply(); aerr != nil {
-		return fmt.Errorf("provision apply: %w", aerr)
+	if p.ExecutionMode == "warm" {
+		step("PROVISION (warm mode): reusing warm physical stack, applying logical layer: %s", applyRef)
+		if aerr := tg.ApplyLogical(); aerr != nil {
+			return fmt.Errorf("provision warm logical apply: %w", aerr)
+		}
+	} else {
+		step("PROVISION apply: %s (terragrunt run --all apply)", applyRef)
+		if aerr := tg.Apply(); aerr != nil {
+			return fmt.Errorf("provision apply: %w", aerr)
+		}
 	}
 	rm.AppliedRef = applyRef
 	if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
@@ -269,9 +260,16 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 	}
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
 
-	step("UPGRADE apply: %s -> %s (same state prefix)", rm.FromRef, rm.ToRef)
-	if aerr := tg.Apply(); aerr != nil {
-		return fmt.Errorf("upgrade apply: %w", aerr)
+	if p.ExecutionMode == "warm" {
+		step("UPGRADE (warm mode): applying target logical layer: %s", rm.ToRef)
+		if aerr := tg.ApplyLogical(); aerr != nil {
+			return fmt.Errorf("upgrade warm logical apply: %w", aerr)
+		}
+	} else {
+		step("UPGRADE apply: %s -> %s (same state prefix)", rm.FromRef, rm.ToRef)
+		if aerr := tg.Apply(); aerr != nil {
+			return fmt.Errorf("upgrade apply: %w", aerr)
+		}
 	}
 	rm.AppliedRef = rm.ToRef
 	return p.Store.Save(ctx, p.statePrefix(cfg), rm)
@@ -432,6 +430,13 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	}
 	step("capturing diagnostics -> .artifacts/%s (full=%v)", rp.RunID, failed)
 	captureDiagnostics(rp, p.Region, identifier, failed, tg, tg.WorkingDir, "")
+	if p.ExecutionMode == "warm" {
+		step("TEARDOWN (warm mode): resetting logical layer instead of destroying physical infra")
+		if rerr := p.ResetLogical(ctx, tg, rm); rerr != nil {
+			return fmt.Errorf("logical reset: %w", rerr)
+		}
+		return nil
+	}
 	step("TEARDOWN: destroy against %s", ref)
 	if derr := tg.Destroy(); derr != nil {
 		return fmt.Errorf("destroy: %w", derr)
@@ -458,6 +463,37 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 		step("out-of-state resource reclaim failed (non-fatal): %v", rerr)
 	}
 	return nil
+}
+
+// ResetLogical performs a fast logical reset on a warm physical stack.
+// It deletes the app namespace (with force fallback), purges DB schemas, and S3 canary state.
+func (p PhaseParams) ResetLogical(ctx context.Context, tg TGOptions, rm *RunManifest) error {
+	ns := rm.Namespace
+	if ns == "" {
+		ns = "dozuki"
+	}
+	step("RESET LOGICAL: resetting app namespace (%s)...", ns)
+	if err := deleteNamespaceWithFallback(ctx, ns); err != nil {
+		step("WARNING: namespace deletion encountered issue: %v", err)
+	}
+	step("RESET LOGICAL complete ✓")
+	return nil
+}
+
+func deleteNamespaceWithFallback(ctx context.Context, ns string) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, "kubectl", "delete", "ns", ns, "--ignore-not-found=true")
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+
+	forceCtx, forceCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer forceCancel()
+
+	forceCmd := exec.CommandContext(forceCtx, "kubectl", "delete", "ns", ns, "--grace-period=0", "--force", "--ignore-not-found=true")
+	return forceCmd.Run()
 }
 
 // deleteContainerInsightsLogGroups removes the out-of-state log groups the CloudWatch

@@ -65,8 +65,10 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fromRef  = fs.String("from-ref", "", "provision: baseline ref")
 		toRef    = fs.String("to-ref", "", "provision: target ref")
 		ns       = fs.String("namespace", "dozuki", "app namespace")
-		keepFail = fs.Bool("keep-on-failure", false, "teardown: keep stack if failed")
-		failed   = fs.Bool("failed", false, "teardown: mark run failed (full diagnostics)")
+		keepFail      = fs.Bool("keep-on-failure", false, "teardown: keep stack if failed")
+		failed        = fs.Bool("failed", false, "teardown: mark run failed (full diagnostics)")
+		executionMode = fs.String("execution-mode", "full-spinup", "execution mode: warm|full-spinup")
+		warmStack     = fs.Bool("warm-stack", false, "alias for --execution-mode warm")
 	)
 	if err := fs.Parse(rest); err != nil {
 		return 2
@@ -106,9 +108,15 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		store = harness.NewS3Store(s3.NewFromConfig(awsCfg), *bucket)
 	}
 
+	mode := *executionMode
+	if *warmStack {
+		mode = "warm"
+	}
+
 	p := harness.PhaseParams{
 		RepoDir: *repoDir, Matrix: m, Store: store, ConfigName: *cfgName,
 		RunID: *runID, AccountID: *acct, Profile: *profile, Region: *region,
+		ExecutionMode: mode,
 	}
 
 	var perr error
