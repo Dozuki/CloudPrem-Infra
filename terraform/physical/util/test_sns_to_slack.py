@@ -629,6 +629,18 @@ def ordering_checks():
          sns_to_slack._event_epoch({}) is None),
         ("_event_epoch returns None on garbage",
          sns_to_slack._event_epoch({"StateChangeTime": "yesterday"}) is None),
+        # A strptime format string with %f rejects this, which would have opted every
+        # whole-second transition out of ordering without anything failing.
+        ("_event_epoch parses a whole-second timestamp",
+         sns_to_slack._event_epoch({"StateChangeTime": "2026-08-01T12:00:00+0000"})
+         is not None),
+        ("_event_epoch parses a Z suffix",
+         sns_to_slack._event_epoch({"StateChangeTime": "2026-08-01T12:00:00.000Z"})
+         is not None),
+        ("whole-second and fractional forms of one instant agree",
+         sns_to_slack._event_epoch({"StateChangeTime": "2026-08-01T12:00:00+0000"})
+         == sns_to_slack._event_epoch(
+             {"StateChangeTime": "2026-08-01T12:00:00.000+0000"})),
         ("_is_stale is False without a prior row",
          sns_to_slack._is_stale(newer_epoch, None) is False),
         ("_is_stale is False when the row has no recorded time",
@@ -686,12 +698,41 @@ def claim_checks():
         ("the claim records the event time", values.get(':evt') is not None),
     ])
 
-    calls.clear()
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client',
-                           return_value=_FakeDDB(fail=True)):
-        lost = sns_to_slack._claim_resolution('alarm-key', 1754049600.0)
-    checks.append(("a rejected condition loses the claim, without raising", lost is False))
+    # A rejected condition has three possible causes and only two of them mean "post
+    # nothing". Which one applies is read off the row, so each is driven separately.
+    def claim_against(row):
+        calls.clear()
+        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+             mock.patch.object(sns_to_slack.boto3, 'client',
+                               return_value=_FakeDDB(fail=True)), \
+             mock.patch.object(sns_to_slack, '_get_alarm_state', return_value=row):
+            return sns_to_slack._claim_resolution('alarm-key', 1754049600.0)
+
+    resolved_row = {'message_ts': '1.2', 'started_at': 'x', 'status': 'RESOLVED',
+                    'last_event_at': 1754049600.0}
+    still_firing = dict(resolved_row, status='ALARM')
+    checks.extend([
+        ("an already-RESOLVED row loses the claim without raising",
+         claim_against(resolved_row) is False),
+        ("a stale event against a live ALARM row loses the claim without raising",
+         claim_against(still_firing) is False),
+        ("a vanished row loses the claim without raising",
+         claim_against(None) is False),
+    ])
+
+    # THE one that matters. An unexpired RESOLVING claim means another execution owns
+    # this resolution and may have died mid-post. Returning False here would end the
+    # invocation successfully, which drops the event from Lambda's async retry queue -
+    # and Lambda's first retry lands at about the same minute as the lease, so the very
+    # retry meant to take the claim over is the one that would be discarded. The card
+    # would be lost for good. It must raise so the retry gets to re-read.
+    held = dict(resolved_row, status='RESOLVING')
+    raised = False
+    try:
+        claim_against(held)
+    except RuntimeError:
+        raised = True
+    checks.append(("an unexpired RESOLVING claim raises so Lambda retries", raised))
 
     # No event time: there is nothing to order by, so the guard must come off entirely
     # rather than compare against a missing value and reject every claim.

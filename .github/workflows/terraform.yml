@@ -36,6 +36,13 @@ jobs:
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
+    # Chained so the lambda suite actually blocks a merge. The three "Terraform (...)"
+    # contexts are required by master's branch protection and "Lambda tests" is not, so
+    # left parallel a red lambda run would sit next to three green required checks and
+    # merge anyway. Depending on it means a failure skips those contexts instead, and a
+    # skipped required context is not a pass. Decouple this once "Lambda tests" is added
+    # to the required set in branch protection.
+    needs: lambda-tests
     strategy:
       fail-fast: false
       matrix:

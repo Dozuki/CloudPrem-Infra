@@ -479,14 +479,15 @@ def _event_epoch(message_json):
 
     Returns None when the field is missing or unparseable. Callers must treat None as
     "cannot order this" and fall through to posting: never classify on bad data.
+
+    Parsing goes through _parse_time (fromisoformat) rather than a strptime format
+    string. A literal "%Y-%m-%dT%H:%M:%S.%f%z" requires the fractional second, so a
+    timestamp landing exactly on a second boundary would fail to parse and silently opt
+    that event out of ordering entirely - the ordering guard would be off for precisely
+    the events least likely to be noticed.
     """
-    raw = message_json.get('StateChangeTime')
-    if not raw:
-        return None
-    try:
-        return datetime.strptime(raw, "%Y-%m-%dT%H:%M:%S.%f%z").timestamp()
-    except (TypeError, ValueError):
-        return None
+    parsed = _parse_time(message_json.get('StateChangeTime'))
+    return parsed.timestamp() if parsed else None
 
 
 def _is_stale(event_at, prior):
@@ -647,9 +648,30 @@ def _claim_resolution(alarm_key, event_at):
         )
         return True
     except client.exceptions.ConditionalCheckFailedException:
-        # Someone else owns this resolution, or the event is older than the row. Both
-        # mean "post nothing", and neither is an error. Every other failure - throttling,
-        # a missing table, credentials - propagates so the Lambda retries it.
+        # The condition fails for three different reasons and they do NOT share an
+        # outcome, so read the row rather than assuming the benign one.
+        prior = _get_alarm_state(alarm_key)
+        if prior and prior.get('status') == 'RESOLVING':
+            # Someone holds an unexpired claim. Either they are still posting, or they
+            # died between claiming and posting - and nothing here can tell which.
+            #
+            # Returning False would end this invocation successfully, which tells Lambda
+            # the event is handled and drops it from the async queue. If the holder is
+            # dead, the recovery card is then gone for good and the lease below never
+            # gets a chance to matter: Lambda's first async retry lands at roughly the
+            # same minute as the lease, so the retry that was supposed to take over is
+            # exactly the one being discarded here.
+            #
+            # Raising instead lets the retry re-read. By then the holder has either
+            # finished (row is RESOLVED, the retry returns False quietly) or its lease
+            # has expired (the retry wins the claim and posts). Both converge. Silence
+            # only converges when the holder happened to survive.
+            raise RuntimeError(
+                f'{alarm_key} is claimed by an in-flight resolution; retrying')
+        # RESOLVED means the resolution already happened, and a still-ALARM row means
+        # this event is older than the one applied. Both mean "post nothing", and
+        # neither is an error. Every other failure - throttling, a missing table,
+        # credentials - propagates so the Lambda retries it.
         return False
 
 
