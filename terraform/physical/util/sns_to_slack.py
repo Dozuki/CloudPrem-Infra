@@ -493,11 +493,20 @@ def classify_dms_event(detail_message, detail_type, resource_arn, category=''):
     be compared against the raw message, so they matched only AWS's uppercase prefixes and a
     message worded "Error:" was dropped in silence. Case-folding fixes that but reintroduces
     the opposite problem: a plain substring test reads "nonfatal" as fatal and "error-free"
-    as an error. The guards are [\\w-] rather than \\b because a hyphen IS a word boundary,
-    so \\b alone still matches inside both. Excluding the hyphen takes the whole family of
-    hyphenated opposites, and "failover" falls out too because the suffix group stops at
-    real failure words. AWS's real failure wording is followed by ":" or a space
-    ("ERROR: out of memory", "Last Error  Task error notification"), so nothing real is lost.
+    as an error.
+
+    The guards are deliberately narrow, because the two directions are not symmetric: a
+    false positive is a noisy card and a false negative is an alert nobody ever sees. So
+    only the specific opposites are excluded, not every hyphenated form. A blanket
+    [\\w-] guard on both sides looked tidier and silently dropped "task-failed"; a suffix
+    group without "s" dropped "fails". Both were regressions against the old substring
+    test, which had no false negatives at all.
+
+    What each guard buys:
+      (?<!\\w)      "nonfatal" is not fatal
+      (?<!non-)     "non-fatal" is not fatal, but "task-failed" still matches
+      (?!\\w)       "failover" is not a failure
+      (?!-free)     "error-free" is not an error, but "error-code" still matches
 
     deprovision stays a substring on purpose: it has to match "deprovisioning" (the
     transition into the unrecoverable state) as well as "deprovisioned".
@@ -505,8 +514,9 @@ def classify_dms_event(detail_message, detail_type, resource_arn, category=''):
     haystack = f"{detail_message} {detail_type}".casefold()
     critical = (
         str(category).casefold() == 'failure'
-        or re.search(r'(?<![\w-])(?:error|fatal|fail(?:ed|ure|ures|ing)?)(?![\w-])',
-                     haystack) is not None
+        or re.search(
+            r'(?<!\w)(?<!non-)(?:error|fatal|fail(?:s|ed|ure|ures|ing)?)(?!\w)(?!-free)',
+            haystack) is not None
         or 'deprovision' in haystack
     )
 

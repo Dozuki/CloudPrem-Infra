@@ -424,13 +424,26 @@ def dms_routing_checks():
     checks.append(("serverless detail.category=Failure posts on novel wording",
                    len(posted) == 1))
 
-    # Substring collisions the word-bounded match must NOT read as critical. Each of these
-    # contains error/fatal/fail as a substring but says the opposite.
+    # The criticality regex, both directions. False positives are a noisy card; false
+    # negatives are an alert nobody ever sees, so the MUST-PAGE half matters more. Every
+    # entry below is a wording the plain-substring test used to catch, or a collision the
+    # word-bounded one has to keep rejecting - the two regressions that got caught in
+    # review were "fails" (suffix group had no s) and "task-failed" (blanket hyphen ban).
+    for message in ('The replication task fails to start.',
+                    'Event: task-failed on the source endpoint.',
+                    'Replication failures exceeded the retry budget.',
+                    'The task is failing repeatedly.',
+                    'A fatal condition stopped the replication.',
+                    'error-code 1020101 encountered during CDC.'):
+        posted, _ = run_dms_event(message, SERVERLESS_ARN)
+        checks.append((f'"{message[:34]}" pages', len(posted) == 1))
+
     for message in ('Replication failover completed normally.',
                     'A nonfatal condition was observed and cleared.',
+                    'A non-fatal condition was observed and cleared.',
                     'The load completed error-free.'):
         posted, _ = run_dms_event(message, SERVERLESS_ARN)
-        checks.append((f'"{message[:28]}" is not critical', posted == []))
+        checks.append((f'"{message[:34]}" is not critical', posted == []))
     return checks
 
 
