@@ -17,9 +17,10 @@ Functions:
 - lambda_handler(event, context): Entry point for the Lambda function. Processes the event and sends an alert to Slack.
 
 Environment Variables:
-- SLACK_BOT_TOKEN_SSM_PARAM: SSM SecureString holding a bot token (chat:write); preferred path.
+- SLACK_BOT_TOKEN_SSM_PARAM: SSM SecureString holding a bot token (chat:write, reactions:write);
+  preferred path.
 - SLACK_CHANNEL_ID: Channel the bot-token path posts to.
-- SLACK_STATE_TABLE: DynamoDB table used to update ALARM roots when they resolve.
+- SLACK_STATE_TABLE: DynamoDB table used to thread a recovery under the ALARM root that fired.
 - SLACK_WEBHOOK_URL: Legacy Slack incoming webhook URL; used when no bot token is configured.
 - AWS_REGION: The AWS region where the Lambda function operates.
 - AWS_ACCOUNT_ID: The AWS account ID.
@@ -41,29 +42,27 @@ import urllib.request
 from datetime import datetime, timezone
 import boto3
 
-# Routine serverless lifecycle chatter, dropped before it reaches Slack.
+# Routine DMS lifecycle chatter, dropped before it reaches Slack.
 #
-# A serverless replication narrates every autoscaling decision and every step of its
-# provisioning pipeline. In steady state that is the only DMS traffic the channel gets,
-# so the recurring "cannot scale down, already at the minimum DCU" post is what people
-# learn to scroll past - and the failure that matters scrolls past with it. Sustained
-# capacity pressure is the one scaling signal worth a human, and a single event cannot
-# tell you it is sustained; the <identifier>-dms-capacity-saturated alarm in
-# monitoring.tf covers that instead, on an hour of datapoints.
+# This list now governs the PROVISIONED path only (the aurora migration task). Serverless
+# replications no longer reach it: they are filtered by criticality in lambda_handler,
+# because they have a CloudWatch backstop and the migration task does not. See the split
+# in the detail-type branch.
 #
 # Nothing here is a state a human acts on. Failed, stopped, started, running and
 # deprovisioned all stay off this list, and the list is a denylist rather than an
 # allowlist so a message AWS words differently than we assumed still posts.
 #
-# "cannot scale UP" is deliberately NOT here, though its scale-down twin is. They read
-# alike and are opposites: at-minimum means we are paying for capacity nobody wants,
-# at-maximum means the ceiling is throttling the replication. The second is the strongest
-# point-in-time evidence that max_capacity_units is binding, and it is what the
-# -dms-capacity-saturated alarm needs an hour of datapoints to infer. With max at 32
-# against a 1-2 DCU steady state it should approximately never fire, so dropping it would
-# buy no quiet at the cost of the one event worth reading. If it ever does turn noisy,
-# aggregate it into a metric and alarm on N occurrences in 15-30 minutes rather than
-# discarding it here.
+# Several entries below are serverless vocabulary (the scaling and capacity messages) and
+# are unreachable now that serverless is filtered by criticality upstream: a provisioned
+# task emits no DCU decisions. They are kept rather than pruned because the cost is zero
+# and a denylist that still matches a message AWS decides to reuse is the safer default.
+# The scale-up-blocked signal that used to be argued for here is now carried solely by the
+# <identifier>-dms-capacity-saturated alarm in monitoring.tf, on an hour of datapoints,
+# which is the sustained reading a single event could never give.
+#
+# What the list still does for the task path is drop 'is initializing', 'is being
+# modified' and 'connections tied to'.
 #
 # Matched only AFTER the failure tokens, because two of these phrases are substrings of
 # messages that must page: "provisioning its capacity" sits inside "deprovisioning its
@@ -396,16 +395,30 @@ def _slack_api(method, token, body):
     return result
 
 
-def _post_bot(token, payload, thread_ts=None):
+def _post_bot(token, payload, thread_ts=None, reply_broadcast=False):
     body = {'channel': SLACK_CHANNEL_ID, **payload}
     if thread_ts:
         body['thread_ts'] = thread_ts
+    if reply_broadcast:
+        # Threaded replies are invisible to anyone not already in the thread. A
+        # resolution has to land in the channel itself or the incident reads as
+        # still open, so the recovery card is broadcast as well as threaded.
+        body['reply_broadcast'] = True
     return _slack_api('chat.postMessage', token, body)['ts']
 
 
 def _update_bot(token, message_ts, payload):
     _slack_api('chat.update', token,
                {'channel': SLACK_CHANNEL_ID, 'ts': message_ts, **payload})
+
+
+def _add_reaction(token, message_ts, name):
+    """Add an emoji reaction to a message. Callers treat this as best effort."""
+    _slack_api('reactions.add', token, {
+        'channel': SLACK_CHANNEL_ID,
+        'timestamp': message_ts,
+        'name': name,
+    })
 
 
 def _post_webhook(payload):
@@ -472,6 +485,9 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
 
     if state == 'ALARM':
         if prior and prior.get('status') == 'ALARM':
+            # Refreshing an already-red root, not turning it green. This branch mostly
+            # fires on duplicate SNS delivery of the same firing event, where an edit
+            # is what keeps the channel from showing the same incident twice.
             message_ts = prior['message_ts']
             _update_bot(token, message_ts, payload)
         else:
@@ -481,12 +497,24 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         return
 
     if state == 'OK' and prior:
-        _update_bot(token, prior['message_ts'], payload)
+        # The ALARM card is written once and never edited on recovery. Editing it
+        # green destroyed the only record that the incident happened: an audit of one
+        # week found 10 firing records overwritten, 2 of which left no trace at all.
+        # The red root stays red; recovery is a new message, not a rewrite.
         if prior.get('status') != 'RESOLVED':
-            _post_bot(token, {
-                'text': (f'✅ Automatically resolved · {metadata["alarm_name"]} · '
-                         f'{_format_duration(prior["started_at"], metadata["changed_at"])}')
-            }, thread_ts=prior['message_ts'])
+            # Full recovery card, not a one-line summary, so the channel gets the same
+            # detail (duration, final reading, resource) it got when the alarm fired.
+            # Broadcast because a thread reply alone leaves the channel showing red.
+            _post_bot(token, payload, thread_ts=prior['message_ts'],
+                      reply_broadcast=True)
+            try:
+                _add_reaction(token, prior['message_ts'], 'white_check_mark')
+            except Exception as exc:  # noqa: BLE001 - a reaction is decoration
+                # Never let a reactions failure (scope, already_reacted, Slack 5xx)
+                # bubble up: the recovery card is already posted, and raising here
+                # would skip the tombstone below and re-post it on the Lambda retry.
+                print(f'could not mark {metadata["alarm_name"]} '
+                      f'({prior["message_ts"]}) resolved: {exc}')
         _put_alarm_state(alarm_key, prior['message_ts'], prior['started_at'], 'RESOLVED')
         return
 
@@ -546,11 +574,39 @@ def lambda_handler(event, context):
         critical = ("ERROR" in detail_message or "FATAL" in detail_message
                     or "fail" in haystack or "deprovision" in haystack)
 
-        # Drop before the name lookup, not after: get_task_name calls DMS on every
-        # event, and the dropped ones are the overwhelming majority. Only reached
-        # once the message is known not to be critical - see the substring note on
-        # DMS_ROUTINE_MESSAGES.
-        if not critical and any(p in haystack for p in DMS_ROUTINE_MESSAGES):
+        # One EventBridge rule feeds two producers, and only one of them has a
+        # CloudWatch backstop, so they get different filters.
+        #
+        # Serverless (a replication-config, the BI replication): post only what is
+        # critical. Everything else is scale and lifecycle narration, roughly 225
+        # messages a week, and no human acts on any of it. Anything that goes quiet is
+        # still caught: the bi_cdc_latency_source/target alarms key on
+        # ReplicationConfigId with treat_missing_data = "breaching" at 9 of 12 x 300s,
+        # so a stopped, silent or deprovisioned replication alarms on its own inside
+        # about 45 minutes. That backstop is why a whitelist by criticality is safe
+        # here, and why it replaces growing DMS_ROUTINE_MESSAGES phrase by phrase.
+        # Deprovision counts as critical and so still posts immediately, which matters:
+        # it is the one BI state nothing recovers from, and the latency alarm would
+        # report it 45 minutes later as "latency high or not reporting" instead.
+        #
+        # Provisioned task (the aurora migration): unchanged, denylist only. It has NO
+        # CloudWatch alarm anywhere, so this card is its only alerting and nothing may
+        # be dropped that was not already dropped.
+        #
+        # Both drops happen before the name lookup, not after: get_task_name calls DMS
+        # on every event, and the dropped ones are the overwhelming majority. The
+        # denylist is still consulted only after the failure tokens - see the substring
+        # note on DMS_ROUTINE_MESSAGES.
+        # Derived from resources[0], which is 'N/A' when the event carries none. That
+        # falls to the provisioned branch and still posts, which is the safe direction now
+        # that a wrong answer here costs a dropped card rather than just a wrong console
+        # link: the task path drops nothing the denylist did not already drop.
+        serverless = ":replication-config:" in resource_arn
+        if serverless:
+            if not critical:
+                print(f"skipping non-critical serverless DMS event: {detail_message}")
+                return
+        elif not critical and any(p in haystack for p in DMS_ROUTINE_MESSAGES):
             print(f"skipping routine DMS state change: {detail_message}")
             return
 
@@ -558,7 +614,7 @@ def lambda_handler(event, context):
         # Link to THIS region's console (was hardcoded us-east-1). Serverless replications are
         # not replication tasks and do not exist under #taskDetails, so a config ARN needs the
         # serverless route or the alert links to a page that cannot show the incident.
-        if ":replication-config:" in resource_arn:
+        if serverless:
             replication_task_link = (
                 f"https://console.aws.amazon.com/dms/v2/home?region={region}"
                 f"#serverlessReplicationDetails/{replication_task_name}"
