@@ -833,6 +833,16 @@ resource "aws_lambda_function" "dms_restart" {
   runtime       = "python3.12"
   architectures = ["arm64"]
   role          = aws_iam_role.lambda_execution[0].arn
+  # This was never set, so the function ran on AWS's 3s default while doing a
+  # FilterLogEvents plus a StartReplication on a cold arm64 start. Real invocations
+  # land at 2.7-2.9s and one has already been killed outright ("Status: timeout",
+  # 3000.00 ms), recovered only because Lambda retried the async invocation. That
+  # rescue is not guaranteed: once the async retries are spent, a restart lost this
+  # way is silent, and the replication sits failed against the 48h deprovision clock
+  # with nothing but the CRITICAL state-change alert to say so. 30s matches
+  # sns_to_slack above; Lambda bills duration actually used, so a higher ceiling
+  # costs nothing on the normal 2s path.
+  timeout = 30
 
   source_code_hash = data.archive_file.dms_restart_lambda[0].output_base64sha256
 
