@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.17.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.17.0...v8.17.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **dms:** set an explicit timeout on the dms_restart lambda ([#467](https://github.com/Dozuki/CloudPrem-Infra/issues/467)) ([6dbd1ae](https://github.com/Dozuki/CloudPrem-Infra/commit/6dbd1ae67ed328debdd1244eed93b2b1c4b94e42))
+
 ## [8.17.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.16.0...v8.17.0) (2026-08-07)
 
 
