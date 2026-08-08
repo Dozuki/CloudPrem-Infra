@@ -2,6 +2,22 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.18.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.17.0...v8.18.0) (2026-08-08)
+
+
+### Features
+
+* connect harness cleanup to resource reaper ([#469](https://github.com/Dozuki/CloudPrem-Infra/issues/469)) ([438917a](https://github.com/Dozuki/CloudPrem-Infra/commit/438917a2c8e17942842242a6a1364da57fe020bd))
+* **harness:** add path-aware warm pool execution mode and business-hours crons ([#470](https://github.com/Dozuki/CloudPrem-Infra/issues/470)) ([d792bf6](https://github.com/Dozuki/CloudPrem-Infra/commit/d792bf6d394d7bf7078d40135873d7286f3a8be0))
+
+
+### Bug Fixes
+
+* **alerts:** keep resolved alarms in the channel history and quiet serverless DMS ([#460](https://github.com/Dozuki/CloudPrem-Infra/issues/460)) ([467be6c](https://github.com/Dozuki/CloudPrem-Infra/commit/467be6ccfb777bc99fea405f3051da422e2a6b35))
+* **dms:** restore the AWS default RecoverableErrorCount so DMS retries a lost connection ([4d41eae](https://github.com/Dozuki/CloudPrem-Infra/commit/4d41eaee7de64928c7784be1c3b744c585684e6b))
+* **dms:** set an explicit timeout on the dms_restart lambda ([#467](https://github.com/Dozuki/CloudPrem-Infra/issues/467)) ([6dbd1ae](https://github.com/Dozuki/CloudPrem-Infra/commit/6dbd1ae67ed328debdd1244eed93b2b1c4b94e42))
+* **physical:** use bucket resource map lookup for dr replication destination arn ([ccd8d4b](https://github.com/Dozuki/CloudPrem-Infra/commit/ccd8d4b150b7d2bdc28a3eda681b1f36fbe18931))
+
 ## [8.17.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.16.0...v8.17.0) (2026-08-07)
 
 
