@@ -442,7 +442,7 @@ done
 done
 
 # 6) Central Vault cleanup: disable each stack's k8s auth mount + delete its policy.
-# The mount k8s/<customer>-<env> lives in the central Vault (account 0106), keyed by
+# The mount k8s/<customer>-<env> lives in the central Vault (management account), keyed by
 # stack name, and is NOT torn down with the AWS stack. A leftover mount makes the next
 # run's `vault_auth_backend` create fail ("path already in use"), so kubernetes_host
 # stays pointed at the old cluster -> ESO gets 403 -> pods can't mount their secret ->

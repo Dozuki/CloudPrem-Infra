@@ -139,21 +139,23 @@ if [ -z "${DDVTEST_ACCOUNT_ID:-}" ]; then
   _sts_err="$(mktemp)"
   DDVTEST_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text \
     2>"$_sts_err" | tr -d '\r' || true)"
-  case "$DDVTEST_ACCOUNT_ID" in
-    # Refuse an empty or malformed answer rather than letting it through: it becomes
-    # part of every bucket name below, so a blank builds a plausible-looking name that
-    # points nowhere and fails much later.
-    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
-    *)
-      echo "ERROR: could not resolve the test account id from AWS_PROFILE='$AWS_PROFILE'." >&2
-      [ -s "$_sts_err" ] && sed '/^[[:space:]]*$/d; s/^/       aws: /' "$_sts_err" >&2
-      echo "       Refresh the profile, or export DDVTEST_ACCOUNT_ID=<12-digit account>." >&2
-      rm -f "$_sts_err"
-      exit 1
-      ;;
-  esac
+  if [ -z "$DDVTEST_ACCOUNT_ID" ] && [ -s "$_sts_err" ]; then
+    echo "ERROR: sts:GetCallerIdentity failed for AWS_PROFILE='$AWS_PROFILE'." >&2
+    sed '/^[[:space:]]*$/d; s/^/       aws: /' "$_sts_err" >&2
+  fi
   rm -f "$_sts_err"
 fi
+# Validated unconditionally, not just on the resolved path. An explicit override is the
+# documented escape hatch, and a typo in it would otherwise sail straight into every
+# bucket name below and build a plausible-looking one that points nowhere.
+case "$DDVTEST_ACCOUNT_ID" in
+  [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+  *)
+    echo "ERROR: DDVTEST_ACCOUNT_ID must be a 12-digit AWS account id (got '${DDVTEST_ACCOUNT_ID:-}')." >&2
+    echo "       Refresh the profile, or export DDVTEST_ACCOUNT_ID=<12-digit account>." >&2
+    exit 1
+    ;;
+esac
 export DDVTEST_ACCOUNT_ID
 echo ">> Test account: $DDVTEST_ACCOUNT_ID (profile '$AWS_PROFILE')"
 
@@ -211,7 +213,7 @@ trap cleanup EXIT
 
 setup_vault() {
   # The vault kube context AND the vault AWS-auth login both authenticate as
-  # VAULT_AWS_PROFILE (dozuki / 0106 — the account the Vault cluster lives in).
+  # VAULT_AWS_PROFILE (dozuki — the management account the Vault cluster lives in).
   # If that SSO session is expired, the port-forward's get-token fails and the
   # tunnel silently never comes up. Check up front with an actionable message.
   if ! aws sts get-caller-identity --profile "$VAULT_AWS_PROFILE" >/dev/null 2>&1; then
