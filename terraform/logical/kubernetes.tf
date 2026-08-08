@@ -337,7 +337,7 @@ resource "kubernetes_manifest" "nodepool_spot" {
           # per node once the CNI agent is ready. App pods can ONLY land on
           # these custom pools (physical enables just the built-in system pool,
           # which is CriticalAddonsOnly), so coverage is total.
-          local.mesh_installed ? {
+          local.mesh_enabled ? {
             startupTaints = [{
               key    = "cni.istio.io/not-ready"
               effect = "NoSchedule"
@@ -437,7 +437,7 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
             ]
           },
           # See nodepool_spot for the startupTaints rationale.
-          local.mesh_installed ? {
+          local.mesh_enabled ? {
             startupTaints = [{
               key    = "cni.istio.io/not-ready"
               effect = "NoSchedule"

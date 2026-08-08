@@ -270,7 +270,6 @@ configs:
       # bi_db_engine intentionally left at its "rds" default: this is the provisioned BI
       # path the existing fleet runs. bi_ha covers the Aurora one.
       restore_drill: true         # consumed by the harness, NOT passed to terraform
-      istio_mesh_state: "strict"
       alarm_email: "devops@dozuki.com"
       # MUST be false for an ephemeral test stack. The variable defaults to TRUE, which
       # turns on RDS deletion protection and skip_final_snapshot=false, so teardown dies

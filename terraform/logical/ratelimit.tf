@@ -268,7 +268,7 @@ resource "kubernetes_network_policy_v1" "ratelimit_redis" {
       # this, enrolling redis-system severs ratelimit -> redis immediately
       # (permissive mode included). 6379 stays for the pre-enrollment path.
       dynamic "ports" {
-        for_each = local.mesh_enrolled ? [1] : []
+        for_each = local.mesh_enabled ? [1] : []
         content {
           protocol = "TCP"
           port     = "15008"

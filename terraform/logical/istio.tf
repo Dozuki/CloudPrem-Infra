@@ -12,29 +12,35 @@ locals {
   # string = chart default hub.
   istio_image_hub = ""
 
-  mesh_state_rank = { disabled = 0, installed = 1, permissive = 2, strict = 3 }
-  mesh_rank       = local.mesh_state_rank[var.istio_mesh_state]
-
   # Platform contract: ambient runs on AWS EKS Auto Mode, both partitions. Gov
   # clusters pull docker.io/ghcr.io/quay.io today, so no image mirror is needed;
   # the old "phase-2 mirror first" gate was based on a stale airgap assumption.
   # Azure is deferred (no node-taint surface on AKS today; see the design annex).
-  mesh_supported = var.cloud == "aws"
-
-  mesh_installed = local.mesh_rank >= 1
-  mesh_enrolled  = local.mesh_rank >= 2
-  mesh_strict    = local.mesh_rank >= 3
+  #
+  # There is no lifecycle knob any more. The mesh used to walk a four-rung
+  # ladder (disabled -> installed -> permissive -> strict) driven by a
+  # var.istio_mesh_state input, so the fleet could be moved one rung per apply
+  # with a canary env leading. That rollout finished 2026-08-08 with every
+  # environment on strict, and the ladder was removed with it: install,
+  # namespace enrollment and STRICT enforcement now all land in a single apply.
+  # Two consequences worth knowing before changing this:
+  #   - A first-time enable is no longer incremental. The carve-outs below and
+  #     the depends_on chain order it correctly WITHIN one apply, but there is
+  #     no longer an intermediate state to sit in and observe.
+  #   - Rollback is a code change here, not an input flip. If STRICT has to come
+  #     off in an incident, that is an edit + release + version bump per env.
+  mesh_enabled = var.cloud == "aws"
 }
 
 resource "kubernetes_namespace_v1" "istio_system" {
-  count = local.mesh_installed ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
   metadata {
     name = "istio-system"
   }
 }
 
 resource "helm_release" "istio_base" {
-  count = local.mesh_installed ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
 
   name       = "istio-base"
   namespace  = kubernetes_namespace_v1.istio_system[0].metadata[0].name
@@ -68,7 +74,7 @@ resource "helm_release" "istio_base" {
 # one hungry pod can starve everything else on it. Do not add limits here;
 # that reintroduces the exact failure mode this PR closes.
 resource "helm_release" "istiod" {
-  count = local.mesh_installed ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
 
   # Gateway API CRDs must exist before istiod (it watches them). The Envoy Gateway
   # CRD bundle already ships Gateway API v1.5.1, so istio and EG share those CRDs:
@@ -145,7 +151,7 @@ resource "helm_release" "istiod" {
 }
 
 resource "helm_release" "istio_cni" {
-  count      = local.mesh_installed ? 1 : 0
+  count      = local.mesh_enabled ? 1 : 0
   depends_on = [helm_release.istiod]
 
   name       = "istio-cni"
@@ -174,7 +180,7 @@ resource "helm_release" "istio_cni" {
 }
 
 resource "helm_release" "ztunnel" {
-  count      = local.mesh_installed ? 1 : 0
+  count      = local.mesh_enabled ? 1 : 0
   depends_on = [helm_release.istio_cni]
 
   name       = "ztunnel"
@@ -205,7 +211,7 @@ resource "helm_release" "ztunnel" {
 }
 
 resource "kubernetes_labels" "ambient_dozuki" {
-  count      = local.mesh_enrolled ? 1 : 0
+  count      = local.mesh_enabled ? 1 : 0
   depends_on = [helm_release.ztunnel]
 
   api_version = "v1"
@@ -220,7 +226,7 @@ resource "kubernetes_labels" "ambient_dozuki" {
 }
 
 resource "kubernetes_labels" "ambient_envoy_gateway" {
-  count = local.mesh_enrolled ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
   # envoy-gateway-system is created by the EG release (create_namespace), not by a
   # Terraform namespace resource.
   depends_on = [helm_release.ztunnel, helm_release.envoy_gateway]
@@ -237,7 +243,7 @@ resource "kubernetes_labels" "ambient_envoy_gateway" {
 }
 
 resource "kubernetes_labels" "ambient_redis" {
-  count = local.mesh_enrolled ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
   # The NetworkPolicy must allow HBONE 15008 before redis-system is enrolled (and
   # enrollment must be removed before the rule on teardown).
   depends_on = [helm_release.ztunnel, kubernetes_network_policy_v1.ratelimit_redis]
@@ -325,7 +331,7 @@ locals {
 # teardown), or the NLB-facing envoy ports and API-server webhook callbacks are
 # rejected during the transition window.
 resource "kubectl_manifest" "peer_auth_strict" {
-  for_each   = local.mesh_strict ? toset(local.mesh_strict_namespaces) : toset([])
+  for_each   = local.mesh_enabled ? toset(local.mesh_strict_namespaces) : toset([])
   depends_on = [kubectl_manifest.peer_auth_carveouts]
 
   yaml_body = yamlencode({
@@ -338,7 +344,7 @@ resource "kubectl_manifest" "peer_auth_strict" {
 }
 
 resource "kubectl_manifest" "peer_auth_carveouts" {
-  for_each = local.mesh_strict ? local.mesh_carveouts : {}
+  for_each = local.mesh_enabled ? local.mesh_carveouts : {}
   depends_on = [
     kubernetes_labels.ambient_dozuki,
     kubernetes_labels.ambient_envoy_gateway,
