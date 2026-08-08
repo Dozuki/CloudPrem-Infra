@@ -242,10 +242,11 @@ func (o JanitorOptions) now() time.Time {
 	return time.Now()
 }
 
-// JanitorPodActiveDeadlineSeconds MUST match the `scan` container's
+// JanitorPodActiveDeadlineSeconds MUST match the Resource Reaper `execute` template's
 // activeDeadlineSeconds in 50-janitor-cron.yaml - that YAML value carries a comment
-// pointing back here for the same reason. This is the single source of truth; the
-// YAML is the consumer. If the pod deadline ever needs to change, change it here
+// pointing back here for the same reason. The report-only scan has a smaller, separate
+// deadline and never calls Sweep. This is the destructive worker's source of truth; the
+// YAML is the consumer. If the worker deadline ever needs to change, change it here
 // first and let DefaultSweepBudget's derivation carry the new number into Sweep
 // automatically, then copy the same literal into the YAML (Go cannot reach into a
 // YAML manifest at build time, so the copy is manual - but there is only one number
@@ -254,8 +255,8 @@ const JanitorPodActiveDeadlineSeconds = 12600
 
 // sweepSetupMargin is reserved for everything in the pod that runs BEFORE Sweep's own
 // clock starts and so is never inside its budget: image pull/container start, the
-// workspace repo clone or incremental fetch (docker-entrypoint.sh, unconditional even
-// in report mode), Vault login, and Scan itself (S3 listings + tag lookups, "minutes"
+// workspace repo clone or incremental fetch (docker-entrypoint.sh), Vault login, and
+// the worker's fresh Scan (S3 listings + tag lookups, "minutes"
 // per 50-janitor-cron.yaml's own comment). 30 minutes is generous against all of
 // that put together, and generous is the right direction to round: undercounting the
 // margin is what would let Sweep itself blow the pod deadline.
@@ -1502,6 +1503,108 @@ func clearStateDigests(ctx context.Context, d JanitorDeps, o JanitorOptions, loc
 		}
 	}
 	return cleared, firstErr
+}
+
+// Janitor binds the dependencies needed to re-scan and sweep exactly one Reaper
+// finding. ScanFunc and FinalVeto are injected seams for deterministic safety tests;
+// production leaves ScanFunc nil and supplies a control-plane veto immediately before
+// the existing Sweep path is allowed to mutate anything.
+type Janitor struct {
+	Deps            JanitorDeps
+	Options         JanitorOptions
+	Workflows       JanitorWorkflowList
+	ScanFunc        func(context.Context, JanitorDeps, JanitorOptions, JanitorWorkflowList) (*Report, error)
+	FinalVeto       func(context.Context, Candidate) error
+	actionRequest   ReaperActionRequest
+	actionFinalVeto func(context.Context, ReaperActionRequest, Candidate) error
+}
+
+func (janitor *Janitor) PrepareReaperAction(request ReaperActionRequest, veto func(context.Context, ReaperActionRequest, Candidate) error) {
+	janitor.actionRequest = request
+	janitor.actionFinalVeto = veto
+}
+
+func (janitor *Janitor) scan(ctx context.Context) (*Report, error) {
+	if janitor.ScanFunc != nil {
+		return janitor.ScanFunc(ctx, janitor.Deps, janitor.Options, janitor.Workflows)
+	}
+	return Scan(ctx, janitor.Deps, janitor.Options, janitor.Workflows)
+}
+
+// SweepSelected re-runs Scan, revalidates the current finding, and delegates one
+// candidate to the existing bounded Sweep implementation. It never trusts the report
+// that originally produced the Slack action.
+func (janitor *Janitor) SweepSelected(ctx context.Context, output *Report, prefix, expectedVersion string) (Candidate, error) {
+	fresh, err := janitor.scan(ctx)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("%w: fresh janitor scan: %v", ErrRetryable, err)
+	}
+	cleanPrefix := strings.Trim(prefix, "/")
+	var matches []Candidate
+	for _, candidate := range fresh.Candidates {
+		if strings.Trim(candidate.Prefix, "/") == cleanPrefix {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(matches) == 0 {
+		return Candidate{}, ErrAlreadyGone
+	}
+	if len(matches) != 1 {
+		return Candidate{}, fmt.Errorf("%w: prefix %q matched %d candidates", ErrBlocked, prefix, len(matches))
+	}
+	candidate := matches[0]
+	decision, _, err := decisionForCandidate(candidate)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("%w: %v", ErrBlocked, err)
+	}
+	if decision == "already_gone" {
+		return candidate, ErrAlreadyGone
+	}
+	if decision != "eligible" || candidate.State != StateOrphan || candidate.KeepOnFailure {
+		return candidate, ErrBlocked
+	}
+	if FindingVersion(candidate, decision) != expectedVersion {
+		return candidate, ErrStale
+	}
+	if err := guardProtected(candidate.Prefix, candidate.Identifier); err != nil {
+		return candidate, fmt.Errorf("%w: %v", ErrBlocked, err)
+	}
+	if janitor.FinalVeto != nil {
+		if err := janitor.FinalVeto(ctx, candidate); err != nil {
+			return candidate, err
+		}
+	}
+	if janitor.actionFinalVeto != nil {
+		if err := janitor.actionFinalVeto(ctx, janitor.actionRequest, candidate); err != nil {
+			return candidate, err
+		}
+	}
+
+	selected := &Report{
+		SchemaVersion: fresh.SchemaVersion,
+		Mode:          "sweep",
+		At:            fresh.At,
+		Account:       fresh.Account,
+		Candidates:    []Candidate{candidate},
+		Orphans:       1,
+	}
+	options := janitor.Options
+	options.Sweep = true
+	options.MaxSweeps = 1
+	if err := Sweep(ctx, janitor.Deps, options, selected); err != nil {
+		return selected.Candidates[0], err
+	}
+	if output != nil {
+		*output = *selected
+	}
+	result := selected.Candidates[0]
+	if strings.HasPrefix(result.SweepResult, "failed:") {
+		return result, fmt.Errorf("%w: %s", ErrTeardown, result.SweepResult)
+	}
+	if result.State == StateOrphan && result.SweepResult != sweepResultDestroyed {
+		return result, fmt.Errorf("%w: %s", ErrBlocked, result.SweepResult)
+	}
+	return result, nil
 }
 
 // Sweep destroys the orphans a prior Scan found, capped at MaxSweeps. It calls the

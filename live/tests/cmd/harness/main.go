@@ -20,7 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
-const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|janitor> [flags]
+const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|janitor|reaper-worker|reaper-drain-cancelled> [flags]
   common: --run-id --config --repo-dir --account-id --profile --region --matrix --state-bucket [--mem-store]
   provision: --scenario <upgrade|fresh> --from-ref --to-ref --namespace
   teardown:  --keep-on-failure --failed
@@ -28,8 +28,14 @@ const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|jani
              writes the CHILD_JSON array on stdout; needs neither --run-id nor --config)
   janitor:   --account-id --region --dr-region --self-workflow [--sweep] [--max-sweeps]
              [--max-sweep-failures] [--sweep-budget]
+             [--reaper-report-bucket <bucket>] [--reaper-shadow]
              (Phase 4 orphan sweeper; reads a WorkflowList json on stdin, defaults to a
-             dry-run report; needs neither --run-id nor --config)`
+             dry-run report; needs neither --run-id nor --config)
+  reaper-worker: --action-queue-url --result-queue-url --control-table --account-id
+                 --region --dr-region --self-workflow --actions-enabled
+                 (reads WorkflowList JSON on stdin only when actions are enabled)
+  reaper-drain-cancelled: --action-queue-url --result-queue-url --control-table
+                           --archive-bucket --account-id --region`
 
 func main() { os.Exit(dispatch(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
@@ -47,6 +53,12 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if sub == "janitor" {
 		return runJanitor(rest, stdin, stdout, stderr)
+	}
+	if sub == "reaper-worker" {
+		return runReaperWorker(rest, stdin, stdout, stderr)
+	}
+	if sub == "reaper-drain-cancelled" {
+		return runReaperDrainCancelled(rest, stdout, stderr)
 	}
 
 	fs := flag.NewFlagSet(sub, flag.ContinueOnError)
@@ -222,9 +234,9 @@ func runEvidence(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // uses - no client-go against the Argo cluster), recomputes each candidate's identity
 // with the exact same code the apply used (Config.Salted), and only ever acts on a
 // candidate that is simultaneously stale, unowned by any live workflow or fresh lock, and
-// still holding real tagged AWS resources. Defaults to a dry-run report; --sweep and the
-// harness-config `janitor_mode` ConfigMap key both have to say so before anything is
-// destroyed.
+// still holding real tagged AWS resources. The CLI defaults to a dry-run report; the
+// Argo daily entrypoint fixes --sweep=false, and only the separate Resource Reaper
+// worker reaches selected teardown after its durable action and final-veto checks.
 //
 // Exit codes: 2 is a usage error (bad flags). 3 is a SAFETY ABORT - the account identity
 // did not match, the workflow list could not be trusted, or a candidate resolved to a
@@ -259,6 +271,8 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		maxSweepFail = fs.Int("max-sweep-failures", 2, "cap on FAILED destroy attempts in one cycle, independent of --max-sweeps (bounds total attempts against the pod deadline; see janitor.go Sweep)")
 		sweepBudget  = fs.Duration("sweep-budget", 0, "wall-clock budget for starting new Sweep destroy attempts in one cycle; <= 0 derives it from harness.JanitorPodActiveDeadlineSeconds (see janitor.go DefaultSweepBudget) rather than a second independent number")
 		jsonOut      = fs.Bool("json", false, "also print the report as JSON on the last stdout line")
+		reaperBucket = fs.String("reaper-report-bucket", "", "publish Engine Report v1 to this Resource Reaper report bucket")
+		reaperShadow = fs.Bool("reaper-shadow", false, "publish Resource Reaper reports without consuming cleanup actions")
 	)
 	if err := fs.Parse(rest); err != nil {
 		return 2
@@ -269,6 +283,10 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if *selfWorkflow == "" {
 		fmt.Fprintln(stderr, "error: --self-workflow is required — the ownership check must be able to prove it is looking at a real workflow list\n"+usage)
+		return 2
+	}
+	if *reaperShadow && *reaperBucket == "" {
+		fmt.Fprintln(stderr, "error: --reaper-shadow requires --reaper-report-bucket")
 		return 2
 	}
 	if *maxSweeps < 1 {
@@ -383,23 +401,19 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		ProcessStart: processStart,
 	}
 
-	// emitJSON prints the report as the last stdout line when --json is set. Every exit
-	// path from here on goes through it, including the mid-sweep safety abort: the Argo
-	// scan step's `tail -1 > report.json` contract (50-janitor-cron.yaml) treats the
-	// last stdout line as the report, and an abort is exactly the cycle whose report a
-	// human needs. Before this, the abort path returned before the print and the notify
-	// step got the outputs default '{}' - no candidates, no reason, nothing to read.
-	emitJSON := func(rep *harness.Report, code int) int {
-		if !*jsonOut || rep == nil {
-			return code
-		}
-		out, jerr := json.Marshal(rep)
-		if jerr != nil {
-			fmt.Fprintf(stderr, "janitor: marshal report: %v\n", jerr)
-			return 1
-		}
-		fmt.Fprintln(stdout, string(out))
-		return code
+	// Every exit path after Scan uses finish. It publishes the normalized report first,
+	// then keeps the legacy janitor JSON as the last stdout line for Argo's existing
+	// `tail -1 > report.json` artifact contract. A publish failure therefore turns the
+	// step red only after the original report remains available to the notify step.
+	var reaperWriter harness.EngineReportWriter
+	if *reaperBucket != "" {
+		reaperWriter = s3.NewFromConfig(awsCfg)
+	}
+	finish := func(rep *harness.Report, code int) int {
+		return finishJanitorReport(
+			ctx, rep, code, *jsonOut, *reaperBucket, *reaperShadow,
+			reaperWriter, stdout, stderr,
+		)
 	}
 
 	rep, serr := harness.Scan(ctx, deps, opts, wfList)
@@ -429,14 +443,70 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			// The report is partial by definition here (the cycle stopped mid-sweep),
 			// and partial is exactly what the human needs to see: which candidates were
 			// already destroyed before the abort.
-			return emitJSON(rep, 3)
+			return finish(rep, 3)
 		}
 		fmt.Fprintln(stdout)
 		printJanitorReport(stdout, rep)
 		exitCode = janitorExitCode(rep)
 	}
 
-	return emitJSON(rep, exitCode)
+	return finish(rep, exitCode)
+}
+
+func emitJanitorJSON(rep *harness.Report, code int, enabled bool, stdout, stderr io.Writer) int {
+	if !enabled || rep == nil {
+		return code
+	}
+	out, err := json.Marshal(rep)
+	if err != nil {
+		fmt.Fprintf(stderr, "janitor: marshal report: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(out))
+	return code
+}
+
+func finishJanitorReport(
+	ctx context.Context,
+	rep *harness.Report,
+	code int,
+	jsonOut bool,
+	reaperBucket string,
+	reaperShadow bool,
+	reaperWriter harness.EngineReportWriter,
+	stdout, stderr io.Writer,
+) int {
+	if reaperBucket == "" || rep == nil {
+		return emitJanitorJSON(rep, code, jsonOut, stdout, stderr)
+	}
+	engineReport, err := harness.ToEngineReport(*rep)
+	if err != nil {
+		fmt.Fprintf(stderr, "janitor: build Resource Reaper report: %v\n", err)
+		if code == 0 {
+			code = 1
+		}
+		return emitJanitorJSON(rep, code, jsonOut, stdout, stderr)
+	}
+	if reaperShadow {
+		engineReport.Shadow = true
+		for index := range engineReport.CleanupUnits {
+			engineReport.CleanupUnits[index].Evidence.Shadow = true
+		}
+	}
+	key, err := harness.WriteEngineReport(ctx, reaperWriter, reaperBucket, engineReport)
+	if err != nil {
+		fmt.Fprintf(stderr, "janitor: publish Resource Reaper report: %v\n", err)
+		if code == 0 {
+			code = 1
+		}
+		return emitJanitorJSON(rep, code, jsonOut, stdout, stderr)
+	}
+	mode := "producer"
+	if reaperShadow {
+		mode = "shadow producer"
+	}
+	fmt.Fprintf(stdout, "janitor: Resource Reaper %s report archived at s3://%s/%s\n", mode, reaperBucket, key)
+	return emitJanitorJSON(rep, code, jsonOut, stdout, stderr)
 }
 
 // janitorExitCode is the sweep-cycle verdict: non-zero whenever a candidate ended in a

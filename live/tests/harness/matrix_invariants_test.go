@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Guards the real matrix.yaml, not testdata/. Everything else in this package
@@ -96,37 +98,59 @@ func TestMatrixConfigsSaltProducesUniqueCustomer(t *testing.T) {
 //     script keeps asserting the old number, EVERY cycle posts "cannot read this
 //     cycle's report" instead of a report - loud, but permanently wrong.
 //   - activeDeadlineSeconds: JanitorPodActiveDeadlineSeconds is the source of truth
-//     Sweep's wall-clock budget is derived from. If the pod's real deadline is shorter
-//     than the constant, Sweep budgets time the pod does not have and a destroy gets
-//     SIGKILLed mid-run - the one failure the budget exists to prevent.
+//     Sweep's wall-clock budget is derived from. The Resource Reaper execute template,
+//     not the report-only scan, must carry it. If the destructive pod's real deadline is
+//     shorter than the constant, Sweep budgets time the pod does not have and a destroy
+//     gets SIGKILLed mid-run - the one failure the budget exists to prevent.
 func TestJanitorCronMatchesTheGoConstants(t *testing.T) {
 	b, err := os.ReadFile("../argo/50-janitor-cron.yaml")
 	if err != nil {
 		t.Fatalf("read 50-janitor-cron.yaml: %v", err)
 	}
-	yaml := string(b)
+	yamlText := string(b)
 
 	wantSchema := fmt.Sprintf(`[ "$SCHEMA_VERSION" != "%d" ]`, JanitorReportSchemaVersion)
-	if !strings.Contains(yaml, wantSchema) {
+	if !strings.Contains(yamlText, wantSchema) {
 		t.Errorf("the notify script does not assert schema_version %d (looked for %s); Go's JanitorReportSchemaVersion and the script's literal have drifted apart",
 			JanitorReportSchemaVersion, wantSchema)
 	}
 
-	wantDeadline := fmt.Sprintf("activeDeadlineSeconds: %d", JanitorPodActiveDeadlineSeconds)
-	if !strings.Contains(yaml, wantDeadline) {
-		t.Errorf("the scan pod does not carry %q; JanitorPodActiveDeadlineSeconds (%d) is the number Sweep's budget is derived from and the pod must actually get that long",
-			wantDeadline, JanitorPodActiveDeadlineSeconds)
+	var templateDoc struct {
+		Kind string `yaml:"kind"`
+		Spec struct {
+			Templates []struct {
+				Name                  string `yaml:"name"`
+				ActiveDeadlineSeconds int    `yaml:"activeDeadlineSeconds"`
+			} `yaml:"templates"`
+		} `yaml:"spec"`
+	}
+	decoder := yaml.NewDecoder(strings.NewReader(yamlText))
+	for templateDoc.Kind != "WorkflowTemplate" {
+		if err := decoder.Decode(&templateDoc); err != nil {
+			t.Fatalf("decode janitor WorkflowTemplate: %v", err)
+		}
+	}
+	executeDeadline := 0
+	for _, template := range templateDoc.Spec.Templates {
+		if template.Name == "execute" {
+			executeDeadline = template.ActiveDeadlineSeconds
+			break
+		}
+	}
+	if executeDeadline != JanitorPodActiveDeadlineSeconds {
+		t.Errorf("Resource Reaper execute activeDeadlineSeconds=%d, want JanitorPodActiveDeadlineSeconds=%d; the destructive pod must receive the full budget",
+			executeDeadline, JanitorPodActiveDeadlineSeconds)
 	}
 
 	// The selector contract, in the other direction: these are the exact state strings
 	// harness/janitor.go emits, and a rename on the Go side that missed the script
 	// would silently drop a whole class of candidate out of Slack.
 	for _, state := range []CandidateState{StateOrphan, StateBlocked, StateResidue, StateUnknown, StateNeedsReview} {
-		if !strings.Contains(yaml, fmt.Sprintf(`.state=="%s"`, state)) {
+		if !strings.Contains(yamlText, fmt.Sprintf(`.state=="%s"`, state)) {
 			t.Errorf("the notify script's selectors never mention state %q; candidates in that state would be invisible in Slack", state)
 		}
 	}
-	if !strings.Contains(yaml, `(.sweep_result // "") != "destroyed"`) {
+	if !strings.Contains(yamlText, `(.sweep_result // "") != "destroyed"`) {
 		t.Error(`the notify script no longer excludes sweep_result "destroyed" from the alarm set; a clean destroy would render under a "teardown FAILED" headline (Sweep leaves State=orphan on purpose)`)
 	}
 }
