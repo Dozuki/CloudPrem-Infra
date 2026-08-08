@@ -487,7 +487,12 @@ def _event_epoch(message_json):
     the events least likely to be noticed.
     """
     parsed = _parse_time(message_json.get('StateChangeTime'))
-    return parsed.timestamp() if parsed else None
+    # A naive datetime would be read as process-local time by .timestamp(), which turns
+    # a malformed value into a confidently wrong ordering key. CloudWatch always sends an
+    # offset, so anything without one is bad data and belongs in the None path.
+    if parsed is None or parsed.tzinfo is None:
+        return None
+    return parsed.timestamp()
 
 
 def _is_stale(event_at, prior):
@@ -616,10 +621,15 @@ def _claim_resolution(alarm_key, event_at):
     stops a delayed OK from a previous incident closing the current one. `<=` rather
     than `<` so a retry of the SAME event can re-claim once its lease expires.
 
-    Returns False when the table is not configured, so the webhook path is unaffected.
+    Returns the claim token (the ClaimedAt we wrote) on success and None otherwise. The
+    token is what _finalize_resolution proves ownership with: between claiming and
+    finalizing, a new ALARM can legitimately take the row over, and without the token the
+    finalize would unconditionally stamp RESOLVED back on top of a live incident.
+
+    Returns None when the table is not configured, so the webhook path is unaffected.
     """
     if not SLACK_STATE_TABLE:
-        return False
+        return None
     now = int(time.time())
     names = {'#s': 'Status'}
     values = {
@@ -646,7 +656,7 @@ def _claim_resolution(alarm_key, event_at):
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
-        return True
+        return now
     except client.exceptions.ConditionalCheckFailedException:
         # The condition fails for three different reasons and they do NOT share an
         # outcome, so read the row rather than assuming the benign one.
@@ -672,10 +682,54 @@ def _claim_resolution(alarm_key, event_at):
         # this event is older than the one applied. Both mean "post nothing", and
         # neither is an error. Every other failure - throttling, a missing table,
         # credentials - propagates so the Lambda retries it.
+        return None
+
+
+def _finalize_resolution(alarm_key, claim_token, event_at):
+    """Stamp RESOLVED, but only if we still own the claim we took. True if we did.
+
+    Between claiming and posting, a NEW incident can legitimately take the row over: a
+    fast flap means ALARM2 arrives, sees a RESOLVING row, posts its own red root and
+    writes ALARM. An unconditional write here would then stamp RESOLVED back on top of
+    that live incident, and its real recovery would later find a RESOLVED row and post
+    nothing - the exact failure this whole change exists to prevent, reintroduced one
+    step further along.
+
+    ClaimedAt is the ownership token. If it no longer matches, someone else owns the row
+    and the right move is to leave it alone: our green card is already posted, and the
+    live incident keeps its own state.
+    """
+    if not SLACK_STATE_TABLE:
+        return False
+    values = {':resolving': {'S': 'RESOLVING'},
+              ':claim': {'N': str(claim_token)},
+              ':resolved': {'S': 'RESOLVED'},
+              ':expires': {'N': str(int(time.time()) + STATE_TTL_SECONDS)}}
+    update = 'SET #s = :resolved, ExpiresAt = :expires'
+    if event_at is not None:
+        values[':evt'] = {'N': repr(event_at)}
+        update += ', LastEventAt = :evt'
+    client = boto3.client('dynamodb')
+    try:
+        client.update_item(
+            TableName=SLACK_STATE_TABLE,
+            Key={'AlarmKey': {'S': alarm_key}},
+            UpdateExpression=update,
+            ConditionExpression='#s = :resolving AND ClaimedAt = :claim',
+            ExpressionAttributeNames={'#s': 'Status'},
+            ExpressionAttributeValues=values,
+        )
+        return True
+    except client.exceptions.ConditionalCheckFailedException:
+        # Superseded mid-resolve. Not an error and not retryable - the card is already
+        # in the channel, and forcing a retry would only post it again.
+        print(f'{alarm_key} was taken over before the resolve finalised; '
+              f'leaving the newer state alone')
         return False
 
 
-def _put_alarm_state(alarm_key, message_ts, started_at, status, event_at=None):
+def _put_alarm_state(alarm_key, message_ts, started_at, status, event_at=None,
+                     prior=None):
     if not SLACK_STATE_TABLE:
         return
     item = {
@@ -684,8 +738,12 @@ def _put_alarm_state(alarm_key, message_ts, started_at, status, event_at=None):
         'StartedAt': {'S': started_at or datetime.now(timezone.utc).isoformat()},
         'Status': {'S': status},
     }
-    if event_at is not None:
-        item['LastEventAt'] = {'N': repr(event_at)}
+    # Carry the watermark forward when this event cannot be ordered. Writing the row
+    # without it would DELETE a perfectly good LastEventAt, so one malformed timestamp
+    # would disable ordering for every event after it.
+    watermark = event_at if event_at is not None else (prior or {}).get('last_event_at')
+    if watermark is not None:
+        item['LastEventAt'] = {'N': repr(watermark)}
     # TTL only on the tombstone. The row is a tombstone once RESOLVED, but while an alarm
     # is still ALARM it is the live correlation to the root card, and expiring it strands
     # the incident: the eventual recovery finds no prior, so it posts an unthreaded green
@@ -732,7 +790,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         else:
             message_ts = _post_bot(token, payload)
             started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
-        _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM', event_at)
+        _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM', event_at, prior)
         return
 
     if state == 'OK' and prior:
@@ -746,7 +804,8 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         # broadcast a full green card into the channel. The claim is a conditional
         # write, so exactly one delivery wins it and the rest return here having sent
         # nothing.
-        if not _claim_resolution(alarm_key, event_at):
+        claim_token = _claim_resolution(alarm_key, event_at)
+        if not claim_token:
             print(f'skipping duplicate or stale OK for {alarm_key}')
             return
 
@@ -767,8 +826,9 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
             # would leave the row RESOLVING and re-post it on the Lambda retry.
             print(f'could not mark {metadata["alarm_name"]} '
                   f'({prior["message_ts"]}) resolved: {exc}')
-        _put_alarm_state(alarm_key, prior['message_ts'], prior['started_at'],
-                         'RESOLVED', event_at)
+        # Conditional on still owning the claim, not an unconditional write. A fast flap
+        # can have handed the row to a new incident while this card was being posted.
+        _finalize_resolution(alarm_key, claim_token, event_at)
         return
 
     _post_bot(token, payload)

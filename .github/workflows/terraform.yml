@@ -39,10 +39,17 @@ jobs:
     # Chained so the lambda suite actually blocks a merge. The three "Terraform (...)"
     # contexts are required by master's branch protection and "Lambda tests" is not, so
     # left parallel a red lambda run would sit next to three green required checks and
-    # merge anyway. Depending on it means a failure skips those contexts instead, and a
-    # skipped required context is not a pass. Decouple this once "Lambda tests" is added
-    # to the required set in branch protection.
+    # merge anyway.
+    #
+    # needs: alone does not fix that - GitHub treats a SKIPPED required context as
+    # satisfied, so a failed dependency would skip these three and still leave the PR
+    # mergeable. always() keeps them running and the guard step below fails them
+    # explicitly, which is what turns a red lambda run into three red required checks.
+    #
+    # The clean fix is adding "Lambda tests" to the required set in branch protection;
+    # do that and this whole coupling can come out.
     needs: lambda-tests
+    if: ${{ always() }}
     strategy:
       fail-fast: false
       matrix:
@@ -68,6 +75,14 @@ jobs:
         shell: bash
 
     steps:
+    # First, so a lambda failure fails this required context rather than letting it pass
+    # on a technicality. See the always() note above.
+    - name: Enforce Lambda tests
+      if: ${{ needs.lambda-tests.result != 'success' }}
+      run: |
+        echo "::error::Lambda tests did not pass (result: ${{ needs.lambda-tests.result }})"
+        exit 1
+
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
