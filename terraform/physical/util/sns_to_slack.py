@@ -558,7 +558,14 @@ def lambda_handler(event, context):
         detail_type = message_json.get('detail-type', 'N/A')
         detail_message = (message_json.get('detail') or {}).get('detailMessage', 'N/A')
         resources = message_json.get('resources') or []
-        resource_arn = resources[0] if resources else 'N/A'
+        # Pick the replication-config ARN wherever it sits, rather than trusting index 0.
+        # Every event AWS sends today carries exactly one resource, so this reads the same
+        # answer; it matters because the flag it feeds now decides delivery and the console
+        # route, not just a link, and a multi-resource event that guessed provisioned would
+        # both drop the card and build a #taskDetails URL that cannot render a config.
+        resource_arn = next(
+            (r for r in resources if ":replication-config:" in r),
+            resources[0] if resources else 'N/A')
 
         # Page the channel only on failures. A plain "Replication task stopped"
         # is routine (operator stops, the migration's automatic
@@ -597,10 +604,10 @@ def lambda_handler(event, context):
         # on every event, and the dropped ones are the overwhelming majority. The
         # denylist is still consulted only after the failure tokens - see the substring
         # note on DMS_ROUTINE_MESSAGES.
-        # Derived from resources[0], which is 'N/A' when the event carries none. That
-        # falls to the provisioned branch and still posts, which is the safe direction now
-        # that a wrong answer here costs a dropped card rather than just a wrong console
-        # link: the task path drops nothing the denylist did not already drop.
+        # 'N/A' when the event carries no resources at all. That falls to the provisioned
+        # branch and still posts, which is the safe direction now that a wrong answer here
+        # costs a dropped card rather than just a wrong console link: the task path drops
+        # nothing the denylist did not already drop.
         serverless = ":replication-config:" in resource_arn
         if serverless:
             if not critical:

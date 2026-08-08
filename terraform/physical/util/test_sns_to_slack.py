@@ -225,12 +225,18 @@ def run_dms_event(detail_message, resource_arn,
     so the two disagree loudly if the mirror drifts. Returns the payloads that reached
     Slack and the ARNs get_task_name was called with - the second list is the assertion
     that a drop happens BEFORE the DMS lookup, which costs an API call on every event.
+
+    resource_arn takes a single ARN, a list of them for a multi-resource event, or None to
+    omit the 'resources' key the way an event that carries none does.
     """
-    event = {'Records': [{'Sns': {'Message': json.dumps({
+    message = {
         'detail-type': detail_type,
         'detail': {'detailMessage': detail_message},
-        'resources': [resource_arn],
-    })}}]}
+    }
+    if resource_arn is not None:
+        message['resources'] = (list(resource_arn) if isinstance(resource_arn, list)
+                                else [resource_arn])
+    event = {'Records': [{'Sns': {'Message': json.dumps(message)}}]}
     posted, lookups = [], []
     with mock.patch.dict(os.environ, {'AWS_ACCOUNT_ID': '111', 'IDENTIFIER': 'test-env',
                                       'AWS_REGION': 'us-east-1'}), \
@@ -361,6 +367,24 @@ def dms_routing_checks():
         ("provisioned denylist still drops", posted == []),
         ("provisioned drop skips the DMS name lookup", lookups == []),
     ])
+
+    # The two shapes the ARN lookup promises to survive. Neither has ever been observed:
+    # AWS sends one resource per event today. They are pinned because the flag they feed
+    # now decides delivery, so a wrong answer costs a card rather than a console link.
+    posted, _ = run_dms_event('DMS replication has stopped', None)
+    checks.append(("an event carrying no resources falls to the provisioned path and posts",
+                   len(posted) == 1))
+
+    multi = ["arn:aws:sns:us-east-1:111:some-topic", SERVERLESS_ARN]
+    posted, lookups = run_dms_event('DMS replication has stopped', multi)
+    checks.extend([
+        ("a config ARN past index 0 is still read as serverless", posted == []),
+        ("that drop still skips the DMS name lookup", lookups == []),
+    ])
+
+    posted, _ = run_dms_event('DMS replication has failed.', multi)
+    checks.append(("a critical multi-resource event links to the serverless console",
+                   len(posted) == 1 and 'serverlessReplicationDetails' in str(posted[0])))
     return checks
 
 
