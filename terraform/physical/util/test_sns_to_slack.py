@@ -799,12 +799,26 @@ except ImportError:  # pragma: no cover - the CI job installs it
     _MOTO = False
 
 
+# Hermetic by construction. The module under test builds its clients with a bare
+# boto3.client('dynamodb'), which in the real Lambda picks the region up from the
+# runtime - but on a machine with no AWS config that raises NoRegionError, so the suite
+# would pass for whoever happened to have a region set and fail in CI. Pinning fake
+# values here means these checks never touch a real account and never depend on one.
+_FAKE_AWS_ENV = {
+    'AWS_DEFAULT_REGION': 'us-east-1',
+    'AWS_REGION': 'us-east-1',
+    'AWS_ACCESS_KEY_ID': 'testing',
+    'AWS_SECRET_ACCESS_KEY': 'testing',
+    'AWS_SECURITY_TOKEN': 'testing',
+    'AWS_SESSION_TOKEN': 'testing',
+}
+
+
 def _with_table(fn):
     """Run fn(client, table) against a fresh in-memory DynamoDB table."""
     import boto3
-    with moto.mock_aws():
-        client = boto3.client('dynamodb', region_name='us-east-1',
-                              aws_access_key_id='x', aws_secret_access_key='x')
+    with mock.patch.dict(os.environ, _FAKE_AWS_ENV), moto.mock_aws():
+        client = boto3.client('dynamodb', region_name='us-east-1')
         client.create_table(
             TableName='slack-alarm-state',
             KeySchema=[{'AttributeName': 'AlarmKey', 'KeyType': 'HASH'}],
@@ -1046,7 +1060,8 @@ def dynamo_checks():
 
     # The no-table configuration must be a no-op rather than an error, so the webhook
     # and tokened-but-tableless paths keep posting.
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', ''):
+    with mock.patch.dict(os.environ, _FAKE_AWS_ENV), \
+         mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', ''):
         checks.extend([
             ("no table means no root claim", sns_to_slack._claim_alarm_root('k', 1.0) is None),
             ("no table means no resolve claim", sns_to_slack._claim_resolution('k', 1.0) is None),
