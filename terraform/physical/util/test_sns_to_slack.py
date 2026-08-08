@@ -333,10 +333,14 @@ def dms_routing_checks():
     ])
 
     # One check per token in the critical test, because the whitelist is now the only
-    # thing keeping a serverless event alive.
+    # thing keeping a serverless event alive. The lowercase pair is deliberate: the gate
+    # used to compare these two against the raw message, so a message worded "Error:"
+    # rather than "ERROR:" was dropped in silence.
     for token, message in (
         ('ERROR', 'Task error notification received [1020101] ERROR: out of memory'),
         ('FATAL', 'FATAL: the replication instance ran out of storage.'),
+        ('lowercase error', 'Error: the replication could not reach the source endpoint.'),
+        ('lowercase fatal', 'Fatal exception in the replication engine.'),
         ('fail', 'DMS replication has failed.'),
         ('deprovision', 'DMS replication has been deprovisioned.'),
     ):
@@ -385,6 +389,20 @@ def dms_routing_checks():
     posted, _ = run_dms_event('DMS replication has failed.', multi)
     checks.append(("a critical multi-resource event links to the serverless console",
                    len(posted) == 1 and 'serverlessReplicationDetails' in str(posted[0])))
+
+    # The provisioned half of the same lookup. Routing is safe either way here (a topic ARN
+    # carries no ':replication-config:' so it lands on the task path regardless), but the
+    # ARN also feeds get_task_name and the console URL, so picking index 0 would resolve a
+    # name from the topic and deep-link to nothing.
+    multi_task = ["arn:aws:sns:us-east-1:111:some-topic", TASK_ARN]
+    posted, lookups = run_dms_event('Replication task stopped', multi_task,
+                                    detail_type='DMS Replication Task State Change')
+    checks.extend([
+        ("a task ARN past index 0 still posts", len(posted) == 1),
+        ("that post resolves its name from the task, not the topic", lookups == [TASK_ARN]),
+        ("that post links to the provisioned console",
+         posted and 'taskDetails' in str(posted[0])),
+    ])
     return checks
 
 

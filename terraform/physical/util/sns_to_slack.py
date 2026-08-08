@@ -558,13 +558,15 @@ def lambda_handler(event, context):
         detail_type = message_json.get('detail-type', 'N/A')
         detail_message = (message_json.get('detail') or {}).get('detailMessage', 'N/A')
         resources = message_json.get('resources') or []
-        # Pick the replication-config ARN wherever it sits, rather than trusting index 0.
-        # Every event AWS sends today carries exactly one resource, so this reads the same
-        # answer; it matters because the flag it feeds now decides delivery and the console
-        # route, not just a link, and a multi-resource event that guessed provisioned would
-        # both drop the card and build a #taskDetails URL that cannot render a config.
+        # Pick the DMS ARN wherever it sits, rather than trusting index 0. Every event AWS
+        # sends today carries exactly one resource, so this reads the same answer; it
+        # matters because what it feeds is no longer just a link. The config case decides
+        # delivery, so guessing provisioned there drops the card outright. Both cases feed
+        # get_task_name and the console URL, so a non-DMS ARN at index 0 (a topic, say)
+        # would resolve a name from the wrong resource and deep-link to nothing.
         resource_arn = next(
-            (r for r in resources if ":replication-config:" in r),
+            (r for r in resources
+             if ":replication-config:" in r or ":replication-task:" in r),
             resources[0] if resources else 'N/A')
 
         # Page the channel only on failures. A plain "Replication task stopped"
@@ -578,7 +580,17 @@ def lambda_handler(event, context):
         # detail-type, and it catches "deprovisioning" too: that is the transition into the
         # unrecoverable state, not a routine stop, so it is worth the page.
         haystack = f"{detail_message} {detail_type}".lower()
-        critical = ("ERROR" in detail_message or "FATAL" in detail_message
+        # All four tokens match the lowered haystack. "ERROR"/"FATAL" used to be compared
+        # against the raw message, so they only matched AWS's uppercase prefixes - a gate
+        # that read wider than it was. That was survivable while critical only chose
+        # whether to @channel; on the serverless path it now decides whether the card is
+        # sent at all, and a message worded "Error:" would have been dropped in silence.
+        # Widening only ever adds a post, never removes one, and no DMS_ROUTINE_MESSAGES
+        # entry contains either word, so the denylist path is unaffected. On the
+        # provisioned side the effect is that a lowercase-worded error now pages instead
+        # of posting quietly, which is the correct end of that trade for a task with no
+        # alarm behind it.
+        critical = ("error" in haystack or "fatal" in haystack
                     or "fail" in haystack or "deprovision" in haystack)
 
         # One EventBridge rule feeds two producers, and only one of them has a
