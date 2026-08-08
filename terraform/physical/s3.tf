@@ -484,9 +484,9 @@ resource "aws_s3_bucket_logging" "guide_buckets_logging" {
 # no object ACL is ever load-bearing for delivery. This carve-out exists purely
 # so the ACL calls stop throwing. Remove it once the app can run ACL-free.
 resource "aws_s3_bucket_ownership_controls" "guide_pdf_bucket" {
-  for_each = contains(local.create_s3_bucket_names, "pdf") ? { pdf = aws_s3_bucket.guide_buckets["pdf"] } : {}
+  for_each = contains(local.create_s3_bucket_names, "pdf") ? { pdf = aws_s3_bucket.guide_buckets["pdf"].id } : {}
 
-  bucket = each.value.id
+  bucket = each.value
 
   rule {
     object_ownership = "ObjectWriter"
@@ -496,7 +496,7 @@ resource "aws_s3_bucket_ownership_controls" "guide_pdf_bucket" {
 resource "aws_s3_bucket_public_access_block" "guide_buckets_acl_block" {
   for_each = local.s3_public_access_block_buckets
 
-  bucket = each.value.id
+  bucket = each.value
 
   block_public_acls       = true
   block_public_policy     = true
@@ -504,9 +504,9 @@ resource "aws_s3_bucket_public_access_block" "guide_buckets_acl_block" {
   restrict_public_buckets = true
 }
 resource "aws_s3_bucket_versioning" "guide_buckets_versioning" {
-  for_each = aws_s3_bucket.guide_buckets
+  for_each = { for k, v in aws_s3_bucket.guide_buckets : k => v.id }
 
-  bucket = each.value.id
+  bucket = each.value
 
   versioning_configuration {
     status = "Enabled"
@@ -514,9 +514,9 @@ resource "aws_s3_bucket_versioning" "guide_buckets_versioning" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "guide_buckets_encryption" {
-  for_each = aws_s3_bucket.guide_buckets
+  for_each = { for k, v in aws_s3_bucket.guide_buckets : k => v.id }
 
-  bucket = each.value.id
+  bucket = each.value
 
   rule {
     bucket_key_enabled = false
@@ -603,14 +603,14 @@ resource "aws_s3_bucket_lifecycle_configuration" "guide_buckets" {
 # and presigned-URL access are all TLS, so the deny breaks nothing. The DR
 # replicas carry the same policy in dr.tf.
 resource "aws_s3_bucket_policy" "guide_buckets" {
-  for_each = aws_s3_bucket.guide_buckets
+  for_each = { for k, v in aws_s3_bucket.guide_buckets : k => v.id }
 
-  bucket = each.value.id
+  bucket = each.value
   policy = data.aws_iam_policy_document.guide_buckets_ssl_only[each.key].json
 }
 
 data "aws_iam_policy_document" "guide_buckets_ssl_only" {
-  for_each = aws_s3_bucket.guide_buckets
+  for_each = { for k, v in aws_s3_bucket.guide_buckets : k => v.id }
 
   statement {
     sid     = "DenyInsecureTransport"
@@ -618,8 +618,8 @@ data "aws_iam_policy_document" "guide_buckets_ssl_only" {
     actions = ["s3:*"]
 
     resources = [
-      each.value.arn,
-      "${each.value.arn}/*",
+      aws_s3_bucket.guide_buckets[each.key].arn,
+      "${aws_s3_bucket.guide_buckets[each.key].arn}/*",
     ]
 
     condition {

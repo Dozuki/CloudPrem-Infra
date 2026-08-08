@@ -209,7 +209,7 @@ locals {
   s3_destination_bucket_arn_list_with_objects = [for _, bucket in one(flatten(toset(aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"]
 
   // Conditional public access block to conform with unmanaged SCP
-  s3_public_access_block_buckets = var.s3_block_public_access ? aws_s3_bucket.guide_buckets : {}
+  s3_public_access_block_buckets = var.s3_block_public_access ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}
 
   # --VPC--
   # Hardcoded 3. The old azs_count variable was never set to anything else in five

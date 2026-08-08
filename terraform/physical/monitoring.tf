@@ -892,7 +892,7 @@ resource "aws_lambda_permission" "dms_restart_permission" {
 # topic only exists when Aurora DR is on), so it stays here, documented,
 # until the central-metrics parity work covers cross-region signals.
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
-  for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
+  for_each = var.enable_dr ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}
 
   alarm_name          = "${local.identifier}-dr-s3-replication-${each.key}"
   alarm_description   = "S3 DR replication latency high for ${local.identifier} ${each.key} bucket"
@@ -906,7 +906,7 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    SourceBucket      = each.value.id
+    SourceBucket      = each.value
     DestinationBucket = aws_s3_bucket.dr_guide_buckets[each.key].id
     RuleId            = "dr-${each.key}"
   }
@@ -925,7 +925,7 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
 # a job that never runs at all - the rollout runbook's describe-job check
 # covers that).
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
-  for_each = var.enable_dr ? aws_s3_bucket.guide_buckets : {}
+  for_each = var.enable_dr ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}
 
   alarm_name          = "${local.identifier}-dr-s3-replication-failed-${each.key}"
   alarm_description   = "S3 DR replication to ${aws_s3_bucket.dr_guide_buckets[each.key].id} is failing for ${local.identifier} ${each.key}. Failed operations are NOT retried indefinitely. Diagnose (role trust/policy, KMS, destination), read the batch-replication-report CSVs in the logging bucket, then re-drive the gap with a Batch Replication job (util/create-s3-batch.sh)."
@@ -939,7 +939,7 @@ resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    SourceBucket      = each.value.id
+    SourceBucket      = each.value
     DestinationBucket = aws_s3_bucket.dr_guide_buckets[each.key].id
     RuleId            = "dr-${each.key}"
   }

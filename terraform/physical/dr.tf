@@ -210,7 +210,7 @@ resource "aws_db_instance_automated_backups_replication" "primary" {
 
 # Destination buckets for S3 cross-region replication, one per content bucket.
 resource "aws_s3_bucket" "dr_guide_buckets" {
-  for_each = local.dr_enabled ? aws_s3_bucket.guide_buckets : {}
+  for_each = local.dr_enabled ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}
   provider = aws.dr
 
   bucket_prefix = "${local.identifier}-${each.key}-dr-"
@@ -240,10 +240,10 @@ resource "aws_s3_bucket" "dr_guide_buckets" {
 }
 
 resource "aws_s3_bucket_versioning" "dr_guide_buckets" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
   provider = aws.dr
 
-  bucket = each.value.id
+  bucket = each.value
   versioning_configuration {
     status = "Enabled"
   }
@@ -258,10 +258,10 @@ resource "aws_s3_bucket_versioning" "dr_guide_buckets" {
 # is unaffected, unlike IA or the archive tiers), and objects under 128K are
 # exempt from the monitoring fee so small images cannot turn it into a loss.
 resource "aws_s3_bucket_lifecycle_configuration" "dr_guide_buckets" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
   provider = aws.dr
 
-  bucket = each.value.id
+  bucket = each.value
 
   rule {
     id     = "finops-hygiene"
@@ -287,15 +287,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_guide_buckets" {
 # S3.5: reject plaintext requests. Replication and restore tooling are TLS-only,
 # so the deny has no legitimate traffic to break.
 resource "aws_s3_bucket_policy" "dr_guide_buckets" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
   provider = aws.dr
 
-  bucket = each.value.id
+  bucket = each.value
   policy = data.aws_iam_policy_document.dr_guide_buckets_ssl_only[each.key].json
 }
 
 data "aws_iam_policy_document" "dr_guide_buckets_ssl_only" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
 
   statement {
     sid     = "DenyInsecureTransport"
@@ -303,8 +303,8 @@ data "aws_iam_policy_document" "dr_guide_buckets_ssl_only" {
     actions = ["s3:*"]
 
     resources = [
-      each.value.arn,
-      "${each.value.arn}/*",
+      aws_s3_bucket.dr_guide_buckets[each.key].arn,
+      "${aws_s3_bucket.dr_guide_buckets[each.key].arn}/*",
     ]
 
     condition {
@@ -321,10 +321,10 @@ data "aws_iam_policy_document" "dr_guide_buckets_ssl_only" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "dr_guide_buckets" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
   provider = aws.dr
 
-  bucket = each.value.id
+  bucket = each.value
   rule {
     apply_server_side_encryption_by_default {
       kms_master_key_id = aws_kms_key.dr_s3[0].arn
@@ -338,10 +338,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_guide_buckets"
 # object that carries an ACL needs the destination to accept ACLs too. Same
 # removal condition as the primary. Public access stays blocked here as well.
 resource "aws_s3_bucket_ownership_controls" "dr_guide_pdf_bucket" {
-  for_each = contains(keys(aws_s3_bucket.dr_guide_buckets), "pdf") ? { pdf = aws_s3_bucket.dr_guide_buckets["pdf"] } : {}
+  for_each = contains(keys(aws_s3_bucket.dr_guide_buckets), "pdf") ? { pdf = aws_s3_bucket.dr_guide_buckets["pdf"].id } : {}
   provider = aws.dr
 
-  bucket = each.value.id
+  bucket = each.value
 
   rule {
     object_ownership = "ObjectWriter"
@@ -349,10 +349,10 @@ resource "aws_s3_bucket_ownership_controls" "dr_guide_pdf_bucket" {
 }
 
 resource "aws_s3_bucket_public_access_block" "dr_guide_buckets" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
   provider = aws.dr
 
-  bucket                  = each.value.id
+  bucket                  = each.value
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
@@ -452,7 +452,7 @@ resource "aws_iam_role_policy_attachment" "dr_s3_replication" {
 # CRR from each source content bucket to its DR counterpart. Source versioning
 # is already enabled (aws_s3_bucket_versioning.guide_buckets_versioning).
 resource "aws_s3_bucket_replication_configuration" "dr" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
 
   role   = aws_iam_role.dr_s3_replication[0].arn
   bucket = aws_s3_bucket.guide_buckets[each.key].id
@@ -510,7 +510,7 @@ resource "aws_s3_bucket_replication_configuration" "dr" {
 # state, which is exactly the fleet backfill. The job is async; progress and
 # the task report land under batch-replication-report/ in the logging bucket.
 resource "null_resource" "dr_replication_job_init" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
 
   # The job is authorised by the POLICY, not the role, and S3ReplicateObject
   # requires the source bucket to already carry its replication config: without
@@ -533,7 +533,7 @@ resource "null_resource" "dr_replication_job_init" {
   # DR bucket gets a NEW name, so dr_bucket does change when it matters.
   triggers = {
     source_bucket = aws_s3_bucket.guide_buckets[each.key].bucket
-    dr_bucket     = each.value.id
+    dr_bucket     = each.value
   }
 
   provisioner "local-exec" {
@@ -684,10 +684,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_logging_bucket" {
 }
 
 resource "aws_s3_bucket_logging" "dr_guide_buckets" {
-  for_each = aws_s3_bucket.dr_guide_buckets
+  for_each = { for k, v in aws_s3_bucket.dr_guide_buckets : k => v.id }
   provider = aws.dr
 
-  bucket = each.value.id
+  bucket = each.value
 
   target_bucket = aws_s3_bucket.dr_logging_bucket[0].bucket
   target_prefix = "${each.key}/"
