@@ -40,6 +40,7 @@ import os
 import sys
 import time
 import importlib.util
+from types import SimpleNamespace
 from unittest import mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -265,7 +266,7 @@ def run_dms_event(detail_message, resource_arn,
 
 
 def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
-                       changed_at=None):
+                       changed_at=None, already_posted=False):
     """Run _deliver_cloudwatch_bot with every Slack and DynamoDB call captured.
 
     claim stands in for the conditional write's verdict: True means this delivery won
@@ -276,6 +277,7 @@ def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
     separately in claim_checks().
     """
     updates, posts, states, reactions, claims, finals = [], [], [], [], [], []
+    root_claims, root_finals, dedupes = [], [], []
 
     def _post(token, payload, thread_ts=None, reply_broadcast=False):
         posts.append({'payload': payload, 'thread_ts': thread_ts,
@@ -295,6 +297,18 @@ def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
         finals.append((alarm_key, claim_token, event_at))
         return True
 
+    def _claim_root(alarm_key, event_at):
+        root_claims.append((alarm_key, event_at))
+        return 1754049600 if claim else None
+
+    def _finalize_root(alarm_key, claim_token, message_ts, started_at, event_at):
+        root_finals.append((alarm_key, claim_token, message_ts))
+        return True
+
+    def _posted(token, marker, thread_ts=None, since=None):
+        dedupes.append((marker, thread_ts))
+        return already_posted
+
     fixture = alarm_fixture(state)
     if changed_at is not None:
         fixture['StateChangeTime'] = changed_at
@@ -306,11 +320,17 @@ def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
          mock.patch.object(sns_to_slack, '_add_reaction', side_effect=_react), \
          mock.patch.object(sns_to_slack, '_claim_resolution', side_effect=_claim), \
          mock.patch.object(sns_to_slack, '_finalize_resolution', side_effect=_finalize), \
+         mock.patch.object(sns_to_slack, '_claim_alarm_root', side_effect=_claim_root), \
+         mock.patch.object(sns_to_slack, '_finalize_alarm_root', side_effect=_finalize_root), \
+         mock.patch.object(sns_to_slack, '_already_posted', side_effect=_posted), \
          mock.patch.object(sns_to_slack, '_put_alarm_state',
                            side_effect=lambda *args: states.append(args)):
         sns_to_slack._deliver_cloudwatch_bot(
             'xoxb', fixture, 'acme-prod', 'us-east-1', '111', 'prod')
-    return updates, posts, states, reactions, claims, finals
+    return SimpleNamespace(
+        updates=updates, posts=posts, states=states, reactions=reactions,
+        claims=claims, finals=finals, root_claims=root_claims,
+        root_finals=root_finals, dedupes=dedupes)
 
 
 def slack_body_checks():
@@ -493,77 +513,128 @@ def lifecycle_checks():
     firing = {"message_ts": "111.222", "started_at": "2026-08-01T12:00:00.000+0000",
               "status": "ALARM"}
 
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch("OK", firing)
-    card = str(posts[0]['payload']) if posts else ''
+    r = deliver_cloudwatch("OK", firing)
+    card = str(r.posts[0]['payload']) if r.posts else ''
     checks.extend([
-        ("resolution posts one card", len(posts) == 1),
+        ("resolution posts one card", len(r.posts) == 1),
         ("resolution card is the full green card",
-         posts and posts[0]['payload'].get('attachments', [{}])[0].get('color')
+         r.posts and r.posts[0]['payload'].get('attachments', [{}])[0].get('color')
          == sns_to_slack.COLOR_RESOLVED
          and all(x in card for x in ('✅ RESOLVED', 'OUTCOME', 'DURATION', '8m'))),
-        ("resolution threads under the root", posts and posts[0]['thread_ts'] == "111.222"),
-        ("resolution broadcasts to the channel", posts and posts[0]['broadcast'] is True),
+        ("resolution threads under the root", r.posts and r.posts[0]['thread_ts'] == "111.222"),
+        ("resolution broadcasts to the channel", r.posts and r.posts[0]['broadcast'] is True),
         # The audit that motivated this: 10 firing records overwritten in one week.
-        ("resolution never edits the red root", updates == []),
-        ("resolution reacts on the root", reactions == [("111.222", "white_check_mark")]),
+        ("resolution never edits the red root", r.updates == []),
+        ("resolution reacts on the root", r.reactions == [("111.222", "white_check_mark")]),
         # Finalizing is now a conditional write of its own, not a blind PutItem, so it
         # has to carry the token proving we still own the claim we took.
         ("resolution finalises with the claim token it was given",
-         finals == [(finals[0][0], 1754049600, finals[0][2])] if finals else False),
-        ("resolution writes no unconditional state", states == []),
-        ("resolution claims before it posts", len(claims) == 1),
+         r.finals == [(r.finals[0][0], 1754049600, r.finals[0][2])] if r.finals else False),
+        ("resolution writes no unconditional state", r.states == []),
+        ("resolution claims before it posts", len(r.claims) == 1),
     ])
 
     # reactions:write can be revoked, the root can be too old, Slack can 5xx. None of
     # that may cost us the resolution card, so the failure is swallowed at the call site
     # rather than allowed out of _deliver_cloudwatch_bot.
     try:
-        updates, posts, states, reactions, claims, finals = deliver_cloudwatch(
+        r = deliver_cloudwatch(
             "OK", firing, reaction_error="missing_scope")
         escaped = False
     except Exception:  # noqa: BLE001 - the point of the check is that this cannot happen
-        updates, posts, states, reactions, finals = [], [], [], [], []
+        r = SimpleNamespace(updates=[], posts=[], states=[], reactions=[],
+                            claims=[], finals=[], root_claims=[],
+                            root_finals=[], dedupes=[])
         escaped = True
     checks.extend([
         ("reaction failure does not escape the handler", not escaped),
-        ("reaction failure still posts the resolution card", len(posts) == 1),
-        ("reaction failure does not edit the root", updates == []),
+        ("reaction failure still posts the resolution card", len(r.posts) == 1),
+        ("reaction failure does not edit the root", r.updates == []),
         # If this raised, the row would stay RESOLVING and the retry would re-post.
-        ("reaction failure still finalises the resolution", len(finals) == 1),
+        ("reaction failure still finalises the resolution", len(r.finals) == 1),
     ])
 
     # The claim losing is what a duplicate or already-resolved OK looks like from here:
     # DynamoDB refused the ALARM -> RESOLVING transition. Nothing may be sent after that.
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch(
+    r = deliver_cloudwatch(
         "OK", dict(firing, status="RESOLVED"), claim=False)
     checks.extend([
-        ("a lost claim posts no card", posts == []),
-        ("a lost claim adds no reaction", reactions == []),
-        ("a lost claim edits nothing", updates == []),
+        ("a lost claim posts no card", r.posts == []),
+        ("a lost claim adds no reaction", r.reactions == []),
+        ("a lost claim edits nothing", r.updates == []),
         # Previously this rewrote the tombstone on every duplicate, pushing its TTL out
         # each time. Now it writes nothing at all.
-        ("a lost claim writes no state", states == [] and finals == []),
-        ("a lost claim still attempted the claim", len(claims) == 1),
+        ("a lost claim writes no state", r.states == [] and r.finals == []),
+        ("a lost claim still attempted the claim", len(r.claims) == 1),
     ])
 
     # Repeat ALARM keeps editing: it is duplicate SNS delivery of the same firing event,
     # and the edit is what stops the same incident appearing twice. It never goes green.
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch("ALARM", firing)
+    r = deliver_cloudwatch("ALARM", firing)
     checks.extend([
-        ("repeat ALARM edits the root", len(updates) == 1 and updates[0][0] == "111.222"),
-        ("repeat ALARM posts nothing new", posts == []),
-        ("repeat ALARM adds no reaction", reactions == []),
-        ("repeat ALARM stays ALARM", bool(states) and states[0][3] == "ALARM"),
-        ("repeat ALARM never claims a resolution", claims == []),
+        ("repeat ALARM edits the root", len(r.updates) == 1 and r.updates[0][0] == "111.222"),
+        ("repeat ALARM posts nothing new", r.posts == []),
+        ("repeat ALARM adds no reaction", r.reactions == []),
+        ("repeat ALARM stays ALARM", bool(r.states) and r.states[0][3] == "ALARM"),
+        ("repeat ALARM never claims a resolution", r.claims == []),
     ])
 
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch("ALARM", None)
+    r = deliver_cloudwatch("ALARM", None)
     checks.extend([
         ("first ALARM posts a root, unthreaded",
-         len(posts) == 1 and posts[0]['thread_ts'] is None
-         and posts[0]['broadcast'] is False),
-        ("first ALARM edits nothing", updates == []),
+         len(r.posts) == 1 and r.posts[0]['thread_ts'] is None
+         and r.posts[0]['broadcast'] is False),
+        ("first ALARM edits nothing", r.updates == []),
+        # Same reasoning as the resolve: two deliveries that both see no row would
+        # otherwise both post a root, and only one timestamp would survive the write.
+        ("first ALARM claims before it posts", len(r.root_claims) == 1),
+        ("first ALARM finalises with its claim token",
+         r.root_finals == [(r.root_finals[0][0], 1754049600, '333.444')]
+         if r.root_finals else False),
+        ("first ALARM writes no unconditional state", r.states == []),
+        # A fresh claim cannot have a root already in the channel, so no read is spent.
+        ("first ALARM does not read Slack history", r.dedupes == []),
     ])
+
+    r = deliver_cloudwatch("ALARM", None, claim=False)
+    checks.extend([
+        ("a lost root claim posts nothing", r.posts == []),
+        ("a lost root claim finalises nothing", r.root_finals == []),
+    ])
+
+    # Taking over an ALARM_POSTING claim means a previous attempt died. It may have got
+    # its root into the channel first, and only Slack can say.
+    posting = {"message_ts": "", "started_at": "2026-08-01T12:00:00.000+0000",
+               "status": "ALARM_POSTING"}
+    r = deliver_cloudwatch("ALARM", posting, already_posted=True)
+    checks.extend([
+        ("a takeover checks Slack before reposting the root", len(r.dedupes) == 1),
+        ("a root already in the channel is not posted twice", r.posts == []),
+    ])
+
+    r = deliver_cloudwatch("ALARM", posting, already_posted=False)
+    checks.append(("a takeover with no root in the channel posts one", len(r.posts) == 1))
+
+    # The resolve half of the same problem: the lease turns every crash into a second
+    # green card unless the thread is checked first.
+    resolving = {"message_ts": "111.222", "started_at": "2026-08-01T12:00:00.000+0000",
+                 "status": "RESOLVING"}
+    r = deliver_cloudwatch("OK", resolving, already_posted=True)
+    checks.extend([
+        ("a resolve takeover checks the thread", r.dedupes == [("✅ RESOLVED", "111.222")]),
+        ("a recovery already in the thread is not posted twice", r.posts == []),
+        ("a recovery already in the thread still finalises", len(r.finals) == 1),
+        ("a recovery already in the thread adds no second reaction", r.reactions == []),
+    ])
+
+    r = deliver_cloudwatch("OK", resolving, already_posted=False)
+    checks.append(("a resolve takeover with an empty thread posts the card",
+                   len(r.posts) == 1))
+
+    # The common path must not spend a Slack read: a claim taken from a live ALARM row
+    # is a first attempt, and nothing can already be in the thread.
+    r = deliver_cloudwatch("OK", firing)
+    checks.append(("a first-attempt resolve does not read the thread", r.dedupes == []))
     return checks
 
 
@@ -587,45 +658,45 @@ def ordering_checks():
     open_incident = {"message_ts": "999.888", "started_at": newer,
                      "status": "ALARM", "last_event_at": newer_epoch}
 
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch(
+    r = deliver_cloudwatch(
         "OK", open_incident, changed_at=older)
     checks.extend([
-        ("a stale OK posts nothing", posts == []),
-        ("a stale OK does not react on the live root", reactions == []),
-        ("a stale OK does not close the live incident", states == []),
+        ("a stale OK posts nothing", r.posts == []),
+        ("a stale OK does not react on the live root", r.reactions == []),
+        ("a stale OK does not close the live incident", r.states == []),
         # Dropped before the claim, so it costs no conditional write either.
-        ("a stale OK never reaches the claim", claims == []),
+        ("a stale OK never reaches the claim", r.claims == []),
     ])
 
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch(
+    r = deliver_cloudwatch(
         "ALARM", open_incident, changed_at=older)
     checks.extend([
-        ("a stale ALARM posts nothing", posts == []),
-        ("a stale ALARM edits nothing", updates == []),
-        ("a stale ALARM writes no state", states == []),
+        ("a stale ALARM posts nothing", r.posts == []),
+        ("a stale ALARM edits nothing", r.updates == []),
+        ("a stale ALARM writes no state", r.states == []),
     ])
 
     # Same timestamp is a duplicate, not a stale event, and the two paths handle it
     # differently: ALARM edits the root, OK is gated by the claim. Neither is dropped
     # here, or a redelivery of the only OK we get would be lost.
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch(
+    r = deliver_cloudwatch(
         "OK", open_incident, changed_at=newer)
-    checks.append(("an equal-timestamp OK still reaches the claim", len(claims) == 1))
+    checks.append(("an equal-timestamp OK still reaches the claim", len(r.claims) == 1))
 
     # A row written before LastEventAt existed, or an event with no parseable
     # StateChangeTime, cannot be ordered. Both must fall through to posting rather than
     # being suppressed: never classify on missing data.
     legacy = {"message_ts": "111.222", "started_at": older, "status": "ALARM"}
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch(
+    r = deliver_cloudwatch(
         "OK", legacy, changed_at=older)
-    checks.append(("a row with no recorded event time still resolves", len(posts) == 1))
+    checks.append(("a row with no recorded event time still resolves", len(r.posts) == 1))
 
-    updates, posts, states, reactions, claims, finals = deliver_cloudwatch(
+    r = deliver_cloudwatch(
         "OK", open_incident, changed_at="not a timestamp")
     checks.extend([
-        ("an unparseable event time still resolves", len(posts) == 1),
+        ("an unparseable event time still resolves", len(r.posts) == 1),
         ("an unparseable event time claims with None",
-         claims == [(claims[0][0], None)] if claims else False),
+         r.claims == [(r.claims[0][0], None)] if r.claims else False),
     ])
 
     checks.extend([
@@ -669,7 +740,7 @@ def claim_checks():
     """The conditional write _claim_resolution actually sends.
 
     DynamoDB evaluates the condition, not this suite, so what is pinned here is the
-    request: the states it will accept, the lease comparison that lets a dead claim be
+    request: the r.states it will accept, the lease comparison that lets a dead claim be
     taken over, and the event-time guard. A fake client stands in for the service and
     reports whether the condition would have been checked at all.
     """
@@ -788,8 +859,8 @@ def claim_checks():
 def finalize_checks():
     """Finalizing a resolution must not clobber an incident that superseded it.
 
-    The flap this exists for: OK1 claims ALARM1 and starts posting; ALARM2 arrives, sees
-    a RESOLVING row, posts its own red root and writes ALARM; OK1 then finishes. An
+    The flap this exists for: OK1 r.claims ALARM1 and starts posting; ALARM2 arrives, sees
+    a RESOLVING row, r.posts its own red root and writes ALARM; OK1 then finishes. An
     unconditional write there would stamp RESOLVED over the live ALARM2, and ALARM2's
     real recovery would later find RESOLVED and post nothing - the original bug, moved
     one step later.
@@ -854,6 +925,48 @@ def finalize_checks():
         sns_to_slack._finalize_resolution('alarm-key', 1754049600, None)
     checks.append(("an unorderable finalise leaves the watermark alone",
                    'LastEventAt' not in calls[0]['UpdateExpression'] if calls else False))
+
+    # The ALARM root has the same shape and the same hazard: between claiming and
+    # recording the root, a resolve or a newer incident can take the row. Recording it
+    # unconditionally would put a stale MessageTs back on a row that moved on, and every
+    # later recovery would thread under the wrong message.
+    calls.clear()
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
+        root_ok = sns_to_slack._finalize_alarm_root(
+            'alarm-key', 1754049600, '111.222', '2026-08-01T12:00:00+00:00', 1754049601.0)
+    root_sent = calls[0] if calls else {}
+    root_cond = root_sent.get('ConditionExpression', '')
+    root_update = root_sent.get('UpdateExpression', '')
+    root_values = root_sent.get('ExpressionAttributeValues', {})
+    checks.extend([
+        ("finalising an owned root claim succeeds", root_ok is True),
+        ("finalising a root requires the row still be ALARM_POSTING",
+         '#s = :posting' in root_cond),
+        ("finalising a root requires the same claim token",
+         'ClaimedAt = :claim' in root_cond),
+        ("finalising a root records the posted message ts",
+         root_values.get(':ts') == {'S': '111.222'} and 'MessageTs = :ts' in root_update),
+        ("finalising a root flips the row to ALARM", '#s = :alarm' in root_update),
+        # A live incident must not inherit the tombstone TTL from the row it replaced.
+        ("finalising a root clears any tombstone TTL", 'REMOVE ExpiresAt' in root_update),
+    ])
+
+    calls.clear()
+    raised = False
+    try:
+        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+             mock.patch.object(sns_to_slack.boto3, 'client',
+                               return_value=_FakeDDB(fail=True)):
+            root_lost = sns_to_slack._finalize_alarm_root(
+                'alarm-key', 1754049600, '111.222', 'x', 1.0)
+    except Exception:  # noqa: BLE001
+        raised = True
+        root_lost = None
+    checks.extend([
+        ("a superseded root finalise reports False", root_lost is False),
+        ("a superseded root finalise does not raise", not raised),
+    ])
     return checks
 
 
@@ -893,7 +1006,7 @@ def state_ttl_checks():
     """Only the tombstone carries a TTL.
 
     An ALARM row is the live correlation to the red root, not a tombstone. Expiring it
-    strands the incident: the eventual recovery finds no prior and posts an unthreaded
+    strands the incident: the eventual recovery finds no prior and r.posts an unthreaded
     green root with DURATION: Unknown - the same record loss this change exists to stop,
     on a slower clock. These drive the real _put_alarm_state and read the item it builds.
     """

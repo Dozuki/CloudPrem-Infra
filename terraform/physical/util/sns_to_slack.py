@@ -17,8 +17,10 @@ Functions:
 - lambda_handler(event, context): Entry point for the Lambda function. Processes the event and sends an alert to Slack.
 
 Environment Variables:
-- SLACK_BOT_TOKEN_SSM_PARAM: SSM SecureString holding a bot token (chat:write, reactions:write);
-  preferred path.
+- SLACK_BOT_TOKEN_SSM_PARAM: SSM SecureString holding a bot token (chat:write,
+  reactions:write, and channels:history or groups:history); preferred path. The history
+  scope is used only to avoid duplicating a card when a crashed attempt is retried, and
+  its absence degrades to the previous at-least-once behaviour rather than failing.
 - SLACK_CHANNEL_ID: Channel the bot-token path posts to.
 - SLACK_STATE_TABLE: DynamoDB table used to thread a recovery under the ALARM root that fired.
 - SLACK_WEBHOOK_URL: Legacy Slack incoming webhook URL; used when no bot token is configured.
@@ -105,6 +107,16 @@ STATE_TTL_SECONDS = 30 * 24 * 3600
 # lets the retry re-claim and post, while a lease longer than that would make the
 # retry give up on a card that was never actually sent.
 CLAIM_LEASE_SECONDS = 60
+
+# The header text a recovery card carries, used to recognise one already sitting in an
+# incident thread. Kept next to the card renderer's own string so the two move together.
+RECOVERY_MARKER = '✅ RESOLVED'
+
+# How far back to look in channel history when checking whether a red root was already
+# posted by an attempt that died. Only has to cover the gap between a crash and the
+# retry that takes the claim over, which is bounded by the lease plus Lambda's retry
+# cadence; a wider window would just read more messages for the same answer.
+STALE_POST_WINDOW = 15 * 60
 COLOR_CRITICAL = '#e01e5a'
 COLOR_WARNING = '#ecb22e'
 COLOR_RESOLVED = '#2eb67d'
@@ -405,6 +417,51 @@ def _slack_api(method, token, body):
     return result
 
 
+def _slack_get(method, token, params):
+    """Read-side Web API call. conversations.* reads take query params, not a JSON body."""
+    request = urllib.request.Request(
+        f'https://slack.com/api/{method}?{urllib.parse.urlencode(params)}',
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        result = json.loads(response.read())
+    if not result.get('ok'):
+        raise RuntimeError(f'{method} failed: {result.get("error")}')
+    return result
+
+
+def _already_posted(token, marker, thread_ts=None, since=None):
+    """True when a message carrying `marker` is already in the channel or thread.
+
+    This is what makes a retry idempotent at the Slack boundary. The DynamoDB claim can
+    only say "nobody else is posting right now"; it cannot say whether OUR previous
+    attempt got its message through before dying, because the failure mode being covered
+    is exactly "Slack accepted it and we never learned that". Only Slack knows, so ask
+    Slack - but only on a takeover, where a previous attempt actually existed.
+
+    Fails OPEN (returns False, so the caller posts). A missing history scope, a Slack
+    5xx, or a thread that cannot be read must not swallow a recovery card: a duplicate
+    card is an annoyance, a missing one is the bug this whole change exists to prevent.
+    That degradation is why the scope is not a hard dependency.
+    """
+    try:
+        if thread_ts:
+            result = _slack_get('conversations.replies', token, {
+                'channel': SLACK_CHANNEL_ID, 'ts': thread_ts, 'limit': 200})
+            # [0] is the root itself, which is not a recovery.
+            messages = (result.get('messages') or [])[1:]
+        else:
+            params = {'channel': SLACK_CHANNEL_ID, 'limit': 200}
+            if since:
+                params['oldest'] = since
+            messages = _slack_get('conversations.history', token, params).get(
+                'messages') or []
+    except Exception as exc:  # noqa: BLE001 - never let a read failure drop a card
+        print(f'could not check Slack for an existing "{marker}" post: {exc}')
+        return False
+    return any(marker in json.dumps(message) for message in messages)
+
+
 def _post_bot(token, payload, thread_ts=None, reply_broadcast=False):
     body = {'channel': SLACK_CHANNEL_ID, **payload}
     if thread_ts:
@@ -685,6 +742,94 @@ def _claim_resolution(alarm_key, event_at):
         return None
 
 
+def _claim_alarm_root(alarm_key, event_at):
+    """Take ownership of posting a NEW red root. Returns the claim token, or None.
+
+    The resolve path got a claim first because its duplicate is loud, but the ALARM path
+    has the same shape: two deliveries both read "no row" (or the same RESOLVED
+    tombstone), both post a root, and only one timestamp survives the write. The other
+    root is then permanently untracked - it never gets a check-mark, and its recovery
+    threads under the wrong message. That contradicts the "posted once" invariant this
+    whole change is built on.
+
+    Accepts a row that does not exist, a RESOLVED tombstone (a genuinely new incident on
+    a reused key), a RESOLVING row (a new incident supersedes an in-flight resolve, and
+    that resolve's finalize will correctly fail on its token), and an ALARM_POSTING whose
+    lease has expired. It does NOT accept a live ALARM - that is the repeat-delivery edit
+    path, which is handled without a claim because editing is already idempotent.
+    """
+    if not SLACK_STATE_TABLE:
+        return None
+    now = int(time.time())
+    values = {
+        ':posting': {'S': 'ALARM_POSTING'},
+        ':resolved': {'S': 'RESOLVED'},
+        ':resolving': {'S': 'RESOLVING'},
+        ':now': {'N': str(now)},
+        ':lease': {'N': str(now - CLAIM_LEASE_SECONDS)},
+    }
+    condition = ('(attribute_not_exists(AlarmKey) OR #s = :resolved OR #s = :resolving'
+                 ' OR (#s = :posting AND ClaimedAt < :lease))')
+    update = 'SET #s = :posting, ClaimedAt = :now'
+    if event_at is not None:
+        values[':evt'] = {'N': repr(event_at)}
+        condition += ' AND (attribute_not_exists(LastEventAt) OR LastEventAt <= :evt)'
+        update += ', LastEventAt = :evt'
+    client = boto3.client('dynamodb')
+    try:
+        client.update_item(
+            TableName=SLACK_STATE_TABLE,
+            Key={'AlarmKey': {'S': alarm_key}},
+            UpdateExpression=update,
+            ConditionExpression=condition,
+            ExpressionAttributeNames={'#s': 'Status'},
+            ExpressionAttributeValues=values,
+        )
+        return now
+    except client.exceptions.ConditionalCheckFailedException:
+        prior = _get_alarm_state(alarm_key)
+        if prior and prior.get('status') == 'ALARM_POSTING':
+            # Another delivery is mid-post. Same reasoning as the resolve claim: going
+            # quiet here would consume this event's retry, and if that delivery died the
+            # root is lost for good. Raise so the retry re-reads once the lease is up.
+            raise RuntimeError(
+                f'{alarm_key} root is being posted by another execution; retrying')
+        # A live ALARM row means someone finished posting the root already, and a newer
+        # LastEventAt means this event is stale. Neither should post.
+        return None
+
+
+def _finalize_alarm_root(alarm_key, claim_token, message_ts, started_at, event_at):
+    """Record the root we just posted, if we still own the claim. True if we did."""
+    if not SLACK_STATE_TABLE:
+        return False
+    values = {':posting': {'S': 'ALARM_POSTING'},
+              ':claim': {'N': str(claim_token)},
+              ':alarm': {'S': 'ALARM'},
+              ':ts': {'S': message_ts},
+              ':sa': {'S': started_at or datetime.now(timezone.utc).isoformat()}}
+    update = 'SET #s = :alarm, MessageTs = :ts, StartedAt = :sa REMOVE ExpiresAt'
+    if event_at is not None:
+        values[':evt'] = {'N': repr(event_at)}
+        update = ('SET #s = :alarm, MessageTs = :ts, StartedAt = :sa, LastEventAt = :evt'
+                  ' REMOVE ExpiresAt')
+    client = boto3.client('dynamodb')
+    try:
+        client.update_item(
+            TableName=SLACK_STATE_TABLE,
+            Key={'AlarmKey': {'S': alarm_key}},
+            UpdateExpression=update,
+            ConditionExpression='#s = :posting AND ClaimedAt = :claim',
+            ExpressionAttributeNames={'#s': 'Status'},
+            ExpressionAttributeValues=values,
+        )
+        return True
+    except client.exceptions.ConditionalCheckFailedException:
+        print(f'{alarm_key} was taken over before the root was recorded; '
+              f'leaving the newer state alone')
+        return False
+
+
 def _finalize_resolution(alarm_key, claim_token, event_at):
     """Stamp RESOLVED, but only if we still own the claim we took. True if we did.
 
@@ -784,13 +929,33 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         if prior and prior.get('status') == 'ALARM':
             # Refreshing an already-red root, not turning it green. This branch mostly
             # fires on duplicate SNS delivery of the same firing event, where an edit
-            # is what keeps the channel from showing the same incident twice.
+            # is what keeps the channel from showing the same incident twice. No claim
+            # needed: editing the same message with the same payload is idempotent.
             message_ts = prior['message_ts']
             _update_bot(token, message_ts, payload)
-        else:
-            message_ts = _post_bot(token, payload)
-            started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
-        _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM', event_at, prior)
+            _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM', event_at, prior)
+            return
+
+        # A brand new root. Claim before posting for the same reason the resolve does:
+        # two deliveries that both see no row would otherwise both post one, and only
+        # one timestamp would survive the write.
+        claim_token = _claim_alarm_root(alarm_key, event_at)
+        if not claim_token:
+            print(f'skipping duplicate or stale ALARM for {alarm_key}')
+            return
+
+        # Only on a takeover, where a previous attempt may have posted before dying.
+        # A fresh claim cannot have a root already in the channel.
+        if (prior and prior.get('status') == 'ALARM_POSTING'
+                and _already_posted(token, metadata['alarm_name'],
+                                    since=str(int(time.time()) - STALE_POST_WINDOW))):
+            print(f'root for {metadata["alarm_name"]} is already in the channel; '
+                  f'not posting a second one')
+            return
+
+        message_ts = _post_bot(token, payload)
+        started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
+        _finalize_alarm_root(alarm_key, claim_token, message_ts, started_at, event_at)
         return
 
     if state == 'OK' and prior:
@@ -809,13 +974,26 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
             print(f'skipping duplicate or stale OK for {alarm_key}')
             return
 
+        # A takeover means a previous attempt held this claim and died. It may have got
+        # its message to Slack before dying - the claim cannot know, because the failure
+        # being covered is "Slack accepted it and we never learned that". Only Slack can
+        # answer, and only the thread needs reading. Without this the lease turns every
+        # crash into a second green card.
+        if (prior.get('status') == 'RESOLVING'
+                and _already_posted(token, RECOVERY_MARKER,
+                                    thread_ts=prior['message_ts'])):
+            print(f'recovery for {metadata["alarm_name"]} is already in the thread; '
+                  f'finalising without posting a second one')
+            _finalize_resolution(alarm_key, claim_token, event_at)
+            return
+
         # Full recovery card, not a one-line summary, so the channel gets the same
         # detail (duration, final reading, resource) it got when the alarm fired.
         # Broadcast because a thread reply alone leaves the channel showing red.
         #
         # If this raises, the row stays RESOLVING and the Lambda retries. Once the
-        # claim's lease expires the retry re-claims and posts, so a failure here costs
-        # a delay rather than the recovery card.
+        # claim's lease expires the retry re-claims, finds the card above, and finalises
+        # without duplicating it.
         _post_bot(token, payload, thread_ts=prior['message_ts'],
                   reply_broadcast=True)
         try:
