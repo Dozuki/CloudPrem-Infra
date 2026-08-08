@@ -125,7 +125,20 @@ fi
 # lookup. Runs after the SSO check so an expired session reports as an expired
 # session rather than as an STS failure.
 if [ -z "${DDVTEST_ACCOUNT_ID:-}" ]; then
-  DDVTEST_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
+  # The REQUIRED_BINS sweep is much further down, so check the one tool this needs here.
+  # Without it a missing CLI reads as "could not resolve the account", which sends the
+  # operator looking at their SSO session instead of at their PATH.
+  command -v aws >/dev/null || {
+    echo "missing required tool: aws (needed to resolve the test account id)" >&2
+    echo "       Install it, or export DDVTEST_ACCOUNT_ID=<12-digit account> to skip." >&2
+    exit 1
+  }
+  # stderr is kept, not discarded: an expired token or a denied sts:GetCallerIdentity says
+  # exactly what is wrong, and swallowing it leaves only the generic message below. tr -d
+  # strips the CR that some environments append, which the exact-width match would reject.
+  _sts_err="$(mktemp)"
+  DDVTEST_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text \
+    2>"$_sts_err" | tr -d '\r' || true)"
   case "$DDVTEST_ACCOUNT_ID" in
     # Refuse an empty or malformed answer rather than letting it through: it becomes
     # part of every bucket name below, so a blank builds a plausible-looking name that
@@ -133,10 +146,13 @@ if [ -z "${DDVTEST_ACCOUNT_ID:-}" ]; then
     [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
     *)
       echo "ERROR: could not resolve the test account id from AWS_PROFILE='$AWS_PROFILE'." >&2
+      [ -s "$_sts_err" ] && sed '/^[[:space:]]*$/d; s/^/       aws: /' "$_sts_err" >&2
       echo "       Refresh the profile, or export DDVTEST_ACCOUNT_ID=<12-digit account>." >&2
+      rm -f "$_sts_err"
       exit 1
       ;;
   esac
+  rm -f "$_sts_err"
 fi
 export DDVTEST_ACCOUNT_ID
 echo ">> Test account: $DDVTEST_ACCOUNT_ID (profile '$AWS_PROFILE')"
