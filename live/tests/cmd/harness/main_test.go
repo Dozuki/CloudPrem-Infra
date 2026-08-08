@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -9,6 +12,12 @@ import (
 	"github.com/Dozuki/CloudPrem-Infra/live/tests/harness"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
+
+type failingReaperWriter struct{}
+
+func (failingReaperWriter) PutObject(context.Context, *s3.PutObjectInput, ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	return nil, errors.New("report bucket denied")
+}
 
 func TestDispatchUnknownSubcommand(t *testing.T) {
 	var b bytes.Buffer
@@ -44,6 +53,66 @@ func TestDispatchEvidenceRejectsMalformedInput(t *testing.T) {
 	code := dispatch([]string{"evidence"}, strings.NewReader("not json"), &stdout, &stderr)
 	if code == 0 {
 		t.Fatalf("malformed stdin should be non-zero (so the caller's jq fallback triggers)")
+	}
+}
+
+func TestJanitorReaperShadowRequiresReportBucket(t *testing.T) {
+	var stderr bytes.Buffer
+	code := dispatch(
+		[]string{"janitor", "--account-id", "076248559428", "--self-workflow", "janitor-1", "--reaper-shadow"},
+		strings.NewReader(""),
+		io.Discard,
+		&stderr,
+	)
+	if code != 2 || !strings.Contains(stderr.String(), "--reaper-shadow requires --reaper-report-bucket") {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+}
+
+func TestJanitorAcceptsReaperShadowFlagsBeforeOwnershipGate(t *testing.T) {
+	var stderr bytes.Buffer
+	code := dispatch(
+		[]string{
+			"janitor", "--account-id", "076248559428", "--self-workflow", "janitor-1",
+			"--reaper-report-bucket", "resource-reaper-reports", "--reaper-shadow",
+		},
+		strings.NewReader(`{"items":[]}`),
+		io.Discard,
+		&stderr,
+	)
+	if code != 3 || !strings.Contains(stderr.String(), "not found among 0 workflows") {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+}
+
+func TestReaperPublishFailureReturnsNonzeroAfterLegacyJSON(t *testing.T) {
+	report := &harness.Report{
+		SchemaVersion: harness.JanitorReportSchemaVersion,
+		Mode:          "report",
+		At:            "2026-08-08T13:00:00Z",
+		Account:       "076248559428",
+		Candidates: []harness.Candidate{{
+			Bucket: "dozuki-terraform-state-us-east-1-076248559428",
+			Prefix: "run-min_default/", State: harness.StateNeedsReview,
+			Reason: "manifest unreadable",
+		}},
+	}
+	var stdout, stderr bytes.Buffer
+	code := finishJanitorReport(
+		context.Background(), report, 0, true,
+		"resource-reaper-reports", true, failingReaperWriter{},
+		&stdout, &stderr,
+	)
+	if code != 1 || !strings.Contains(stderr.String(), "report bucket denied") {
+		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	var preserved harness.Report
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &preserved); err != nil {
+		t.Fatalf("last stdout line is not the legacy report: %v\nstdout=%q", err, stdout.String())
+	}
+	if preserved.Candidates[0].Prefix != report.Candidates[0].Prefix {
+		t.Fatalf("preserved report = %+v", preserved)
 	}
 }
 

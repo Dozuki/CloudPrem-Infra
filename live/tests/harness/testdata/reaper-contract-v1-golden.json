@@ -1,0 +1,33 @@
+{
+  "engine": "harness",
+  "account": "076248559428",
+  "state_bucket": "state-bucket",
+  "state_prefix": "/runs/bi-ha/",
+  "canonical_identity": "state-bucket/runs/bi-ha",
+  "run_id": "run-123",
+  "regions": [
+    "us-west-2",
+    "us-east-1"
+  ],
+  "ordered_regions": "us-east-1,us-west-2",
+  "decision": "eligible",
+  "expires_at": "2026-08-07T08:00:00Z",
+  "resource_count": 12,
+  "workflow_phase": "",
+  "keep_on_failure": false,
+  "lock_present": false,
+  "version_fields": [
+    "v1",
+    "state-bucket/runs/bi-ha",
+    "run-123",
+    "us-east-1,us-west-2",
+    "eligible",
+    "2026-08-07T08:00:00Z",
+    "12",
+    "",
+    "false",
+    "false"
+  ],
+  "finding_id": "sha256:019406da27ce5a07617306ec9f386a2c4fd4d28b97e098426a6f8c3802aaafb8",
+  "version": "sha256:cd817dda89287de462248e01e8e400cb6ed7853723643e4bff0417315457e90d"
+}

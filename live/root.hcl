@@ -53,6 +53,7 @@ locals {
           StackPath   = "${path_relative_to_include()}"
           Repo        = "CloudPrem-Infra"
           %{if local.delete_after != ""}deleteAfter = "${local.delete_after}"%{endif}
+          %{if local.delete_after != ""}"reaper:engine" = "harness"%{endif}
         }
       }
   EOF
