@@ -54,6 +54,21 @@ _spec.loader.exec_module(sns_to_slack)
 
 DROP = sns_to_slack.DMS_ROUTINE_MESSAGES
 
+
+class _ConditionalCheckFailedException(Exception):
+    """Stand-in for botocore's dynamically generated error class.
+
+    The real one only exists on a live client's `exceptions` namespace, which is exactly
+    how _claim_resolution catches it. The fake client below exposes this under the same
+    attribute so the production code path is the one under test, rather than a
+    name-matching shortcut written for the suite's benefit.
+    """
+
+
+class _FakeExceptions:
+    ConditionalCheckFailedException = _ConditionalCheckFailedException
+
+
 # The aurora migration task and the BI serverless replication, which are the two producers
 # behind the single EventBridge rule that feeds this lambda.
 TASK_ARN = "arn:aws:dms:us-east-1:111:replication-task:EXAMPLETASKID"
@@ -249,9 +264,18 @@ def run_dms_event(detail_message, resource_arn,
     return posted, lookups
 
 
-def deliver_cloudwatch(state, prior, reaction_error=None):
-    """Run _deliver_cloudwatch_bot with every Slack and DynamoDB call captured."""
-    updates, posts, states, reactions = [], [], [], []
+def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
+                       changed_at=None):
+    """Run _deliver_cloudwatch_bot with every Slack and DynamoDB call captured.
+
+    claim stands in for the conditional write's verdict: True means this delivery won
+    the ALARM -> RESOLVING transition, False means DynamoDB rejected it because another
+    delivery already owns the resolve or the event is older than the row. The condition
+    itself is DynamoDB's to evaluate - what these checks pin is that we ask before
+    posting and honour the answer. _claim_resolution's request shape is asserted
+    separately in claim_checks().
+    """
+    updates, posts, states, reactions, claims = [], [], [], [], []
 
     def _post(token, payload, thread_ts=None, reply_broadcast=False):
         posts.append({'payload': payload, 'thread_ts': thread_ts,
@@ -263,16 +287,25 @@ def deliver_cloudwatch(state, prior, reaction_error=None):
         if reaction_error:
             raise RuntimeError(reaction_error)
 
+    def _claim(alarm_key, event_at):
+        claims.append((alarm_key, event_at))
+        return claim
+
+    fixture = alarm_fixture(state)
+    if changed_at is not None:
+        fixture['StateChangeTime'] = changed_at
+
     with mock.patch.object(sns_to_slack, '_get_alarm_state', return_value=prior), \
          mock.patch.object(sns_to_slack, '_update_bot',
                            side_effect=lambda token, ts, payload: updates.append((ts, payload))), \
          mock.patch.object(sns_to_slack, '_post_bot', side_effect=_post), \
          mock.patch.object(sns_to_slack, '_add_reaction', side_effect=_react), \
+         mock.patch.object(sns_to_slack, '_claim_resolution', side_effect=_claim), \
          mock.patch.object(sns_to_slack, '_put_alarm_state',
                            side_effect=lambda *args: states.append(args)):
         sns_to_slack._deliver_cloudwatch_bot(
-            'xoxb', alarm_fixture(state), 'acme-prod', 'us-east-1', '111', 'prod')
-    return updates, posts, states, reactions
+            'xoxb', fixture, 'acme-prod', 'us-east-1', '111', 'prod')
+    return updates, posts, states, reactions, claims
 
 
 def slack_body_checks():
@@ -455,7 +488,7 @@ def lifecycle_checks():
     firing = {"message_ts": "111.222", "started_at": "2026-08-01T12:00:00.000+0000",
               "status": "ALARM"}
 
-    updates, posts, states, reactions = deliver_cloudwatch("OK", firing)
+    updates, posts, states, reactions, claims = deliver_cloudwatch("OK", firing)
     card = str(posts[0]['payload']) if posts else ''
     checks.extend([
         ("resolution posts one card", len(posts) == 1),
@@ -469,14 +502,15 @@ def lifecycle_checks():
         ("resolution never edits the red root", updates == []),
         ("resolution reacts on the root", reactions == [("111.222", "white_check_mark")]),
         ("resolution keeps idempotency tombstone",
-         bool(states) and states[0][1] == "111.222" and states[0][-1] == "RESOLVED"),
+         bool(states) and states[0][1] == "111.222" and states[0][3] == "RESOLVED"),
+        ("resolution claims before it posts", len(claims) == 1),
     ])
 
     # reactions:write can be revoked, the root can be too old, Slack can 5xx. None of
     # that may cost us the resolution card, so the failure is swallowed at the call site
     # rather than allowed out of _deliver_cloudwatch_bot.
     try:
-        updates, posts, states, reactions = deliver_cloudwatch(
+        updates, posts, states, reactions, claims = deliver_cloudwatch(
             "OK", firing, reaction_error="missing_scope")
         escaped = False
     except Exception:  # noqa: BLE001 - the point of the check is that this cannot happen
@@ -486,39 +520,215 @@ def lifecycle_checks():
         ("reaction failure does not escape the handler", not escaped),
         ("reaction failure still posts the resolution card", len(posts) == 1),
         ("reaction failure does not edit the root", updates == []),
-        # If this raised, the tombstone would never be written and the Lambda retry
-        # would post a second green card.
+        # If this raised, the row would stay RESOLVING and the retry would re-post.
         ("reaction failure still writes the tombstone",
-         bool(states) and states[0][-1] == "RESOLVED"),
+         bool(states) and states[0][3] == "RESOLVED"),
     ])
 
-    resolved = dict(firing, status="RESOLVED")
-    updates, posts, states, reactions = deliver_cloudwatch("OK", resolved)
+    # The claim losing is what a duplicate or already-resolved OK looks like from here:
+    # DynamoDB refused the ALARM -> RESOLVING transition. Nothing may be sent after that.
+    updates, posts, states, reactions, claims = deliver_cloudwatch(
+        "OK", dict(firing, status="RESOLVED"), claim=False)
     checks.extend([
-        ("duplicate OK posts no second card", posts == []),
-        ("duplicate OK adds no second reaction", reactions == []),
-        ("duplicate OK edits nothing", updates == []),
-        ("duplicate OK rewrites the tombstone only",
-         bool(states) and states[0][-1] == "RESOLVED"),
+        ("a lost claim posts no card", posts == []),
+        ("a lost claim adds no reaction", reactions == []),
+        ("a lost claim edits nothing", updates == []),
+        # Previously this rewrote the tombstone on every duplicate, pushing its TTL out
+        # each time. Now it writes nothing at all.
+        ("a lost claim writes no state", states == []),
+        ("a lost claim still attempted the claim", len(claims) == 1),
     ])
 
     # Repeat ALARM keeps editing: it is duplicate SNS delivery of the same firing event,
     # and the edit is what stops the same incident appearing twice. It never goes green.
-    updates, posts, states, reactions = deliver_cloudwatch("ALARM", firing)
+    updates, posts, states, reactions, claims = deliver_cloudwatch("ALARM", firing)
     checks.extend([
         ("repeat ALARM edits the root", len(updates) == 1 and updates[0][0] == "111.222"),
         ("repeat ALARM posts nothing new", posts == []),
         ("repeat ALARM adds no reaction", reactions == []),
-        ("repeat ALARM stays ALARM", bool(states) and states[0][-1] == "ALARM"),
+        ("repeat ALARM stays ALARM", bool(states) and states[0][3] == "ALARM"),
+        ("repeat ALARM never claims a resolution", claims == []),
     ])
 
-    updates, posts, states, reactions = deliver_cloudwatch("ALARM", None)
+    updates, posts, states, reactions, claims = deliver_cloudwatch("ALARM", None)
     checks.extend([
         ("first ALARM posts a root, unthreaded",
          len(posts) == 1 and posts[0]['thread_ts'] is None
          and posts[0]['broadcast'] is False),
         ("first ALARM edits nothing", updates == []),
     ])
+    return checks
+
+
+def ordering_checks():
+    """Out-of-order delivery must not rewrite history with an older truth.
+
+    SNS is at-least-once and unordered. The sequence that motivated this:
+
+        ALARM1 -> OK1 -> ALARM2 -> (delayed) OK1
+
+    the delayed OK1 used to thread a green card under ALARM2, react to it, and mark it
+    RESOLVED - closing a live incident. The real OK2 was then suppressed because the row
+    already said RESOLVED, so the incident that mattered never got a recovery at all.
+    """
+    checks = []
+    # StateChangeTime of the row's last applied event, and one an hour older.
+    newer = "2026-08-01T13:00:00.000+0000"
+    older = "2026-08-01T12:00:00.000+0000"
+    newer_epoch = sns_to_slack._event_epoch({"StateChangeTime": newer})
+
+    open_incident = {"message_ts": "999.888", "started_at": newer,
+                     "status": "ALARM", "last_event_at": newer_epoch}
+
+    updates, posts, states, reactions, claims = deliver_cloudwatch(
+        "OK", open_incident, changed_at=older)
+    checks.extend([
+        ("a stale OK posts nothing", posts == []),
+        ("a stale OK does not react on the live root", reactions == []),
+        ("a stale OK does not close the live incident", states == []),
+        # Dropped before the claim, so it costs no conditional write either.
+        ("a stale OK never reaches the claim", claims == []),
+    ])
+
+    updates, posts, states, reactions, claims = deliver_cloudwatch(
+        "ALARM", open_incident, changed_at=older)
+    checks.extend([
+        ("a stale ALARM posts nothing", posts == []),
+        ("a stale ALARM edits nothing", updates == []),
+        ("a stale ALARM writes no state", states == []),
+    ])
+
+    # Same timestamp is a duplicate, not a stale event, and the two paths handle it
+    # differently: ALARM edits the root, OK is gated by the claim. Neither is dropped
+    # here, or a redelivery of the only OK we get would be lost.
+    updates, posts, states, reactions, claims = deliver_cloudwatch(
+        "OK", open_incident, changed_at=newer)
+    checks.append(("an equal-timestamp OK still reaches the claim", len(claims) == 1))
+
+    # A row written before LastEventAt existed, or an event with no parseable
+    # StateChangeTime, cannot be ordered. Both must fall through to posting rather than
+    # being suppressed: never classify on missing data.
+    legacy = {"message_ts": "111.222", "started_at": older, "status": "ALARM"}
+    updates, posts, states, reactions, claims = deliver_cloudwatch(
+        "OK", legacy, changed_at=older)
+    checks.append(("a row with no recorded event time still resolves", len(posts) == 1))
+
+    updates, posts, states, reactions, claims = deliver_cloudwatch(
+        "OK", open_incident, changed_at="not a timestamp")
+    checks.extend([
+        ("an unparseable event time still resolves", len(posts) == 1),
+        ("an unparseable event time claims with None",
+         claims == [(claims[0][0], None)] if claims else False),
+    ])
+
+    checks.extend([
+        ("_event_epoch parses CloudWatch's format", newer_epoch is not None),
+        ("_event_epoch orders two timestamps",
+         sns_to_slack._event_epoch({"StateChangeTime": older}) < newer_epoch),
+        ("_event_epoch returns None on a missing field",
+         sns_to_slack._event_epoch({}) is None),
+        ("_event_epoch returns None on garbage",
+         sns_to_slack._event_epoch({"StateChangeTime": "yesterday"}) is None),
+        ("_is_stale is False without a prior row",
+         sns_to_slack._is_stale(newer_epoch, None) is False),
+        ("_is_stale is False when the row has no recorded time",
+         sns_to_slack._is_stale(newer_epoch, {"status": "ALARM"}) is False),
+        ("_is_stale is False for an equal timestamp",
+         sns_to_slack._is_stale(newer_epoch, open_incident) is False),
+        ("_is_stale is True for an older event",
+         sns_to_slack._is_stale(newer_epoch - 1, open_incident) is True),
+    ])
+    return checks
+
+
+def claim_checks():
+    """The conditional write _claim_resolution actually sends.
+
+    DynamoDB evaluates the condition, not this suite, so what is pinned here is the
+    request: the states it will accept, the lease comparison that lets a dead claim be
+    taken over, and the event-time guard. A fake client stands in for the service and
+    reports whether the condition would have been checked at all.
+    """
+    checks = []
+    calls = []
+
+    class _FakeDDB:
+        exceptions = _FakeExceptions()
+
+        def __init__(self, fail=False):
+            self.fail = fail
+
+        def update_item(self, **kwargs):
+            calls.append(kwargs)
+            if self.fail:
+                raise _ConditionalCheckFailedException("condition not met")
+
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
+        won = sns_to_slack._claim_resolution('alarm-key', 1754049600.0)
+
+    sent = calls[0] if calls else {}
+    condition = sent.get('ConditionExpression', '')
+    values = sent.get('ExpressionAttributeValues', {})
+    checks.extend([
+        ("a satisfied condition wins the claim", won is True),
+        ("the claim writes RESOLVING",
+         ':resolving' in values and values[':resolving'] == {'S': 'RESOLVING'}),
+        ("the claim accepts an open ALARM", '#s = :alarm' in condition),
+        ("the claim accepts a RESOLVING whose lease expired",
+         '#s = :resolving AND ClaimedAt < :lease' in condition),
+        ("the lease cutoff is CLAIM_LEASE_SECONDS old",
+         int(values[':now']['N']) - int(values[':lease']['N'])
+         == sns_to_slack.CLAIM_LEASE_SECONDS),
+        ("the claim refuses an older event", 'LastEventAt <= :evt' in condition),
+        ("the claim tolerates a row that predates LastEventAt",
+         'attribute_not_exists(LastEventAt)' in condition),
+        ("the claim records the event time", values.get(':evt') is not None),
+    ])
+
+    calls.clear()
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+         mock.patch.object(sns_to_slack.boto3, 'client',
+                           return_value=_FakeDDB(fail=True)):
+        lost = sns_to_slack._claim_resolution('alarm-key', 1754049600.0)
+    checks.append(("a rejected condition loses the claim, without raising", lost is False))
+
+    # No event time: there is nothing to order by, so the guard must come off entirely
+    # rather than compare against a missing value and reject every claim.
+    calls.clear()
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
+        sns_to_slack._claim_resolution('alarm-key', None)
+    unordered = calls[0]['ConditionExpression'] if calls else ''
+    checks.extend([
+        ("an unorderable event drops the time guard", 'LastEventAt' not in unordered),
+        ("an unorderable event still checks the status", '#s = :alarm' in unordered),
+    ])
+
+    # The webhook path has no table. Claiming must be a no-op rather than an error, and
+    # must report False so nothing downstream believes it owns a resolution.
+    calls.clear()
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', ''):
+        checks.append(("no table configured means no claim and no call",
+                       sns_to_slack._claim_resolution('k', 1.0) is False and calls == []))
+
+    # A real service error is not a lost claim and must not be swallowed into one.
+    calls.clear()
+
+    class _BrokenDDB:
+        exceptions = _FakeExceptions()
+
+        def update_item(self, **kwargs):
+            raise RuntimeError("ProvisionedThroughputExceededException")
+
+    raised = False
+    try:
+        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
+             mock.patch.object(sns_to_slack.boto3, 'client', return_value=_BrokenDDB()):
+            sns_to_slack._claim_resolution('k', 1.0)
+    except RuntimeError:
+        raised = True
+    checks.append(("a non-condition failure propagates", raised))
     return checks
 
 
@@ -610,7 +820,8 @@ def main():
             failures.append((message, expected, got, f"serverless: {why}"))
 
     checks = (renderer_checks() + slack_body_checks() + dms_routing_checks()
-              + lifecycle_checks() + state_ttl_checks())
+              + lifecycle_checks() + state_ttl_checks() + ordering_checks()
+              + claim_checks())
     for name, passed in checks:
         if not passed:
             failures.append((name, "PASS", "FAIL", "renderer/routing/lifecycle contract"))

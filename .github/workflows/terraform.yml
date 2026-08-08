@@ -7,6 +7,32 @@ on:
   pull_request:
 
 jobs:
+  # The alerting lambdas are Python inside a Terraform repo, so nothing in the matrix
+  # below ever executes them - tofu validate only checks that the archive_file source
+  # exists. Their suite ran by hand until now, which meant the one guarantee protecting
+  # the aurora migration task (it has no CloudWatch alarm anywhere, so its Slack card is
+  # its only alerting) held only when someone remembered to run it.
+  lambda-tests:
+    name: 'Lambda tests'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+    - name: Setup Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.12'   # the runtime aws_lambda_function.sns_to_slack declares
+
+    # The suite has no test framework and no fixtures on disk; boto3 is its only
+    # dependency, and only because the module under test imports it at import time.
+    - name: Install boto3
+      run: pip install --disable-pip-version-check boto3
+
+    - name: sns_to_slack
+      run: python3 test_sns_to_slack.py
+      working-directory: ./terraform/physical/util
+
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest

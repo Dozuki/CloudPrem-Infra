@@ -95,6 +95,16 @@ SLACK_CHANNEL_ID = os.environ.get('SLACK_CHANNEL_ID', '')
 SLACK_STATE_TABLE = os.environ.get('SLACK_STATE_TABLE', '')
 
 STATE_TTL_SECONDS = 30 * 24 * 3600
+
+# How long a resolve claim is honoured before another invocation may take it over.
+#
+# The claim exists so that exactly one delivery of an OK posts the recovery card. The
+# lease exists so that a claim whose posting step then died does not silence the
+# recovery forever. Sized against the retry cadence rather than the posting time: SNS
+# and Lambda async retries are a minute or more apart, so a lease shorter than that
+# lets the retry re-claim and post, while a lease longer than that would make the
+# retry give up on a card that was never actually sent.
+CLAIM_LEASE_SECONDS = 60
 COLOR_CRITICAL = '#e01e5a'
 COLOR_WARNING = '#ecb22e'
 COLOR_RESOLVED = '#2eb67d'
@@ -451,7 +461,45 @@ def _get_alarm_state(alarm_key):
         'message_ts': item['MessageTs']['S'],
         'started_at': item['StartedAt']['S'],
         'status': item['Status']['S'],
+        # Absent on rows written before this field existed. None means "unknown", which
+        # every ordering check below treats as "do not suppress" - an unordered event
+        # posts rather than being dropped.
+        'last_event_at': (float(item['LastEventAt']['N'])
+                          if 'LastEventAt' in item else None),
     }
+
+
+def _event_epoch(message_json):
+    """Epoch seconds for the alarm transition this message describes.
+
+    CloudWatch stamps every state change with StateChangeTime, and that - not arrival
+    order - is the only thing that says which of two deliveries happened first. SNS is
+    at-least-once and unordered, so without it a delayed OK from a previous incident
+    looks exactly like the recovery of the current one.
+
+    Returns None when the field is missing or unparseable. Callers must treat None as
+    "cannot order this" and fall through to posting: never classify on bad data.
+    """
+    raw = message_json.get('StateChangeTime')
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%dT%H:%M:%S.%f%z").timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_stale(event_at, prior):
+    """True when this delivery is older than the one the row already reflects.
+
+    Equal timestamps are NOT stale: that is the same event delivered twice, and the
+    duplicate handling for it differs per path (the ALARM path edits, the OK path is
+    gated by the claim below).
+    """
+    if event_at is None or not prior:
+        return False
+    last = prior.get('last_event_at')
+    return last is not None and event_at < last
 
 
 def classify_dms_event(detail_message, detail_type, resource_arn, category=''):
@@ -549,7 +597,63 @@ def _pick_dms_arn(resources):
     return resources[0] if resources else 'N/A'
 
 
-def _put_alarm_state(alarm_key, message_ts, started_at, status):
+def _claim_resolution(alarm_key, event_at):
+    """Atomically take ownership of resolving this incident. True if we own it.
+
+    This is the whole concurrency fix. Two deliveries of the same OK used to both read
+    `status == 'ALARM'` and both post; with `reply_broadcast` that is two full green
+    cards in the channel, not two thread lines. Now they both attempt this conditional
+    transition and DynamoDB picks exactly one winner - the loser returns False and
+    posts nothing.
+
+    The condition accepts two starting states:
+      * ALARM - the normal case, an incident that is still open.
+      * RESOLVING whose claim has outlived CLAIM_LEASE_SECONDS - a previous invocation
+        took the claim and died before posting, so the recovery would otherwise be lost.
+
+    and requires the event not be older than the row already reflects, which is what
+    stops a delayed OK from a previous incident closing the current one. `<=` rather
+    than `<` so a retry of the SAME event can re-claim once its lease expires.
+
+    Returns False when the table is not configured, so the webhook path is unaffected.
+    """
+    if not SLACK_STATE_TABLE:
+        return False
+    now = int(time.time())
+    names = {'#s': 'Status'}
+    values = {
+        ':resolving': {'S': 'RESOLVING'},
+        ':alarm': {'S': 'ALARM'},
+        ':now': {'N': str(now)},
+        ':lease': {'N': str(now - CLAIM_LEASE_SECONDS)},
+    }
+    condition = ('(#s = :alarm OR (#s = :resolving AND ClaimedAt < :lease))')
+    update = 'SET #s = :resolving, ClaimedAt = :now'
+    # Only order when the event carries a usable timestamp. Without one there is nothing
+    # to compare, and refusing to claim would drop the recovery entirely.
+    if event_at is not None:
+        values[':evt'] = {'N': repr(event_at)}
+        condition += (' AND (attribute_not_exists(LastEventAt) OR LastEventAt <= :evt)')
+        update += ', LastEventAt = :evt'
+    client = boto3.client('dynamodb')
+    try:
+        client.update_item(
+            TableName=SLACK_STATE_TABLE,
+            Key={'AlarmKey': {'S': alarm_key}},
+            UpdateExpression=update,
+            ConditionExpression=condition,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        return True
+    except client.exceptions.ConditionalCheckFailedException:
+        # Someone else owns this resolution, or the event is older than the row. Both
+        # mean "post nothing", and neither is an error. Every other failure - throttling,
+        # a missing table, credentials - propagates so the Lambda retries it.
+        return False
+
+
+def _put_alarm_state(alarm_key, message_ts, started_at, status, event_at=None):
     if not SLACK_STATE_TABLE:
         return
     item = {
@@ -558,6 +662,8 @@ def _put_alarm_state(alarm_key, message_ts, started_at, status):
         'StartedAt': {'S': started_at or datetime.now(timezone.utc).isoformat()},
         'Status': {'S': status},
     }
+    if event_at is not None:
+        item['LastEventAt'] = {'N': repr(event_at)}
     # TTL only on the tombstone. The row is a tombstone once RESOLVED, but while an alarm
     # is still ALARM it is the live correlation to the root card, and expiring it strands
     # the incident: the eventual recovery finds no prior, so it posts an unthreaded green
@@ -575,6 +681,17 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         f'{identifier}:{region}:{message_json.get("AlarmName", "Unknown alarm")}')
     prior = _get_alarm_state(alarm_key)
     state = message_json.get('NewStateValue', 'UNKNOWN')
+    event_at = _event_epoch(message_json)
+
+    # SNS is at-least-once and unordered, so a delivery can arrive after the incident it
+    # describes has already been superseded. Applying it would rewrite history with an
+    # older truth: a stale ALARM reopens an incident that closed, a stale OK closes one
+    # that is still burning and then suppresses its real recovery.
+    if _is_stale(event_at, prior):
+        print(f'skipping stale {state} for {alarm_key} '
+              f'(event {event_at} older than {prior.get("last_event_at")})')
+        return
+
     # A newly firing incident may reuse an alarm key whose last row is a resolved
     # idempotency tombstone; only carry its start into a recovery or a duplicate
     # ALARM update, never into the next distinct incident.
@@ -593,7 +710,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         else:
             message_ts = _post_bot(token, payload)
             started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
-        _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM')
+        _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM', event_at)
         return
 
     if state == 'OK' and prior:
@@ -601,21 +718,35 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         # green destroyed the only record that the incident happened: an audit of one
         # week found 10 firing records overwritten, 2 of which left no trace at all.
         # The red root stays red; recovery is a new message, not a rewrite.
-        if prior.get('status') != 'RESOLVED':
-            # Full recovery card, not a one-line summary, so the channel gets the same
-            # detail (duration, final reading, resource) it got when the alarm fired.
-            # Broadcast because a thread reply alone leaves the channel showing red.
-            _post_bot(token, payload, thread_ts=prior['message_ts'],
-                      reply_broadcast=True)
-            try:
-                _add_reaction(token, prior['message_ts'], 'white_check_mark')
-            except Exception as exc:  # noqa: BLE001 - a reaction is decoration
-                # Never let a reactions failure (scope, already_reacted, Slack 5xx)
-                # bubble up: the recovery card is already posted, and raising here
-                # would skip the tombstone below and re-post it on the Lambda retry.
-                print(f'could not mark {metadata["alarm_name"]} '
-                      f'({prior["message_ts"]}) resolved: {exc}')
-        _put_alarm_state(alarm_key, prior['message_ts'], prior['started_at'], 'RESOLVED')
+        #
+        # Claim BEFORE posting, not after. The old order read the status, posted, then
+        # wrote the tombstone, so two concurrent deliveries both saw ALARM and both
+        # broadcast a full green card into the channel. The claim is a conditional
+        # write, so exactly one delivery wins it and the rest return here having sent
+        # nothing.
+        if not _claim_resolution(alarm_key, event_at):
+            print(f'skipping duplicate or stale OK for {alarm_key}')
+            return
+
+        # Full recovery card, not a one-line summary, so the channel gets the same
+        # detail (duration, final reading, resource) it got when the alarm fired.
+        # Broadcast because a thread reply alone leaves the channel showing red.
+        #
+        # If this raises, the row stays RESOLVING and the Lambda retries. Once the
+        # claim's lease expires the retry re-claims and posts, so a failure here costs
+        # a delay rather than the recovery card.
+        _post_bot(token, payload, thread_ts=prior['message_ts'],
+                  reply_broadcast=True)
+        try:
+            _add_reaction(token, prior['message_ts'], 'white_check_mark')
+        except Exception as exc:  # noqa: BLE001 - a reaction is decoration
+            # Never let a reactions failure (scope, already_reacted, Slack 5xx)
+            # bubble up: the recovery card is already posted, and raising here
+            # would leave the row RESOLVING and re-post it on the Lambda retry.
+            print(f'could not mark {metadata["alarm_name"]} '
+                  f'({prior["message_ts"]}) resolved: {exc}')
+        _put_alarm_state(alarm_key, prior['message_ts'], prior['started_at'],
+                         'RESOLVED', event_at)
         return
 
     _post_bot(token, payload)
