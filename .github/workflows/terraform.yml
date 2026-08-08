@@ -24,10 +24,13 @@ jobs:
       with:
         python-version: '3.12'   # the runtime aws_lambda_function.sns_to_slack declares
 
-    # The suite has no test framework and no fixtures on disk; boto3 is its only
-    # dependency, and only because the module under test imports it at import time.
-    - name: Install boto3
-      run: pip install --disable-pip-version-check boto3
+    # boto3 because the module imports it at import time; moto because the state
+    # machine's correctness lives in DynamoDB ConditionExpressions, and a mock that
+    # asserts "we sent the right request" cannot tell a correct condition from a
+    # nonsense one. Four review rounds found defects here that a mock-only suite
+    # passed clean through.
+    - name: Install test dependencies
+      run: pip install --disable-pip-version-check boto3 'moto[dynamodb]'
 
     - name: sns_to_slack
       run: python3 test_sns_to_slack.py
@@ -36,18 +39,15 @@ jobs:
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
-    # Chained so the lambda suite actually blocks a merge. The three "Terraform (...)"
-    # contexts are required by master's branch protection and "Lambda tests" is not, so
-    # left parallel a red lambda run would sit next to three green required checks and
-    # merge anyway.
+    # "Lambda tests" is a required context on master in its own right, so this coupling
+    # is belt-and-braces rather than the primary gate. It stays because the two together
+    # cover each other: branch protection can be edited in the UI without touching the
+    # repo, and this file cannot enforce itself.
     #
-    # needs: alone does not fix that - GitHub treats a SKIPPED required context as
-    # satisfied, so a failed dependency would skip these three and still leave the PR
-    # mergeable. always() keeps them running and the guard step below fails them
-    # explicitly, which is what turns a red lambda run into three red required checks.
-    #
-    # The clean fix is adding "Lambda tests" to the required set in branch protection;
-    # do that and this whole coupling can come out.
+    # Both halves are needed. needs: alone would not gate, because GitHub treats a
+    # SKIPPED required context as satisfied - a failed dependency would skip the three
+    # Terraform contexts and leave the PR mergeable. always() keeps them running and the
+    # guard step below fails them explicitly instead.
     needs: lambda-tests
     if: ${{ always() }}
     strategy:

@@ -42,6 +42,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+import uuid
 import boto3
 
 # Routine DMS lifecycle chatter, dropped before it reaches Slack.
@@ -107,10 +108,6 @@ STATE_TTL_SECONDS = 30 * 24 * 3600
 # lets the retry re-claim and post, while a lease longer than that would make the
 # retry give up on a card that was never actually sent.
 CLAIM_LEASE_SECONDS = 60
-
-# The header text a recovery card carries, used to recognise one already sitting in an
-# incident thread. Kept next to the card renderer's own string so the two move together.
-RECOVERY_MARKER = '✅ RESOLVED'
 
 # How far back to look in channel history when checking whether a red root was already
 # posted by an attempt that died. Only has to cover the gap between a crash and the
@@ -430,8 +427,20 @@ def _slack_get(method, token, params):
     return result
 
 
+def _transition_id(alarm_key, state, changed_at):
+    """Identity of ONE alarm transition, stamped into the card's Slack metadata.
+
+    Substring matching on the alarm name or on "RESOLVED" cannot tell this incident's
+    card from the last one's: during a fast re-alarm the previous red root and the
+    previous green broadcast both still sit in the window and both still contain the
+    same words. A takeover could therefore adopt the OLD card as this incident's root
+    and suppress the new one. An exact per-transition id has no such ambiguity.
+    """
+    return f'{alarm_key}|{state}|{changed_at or "-"}'
+
+
 def _already_posted(token, marker, thread_ts=None, since=None):
-    """The ts of an existing message carrying `marker`, or None.
+    """The ts of an existing message whose metadata carries `marker`, or None.
 
     Returns the timestamp rather than a bool because the ALARM takeover path needs it:
     finding the root someone else posted is only half the job, the row still has to be
@@ -448,18 +457,21 @@ def _already_posted(token, marker, thread_ts=None, since=None):
     card is an annoyance, a missing one is the bug this whole change exists to prevent.
     That degradation is why the scope is not a hard dependency.
 
-    Only bot-authored messages count. The channel-history search matches on the alarm
-    name, and a human typing that name while triaging would otherwise suppress the very
-    card they were talking about - a fail-CLOSED path hiding inside a fail-open design.
+    Matching is on Slack message METADATA, an exact equality against the transition id,
+    and only on bot-authored messages. Both matter: a human typing the alarm name while
+    triaging would otherwise suppress the card they were discussing, and a substring
+    search cannot distinguish this transition's card from the previous incident's.
     """
     try:
         if thread_ts:
             result = _slack_get('conversations.replies', token, {
-                'channel': SLACK_CHANNEL_ID, 'ts': thread_ts, 'limit': 200})
+                'channel': SLACK_CHANNEL_ID, 'ts': thread_ts, 'limit': 200,
+                'include_all_metadata': 'true'})
             # [0] is the root itself, which is not a recovery.
             messages = (result.get('messages') or [])[1:]
         else:
-            params = {'channel': SLACK_CHANNEL_ID, 'limit': 200}
+            params = {'channel': SLACK_CHANNEL_ID, 'limit': 200,
+                      'include_all_metadata': 'true'}
             if since:
                 params['oldest'] = since
             messages = _slack_get('conversations.history', token, params).get(
@@ -468,13 +480,20 @@ def _already_posted(token, marker, thread_ts=None, since=None):
         print(f'could not check Slack for an existing "{marker}" post: {exc}')
         return None
     for message in messages:
-        if message.get('bot_id') and marker in json.dumps(message):
+        payload = (message.get('metadata') or {}).get('event_payload') or {}
+        if message.get('bot_id') and payload.get('transition') == marker:
             return message.get('ts')
     return None
 
 
-def _post_bot(token, payload, thread_ts=None, reply_broadcast=False):
+def _post_bot(token, payload, thread_ts=None, reply_broadcast=False,
+              transition=None):
     body = {'channel': SLACK_CHANNEL_ID, **payload}
+    if transition:
+        # Carried in metadata rather than the visible text so a retry can recognise its
+        # own earlier card exactly, without putting a correlation id in front of humans.
+        body['metadata'] = {'event_type': 'cloudwatch_alarm',
+                            'event_payload': {'transition': transition}}
     if thread_ts:
         body['thread_ts'] = thread_ts
     if reply_broadcast:
@@ -525,10 +544,16 @@ def _get_alarm_state(alarm_key):
     ).get('Item')
     if not item:
         return None
+    # MessageTs and StartedAt do not exist on a row that has been claimed but whose card
+    # has not been posted yet. Reading them unconditionally raised KeyError, so every
+    # retry of a died-mid-post invocation crashed BEFORE it could take the claim over -
+    # the lease could never fire and the card was lost for good.
     return {
-        'message_ts': item['MessageTs']['S'],
-        'started_at': item['StartedAt']['S'],
+        'message_ts': item.get('MessageTs', {}).get('S'),
+        'started_at': item.get('StartedAt', {}).get('S'),
         'status': item['Status']['S'],
+        'claim_token': item.get('ClaimToken', {}).get('S'),
+        'last_event_state': item.get('LastEventState', {}).get('S'),
         # Absent on rows written before this field existed. None means "unknown", which
         # every ordering check below treats as "do not suppress" - an unordered event
         # posts rather than being dropped.
@@ -563,17 +588,27 @@ def _event_epoch(message_json):
     return parsed.timestamp()
 
 
-def _is_stale(event_at, prior):
-    """True when this delivery is older than the one the row already reflects.
+def _is_stale(event_at, prior, state=None):
+    """True when this delivery must not be applied over what the row already reflects.
 
-    Equal timestamps are NOT stale: that is the same event delivered twice, and the
-    duplicate handling for it differs per path (the ALARM path edits, the OK path is
-    gated by the claim below).
+    Older than the watermark is stale, plainly.
+
+    Equal to the watermark is stale ONLY when the state differs. An equal timestamp with
+    the SAME state is a redelivery of one event and each path handles it (the ALARM path
+    edits, the OK path is gated by the claim). An equal timestamp with a DIFFERENT state
+    is two conflicting truths about one instant, and nothing here can order them - so
+    whichever happens to arrive second would win, and an ALARM could reopen a row that an
+    OK resolved at the same second. Refusing both is the only deterministic answer.
     """
     if event_at is None or not prior:
         return False
     last = prior.get('last_event_at')
-    return last is not None and event_at < last
+    if last is None:
+        return False
+    if event_at < last:
+        return True
+    last_state = prior.get('last_event_state')
+    return event_at == last and last_state is not None and state != last_state
 
 
 def classify_dms_event(detail_message, detail_type, resource_arn, category=''):
@@ -699,15 +734,17 @@ def _claim_resolution(alarm_key, event_at):
     if not SLACK_STATE_TABLE:
         return None
     now = int(time.time())
+    token = uuid.uuid4().hex
     names = {'#s': 'Status'}
     values = {
         ':resolving': {'S': 'RESOLVING'},
+        ':token': {'S': token},
         ':alarm': {'S': 'ALARM'},
         ':now': {'N': str(now)},
         ':lease': {'N': str(now - CLAIM_LEASE_SECONDS)},
     }
     condition = ('(#s = :alarm OR (#s = :resolving AND ClaimedAt < :lease))')
-    update = 'SET #s = :resolving, ClaimedAt = :now'
+    update = 'SET #s = :resolving, ClaimedAt = :now, ClaimToken = :token'
     # Only order when the event carries a usable timestamp. Without one there is nothing
     # to compare, and refusing to claim would drop the recovery entirely.
     if event_at is not None:
@@ -724,7 +761,7 @@ def _claim_resolution(alarm_key, event_at):
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
-        return now
+        return token
     except client.exceptions.ConditionalCheckFailedException:
         # The condition fails for three different reasons and they do NOT share an
         # outcome, so read the row rather than assuming the benign one.
@@ -778,8 +815,10 @@ def _claim_alarm_root(alarm_key, event_at):
     if not SLACK_STATE_TABLE:
         return None
     now = int(time.time())
+    token = uuid.uuid4().hex
     values = {
         ':posting': {'S': 'ALARM_POSTING'},
+        ':token': {'S': token},
         ':resolved': {'S': 'RESOLVED'},
         ':resolving': {'S': 'RESOLVING'},
         ':now': {'N': str(now)},
@@ -787,7 +826,7 @@ def _claim_alarm_root(alarm_key, event_at):
     }
     condition = ('(attribute_not_exists(AlarmKey) OR #s = :resolved OR #s = :resolving'
                  ' OR (#s = :posting AND ClaimedAt < :lease))')
-    update = 'SET #s = :posting, ClaimedAt = :now'
+    update = 'SET #s = :posting, ClaimedAt = :now, ClaimToken = :token'
     if event_at is not None:
         values[':evt'] = {'N': repr(event_at)}
         condition += ' AND (attribute_not_exists(LastEventAt) OR LastEventAt <= :evt)'
@@ -802,7 +841,7 @@ def _claim_alarm_root(alarm_key, event_at):
             ExpressionAttributeNames={'#s': 'Status'},
             ExpressionAttributeValues=values,
         )
-        return now
+        return token
     except client.exceptions.ConditionalCheckFailedException:
         prior = _get_alarm_state(alarm_key)
         if prior and prior.get('status') == 'ALARM_POSTING':
@@ -821,22 +860,24 @@ def _finalize_alarm_root(alarm_key, claim_token, message_ts, started_at, event_a
     if not SLACK_STATE_TABLE:
         return False
     values = {':posting': {'S': 'ALARM_POSTING'},
-              ':claim': {'N': str(claim_token)},
+              ':claim': {'S': str(claim_token)},
               ':alarm': {'S': 'ALARM'},
               ':ts': {'S': message_ts},
+              ':state': {'S': 'ALARM'},
               ':sa': {'S': started_at or datetime.now(timezone.utc).isoformat()}}
-    update = 'SET #s = :alarm, MessageTs = :ts, StartedAt = :sa REMOVE ExpiresAt'
+    update = ('SET #s = :alarm, MessageTs = :ts, StartedAt = :sa,'
+              ' LastEventState = :state REMOVE ExpiresAt')
     if event_at is not None:
         values[':evt'] = {'N': repr(event_at)}
-        update = ('SET #s = :alarm, MessageTs = :ts, StartedAt = :sa, LastEventAt = :evt'
-                  ' REMOVE ExpiresAt')
+        update = ('SET #s = :alarm, MessageTs = :ts, StartedAt = :sa,'
+                  ' LastEventState = :state, LastEventAt = :evt REMOVE ExpiresAt')
     client = boto3.client('dynamodb')
     try:
         client.update_item(
             TableName=SLACK_STATE_TABLE,
             Key={'AlarmKey': {'S': alarm_key}},
             UpdateExpression=update,
-            ConditionExpression='#s = :posting AND ClaimedAt = :claim',
+            ConditionExpression='#s = :posting AND ClaimToken = :claim',
             ExpressionAttributeNames={'#s': 'Status'},
             ExpressionAttributeValues=values,
         )
@@ -864,10 +905,11 @@ def _finalize_resolution(alarm_key, claim_token, event_at):
     if not SLACK_STATE_TABLE:
         return False
     values = {':resolving': {'S': 'RESOLVING'},
-              ':claim': {'N': str(claim_token)},
+              ':claim': {'S': str(claim_token)},
               ':resolved': {'S': 'RESOLVED'},
+              ':state': {'S': 'OK'},
               ':expires': {'N': str(int(time.time()) + STATE_TTL_SECONDS)}}
-    update = 'SET #s = :resolved, ExpiresAt = :expires'
+    update = 'SET #s = :resolved, ExpiresAt = :expires, LastEventState = :state'
     if event_at is not None:
         values[':evt'] = {'N': repr(event_at)}
         update += ', LastEventAt = :evt'
@@ -877,7 +919,7 @@ def _finalize_resolution(alarm_key, claim_token, event_at):
             TableName=SLACK_STATE_TABLE,
             Key={'AlarmKey': {'S': alarm_key}},
             UpdateExpression=update,
-            ConditionExpression='#s = :resolving AND ClaimedAt = :claim',
+            ConditionExpression='#s = :resolving AND ClaimToken = :claim',
             ExpressionAttributeNames={'#s': 'Status'},
             ExpressionAttributeValues=values,
         )
@@ -890,31 +932,43 @@ def _finalize_resolution(alarm_key, claim_token, event_at):
         return False
 
 
-def _put_alarm_state(alarm_key, message_ts, started_at, status, event_at=None,
-                     prior=None):
-    if not SLACK_STATE_TABLE:
-        return
-    item = {
-        'AlarmKey': {'S': alarm_key},
-        'MessageTs': {'S': message_ts},
-        'StartedAt': {'S': started_at or datetime.now(timezone.utc).isoformat()},
-        'Status': {'S': status},
-    }
-    # Carry the watermark forward when this event cannot be ordered. Writing the row
-    # without it would DELETE a perfectly good LastEventAt, so one malformed timestamp
-    # would disable ordering for every event after it.
-    watermark = event_at if event_at is not None else (prior or {}).get('last_event_at')
-    if watermark is not None:
-        item['LastEventAt'] = {'N': repr(watermark)}
-    # TTL only on the tombstone. The row is a tombstone once RESOLVED, but while an alarm
-    # is still ALARM it is the live correlation to the root card, and expiring it strands
-    # the incident: the eventual recovery finds no prior, so it posts an unthreaded green
-    # root with DURATION: Unknown and no reaction - the exact record loss this change
-    # exists to stop, just on a slower clock. An alarm can legitimately burn longer than
-    # the TTL, so the row must outlive it.
-    if status != 'ALARM':
-        item['ExpiresAt'] = {'N': str(int(time.time()) + STATE_TTL_SECONDS)}
-    boto3.client('dynamodb').put_item(TableName=SLACK_STATE_TABLE, Item=item)
+def _touch_alarm_watermark(alarm_key, message_ts, event_at):
+    """Advance the watermark on a repeat ALARM. True if the row was still ours to touch.
+
+    This was a whole-item PutItem, which is how a paused duplicate of an OLD incident
+    could resurrect it: read the row, pause, the incident resolves, a new incident claims
+    and finalises its own root, then the duplicate lands and replaces the whole row with
+    the old root and the old event time. The regressed watermark then made a delayed OK
+    look newer than the live incident, and it closed it.
+
+    A duplicate needs nothing written except the watermark, so touch only that - and only
+    while the row still holds the same root in the same state. Losing that condition is
+    not an error: the edit we just made was to a message that is still correct history,
+    and whatever superseded us is the state that should stand.
+    """
+    if not SLACK_STATE_TABLE or event_at is None:
+        return False
+    client = boto3.client('dynamodb')
+    try:
+        client.update_item(
+            TableName=SLACK_STATE_TABLE,
+            Key={'AlarmKey': {'S': alarm_key}},
+            UpdateExpression='SET LastEventAt = :evt, LastEventState = :state',
+            ConditionExpression=('#s = :alarm AND MessageTs = :ts'
+                                 ' AND (attribute_not_exists(LastEventAt)'
+                                 ' OR LastEventAt <= :evt)'),
+            ExpressionAttributeNames={'#s': 'Status'},
+            ExpressionAttributeValues={
+                ':alarm': {'S': 'ALARM'},
+                ':ts': {'S': message_ts},
+                ':state': {'S': 'ALARM'},
+                ':evt': {'N': repr(event_at)},
+            },
+        )
+        return True
+    except client.exceptions.ConditionalCheckFailedException:
+        print(f'{alarm_key} moved on before the duplicate ALARM could touch it')
+        return False
 
 
 def _deliver_cloudwatch_bot(token, message_json, identifier, region,
@@ -929,9 +983,24 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
     # describes has already been superseded. Applying it would rewrite history with an
     # older truth: a stale ALARM reopens an incident that closed, a stale OK closes one
     # that is still burning and then suppresses its real recovery.
-    if _is_stale(event_at, prior):
+    if _is_stale(event_at, prior, state):
         print(f'skipping stale {state} for {alarm_key} '
               f'(event {event_at} older than {prior.get("last_event_at")})')
+        return
+
+    # An event with no usable timestamp cannot be placed against the row at all. It used
+    # to fall straight through into the claim, which meant a delayed unparseable OK could
+    # close a live incident and suppress its real recovery - the very thing ordering was
+    # added to stop, walking in through the unordered door. Fail open for VISIBILITY
+    # only: post it so nothing is lost, but do not claim, react to, or rewrite the
+    # incident row. There is nothing to correlate it to.
+    if event_at is None and prior and prior.get('status') in ('ALARM', 'ALARM_POSTING',
+                                                              'RESOLVING'):
+        print(f'{alarm_key}: {state} carries no usable StateChangeTime; posting '
+              f'uncorrelated rather than mutating a live incident')
+        payload, _ = cloudwatch_card(
+            message_json, identifier, region, account_id, account_alias, None)
+        _post_bot(token, payload)
         return
 
     # A newly firing incident may reuse an alarm key whose last row is a resolved
@@ -941,6 +1010,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
                   (state != 'ALARM' or prior.get('status') == 'ALARM') else None)
     payload, metadata = cloudwatch_card(
         message_json, identifier, region, account_id, account_alias, started_at)
+    transition = _transition_id(alarm_key, state, metadata['changed_at'])
 
     if state == 'ALARM':
         if prior and prior.get('status') == 'ALARM':
@@ -950,7 +1020,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
             # needed: editing the same message with the same payload is idempotent.
             message_ts = prior['message_ts']
             _update_bot(token, message_ts, payload)
-            _put_alarm_state(alarm_key, message_ts, started_at, 'ALARM', event_at, prior)
+            _touch_alarm_watermark(alarm_key, message_ts, event_at)
             return
 
         # A brand new root. Claim before posting for the same reason the resolve does:
@@ -969,7 +1039,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         existing_ts = None
         if prior and prior.get('status') == 'ALARM_POSTING':
             existing_ts = _already_posted(
-                token, metadata['alarm_name'],
+                token, transition,
                 since=str(int(time.time()) - STALE_POST_WINDOW))
 
         started_at = metadata['changed_at'] or datetime.now(timezone.utc).isoformat()
@@ -984,7 +1054,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
                                  event_at)
             return
 
-        message_ts = _post_bot(token, payload)
+        message_ts = _post_bot(token, payload, transition=transition)
         _finalize_alarm_root(alarm_key, claim_token, message_ts, started_at, event_at)
         return
 
@@ -1010,10 +1080,17 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         # answer, and only the thread needs reading. Without this the lease turns every
         # crash into a second green card.
         if (prior.get('status') == 'RESOLVING'
-                and _already_posted(token, RECOVERY_MARKER,
+                and _already_posted(token, transition,
                                     thread_ts=prior['message_ts'])):
             print(f'recovery for {metadata["alarm_name"]} is already in the thread; '
                   f'finalising without posting a second one')
+            # The attempt that died may have posted the card and gone before reacting,
+            # so the root would keep its red-only scrollback forever. reactions.add is
+            # idempotent enough for this - already_reacted is caught like any other.
+            try:
+                _add_reaction(token, prior['message_ts'], 'white_check_mark')
+            except Exception as exc:  # noqa: BLE001 - a reaction is decoration
+                print(f'could not mark {metadata["alarm_name"]} resolved: {exc}')
             _finalize_resolution(alarm_key, claim_token, event_at)
             return
 
@@ -1025,7 +1102,7 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         # claim's lease expires the retry re-claims, finds the card above, and finalises
         # without duplicating it.
         _post_bot(token, payload, thread_ts=prior['message_ts'],
-                  reply_broadcast=True)
+                  reply_broadcast=True, transition=transition)
         try:
             _add_reaction(token, prior['message_ts'], 'white_check_mark')
         except Exception as exc:  # noqa: BLE001 - a reaction is decoration

@@ -280,9 +280,9 @@ def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
     updates, posts, states, reactions, claims, finals = [], [], [], [], [], []
     root_claims, root_finals, dedupes = [], [], []
 
-    def _post(token, payload, thread_ts=None, reply_broadcast=False):
+    def _post(token, payload, thread_ts=None, reply_broadcast=False, transition=None):
         posts.append({'payload': payload, 'thread_ts': thread_ts,
-                      'broadcast': reply_broadcast})
+                      'broadcast': reply_broadcast, 'transition': transition})
         return '333.444'
 
     def _react(token, message_ts, name):
@@ -325,8 +325,8 @@ def deliver_cloudwatch(state, prior, reaction_error=None, claim=True,
          mock.patch.object(sns_to_slack, '_claim_alarm_root', side_effect=_claim_root), \
          mock.patch.object(sns_to_slack, '_finalize_alarm_root', side_effect=_finalize_root), \
          mock.patch.object(sns_to_slack, '_already_posted', side_effect=_posted), \
-         mock.patch.object(sns_to_slack, '_put_alarm_state',
-                           side_effect=lambda *args: states.append(args)):
+         mock.patch.object(sns_to_slack, '_touch_alarm_watermark',
+                           side_effect=lambda *args: states.append(args) or True):
         sns_to_slack._deliver_cloudwatch_bot(
             'xoxb', fixture, 'acme-prod', 'us-east-1', '111', 'prod')
     return SimpleNamespace(
@@ -577,7 +577,11 @@ def lifecycle_checks():
         ("repeat ALARM edits the root", len(r.updates) == 1 and r.updates[0][0] == "111.222"),
         ("repeat ALARM posts nothing new", r.posts == []),
         ("repeat ALARM adds no reaction", r.reactions == []),
-        ("repeat ALARM stays ALARM", bool(r.states) and r.states[0][3] == "ALARM"),
+        # The blind whole-item write is gone: a duplicate now touches ONLY the
+        # watermark, conditional on the row still holding this same root.
+        ("repeat ALARM touches only the watermark, for its own root",
+         r.states == [(r.states[0][0], "111.222", r.states[0][2])]
+         if r.states else False),
         ("repeat ALARM never claims a resolution", r.claims == []),
     ])
 
@@ -623,10 +627,18 @@ def lifecycle_checks():
                  "status": "RESOLVING"}
     r = deliver_cloudwatch("OK", resolving, already_posted=True)
     checks.extend([
-        ("a resolve takeover checks the thread", r.dedupes == [("✅ RESOLVED", "111.222")]),
+        # Matched on the transition id in message metadata, not on "RESOLVED" text:
+        # a substring cannot tell this incident's card from the previous one's.
+        ("a resolve takeover checks the thread for THIS transition",
+         len(r.dedupes) == 1 and r.dedupes[0][1] == "111.222"
+         and r.dedupes[0][0].startswith("arn:aws:cloudwatch")
+         and r.dedupes[0][0].endswith("|OK|2026-08-01T12:08:00.000+0000")),
         ("a recovery already in the thread is not posted twice", r.posts == []),
         ("a recovery already in the thread still finalises", len(r.finals) == 1),
-        ("a recovery already in the thread adds no second reaction", r.reactions == []),
+        # The attempt that died may have posted and gone before reacting, leaving the
+        # root red forever in scrollback. reactions.add tolerates already_reacted.
+        ("a recovery already in the thread is still reacted to",
+         r.reactions == [("111.222", "white_check_mark")]),
     ])
 
     r = deliver_cloudwatch("OK", resolving, already_posted=False)
@@ -655,7 +667,11 @@ def lifecycle_checks():
     r = deliver_cloudwatch("ALARM", None, claim=False, state_table='')
     checks.extend([
         ("no state table still posts the ALARM root", len(r.posts) == 1),
-        ("no state table writes no state", r.root_finals == [] or True),
+        # This previously read `r.root_finals == [] or True`, which can never fail. The
+        # real no-op with no table is asserted against DynamoDB in dynamo_checks; what
+        # matters HERE is only that the card still goes out.
+        ("no state table still posts unthreaded",
+         r.posts and r.posts[0]['thread_ts'] is None),
     ])
 
     r = deliver_cloudwatch("OK", firing, claim=False, state_table='')
@@ -716,12 +732,17 @@ def ordering_checks():
         "OK", legacy, changed_at=older)
     checks.append(("a row with no recorded event time still resolves", len(r.posts) == 1))
 
-    r = deliver_cloudwatch(
-        "OK", open_incident, changed_at="not a timestamp")
+    # An event with no usable timestamp cannot be placed against the row, so it fails
+    # open for VISIBILITY only: post it, but do not claim, react to, or rewrite a live
+    # incident. Letting it through to the claim is how a delayed unparseable OK used to
+    # close an incident that was still burning.
+    r = deliver_cloudwatch("OK", open_incident, changed_at="not a timestamp")
     checks.extend([
-        ("an unparseable event time still resolves", len(r.posts) == 1),
-        ("an unparseable event time claims with None",
-         r.claims == [(r.claims[0][0], None)] if r.claims else False),
+        ("an unparseable event time still posts something", len(r.posts) == 1),
+        ("it posts uncorrelated, not threaded", r.posts[0]['thread_ts'] is None),
+        ("it never claims the live incident", r.claims == []),
+        ("it does not react on the live root", r.reactions == []),
+        ("it writes no state", r.states == [] and r.finals == []),
     ])
 
     checks.extend([
@@ -761,342 +782,293 @@ def ordering_checks():
     return checks
 
 
-def claim_checks():
-    """The conditional write _claim_resolution actually sends.
+# --- DynamoDB-backed checks -------------------------------------------------------
+#
+# Everything above this line runs on mocks, which is right for routing and rendering.
+# The state machine is different: its correctness lives in ConditionExpressions that
+# DynamoDB evaluates, and a mock that asserts "we sent the right request" cannot tell a
+# correct condition from a nonsense one. Four review rounds found defects here that the
+# mock suite passed clean through - a same-second token collision, a row shape no reader
+# could parse, a blind write that resurrected a closed incident. All of them are only
+# visible when something actually executes the condition, so these run against moto.
 
-    DynamoDB evaluates the condition, not this suite, so what is pinned here is the
-    request: the r.states it will accept, the lease comparison that lets a dead claim be
-    taken over, and the event-time guard. A fake client stands in for the service and
-    reports whether the condition would have been checked at all.
-    """
-    checks = []
-    calls = []
+try:
+    import moto
+    _MOTO = True
+except ImportError:  # pragma: no cover - the CI job installs it
+    _MOTO = False
 
-    class _FakeDDB:
-        exceptions = _FakeExceptions()
 
-        def __init__(self, fail=False):
-            self.fail = fail
+def _with_table(fn):
+    """Run fn(client, table) against a fresh in-memory DynamoDB table."""
+    import boto3
+    with moto.mock_aws():
+        client = boto3.client('dynamodb', region_name='us-east-1',
+                              aws_access_key_id='x', aws_secret_access_key='x')
+        client.create_table(
+            TableName='slack-alarm-state',
+            KeySchema=[{'AttributeName': 'AlarmKey', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'AlarmKey',
+                                   'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST')
+        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'slack-alarm-state'):
+            return fn(client, 'slack-alarm-state')
 
-        def update_item(self, **kwargs):
-            calls.append(kwargs)
-            if self.fail:
-                raise _ConditionalCheckFailedException("condition not met")
 
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
-        won = sns_to_slack._claim_resolution('alarm-key', 1754049600.0)
+def _row(client):
+    got = client.get_item(TableName='slack-alarm-state',
+                          Key={'AlarmKey': {'S': 'k'}}).get('Item') or {}
+    return {k: list(v.values())[0] for k, v in got.items()}
 
-    sent = calls[0] if calls else {}
-    condition = sent.get('ConditionExpression', '')
-    values = sent.get('ExpressionAttributeValues', {})
-    checks.extend([
-        ("a satisfied condition returns a claim token", bool(won) and won is not True),
-        ("the claim writes RESOLVING",
-         ':resolving' in values and values[':resolving'] == {'S': 'RESOLVING'}),
-        ("the claim accepts an open ALARM", '#s = :alarm' in condition),
-        ("the claim accepts a RESOLVING whose lease expired",
-         '#s = :resolving AND ClaimedAt < :lease' in condition),
-        ("the lease cutoff is CLAIM_LEASE_SECONDS old",
-         int(values[':now']['N']) - int(values[':lease']['N'])
-         == sns_to_slack.CLAIM_LEASE_SECONDS),
-        ("the claim refuses an older event", 'LastEventAt <= :evt' in condition),
-        ("the claim tolerates a row that predates LastEventAt",
-         'attribute_not_exists(LastEventAt)' in condition),
-        ("the claim records the event time", values.get(':evt') is not None),
-    ])
 
-    # A rejected condition has three possible causes and only two of them mean "post
-    # nothing". Which one applies is read off the row, so each is driven separately.
-    def claim_against(row):
-        calls.clear()
-        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-             mock.patch.object(sns_to_slack.boto3, 'client',
-                               return_value=_FakeDDB(fail=True)), \
-             mock.patch.object(sns_to_slack, '_get_alarm_state', return_value=row):
-            return sns_to_slack._claim_resolution('alarm-key', 1754049600.0)
-
-    resolved_row = {'message_ts': '1.2', 'started_at': 'x', 'status': 'RESOLVED',
-                    'last_event_at': 1754049600.0}
-    still_firing = dict(resolved_row, status='ALARM')
-    checks.extend([
-        ("an already-RESOLVED row loses the claim without raising",
-         claim_against(resolved_row) is None),
-        ("a stale event against a live ALARM row loses the claim without raising",
-         claim_against(still_firing) is None),
-        ("a vanished row loses the claim without raising",
-         claim_against(None) is None),
-    ])
-
-    # A row mid-root-post cannot satisfy the resolve condition either, and returning
-    # quietly would let the caller read that as "duplicate or stale" and drop the
-    # recovery permanently - nothing else revisits it.
-    posting_row = dict(resolved_row, status='ALARM_POSTING')
-    raised_posting = False
-    try:
-        claim_against(posting_row)
-    except RuntimeError:
-        raised_posting = True
-    checks.append(("an in-flight ALARM_POSTING row raises rather than dropping the OK",
-                   raised_posting))
-
-    # THE one that matters. An unexpired RESOLVING claim means another execution owns
-    # this resolution and may have died mid-post. Returning False here would end the
-    # invocation successfully, which drops the event from Lambda's async retry queue -
-    # and Lambda's first retry lands at about the same minute as the lease, so the very
-    # retry meant to take the claim over is the one that would be discarded. The card
-    # would be lost for good. It must raise so the retry gets to re-read.
-    held = dict(resolved_row, status='RESOLVING')
-    raised = False
-    try:
-        claim_against(held)
-    except RuntimeError:
-        raised = True
-    checks.append(("an unexpired RESOLVING claim raises so Lambda retries", raised))
-
-    # No event time: there is nothing to order by, so the guard must come off entirely
-    # rather than compare against a missing value and reject every claim.
-    calls.clear()
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
-        sns_to_slack._claim_resolution('alarm-key', None)
-    unordered = calls[0]['ConditionExpression'] if calls else ''
-    checks.extend([
-        ("an unorderable event drops the time guard", 'LastEventAt' not in unordered),
-        ("an unorderable event still checks the status", '#s = :alarm' in unordered),
-    ])
-
-    # The webhook path has no table. Claiming must be a no-op rather than an error, and
-    # must report False so nothing downstream believes it owns a resolution.
-    calls.clear()
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', ''):
-        checks.append(("no table configured means no claim and no call",
-                       sns_to_slack._claim_resolution('k', 1.0) is None and calls == []))
-
-    # A real service error is not a lost claim and must not be swallowed into one.
-    calls.clear()
-
-    class _BrokenDDB:
-        exceptions = _FakeExceptions()
-
-        def update_item(self, **kwargs):
-            raise RuntimeError("ProvisionedThroughputExceededException")
-
-    raised = False
-    try:
-        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-             mock.patch.object(sns_to_slack.boto3, 'client', return_value=_BrokenDDB()):
-            sns_to_slack._claim_resolution('k', 1.0)
-    except RuntimeError:
-        raised = True
-    checks.append(("a non-condition failure propagates", raised))
-
-    # Human chatter must not suppress an incident card. The channel search matches on
-    # the alarm name, so someone typing that name while triaging would otherwise stop
-    # the very card they were talking about - a fail-CLOSED path inside a fail-open
-    # design. Only the bot's own messages count.
-    def read_returning(messages):
+def dedupe_checks():
+    """What _already_posted will and will not treat as an existing card."""
+    def read_returning(messages, marker='arn:k|ALARM|T1'):
         with mock.patch.object(sns_to_slack, 'SLACK_CHANNEL_ID', 'C1'), \
              mock.patch.object(sns_to_slack, '_slack_get',
                                return_value={'messages': messages}):
-            return sns_to_slack._already_posted('xoxb', 'acme-prod-api-5xx')
+            return sns_to_slack._already_posted('xoxb', marker)
 
-    checks.extend([
-        ("a human mentioning the alarm name does not count as a posted card",
-         read_returning([{'user': 'U123', 'ts': '9.9',
-                          'text': 'is acme-prod-api-5xx still firing?'}])
-         is None),
-        ("the bot's own card does count, and returns its ts",
-         read_returning([{'bot_id': 'B1', 'ts': '5.6',
-                          'text': 'CRITICAL acme-prod-api-5xx'}]) == '5.6'),
-        ("an unrelated bot post does not count",
-         read_returning([{'bot_id': 'B1', 'ts': '5.6', 'text': 'some other alarm'}])
-         is None),
-    ])
+    def bot_card(transition, ts='5.6'):
+        return {'bot_id': 'B1', 'ts': ts, 'text': 'CRITICAL acme-prod-api-5xx',
+                'metadata': {'event_type': 'cloudwatch_alarm',
+                             'event_payload': {'transition': transition}}}
 
-    # A read failure must fail OPEN - returning a ts would suppress a card that was
-    # never sent.
+    checks = [
+        ("this transition's own card is found, and its ts returned",
+         read_returning([bot_card('arn:k|ALARM|T1')]) == '5.6'),
+        # The reason substring matching had to go: during a fast re-alarm the previous
+        # incident's red root and green broadcast are both still in the window and both
+        # still contain the alarm name. Adopting one of those as this incident's root
+        # suppresses the card that actually needed sending.
+        ("the PREVIOUS firing's card is not adopted",
+         read_returning([bot_card('arn:k|ALARM|T0')]) is None),
+        ("a recovery card is not adopted as a root",
+         read_returning([bot_card('arn:k|OK|T1')]) is None),
+        # A human typing the alarm name while triaging must not suppress the card they
+        # are talking about - fail-closed hiding inside a fail-open design.
+        ("a human message is never a match",
+         read_returning([{'user': 'U1', 'ts': '9.9',
+                          'text': 'is acme-prod-api-5xx still firing?',
+                          'metadata': {'event_payload':
+                                       {'transition': 'arn:k|ALARM|T1'}}}]) is None),
+        # Matching must be equality on the metadata field, not "does this id appear
+        # anywhere in the message". A card that merely QUOTES another transition's id -
+        # or whose own id contains this one as a prefix - is not this transition's card.
+        ("an id quoted in the text is not a match when the metadata differs",
+         read_returning([{'bot_id': 'B1', 'ts': '7.7',
+                          'text': 'retrying arn:k|ALARM|T1',
+                          'metadata': {'event_payload':
+                                       {'transition': 'arn:k|ALARM|T9'}}}]) is None),
+        ("a longer id containing this one as a prefix is not a match",
+         read_returning([bot_card('arn:k|ALARM|T10')], marker='arn:k|ALARM|T1') is None),
+        ("a bot message with no metadata is not a match",
+         read_returning([{'bot_id': 'B1', 'ts': '5.6', 'text': 'acme-prod-api-5xx'}])
+         is None),
+    ]
+
+    # A read failure must fail OPEN: returning a ts would suppress a card never sent.
     with mock.patch.object(sns_to_slack, 'SLACK_CHANNEL_ID', 'C1'), \
          mock.patch.object(sns_to_slack, '_slack_get',
                            side_effect=RuntimeError('missing_scope')):
         checks.append(("a failed history read fails open",
                        sns_to_slack._already_posted('xoxb', 'x') is None))
-    return checks
 
-
-def finalize_checks():
-    """Finalizing a resolution must not clobber an incident that superseded it.
-
-    The flap this exists for: OK1 r.claims ALARM1 and starts posting; ALARM2 arrives, sees
-    a RESOLVING row, r.posts its own red root and writes ALARM; OK1 then finishes. An
-    unconditional write there would stamp RESOLVED over the live ALARM2, and ALARM2's
-    real recovery would later find RESOLVED and post nothing - the original bug, moved
-    one step later.
-    """
-    checks = []
-    calls = []
-
-    class _FakeDDB:
-        exceptions = _FakeExceptions()
-
-        def __init__(self, fail=False):
-            self.fail = fail
-
-        def update_item(self, **kwargs):
-            calls.append(kwargs)
-            if self.fail:
-                raise _ConditionalCheckFailedException("superseded")
-
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
-        ok = sns_to_slack._finalize_resolution('alarm-key', 1754049600, 1754049601.0)
-
-    sent = calls[0] if calls else {}
-    condition = sent.get('ConditionExpression', '')
-    values = sent.get('ExpressionAttributeValues', {})
-    update = sent.get('UpdateExpression', '')
+    # The read has to ask for metadata or the match can never succeed.
+    asked = {}
+    with mock.patch.object(sns_to_slack, 'SLACK_CHANNEL_ID', 'C1'), \
+         mock.patch.object(sns_to_slack, '_slack_get',
+                           side_effect=lambda m, t, params: asked.update(
+                               {m: params}) or {'messages': []}):
+        sns_to_slack._already_posted('xoxb', 'x')
+        sns_to_slack._already_posted('xoxb', 'x', thread_ts='1.1')
     checks.extend([
-        ("finalising an owned claim succeeds", ok is True),
-        ("finalising requires the row still be RESOLVING", '#s = :resolving' in condition),
-        ("finalising requires the same claim token", 'ClaimedAt = :claim' in condition),
-        ("the token is the one the claim returned",
-         values.get(':claim') == {'N': '1754049600'}),
-        ("finalising writes RESOLVED", ':resolved' in values and '#s = :resolved' in update),
-        ("finalising sets the tombstone TTL", 'ExpiresAt = :expires' in update),
-        ("the TTL is STATE_TTL_SECONDS out",
-         int(values[':expires']['N']) - int(time.time())
-         > sns_to_slack.STATE_TTL_SECONDS - 60),
-        ("finalising advances the watermark", 'LastEventAt = :evt' in update),
-    ])
-
-    # Superseded: the card is already in the channel, so this is neither an error nor
-    # retryable. Raising would only re-post it; writing anyway would eat the incident.
-    calls.clear()
-    raised = False
-    try:
-        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-             mock.patch.object(sns_to_slack.boto3, 'client',
-                               return_value=_FakeDDB(fail=True)):
-            superseded = sns_to_slack._finalize_resolution('alarm-key', 1754049600, 1.0)
-    except Exception:  # noqa: BLE001 - the point is that this cannot happen
-        raised = True
-        superseded = None
-    checks.extend([
-        ("a superseded finalise reports False", superseded is False),
-        ("a superseded finalise does not raise", not raised),
-    ])
-
-    # An unorderable event must not advance or erase the watermark.
-    calls.clear()
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
-        sns_to_slack._finalize_resolution('alarm-key', 1754049600, None)
-    checks.append(("an unorderable finalise leaves the watermark alone",
-                   'LastEventAt' not in calls[0]['UpdateExpression'] if calls else False))
-
-    # The ALARM root has the same shape and the same hazard: between claiming and
-    # recording the root, a resolve or a newer incident can take the row. Recording it
-    # unconditionally would put a stale MessageTs back on a row that moved on, and every
-    # later recovery would thread under the wrong message.
-    calls.clear()
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
-        root_ok = sns_to_slack._finalize_alarm_root(
-            'alarm-key', 1754049600, '111.222', '2026-08-01T12:00:00+00:00', 1754049601.0)
-    root_sent = calls[0] if calls else {}
-    root_cond = root_sent.get('ConditionExpression', '')
-    root_update = root_sent.get('UpdateExpression', '')
-    root_values = root_sent.get('ExpressionAttributeValues', {})
-    checks.extend([
-        ("finalising an owned root claim succeeds", root_ok is True),
-        ("finalising a root requires the row still be ALARM_POSTING",
-         '#s = :posting' in root_cond),
-        ("finalising a root requires the same claim token",
-         'ClaimedAt = :claim' in root_cond),
-        ("finalising a root records the posted message ts",
-         root_values.get(':ts') == {'S': '111.222'} and 'MessageTs = :ts' in root_update),
-        ("finalising a root flips the row to ALARM", '#s = :alarm' in root_update),
-        # A live incident must not inherit the tombstone TTL from the row it replaced.
-        ("finalising a root clears any tombstone TTL", 'REMOVE ExpiresAt' in root_update),
-    ])
-
-    calls.clear()
-    raised = False
-    try:
-        with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-             mock.patch.object(sns_to_slack.boto3, 'client',
-                               return_value=_FakeDDB(fail=True)):
-            root_lost = sns_to_slack._finalize_alarm_root(
-                'alarm-key', 1754049600, '111.222', 'x', 1.0)
-    except Exception:  # noqa: BLE001
-        raised = True
-        root_lost = None
-    checks.extend([
-        ("a superseded root finalise reports False", root_lost is False),
-        ("a superseded root finalise does not raise", not raised),
+        ("the history read requests metadata",
+         asked.get('conversations.history', {}).get('include_all_metadata') == 'true'),
+        ("the thread read requests metadata",
+         asked.get('conversations.replies', {}).get('include_all_metadata') == 'true'),
     ])
     return checks
 
 
-def watermark_checks():
-    """A malformed event must never delete a good ordering watermark.
-
-    _put_alarm_state replaces the whole item, so writing a row for an event that could
-    not be ordered would drop LastEventAt entirely - and one bad timestamp would then
-    disable ordering for every event after it.
-    """
-    written = []
-
-    class _FakeDDB:
-        def put_item(self, **kwargs):
-            written.append(kwargs['Item'])
-
-    prior = {'message_ts': '1.2', 'started_at': 'x', 'status': 'ALARM',
-             'last_event_at': 1754049600.0}
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
-        sns_to_slack._put_alarm_state('k', '1.2', 'x', 'ALARM', None, prior)
-        sns_to_slack._put_alarm_state('k', '1.2', 'x', 'ALARM', 1754049999.0, prior)
-        sns_to_slack._put_alarm_state('k', '1.2', 'x', 'ALARM', None, None)
-
-    carried, advanced, fresh = written
-    return [
-        ("an unorderable event keeps the previous watermark",
-         carried.get('LastEventAt') == {'N': '1754049600.0'}),
-        ("an orderable event advances the watermark",
-         advanced.get('LastEventAt') == {'N': '1754049999.0'}),
-        ("a first row with no orderable event writes no watermark",
-         'LastEventAt' not in fresh),
-    ]
-
-
-def state_ttl_checks():
-    """Only the tombstone carries a TTL.
-
-    An ALARM row is the live correlation to the red root, not a tombstone. Expiring it
-    strands the incident: the eventual recovery finds no prior and r.posts an unthreaded
-    green root with DURATION: Unknown - the same record loss this change exists to stop,
-    on a slower clock. These drive the real _put_alarm_state and read the item it builds.
-    """
-    written = []
-
-    class _FakeDDB:
-        def put_item(self, **kwargs):
-            written.append(kwargs['Item'])
-
+def dynamo_checks():
+    """The state machine, executed against a real DynamoDB implementation."""
+    if not _MOTO:
+        # Deliberately a FAILURE, not a skip. Without moto none of the conditional
+        # writes are exercised at all, and a suite that silently drops its only real
+        # coverage of them while still reporting green is how this got here.
+        return [("moto is installed so the state machine can be tested for real", False)]
     checks = []
-    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', 'state-table'), \
-         mock.patch.object(sns_to_slack.boto3, 'client', return_value=_FakeDDB()):
-        sns_to_slack._put_alarm_state('k', '111.222', '2026-08-01T12:00:00+00:00', 'ALARM')
-        sns_to_slack._put_alarm_state('k', '111.222', '2026-08-01T12:00:00+00:00', 'RESOLVED')
 
-    alarm_item, resolved_item = written
+    # A claimed-but-unposted row has no MessageTs. Reading it used to raise KeyError,
+    # which crashed every retry BEFORE it could take the claim over - so a died-mid-post
+    # root was lost permanently and the lease never got to matter.
+    def pending_read(client, table):
+        token = sns_to_slack._claim_alarm_root('k', 100.0)
+        return token, sns_to_slack._get_alarm_state('k'), _row(client)
+    token, state, row = _with_table(pending_read)
     checks.extend([
-        ("an ALARM row carries no TTL", 'ExpiresAt' not in alarm_item),
-        ("an ALARM row still records its root ts", alarm_item['MessageTs']['S'] == '111.222'),
-        ("a RESOLVED row carries a TTL", 'ExpiresAt' in resolved_item),
-        ("the RESOLVED TTL is in the future",
-         int(resolved_item['ExpiresAt']['N']) > int(time.time())),
+        ("a fresh root claim succeeds", bool(token)),
+        ("the pending row it writes is readable", state is not None),
+        ("a pending row reports no message ts", state and state['message_ts'] is None),
+        ("a pending row reports its status", state and state['status'] == 'ALARM_POSTING'),
+        ("the claim token is a uuid, not a timestamp",
+         len(token) == 32 and not token.isdigit()),
+        ("the row carries that token", row.get('ClaimToken') == token),
+    ])
+
+    # Two claims inside one wall-clock second must not share an identity. ClaimedAt is
+    # whole seconds, so using it as the token let a stale finalizer satisfy a condition
+    # written for a claim it never held, and close someone else's incident.
+    def two_claims(client, table):
+        a = sns_to_slack._claim_alarm_root('k', 100.0)
+        client.update_item(TableName=table, Key={'AlarmKey': {'S': 'k'}},
+                           UpdateExpression='SET #s = :a',
+                           ExpressionAttributeNames={'#s': 'Status'},
+                           ExpressionAttributeValues={':a': {'S': 'RESOLVED'}})
+        b = sns_to_slack._claim_alarm_root('k', 101.0)
+        return a, b
+    a, b = _with_table(two_claims)
+    checks.append(("two claims in the same second get different tokens", a != b))
+
+    # A finalizer holding a superseded token must not win.
+    def stale_finalize(client, table):
+        first = sns_to_slack._claim_alarm_root('k', 100.0)
+        sns_to_slack._finalize_alarm_root('k', first, '1.1', 'start', 100.0)
+        # A second incident takes the row over. It has to resolve first - a row still
+        # in ALARM is the repeat-delivery path, not a new incident.
+        ok = sns_to_slack._claim_resolution('k', 150.0)
+        sns_to_slack._finalize_resolution('k', ok, 150.0)
+        second = sns_to_slack._claim_alarm_root('k', 200.0)
+        # The first claim's finaliser arrives late.
+        late = sns_to_slack._finalize_alarm_root('k', first, '9.9', 'start', 100.0)
+        return late, second, _row(client)
+    late, second, row = _with_table(stale_finalize)
+    checks.extend([
+        ("a superseded finaliser is rejected", late is False),
+        ("the newer claim still owns the row", row.get('ClaimToken') == second),
+        ("the superseded finaliser did not write its message ts",
+         row.get('MessageTs') != '9.9'),
+    ])
+
+    # The interleaving Codex reproduced: a paused duplicate ALARM must not resurrect an
+    # incident that has since resolved and been replaced.
+    def duplicate_overwrite(client, table):
+        first = sns_to_slack._claim_alarm_root('k', 100.0)
+        sns_to_slack._finalize_alarm_root('k', first, 'root-1', 'start', 100.0)
+        ok = sns_to_slack._claim_resolution('k', 200.0)
+        sns_to_slack._finalize_resolution('k', ok, 200.0)
+        second = sns_to_slack._claim_alarm_root('k', 300.0)
+        sns_to_slack._finalize_alarm_root('k', second, 'root-2', 'start', 300.0)
+        # The paused duplicate of incident ONE finally lands.
+        touched = sns_to_slack._touch_alarm_watermark('k', 'root-1', 100.0)
+        return touched, _row(client)
+    touched, row = _with_table(duplicate_overwrite)
+    checks.extend([
+        ("a stale duplicate ALARM cannot touch the row", touched is False),
+        ("the live incident keeps its root", row.get('MessageTs') == 'root-2'),
+        ("the live incident keeps its watermark", float(row.get('LastEventAt')) == 300.0),
+    ])
+
+    # A duplicate of the CURRENT incident may advance the watermark.
+    def live_duplicate(client, table):
+        first = sns_to_slack._claim_alarm_root('k', 100.0)
+        sns_to_slack._finalize_alarm_root('k', first, 'root-1', 'start', 100.0)
+        return sns_to_slack._touch_alarm_watermark('k', 'root-1', 150.0), _row(client)
+    touched, row = _with_table(live_duplicate)
+    checks.extend([
+        ("a duplicate of the live incident is applied", touched is True),
+        ("it advances the watermark", float(row.get('LastEventAt')) == 150.0),
+    ])
+
+    # Ordering, evaluated by the service rather than asserted as a substring.
+    def stale_resolve(client, table):
+        first = sns_to_slack._claim_alarm_root('k', 300.0)
+        sns_to_slack._finalize_alarm_root('k', first, 'root-1', 'start', 300.0)
+        return sns_to_slack._claim_resolution('k', 200.0)
+    checks.append(("an OK older than the watermark cannot claim",
+                   _with_table(stale_resolve) is None))
+
+    def lease(client, table):
+        sns_to_slack._claim_alarm_root('k', 100.0)
+        client.update_item(TableName=table, Key={'AlarmKey': {'S': 'k'}},
+                           UpdateExpression='SET ClaimedAt = :old',
+                           ExpressionAttributeValues={':old': {'N': str(
+                               int(time.time()) - sns_to_slack.CLAIM_LEASE_SECONDS - 5)}})
+        return sns_to_slack._claim_alarm_root('k', 101.0)
+    checks.append(("an expired claim can be taken over", bool(_with_table(lease))))
+
+    def unexpired(client, table):
+        sns_to_slack._claim_alarm_root('k', 100.0)
+        try:
+            sns_to_slack._claim_alarm_root('k', 101.0)
+            return 'no raise'
+        except RuntimeError:
+            return 'raised'
+    checks.append(("an unexpired claim raises instead of dropping the event",
+                   _with_table(unexpired) == 'raised'))
+
+    # TTL: a live incident must never inherit the tombstone's expiry.
+    def ttl(client, table):
+        first = sns_to_slack._claim_alarm_root('k', 100.0)
+        sns_to_slack._finalize_alarm_root('k', first, 'root-1', 'start', 100.0)
+        live = _row(client)
+        ok = sns_to_slack._claim_resolution('k', 200.0)
+        sns_to_slack._finalize_resolution('k', ok, 200.0)
+        return live, _row(client)
+    live, resolved = _with_table(ttl)
+    checks.extend([
+        ("a live ALARM row carries no TTL", 'ExpiresAt' not in live),
+        ("a RESOLVED row carries one", 'ExpiresAt' in resolved),
+        ("the resolved row records the state its watermark belongs to",
+         resolved.get('LastEventState') == 'OK'),
+    ])
+
+    # Equal timestamps with CONFLICTING states are two truths about one instant and
+    # nothing can order them, so whichever arrived second used to win. An ALARM could
+    # reopen a row an OK had resolved at the same second, and the reverse arrival order
+    # gave the opposite answer - the outcome depended purely on delivery race.
+    def equal_conflict(client, table):
+        first = sns_to_slack._claim_alarm_root('k', 100.0)
+        sns_to_slack._finalize_alarm_root('k', first, 'root-1', 'start', 100.0)
+        ok = sns_to_slack._claim_resolution('k', 200.0)
+        sns_to_slack._finalize_resolution('k', ok, 200.0)
+        return sns_to_slack._get_alarm_state('k')
+    resolved_state = _with_table(equal_conflict)
+    checks.extend([
+        ("an equal-timestamp ALARM against a resolved OK is stale",
+         sns_to_slack._is_stale(200.0, resolved_state, 'ALARM') is True),
+        ("an equal-timestamp redelivery of the SAME state is not stale",
+         sns_to_slack._is_stale(200.0, resolved_state, 'OK') is False),
+        ("a newer ALARM after that resolve is not stale",
+         sns_to_slack._is_stale(300.0, resolved_state, 'ALARM') is False),
+    ])
+
+    # The no-table configuration must be a no-op rather than an error, so the webhook
+    # and tokened-but-tableless paths keep posting.
+    with mock.patch.object(sns_to_slack, 'SLACK_STATE_TABLE', ''):
+        checks.extend([
+            ("no table means no root claim", sns_to_slack._claim_alarm_root('k', 1.0) is None),
+            ("no table means no resolve claim", sns_to_slack._claim_resolution('k', 1.0) is None),
+            ("no table means no root finalise",
+             sns_to_slack._finalize_alarm_root('k', 't', '1.1', 's', 1.0) is False),
+            ("no table means no resolve finalise",
+             sns_to_slack._finalize_resolution('k', 't', 1.0) is False),
+            ("no table means no watermark touch",
+             sns_to_slack._touch_alarm_watermark('k', '1.1', 1.0) is False),
+        ])
+
+    # The transition id has to distinguish this incident's card from the previous one's,
+    # which is the whole reason the dedupe stopped matching on the alarm name.
+    a1 = sns_to_slack._transition_id('arn:k', 'ALARM', '2026-08-01T12:00:00.000+0000')
+    a2 = sns_to_slack._transition_id('arn:k', 'ALARM', '2026-08-01T13:00:00.000+0000')
+    ok1 = sns_to_slack._transition_id('arn:k', 'OK', '2026-08-01T12:00:00.000+0000')
+    checks.extend([
+        ("two firings of one alarm get different transition ids", a1 != a2),
+        ("the ALARM and OK of one instant differ", a1 != ok1),
+        ("the same transition is stable across retries",
+         a1 == sns_to_slack._transition_id('arn:k', 'ALARM',
+                                           '2026-08-01T12:00:00.000+0000')),
     ])
     return checks
 
@@ -1158,8 +1130,8 @@ def main():
             failures.append((message, expected, got, f"serverless: {why}"))
 
     checks = (renderer_checks() + slack_body_checks() + dms_routing_checks()
-              + lifecycle_checks() + state_ttl_checks() + ordering_checks()
-              + claim_checks() + finalize_checks() + watermark_checks())
+              + lifecycle_checks() + ordering_checks() + dedupe_checks()
+              + dynamo_checks())
     for name, passed in checks:
         if not passed:
             failures.append((name, "PASS", "FAIL", "renderer/routing/lifecycle contract"))
