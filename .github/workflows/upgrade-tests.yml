@@ -38,8 +38,10 @@ env:
   REGION: us-east-1
   # PR runs test min + bi in parallel (semaphore is 2, so wall clock = bi_ha alone,
   # and two upgrade paths get covered). full stays nightly-only: it is the slowest
-  # stack and its extra coverage (provisioned-RDS BI, istio strict) is not worth the
-  # PR wait. Dispatch runs take the inputs (defaults = the nightly shape). This is the
+  # stack and its extra coverage (provisioned-RDS BI, and the strict-on-both-sides
+  # mesh baseline - every AWS scenario now deploys istio strict, so what full alone
+  # still covers is the no-op migration from a pre-removal strict baseline) is not
+  # worth the PR wait. Dispatch runs take the inputs (defaults = the nightly shape). This is the
   # ceiling for a PR run; the "Select PR scenarios" step below narrows it further by
   # dropping any non-baseline scenario whose matrix.yaml paths the relevant diff never
   # touches. min_default has no paths entry, so it is never dropped.

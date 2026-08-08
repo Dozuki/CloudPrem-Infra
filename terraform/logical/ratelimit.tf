@@ -265,8 +265,9 @@ resource "kubernetes_network_policy_v1" "ratelimit_redis" {
 
       # Ambient delivers inbound over HBONE (TCP 15008) before ztunnel restores
       # the original port, and the VPC CNI evaluates this policy first. Without
-      # this, enrolling redis-system severs ratelimit -> redis immediately
-      # (permissive mode included). 6379 stays for the pre-enrollment path.
+      # this, enrolling redis-system severs ratelimit -> redis immediately, and
+      # that is true regardless of mTLS mode. 6379 stays for the pre-enrollment
+      # path (non-AWS clouds, and the window before ztunnel is up).
       dynamic "ports" {
         for_each = local.mesh_enabled ? [1] : []
         content {
