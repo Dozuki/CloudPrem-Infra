@@ -2,6 +2,15 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.19.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.18.0...v8.19.0) (2026-08-09)
+
+
+### Features
+
+* **logical:** always run the ambient mesh in strict on aws ([#472](https://github.com/Dozuki/CloudPrem-Infra/issues/472)) ([836dd4d](https://github.com/Dozuki/CloudPrem-Infra/commit/836dd4d20c4f3553783558903222525e06910203))
+* **logical:** move istiod off the auto mode system pool ([#475](https://github.com/Dozuki/CloudPrem-Infra/issues/475)) ([7ab493a](https://github.com/Dozuki/CloudPrem-Infra/commit/7ab493a5cbde686ec6109849b88b28e27eeab163))
+* **observability:** ship logs only from the cloudwatch addon, drop the metrics agent ([#476](https://github.com/Dozuki/CloudPrem-Infra/issues/476)) ([47fe3e2](https://github.com/Dozuki/CloudPrem-Infra/commit/47fe3e24ca1989a7ce88c16c74bbb580252098f1))
+
 ## [8.18.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.17.0...v8.18.0) (2026-08-08)
 
 
