@@ -406,15 +406,20 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
   tags = local.tags
 }
 
-# Container Insights: CloudWatch agent (amazon-cloudwatch-observability addon).
+# Log shipping: Fluent Bit (amazon-cloudwatch-observability addon).
 #
 # EKS Auto Mode gives nodes a deliberately minimal role (only EKS worker + ECR pull),
-# so the agent must get its CloudWatch permissions via Pod Identity. Without an
-# association the cloudwatch-agent SA falls back to the node role and every publish
-# (cloudwatch:PutMetricData, logs:PutLogEvents) is AccessDenied: the
-# ContainerInsights namespace stays empty and the node_* cluster alarms sit in
-# INSUFFICIENT_DATA. Both the metrics agent and fluent-bit run as the cloudwatch-agent
-# SA, so one association covers metrics and logs.
+# so Fluent Bit must get its CloudWatch permissions via Pod Identity. Without an
+# association it falls back to the node role and every logs:PutLogEvents is
+# AccessDenied - container logs silently stop reaching CloudWatch, which is now the
+# only thing this addon does.
+#
+# Fluent Bit runs as the cloudwatch-agent SA (the name is historical), so this one
+# association still covers it even though the metrics agent it was named for is gone:
+# the addon config sets agents = [] and metrics come from Prometheus into Mimir now
+# (logical/kubernetes.tf). The role keeps cloudwatch:PutMetricData because the
+# managed CloudWatchAgentServerPolicy grants it; that is harmless with no agent
+# publishing, and swapping to a narrower logs-only policy is a separate change.
 resource "aws_iam_role" "cloudwatch_agent_pod_identity" {
   name = "${local.identifier}-${data.aws_region.current.region}-cw-agent-pod-identity"
 

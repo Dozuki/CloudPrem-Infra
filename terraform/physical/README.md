@@ -34,12 +34,9 @@
 | <a name="module_bi_aurora"></a> [bi\_aurora](#module\_bi\_aurora) | terraform-aws-modules/rds-aurora/aws | 10.2.0 |
 | <a name="module_bi_database_sg"></a> [bi\_database\_sg](#module\_bi\_database\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
 | <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-role | ~> 6.0 |
-| <a name="module_disk_alarm"></a> [disk\_alarm](#module\_disk\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_dms_replica_database"></a> [dms\_replica\_database](#module\_dms\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | ~> 21.0 |
-| <a name="module_memory_alarm"></a> [memory\_alarm](#module\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | ~> 10.0 |
-| <a name="module_node_cpu_alarm"></a> [node\_cpu\_alarm](#module\_node\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_primary_database"></a> [primary\_database](#module\_primary\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_primary_database_sg"></a> [primary\_database\_sg](#module\_primary\_database\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
 | <a name="module_rds_connections_alarm"></a> [rds\_connections\_alarm](#module\_rds\_connections\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
