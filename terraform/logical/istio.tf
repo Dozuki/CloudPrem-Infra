@@ -100,27 +100,54 @@ resource "helm_release" "istiod" {
       # system node does not take the untaint controller down (dead istiod =
       # every new tainted custom-pool node stays unschedulable).
       autoscaleMin = 2
-      # istiod lives on the built-in Auto Mode system pool: it must never depend
-      # on the custom pools it untaints.
-      nodeSelector = { "karpenter.sh/nodepool" = "system" }
-      tolerations  = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
-      # DoNotSchedule + minDomains 2, not ScheduleAnyway: on a one-node system
-      # pool (dev-min and three commercial MPC envs today) the nodeSelector above
-      # restricts eligible domains to that single node, so with the default
-      # minDomains=1 the observed-domain count already meets the floor - the
-      # global minimum used for skew is just that one node's own count, skew
-      # is always 0, and ANY number of istiod pods there satisfies maxSkew 1.
-      # ScheduleAnyway never had a second node to prefer; it wasn't a
-      # preference Karpenter was overriding. minDomains 2 (GA since k8s 1.30,
-      # fleet runs 1.35.6) makes Pod Topology Spread treat a missing second
-      # domain as 0 pods, so the second replica goes Pending until Karpenter
-      # provisions a second system node - ordinary scale-from-zero, since the
-      # system pool carries none of the custom pools' cni.istio.io/not-ready
-      # startupTaint (that taint is only added to the pools this repo defines,
-      # kubernetes.tf). Under STRICT mTLS this matters because one node
-      # hosting both replicas is a single point of failure for the untaint
-      # controller and the mesh CA together; on gov the SCP denies
-      # ec2:TerminateInstances, so recovery from a stuck node there is a
+      # istiod runs on the on-demand pool, NOT the built-in Auto Mode system
+      # pool. It used to sit on system, on the principle that the mesh control
+      # plane must never depend on the custom pools it untaints. What that
+      # actually bought was two dedicated nodes per environment running one
+      # 100m pod each: the system pool is AWS-managed, so its nodes cannot be
+      # sized from here, and Auto Mode picks 2 vCPU. Every one of those nodes
+      # still paid the full per-node daemonset bill (~640m of 1780m allocatable)
+      # to host 100m of istiod. Two nodes per env, fleet-wide, ~7.5x overhead.
+      #
+      # The bootstrap circularity that motivated the system pool does not
+      # actually exist: the istiod chart adds a cni.istio.io/not-ready
+      # toleration of its own, independent of the tolerations set here, so
+      # istiod can land on a freshly-provisioned custom-pool node while that
+      # node still carries the startupTaint istiod itself is responsible for
+      # removing. Verified against running pods, which carry both that
+      # toleration and the one configured below.
+      #
+      # on-demand rather than spot, deliberately: losing the mesh CA and the
+      # untaint controller to a spot reclaim is not a trade worth making. The
+      # capacity-type toleration is REQUIRED, not decorative - the on-demand
+      # pool is tainted eks.amazonaws.com/capacity-type=on-demand:NoSchedule
+      # (kubernetes.tf) while the spot pool is untainted, so changing the
+      # nodeSelector without this toleration does not move istiod to spot, it
+      # makes istiod unschedulable everywhere.
+      nodeSelector = { "karpenter.sh/nodepool" = "on-demand" }
+      tolerations = [{
+        key      = "eks.amazonaws.com/capacity-type"
+        operator = "Equal"
+        value    = "on-demand"
+        effect   = "NoSchedule"
+      }]
+      # DoNotSchedule + minDomains 2, not ScheduleAnyway. The original reasoning
+      # was about a one-node system pool, where the nodeSelector restricted
+      # eligible domains to a single node: with the default minDomains=1 the
+      # observed-domain count already met the floor, skew was always 0, and any
+      # number of istiod pods there satisfied maxSkew 1, so ScheduleAnyway never
+      # had a second node to prefer. minDomains 2 (GA since k8s 1.30, fleet runs
+      # 1.35.6) makes Pod Topology Spread treat a missing second domain as 0
+      # pods, forcing the second replica to wait for a second node.
+      #
+      # On the on-demand pool the constraint is cheaper to satisfy and still
+      # worth keeping: that pool already runs several nodes, and its
+      # do-not-disrupt workloads hold a practical floor of ~2 (kubernetes.tf),
+      # so minDomains 2 is normally met on arrival instead of forcing a
+      # scale-from-zero. It still does the job it is here for - under STRICT
+      # mTLS, one node hosting both replicas is a single point of failure for
+      # the untaint controller and the mesh CA together, and on gov the SCP
+      # denies ec2:TerminateInstances, so recovering a stuck node there is a
       # manual NodeClaim delete.
       topologySpreadConstraints = [{
         maxSkew           = 1
