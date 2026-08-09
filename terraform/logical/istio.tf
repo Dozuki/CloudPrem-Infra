@@ -125,12 +125,33 @@ resource "helm_release" "istiod" {
       # nodeSelector without this toleration does not move istiod to spot, it
       # makes istiod unschedulable everywhere.
       nodeSelector = { "karpenter.sh/nodepool" = "on-demand" }
-      tolerations = [{
-        key      = "eks.amazonaws.com/capacity-type"
-        operator = "Equal"
-        value    = "on-demand"
-        effect   = "NoSchedule"
-      }]
+      tolerations = [
+        {
+          key      = "eks.amazonaws.com/capacity-type"
+          operator = "Equal"
+          value    = "on-demand"
+          effect   = "NoSchedule"
+        },
+        # Pinned deliberately, even though the istiod chart adds this same
+        # toleration on its own today. On the system pool istiod's ability to
+        # schedule was structural: that pool carries no startupTaint, so there
+        # was nothing to tolerate. On the on-demand pool it is conditional -
+        # Karpenter stamps every new node with cni.istio.io/not-ready
+        # (kubernetes.tf startupTaints) and istiod is the controller that
+        # removes it. If a future chart bump ever drops the chart-side
+        # toleration, a cluster with no running istiod would deadlock hard:
+        # Karpenter brings up an on-demand node, the node keeps the startupTaint
+        # because nothing can untaint it, istiod cannot schedule to do the
+        # untainting, and the mesh never comes up. That is a bricked fresh
+        # deploy, not a degradation, so the invariant is stated here rather than
+        # inherited. Safe to set: pilot.tolerations appends, it does not replace
+        # the chart's list (verified against running pods, which carry this
+        # toleration while this repo previously set only CriticalAddonsOnly).
+        {
+          key      = "cni.istio.io/not-ready"
+          operator = "Exists"
+        },
+      ]
       # DoNotSchedule + minDomains 2, not ScheduleAnyway. The original reasoning
       # was about a one-node system pool, where the nodeSelector restricted
       # eligible domains to a single node: with the default minDomains=1 the
