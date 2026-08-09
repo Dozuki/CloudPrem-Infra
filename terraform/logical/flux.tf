@@ -777,10 +777,6 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       condition     = var.cloud == "aws" || !var.enable_bi
       error_message = "enable_bi is not supported on Azure."
     }
-    precondition {
-      condition     = var.istio_mesh_state == "disabled" || local.mesh_supported
-      error_message = "istio_mesh_state requires AWS EKS; Azure is not supported yet."
-    }
   }
 }
 

@@ -270,6 +270,15 @@ configs:
       # bi_db_engine intentionally left at its "rds" default: this is the provisioned BI
       # path the existing fleet runs. bi_ha covers the Aurora one.
       restore_drill: true         # consumed by the harness, NOT passed to terraform
+      # Kept deliberately even though the variable no longer exists on the target ref.
+      # This is the UPGRADE scenario: the baseline comes from an older ref (from_ref
+      # auto:latest-1) that still declares istio_mesh_state and defaults it to
+      # "disabled". Dropping this key would stand the baseline up with no mesh and
+      # turn the test into "disabled -> strict" (a first-time mesh install) instead of
+      # the "strict -> strict" no-op the fleet actually performs. The target ref
+      # ignores it as an undeclared TF_VAR_*, so it only shapes the baseline half.
+      # Drop this key once from_ref (auto:latest-1) has advanced past the release
+      # that removed the variable, at which point the baseline no longer reads it.
       istio_mesh_state: "strict"
       alarm_email: "devops@dozuki.com"
       # MUST be false for an ephemeral test stack. The variable defaults to TRUE, which
