@@ -244,16 +244,36 @@ resource "helm_release" "ztunnel" {
   # Chart default is 200m/512Mi requests, no limits (see the comment on
   # istiod above for why no limits - this is the component that comment is
   # mainly about: today's incident was an unbounded app pod starving a small
-  # spot node and taking its ztunnel down with it). Observed usage across 5
-  # healthy meshed envs peaked around 102m CPU / 32Mi memory. CPU is left at
-  # the chart default (already close to 2x peak, a sane margin). Memory is
-  # brought down from 512Mi to 128Mi - still ~4x observed peak, but the
-  # as-shipped 512Mi was reserving far more allocatable memory per spot node
-  # than this workload has ever used, which works against the goal of this
-  # PR (more usable headroom per small node for everything else scheduled
-  # there).
+  # spot node and taking its ztunnel down with it). Memory is brought down from
+  # 512Mi to 128Mi - still ~4x observed peak, but the as-shipped 512Mi was
+  # reserving far more allocatable memory per spot node than this workload has
+  # ever used.
+  #
+  # CPU comes down from the chart's 200m to 150m. Sized from 3 days of the
+  # busiest commercial MPC env at 5m resolution - 10,514 pod-samples over 18
+  # ztunnel pods - NOT from a kubectl-top snapshot, which reads about 94m and
+  # badly understates the tail:
+  #
+  #   >100m   499 samples (4.7%)   8 pods
+  #   >150m   238 samples (2.3%)   2 pods
+  #   >200m    52 samples (0.5%)   1 pod
+  #   >300m    13 samples (0.1%)   1 pod   (peak 362m)
+  #
+  # So 200m sat near p99.5 and 150m sits near p97.7. This is a deliberate trade,
+  # not free: ztunnel genuinely does exceed 150m on the busiest one or two nodes
+  # of the busiest env. It is acceptable because a request is a scheduling floor
+  # rather than a cap, and these nodes run at ~3% actual CPU, so a burst above
+  # the request is satisfied out of idle capacity. Reclaiming 50m per node on
+  # every node of every meshed env is worth that.
+  #
+  # Two conditions make this wrong, so revisit if either lands: node CPU
+  # utilization climbing out of single digits (fewer/bigger nodes is the plan,
+  # which raises it), or ztunnel showing sustained rather than spiky time above
+  # 150m. ztunnel is on the data path - starving it degrades every meshed
+  # connection on the node, so do not cut this further without re-running the
+  # threshold query above.
   values = [yamlencode(merge(
-    { resources = { requests = { cpu = "200m", memory = "128Mi" } } },
+    { resources = { requests = { cpu = "150m", memory = "128Mi" } } },
     local.istio_image_hub == "" ? {} : { hub = local.istio_image_hub }
   ))]
 }
