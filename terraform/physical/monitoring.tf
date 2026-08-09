@@ -109,101 +109,21 @@ resource "aws_sns_topic_subscription" "email_subscription" {
   endpoint  = var.alarm_email
 }
 
-module "node_cpu_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "~> 5.0"
+# Node-level CPU, memory and filesystem alarms used to live here, reading
+# node_cpu_utilization / node_memory_utilization / node_filesystem_utilization
+# from the ContainerInsights namespace. They are gone along with the CloudWatch
+# metrics agent that fed them (see the addon config in logical/kubernetes.tf).
+#
+# Nothing is lost: kube-prometheus-stack already ships strictly better rules off
+# node-exporter, evaluated in-cluster and remote-written to Mimir -
+# NodeCPUHighUsage, NodeMemoryHighUtilization, NodeFilesystemAlmostOutOfSpace and
+# NodeFilesystemSpaceFillingUp cover the same three signals, and the node-exporter
+# group adds ~30 more these never had (disk IO saturation, conntrack, clock skew,
+# file descriptors, systemd units). These three were the duplicate copy, not the
+# only copy.
+#
+# The SNS topic below stays: the RDS alarms still use it.
 
-  alarm_name        = "${local.identifier}-cpu-high"
-  alarm_description = "CPU utilization high for ${local.identifier} cluster"
-
-  namespace   = "ContainerInsights"
-  metric_name = "node_cpu_utilization"
-  statistic   = "Average"
-
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 3
-  threshold           = 90
-  period              = 60
-
-  dimensions = {
-    ClusterName = module.eks_cluster.cluster_name
-  }
-
-  alarm_actions = [
-    module.sns.topic_arn
-  ]
-
-  ok_actions = [
-    module.sns.topic_arn
-  ]
-}
-
-# The alarm should never trigger unless something is wrong with the cluster autoscaler, or the max scale has been met
-module "memory_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "~> 5.0"
-
-  alarm_name        = "${local.identifier}-memory-utilization"
-  alarm_description = "High memory utilization for ${local.identifier} cluster"
-
-  namespace   = "ContainerInsights"
-  metric_name = "node_memory_utilization"
-  statistic   = "Average"
-
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 1
-  threshold           = 80
-  period              = 300
-
-  dimensions = {
-    ClusterName = module.eks_cluster.cluster_name
-  }
-
-  alarm_actions = [
-    module.sns.topic_arn
-  ]
-
-  ok_actions = [
-    module.sns.topic_arn
-  ]
-}
-
-module "disk_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "~> 5.0"
-
-  alarm_name        = "${local.identifier}-out-of-disk"
-  alarm_description = "Disk usage high for ${local.identifier} cluster"
-
-  namespace   = "ContainerInsights"
-  metric_name = "node_filesystem_utilization"
-  statistic   = "Average"
-
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 1
-  threshold           = 60
-  period              = 300
-
-  dimensions = {
-    ClusterName = module.eks_cluster.cluster_name
-  }
-
-  alarm_actions = [
-    module.sns.topic_arn
-  ]
-
-  ok_actions = [
-    module.sns.topic_arn
-  ]
-}
-
-# RDS alarm dimensions use local.identifier (the value passed to the rds module's
-# `identifier`), NOT module.primary_database.db_instance_id. The rds module is pinned
-# to v5.6.0, whose db_instance_id output returns aws_db_instance.this.id — and under
-# AWS provider v5+ that .id is the resource ID (db-XXXX), not the instance identifier.
-# CloudWatch's AWS/RDS namespace keys on the identifier, so the resource ID matches no
-# metric and every RDS alarm sits in INSUFFICIENT_DATA. local.identifier is correct by
-# construction and immune to provider/module-version drift.
 module "rds_cpu_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
