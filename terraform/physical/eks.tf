@@ -66,16 +66,27 @@ data "aws_iam_policy_document" "eks_worker_kms" {
       "kms:DescribeKey",
     ]
 
-    # The donor key is included alongside this stack's own key because objects
-    # written before the stack owned its key stay encrypted under the donor key
-    # forever - S3 records the key on the object at write time, and noncurrent
-    # versions are never rewritten. Without this the app loses decrypt on
-    # everything it wrote previously the moment the bucket default flips.
-    # Empty list when s3_kms_key_id is unset, which is the normal case.
-    resources = concat(
-      [local.s3_kms_key_id],
-      data.aws_kms_key.s3_migration[*].arn,
-    )
+    resources = [local.s3_kms_key_id]
+  }
+
+  # Objects written before this stack owned its key stay encrypted under the
+  # donor key forever - S3 records the key on the object at write time, and
+  # noncurrent versions are never rewritten. Without this the app loses access
+  # to everything it wrote previously the moment the bucket default flips.
+  #
+  # Decrypt only, and deliberately a separate statement: the donor key must
+  # never encrypt anything new, which is the whole point of this stack owning
+  # its own key. Folding these resources into the statement above would hand
+  # the app kms:Encrypt and kms:GenerateDataKey on a key we do not own.
+  #
+  # Produces no statement at all when s3_kms_key_id is unset, the normal case.
+  dynamic "statement" {
+    for_each = data.aws_kms_key.s3_migration
+
+    content {
+      actions   = ["kms:Decrypt", "kms:DescribeKey"]
+      resources = [statement.value.arn]
+    }
   }
 }
 
