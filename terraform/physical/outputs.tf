@@ -30,6 +30,10 @@ output "guide_pdfs_bucket" {
 output "documents_bucket" {
   value = lookup(aws_s3_bucket.guide_buckets["doc"], "bucket", null)
 }
+output "logging_bucket" {
+  description = "S3 access logging bucket ID"
+  value       = aws_s3_bucket.logging_bucket.id
+}
 output "s3_kms_key_id" {
   value = local.s3_kms_key_id
 }
