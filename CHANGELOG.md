@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [8.20.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.19.0...v8.20.0) (2026-08-10)
+
+
+### Features
+
+* **logical:** gate primary-site grafana reconciliation behind enable_primary_site_grafana ([#482](https://github.com/Dozuki/CloudPrem-Infra/issues/482)) ([fedfeff](https://github.com/Dozuki/CloudPrem-Infra/commit/fedfeff92b14193df80ef6f23639cde66764fe44))
+
+
+### Bug Fixes
+
+* **physical:** stop deriving bucket arn lists through a splat and toset ([4de5d51](https://github.com/Dozuki/CloudPrem-Infra/commit/4de5d51f7ac68d223952de1b659cf5289100fee9))
+
 ## [8.19.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.18.0...v8.19.0) (2026-08-09)
 
 
