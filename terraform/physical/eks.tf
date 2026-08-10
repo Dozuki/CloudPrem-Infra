@@ -84,7 +84,7 @@ data "aws_iam_policy_document" "eks_worker_kms" {
     for_each = data.aws_kms_key.s3_migration
 
     content {
-      actions   = ["kms:Decrypt", "kms:DescribeKey"]
+      actions   = ["kms:Decrypt"]
       resources = [statement.value.arn]
     }
   }
