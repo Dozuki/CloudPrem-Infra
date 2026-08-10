@@ -66,9 +66,16 @@ data "aws_iam_policy_document" "eks_worker_kms" {
       "kms:DescribeKey",
     ]
 
-    resources = [
-      local.s3_kms_key_id,
-    ]
+    # The donor key is included alongside this stack's own key because objects
+    # written before the stack owned its key stay encrypted under the donor key
+    # forever - S3 records the key on the object at write time, and noncurrent
+    # versions are never rewritten. Without this the app loses decrypt on
+    # everything it wrote previously the moment the bucket default flips.
+    # Empty list when s3_kms_key_id is unset, which is the normal case.
+    resources = concat(
+      [local.s3_kms_key_id],
+      data.aws_kms_key.s3_migration[*].arn,
+    )
   }
 }
 

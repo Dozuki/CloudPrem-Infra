@@ -170,7 +170,7 @@ variable "highly_available_nat_gateway" {
 # --- BEGIN Storage Configuration --- #
 
 variable "s3_kms_key_id" {
-  description = "KMS key identifier (key id, key ARN, alias name, or alias ARN) for the donor key that encrypted an existing set of Dozuki buckets being migrated in via s3_existing_buckets. Only used to grant this stack's roles decrypt access to that key; it never encrypts buckets this stack creates, which always use their own KMS key."
+  description = "KMS key identifier (key id, key ARN, alias name, or alias ARN) for a donor key that already encrypted objects this stack must keep reading: either buckets migrated in via s3_existing_buckets, or a key an older version of this module used for the stack's own buckets. It only grants this stack's roles decrypt access to that key. It never encrypts buckets this stack creates, which always use their own KMS key. Objects record their key at write time, so leave this set for as long as any object written under the donor key must remain readable."
   type        = string
   default     = ""
 }
