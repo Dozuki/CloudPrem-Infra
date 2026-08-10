@@ -60,9 +60,8 @@ locals {
   db_apply_immediately = coalesce(var.db_apply_immediately, !var.protect_resources)
 
   # --EKS--
-  cluster_access_role_name = "${local.identifier}-${data.aws_region.current.region}-cluster-access"
-  create_eks_kms           = var.eks_kms_key_id == "" ? true : false
-  eks_kms_key              = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
+  create_eks_kms = var.eks_kms_key_id == "" ? true : false
+  eks_kms_key    = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
 
   # --Tags for all resources--
   // If you add a tag, it must never be blank.
@@ -156,9 +155,6 @@ locals {
     local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
   )
 
-  # Kept for compatibility with existing references to the old name.
-  bi_host = local.bi_db_host
-
   // Static map of all supported database instance types and their memory allocation, used for Memory Usage alarm.
   // (Neither RDS nor CloudWatch provides a metric or a queryable resource for instance memory size)
   rds_instance_memory = {
@@ -189,8 +185,7 @@ locals {
   # --S3 Buckets--
   // If all 4 guide buckets are specified we use them as a replication source.
   use_existing_buckets = length(var.s3_existing_buckets) == 4 ? true : false
-  use_provided_s3_kms  = var.use_existing_s3_kms && var.s3_kms_key_id != "" ? true : false
-  s3_kms_key_id        = local.use_provided_s3_kms ? var.s3_kms_key_id : aws_kms_key.s3[0].arn
+  s3_kms_key_id        = aws_kms_key.s3.arn
 
   // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
   // The format of the s3_existing_buckets object is important and described in the variables.tf file.

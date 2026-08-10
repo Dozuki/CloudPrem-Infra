@@ -170,15 +170,9 @@ variable "highly_available_nat_gateway" {
 # --- BEGIN Storage Configuration --- #
 
 variable "s3_kms_key_id" {
-  description = "AWS KMS key identifier for S3 encryption. The identifier can be one of the following format: Key id, key ARN, alias name or alias ARN"
+  description = "KMS key identifier (key id, key ARN, alias name, or alias ARN) for a donor key that already encrypted objects this stack must keep reading: either buckets migrated in via s3_existing_buckets, or a key an older version of this module used for the stack's own buckets. It only grants this stack's roles decrypt access to that key. It never encrypts buckets this stack creates, which always use their own KMS key. Objects record their key at write time, so leave this set for as long as any object written under the donor key must remain readable."
   type        = string
   default     = ""
-}
-
-variable "use_existing_s3_kms" {
-  description = "To use the s3_kms_key_id provided for the new s3 buckets as well, set this to true."
-  type        = bool
-  default     = false
 }
 
 variable "s3_existing_buckets" {
