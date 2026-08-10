@@ -2,6 +2,54 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.0.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.20.0...v9.0.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **physical:** use_existing_s3_kms is removed. A stack that still sets it will fail to plan until the input is dropped, and dropping it moves that stack's bucket default encryption onto its own KMS key. Existing objects are unaffected: they keep decrypting with the key recorded on them at write time.
+
+### Bug Fixes
+
+* **physical:** always own the S3 encryption key ([#481](https://github.com/Dozuki/CloudPrem-Infra/issues/481)) ([708f3c7](https://github.com/Dozuki/CloudPrem-Infra/commit/708f3c7dfa28c05f9bfda3517f90a97e7e7def84))
+
+## [8.20.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.19.0...v8.20.0) (2026-08-10)
+
+
+### Features
+
+* **logical:** gate primary-site grafana reconciliation behind enable_primary_site_grafana ([#482](https://github.com/Dozuki/CloudPrem-Infra/issues/482)) ([fedfeff](https://github.com/Dozuki/CloudPrem-Infra/commit/fedfeff92b14193df80ef6f23639cde66764fe44))
+
+
+### Bug Fixes
+
+* **physical:** stop deriving bucket arn lists through a splat and toset ([4de5d51](https://github.com/Dozuki/CloudPrem-Infra/commit/4de5d51f7ac68d223952de1b659cf5289100fee9))
+
+## [8.19.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.18.0...v8.19.0) (2026-08-09)
+
+
+### Features
+
+* **logical:** always run the ambient mesh in strict on aws ([#472](https://github.com/Dozuki/CloudPrem-Infra/issues/472)) ([836dd4d](https://github.com/Dozuki/CloudPrem-Infra/commit/836dd4d20c4f3553783558903222525e06910203))
+* **logical:** move istiod off the auto mode system pool ([#475](https://github.com/Dozuki/CloudPrem-Infra/issues/475)) ([7ab493a](https://github.com/Dozuki/CloudPrem-Infra/commit/7ab493a5cbde686ec6109849b88b28e27eeab163))
+* **observability:** ship logs only from the cloudwatch addon, drop the metrics agent ([#476](https://github.com/Dozuki/CloudPrem-Infra/issues/476)) ([47fe3e2](https://github.com/Dozuki/CloudPrem-Infra/commit/47fe3e24ca1989a7ce88c16c74bbb580252098f1))
+
+## [8.18.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.17.0...v8.18.0) (2026-08-08)
+
+
+### Features
+
+* connect harness cleanup to resource reaper ([#469](https://github.com/Dozuki/CloudPrem-Infra/issues/469)) ([438917a](https://github.com/Dozuki/CloudPrem-Infra/commit/438917a2c8e17942842242a6a1364da57fe020bd))
+* **harness:** add path-aware warm pool execution mode and business-hours crons ([#470](https://github.com/Dozuki/CloudPrem-Infra/issues/470)) ([d792bf6](https://github.com/Dozuki/CloudPrem-Infra/commit/d792bf6d394d7bf7078d40135873d7286f3a8be0))
+
+
+### Bug Fixes
+
+* **alerts:** keep resolved alarms in the channel history and quiet serverless DMS ([#460](https://github.com/Dozuki/CloudPrem-Infra/issues/460)) ([467be6c](https://github.com/Dozuki/CloudPrem-Infra/commit/467be6ccfb777bc99fea405f3051da422e2a6b35))
+* **dms:** restore the AWS default RecoverableErrorCount so DMS retries a lost connection ([4d41eae](https://github.com/Dozuki/CloudPrem-Infra/commit/4d41eaee7de64928c7784be1c3b744c585684e6b))
+* **dms:** set an explicit timeout on the dms_restart lambda ([#467](https://github.com/Dozuki/CloudPrem-Infra/issues/467)) ([6dbd1ae](https://github.com/Dozuki/CloudPrem-Infra/commit/6dbd1ae67ed328debdd1244eed93b2b1c4b94e42))
+* **physical:** use bucket resource map lookup for dr replication destination arn ([ccd8d4b](https://github.com/Dozuki/CloudPrem-Infra/commit/ccd8d4b150b7d2bdc28a3eda681b1f36fbe18931))
+
 ## [8.17.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.16.0...v8.17.0) (2026-08-07)
 
 

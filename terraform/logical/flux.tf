@@ -269,8 +269,11 @@ locals {
     "dozuki-operator" = {
       image            = { repository = "${var.image_repository}/dozuki-operator" }
       imagePullSecrets = [{ name = "ghcr-pull" }]
-      grafana          = { url = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : "" }
-      gatewayAPI       = { enabled = var.subsite_gateway_api_enabled }
+      grafana = {
+        url         = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : ""
+        primarySite = var.enable_primary_site_grafana
+      }
+      gatewayAPI = { enabled = var.subsite_gateway_api_enabled }
     }
 
     grafana = {
@@ -776,10 +779,6 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
     precondition {
       condition     = var.cloud == "aws" || !var.enable_bi
       error_message = "enable_bi is not supported on Azure."
-    }
-    precondition {
-      condition     = var.istio_mesh_state == "disabled" || local.mesh_supported
-      error_message = "istio_mesh_state requires AWS EKS; Azure is not supported yet."
     }
   }
 }

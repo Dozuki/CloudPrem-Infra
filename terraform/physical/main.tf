@@ -60,9 +60,8 @@ locals {
   db_apply_immediately = coalesce(var.db_apply_immediately, !var.protect_resources)
 
   # --EKS--
-  cluster_access_role_name = "${local.identifier}-${data.aws_region.current.region}-cluster-access"
-  create_eks_kms           = var.eks_kms_key_id == "" ? true : false
-  eks_kms_key              = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
+  create_eks_kms = var.eks_kms_key_id == "" ? true : false
+  eks_kms_key    = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
 
   # --Tags for all resources--
   // If you add a tag, it must never be blank.
@@ -156,9 +155,6 @@ locals {
     local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
   )
 
-  # Kept for compatibility with existing references to the old name.
-  bi_host = local.bi_db_host
-
   // Static map of all supported database instance types and their memory allocation, used for Memory Usage alarm.
   // (Neither RDS nor CloudWatch provides a metric or a queryable resource for instance memory size)
   rds_instance_memory = {
@@ -189,8 +185,7 @@ locals {
   # --S3 Buckets--
   // If all 4 guide buckets are specified we use them as a replication source.
   use_existing_buckets = length(var.s3_existing_buckets) == 4 ? true : false
-  use_provided_s3_kms  = var.use_existing_s3_kms && var.s3_kms_key_id != "" ? true : false
-  s3_kms_key_id        = local.use_provided_s3_kms ? var.s3_kms_key_id : aws_kms_key.s3[0].arn
+  s3_kms_key_id        = aws_kms_key.s3.arn
 
   // We create this local to control creation of dynamic assets (you cannot use count *and* for_each in the same resource block)
   // The format of the s3_existing_buckets object is important and described in the variables.tf file.
@@ -203,10 +198,15 @@ locals {
   //{ type = one of local.create_s3_bucket_names, destination = arn of destination bucket for replication, source = arn of source bucket for replication }
   existing_bucket_map = local.use_existing_buckets ? [for _, bucket_type in local.create_s3_bucket_names : { type = bucket_type, destination = aws_s3_bucket.guide_buckets[bucket_type].arn, source = data.aws_s3_bucket.guide_buckets[bucket_type].bucket }] : []
 
-  // Build lists for IAM policies to include all the source and destination buckets and objects
-  s3_source_bucket_arn_list                   = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : bucket.arn] : []
-  s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"] : []
-  s3_destination_bucket_arn_list_with_objects = [for _, bucket in one(flatten(toset(aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"]
+  // Build lists for IAM policies to include all the source and destination buckets and objects.
+  // Iterate the for_each map directly instead of one(flatten(toset(...[*]))). The splat+toset
+  // round-trip converted the whole bucket object, which hoists the provider's deprecation marks
+  // (request_payer, website_endpoint, website_domain, acceleration_status, ...) onto the result and
+  // makes every plan print "Value derived from a deprecated source". Reading .arn off the map only
+  // touches .arn, so no marks come along. Same output either way.
+  s3_source_bucket_arn_list                   = local.use_existing_buckets ? [for _, bucket in data.aws_s3_bucket.guide_buckets : bucket.arn] : []
+  s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in data.aws_s3_bucket.guide_buckets : "${bucket.arn}/*"] : []
+  s3_destination_bucket_arn_list_with_objects = [for _, bucket in aws_s3_bucket.guide_buckets : "${bucket.arn}/*"]
 
   // Conditional public access block to conform with unmanaged SCP
   s3_public_access_block_buckets = var.s3_block_public_access ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}

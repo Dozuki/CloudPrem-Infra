@@ -101,9 +101,16 @@ data "aws_iam_policy_document" "s3_kms_key_policy" {
   }
 }
 
-resource "aws_kms_key" "s3" {
-  count = local.use_provided_s3_kms ? 0 : 1
+moved {
+  from = aws_kms_key.s3[0]
+  to   = aws_kms_key.s3
+}
+moved {
+  from = aws_kms_alias.s3[0]
+  to   = aws_kms_alias.s3
+}
 
+resource "aws_kms_key" "s3" {
   description = "KMS key to encrypt S3 bucket contents"
   # Rotation was suppressed with #tfsec:ignore:aws-kms-auto-rotate-keys rather than reasoned
   # about, and this was the only KMS key in the module without it. Enabling it is safe on an
@@ -118,10 +125,8 @@ resource "aws_kms_key" "s3" {
   tags                    = local.tags
 }
 resource "aws_kms_alias" "s3" {
-  count = local.use_provided_s3_kms ? 0 : 1
-
   name_prefix   = "alias/${local.identifier}/${data.aws_region.current.region}/s3/"
-  target_key_id = aws_kms_key.s3[0].id
+  target_key_id = aws_kms_key.s3.id
 }
 
 // If using existing buckets

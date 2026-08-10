@@ -787,10 +787,8 @@ def ordering_checks():
 # Everything above this line runs on mocks, which is right for routing and rendering.
 # The state machine is different: its correctness lives in ConditionExpressions that
 # DynamoDB evaluates, and a mock that asserts "we sent the right request" cannot tell a
-# correct condition from a nonsense one. Four review rounds found defects here that the
-# mock suite passed clean through - a same-second token collision, a row shape no reader
-# could parse, a blind write that resurrected a closed incident. All of them are only
-# visible when something actually executes the condition, so these run against moto.
+# correct condition from a nonsense one. State-transition defects are only visible when
+# something actually executes the condition, so these checks run against moto.
 
 try:
     import moto
@@ -965,8 +963,8 @@ def dynamo_checks():
          row.get('MessageTs') != '9.9'),
     ])
 
-    # The interleaving Codex reproduced: a paused duplicate ALARM must not resurrect an
-    # incident that has since resolved and been replaced.
+    # A paused duplicate ALARM must not resurrect an incident that has since resolved
+    # and been replaced.
     def duplicate_overwrite(client, table):
         first = sns_to_slack._claim_alarm_root('k', 100.0)
         sns_to_slack._finalize_alarm_root('k', first, 'root-1', 'start', 100.0)

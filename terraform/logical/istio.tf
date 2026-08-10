@@ -12,29 +12,35 @@ locals {
   # string = chart default hub.
   istio_image_hub = ""
 
-  mesh_state_rank = { disabled = 0, installed = 1, permissive = 2, strict = 3 }
-  mesh_rank       = local.mesh_state_rank[var.istio_mesh_state]
-
   # Platform contract: ambient runs on AWS EKS Auto Mode, both partitions. Gov
   # clusters pull docker.io/ghcr.io/quay.io today, so no image mirror is needed;
   # the old "phase-2 mirror first" gate was based on a stale airgap assumption.
   # Azure is deferred (no node-taint surface on AKS today; see the design annex).
-  mesh_supported = var.cloud == "aws"
-
-  mesh_installed = local.mesh_rank >= 1
-  mesh_enrolled  = local.mesh_rank >= 2
-  mesh_strict    = local.mesh_rank >= 3
+  #
+  # There is no lifecycle knob any more. The mesh used to walk a four-rung
+  # ladder (disabled -> installed -> permissive -> strict) driven by a
+  # var.istio_mesh_state input, so the fleet could be moved one rung per apply
+  # with a canary env leading. That rollout finished 2026-08-08 with every
+  # environment on strict, and the ladder was removed with it: install,
+  # namespace enrollment and STRICT enforcement now all land in a single apply.
+  # Two consequences worth knowing before changing this:
+  #   - A first-time enable is no longer incremental. The carve-outs below and
+  #     the depends_on chain order it correctly WITHIN one apply, but there is
+  #     no longer an intermediate state to sit in and observe.
+  #   - Rollback is a code change here, not an input flip. If STRICT has to come
+  #     off in an incident, that is an edit + release + version bump per env.
+  mesh_enabled = var.cloud == "aws"
 }
 
 resource "kubernetes_namespace_v1" "istio_system" {
-  count = local.mesh_installed ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
   metadata {
     name = "istio-system"
   }
 }
 
 resource "helm_release" "istio_base" {
-  count = local.mesh_installed ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
 
   name       = "istio-base"
   namespace  = kubernetes_namespace_v1.istio_system[0].metadata[0].name
@@ -68,7 +74,7 @@ resource "helm_release" "istio_base" {
 # one hungry pod can starve everything else on it. Do not add limits here;
 # that reintroduces the exact failure mode this PR closes.
 resource "helm_release" "istiod" {
-  count = local.mesh_installed ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
 
   # Gateway API CRDs must exist before istiod (it watches them). The Envoy Gateway
   # CRD bundle already ships Gateway API v1.5.1, so istio and EG share those CRDs:
@@ -94,27 +100,75 @@ resource "helm_release" "istiod" {
       # system node does not take the untaint controller down (dead istiod =
       # every new tainted custom-pool node stays unschedulable).
       autoscaleMin = 2
-      # istiod lives on the built-in Auto Mode system pool: it must never depend
-      # on the custom pools it untaints.
-      nodeSelector = { "karpenter.sh/nodepool" = "system" }
-      tolerations  = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
-      # DoNotSchedule + minDomains 2, not ScheduleAnyway: on a one-node system
-      # pool (dev-min and three commercial MPC envs today) the nodeSelector above
-      # restricts eligible domains to that single node, so with the default
-      # minDomains=1 the observed-domain count already meets the floor - the
-      # global minimum used for skew is just that one node's own count, skew
-      # is always 0, and ANY number of istiod pods there satisfies maxSkew 1.
-      # ScheduleAnyway never had a second node to prefer; it wasn't a
-      # preference Karpenter was overriding. minDomains 2 (GA since k8s 1.30,
-      # fleet runs 1.35.6) makes Pod Topology Spread treat a missing second
-      # domain as 0 pods, so the second replica goes Pending until Karpenter
-      # provisions a second system node - ordinary scale-from-zero, since the
-      # system pool carries none of the custom pools' cni.istio.io/not-ready
-      # startupTaint (that taint is only added to the pools this repo defines,
-      # kubernetes.tf). Under STRICT mTLS this matters because one node
-      # hosting both replicas is a single point of failure for the untaint
-      # controller and the mesh CA together; on gov the SCP denies
-      # ec2:TerminateInstances, so recovery from a stuck node there is a
+      # istiod runs on the on-demand pool, NOT the built-in Auto Mode system
+      # pool. It used to sit on system, on the principle that the mesh control
+      # plane must never depend on the custom pools it untaints. What that
+      # actually bought was two dedicated nodes per environment running one
+      # 100m pod each: the system pool is AWS-managed, so its nodes cannot be
+      # sized from here, and Auto Mode picks 2 vCPU. Every one of those nodes
+      # still paid the full per-node daemonset bill (~640m of 1780m allocatable)
+      # to host 100m of istiod. Two nodes per env, fleet-wide, ~7.5x overhead.
+      #
+      # The bootstrap circularity that motivated the system pool does not
+      # actually exist: the istiod chart adds a cni.istio.io/not-ready
+      # toleration of its own, independent of the tolerations set here, so
+      # istiod can land on a freshly-provisioned custom-pool node while that
+      # node still carries the startupTaint istiod itself is responsible for
+      # removing. Verified against running pods, which carry both that
+      # toleration and the one configured below.
+      #
+      # on-demand rather than spot, deliberately: losing the mesh CA and the
+      # untaint controller to a spot reclaim is not a trade worth making. The
+      # capacity-type toleration is REQUIRED, not decorative - the on-demand
+      # pool is tainted eks.amazonaws.com/capacity-type=on-demand:NoSchedule
+      # (kubernetes.tf) while the spot pool is untainted, so changing the
+      # nodeSelector without this toleration does not move istiod to spot, it
+      # makes istiod unschedulable everywhere.
+      nodeSelector = { "karpenter.sh/nodepool" = "on-demand" }
+      tolerations = [
+        {
+          key      = "eks.amazonaws.com/capacity-type"
+          operator = "Equal"
+          value    = "on-demand"
+          effect   = "NoSchedule"
+        },
+        # Pinned deliberately, even though the istiod chart adds this same
+        # toleration on its own today. On the system pool istiod's ability to
+        # schedule was structural: that pool carries no startupTaint, so there
+        # was nothing to tolerate. On the on-demand pool it is conditional -
+        # Karpenter stamps every new node with cni.istio.io/not-ready
+        # (kubernetes.tf startupTaints) and istiod is the controller that
+        # removes it. If a future chart bump ever drops the chart-side
+        # toleration, a cluster with no running istiod would deadlock hard:
+        # Karpenter brings up an on-demand node, the node keeps the startupTaint
+        # because nothing can untaint it, istiod cannot schedule to do the
+        # untainting, and the mesh never comes up. That is a bricked fresh
+        # deploy, not a degradation, so the invariant is stated here rather than
+        # inherited. Safe to set: pilot.tolerations appends, it does not replace
+        # the chart's list (verified against running pods, which carry this
+        # toleration while this repo previously set only CriticalAddonsOnly).
+        {
+          key      = "cni.istio.io/not-ready"
+          operator = "Exists"
+        },
+      ]
+      # DoNotSchedule + minDomains 2, not ScheduleAnyway. The original reasoning
+      # was about a one-node system pool, where the nodeSelector restricted
+      # eligible domains to a single node: with the default minDomains=1 the
+      # observed-domain count already met the floor, skew was always 0, and any
+      # number of istiod pods there satisfied maxSkew 1, so ScheduleAnyway never
+      # had a second node to prefer. minDomains 2 (GA since k8s 1.30, fleet runs
+      # 1.35.6) makes Pod Topology Spread treat a missing second domain as 0
+      # pods, forcing the second replica to wait for a second node.
+      #
+      # On the on-demand pool the constraint is cheaper to satisfy and still
+      # worth keeping: that pool already runs several nodes, and its
+      # do-not-disrupt workloads hold a practical floor of ~2 (kubernetes.tf),
+      # so minDomains 2 is normally met on arrival instead of forcing a
+      # scale-from-zero. It still does the job it is here for - under STRICT
+      # mTLS, one node hosting both replicas is a single point of failure for
+      # the untaint controller and the mesh CA together, and on gov the SCP
+      # denies ec2:TerminateInstances, so recovering a stuck node there is a
       # manual NodeClaim delete.
       topologySpreadConstraints = [{
         maxSkew           = 1
@@ -145,7 +199,7 @@ resource "helm_release" "istiod" {
 }
 
 resource "helm_release" "istio_cni" {
-  count      = local.mesh_installed ? 1 : 0
+  count      = local.mesh_enabled ? 1 : 0
   depends_on = [helm_release.istiod]
 
   name       = "istio-cni"
@@ -174,7 +228,7 @@ resource "helm_release" "istio_cni" {
 }
 
 resource "helm_release" "ztunnel" {
-  count      = local.mesh_installed ? 1 : 0
+  count      = local.mesh_enabled ? 1 : 0
   depends_on = [helm_release.istio_cni]
 
   name       = "ztunnel"
@@ -190,22 +244,42 @@ resource "helm_release" "ztunnel" {
   # Chart default is 200m/512Mi requests, no limits (see the comment on
   # istiod above for why no limits - this is the component that comment is
   # mainly about: today's incident was an unbounded app pod starving a small
-  # spot node and taking its ztunnel down with it). Observed usage across 5
-  # healthy meshed envs peaked around 102m CPU / 32Mi memory. CPU is left at
-  # the chart default (already close to 2x peak, a sane margin). Memory is
-  # brought down from 512Mi to 128Mi - still ~4x observed peak, but the
-  # as-shipped 512Mi was reserving far more allocatable memory per spot node
-  # than this workload has ever used, which works against the goal of this
-  # PR (more usable headroom per small node for everything else scheduled
-  # there).
+  # spot node and taking its ztunnel down with it). Memory is brought down from
+  # 512Mi to 128Mi - still ~4x observed peak, but the as-shipped 512Mi was
+  # reserving far more allocatable memory per spot node than this workload has
+  # ever used.
+  #
+  # CPU comes down from the chart's 200m to 150m. Sized from 3 days of the
+  # busiest commercial MPC env at 5m resolution - 10,514 pod-samples over 18
+  # ztunnel pods - NOT from a kubectl-top snapshot, which reads about 94m and
+  # badly understates the tail:
+  #
+  #   >100m   499 samples (4.7%)   8 pods
+  #   >150m   238 samples (2.3%)   2 pods
+  #   >200m    52 samples (0.5%)   1 pod
+  #   >300m    13 samples (0.1%)   1 pod   (peak 362m)
+  #
+  # So 200m sat near p99.5 and 150m sits near p97.7. This is a deliberate trade,
+  # not free: ztunnel genuinely does exceed 150m on the busiest one or two nodes
+  # of the busiest env. It is acceptable because a request is a scheduling floor
+  # rather than a cap, and these nodes run at ~3% actual CPU, so a burst above
+  # the request is satisfied out of idle capacity. Reclaiming 50m per node on
+  # every node of every meshed env is worth that.
+  #
+  # Two conditions make this wrong, so revisit if either lands: node CPU
+  # utilization climbing out of single digits (fewer/bigger nodes is the plan,
+  # which raises it), or ztunnel showing sustained rather than spiky time above
+  # 150m. ztunnel is on the data path - starving it degrades every meshed
+  # connection on the node, so do not cut this further without re-running the
+  # threshold query above.
   values = [yamlencode(merge(
-    { resources = { requests = { cpu = "200m", memory = "128Mi" } } },
+    { resources = { requests = { cpu = "150m", memory = "128Mi" } } },
     local.istio_image_hub == "" ? {} : { hub = local.istio_image_hub }
   ))]
 }
 
 resource "kubernetes_labels" "ambient_dozuki" {
-  count      = local.mesh_enrolled ? 1 : 0
+  count      = local.mesh_enabled ? 1 : 0
   depends_on = [helm_release.ztunnel]
 
   api_version = "v1"
@@ -220,7 +294,7 @@ resource "kubernetes_labels" "ambient_dozuki" {
 }
 
 resource "kubernetes_labels" "ambient_envoy_gateway" {
-  count = local.mesh_enrolled ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
   # envoy-gateway-system is created by the EG release (create_namespace), not by a
   # Terraform namespace resource.
   depends_on = [helm_release.ztunnel, helm_release.envoy_gateway]
@@ -237,7 +311,7 @@ resource "kubernetes_labels" "ambient_envoy_gateway" {
 }
 
 resource "kubernetes_labels" "ambient_redis" {
-  count = local.mesh_enrolled ? 1 : 0
+  count = local.mesh_enabled ? 1 : 0
   # The NetworkPolicy must allow HBONE 15008 before redis-system is enrolled (and
   # enrollment must be removed before the rule on teardown).
   depends_on = [helm_release.ztunnel, kubernetes_network_policy_v1.ratelimit_redis]
@@ -325,7 +399,7 @@ locals {
 # teardown), or the NLB-facing envoy ports and API-server webhook callbacks are
 # rejected during the transition window.
 resource "kubectl_manifest" "peer_auth_strict" {
-  for_each   = local.mesh_strict ? toset(local.mesh_strict_namespaces) : toset([])
+  for_each   = local.mesh_enabled ? toset(local.mesh_strict_namespaces) : toset([])
   depends_on = [kubectl_manifest.peer_auth_carveouts]
 
   yaml_body = yamlencode({
@@ -338,7 +412,7 @@ resource "kubectl_manifest" "peer_auth_strict" {
 }
 
 resource "kubectl_manifest" "peer_auth_carveouts" {
-  for_each = local.mesh_strict ? local.mesh_carveouts : {}
+  for_each = local.mesh_enabled ? local.mesh_carveouts : {}
   depends_on = [
     kubernetes_labels.ambient_dozuki,
     kubernetes_labels.ambient_envoy_gateway,

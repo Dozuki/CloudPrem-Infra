@@ -66,9 +66,27 @@ data "aws_iam_policy_document" "eks_worker_kms" {
       "kms:DescribeKey",
     ]
 
-    resources = [
-      local.s3_kms_key_id,
-    ]
+    resources = [local.s3_kms_key_id]
+  }
+
+  # Objects written before this stack owned its key stay encrypted under the
+  # donor key forever - S3 records the key on the object at write time, and
+  # noncurrent versions are never rewritten. Without this the app loses access
+  # to everything it wrote previously the moment the bucket default flips.
+  #
+  # Decrypt only, and deliberately a separate statement: the donor key must
+  # never encrypt anything new, which is the whole point of this stack owning
+  # its own key. Folding these resources into the statement above would hand
+  # the app kms:Encrypt and kms:GenerateDataKey on a key we do not own.
+  #
+  # Produces no statement at all when s3_kms_key_id is unset, the normal case.
+  dynamic "statement" {
+    for_each = data.aws_kms_key.s3_migration
+
+    content {
+      actions   = ["kms:Decrypt"]
+      resources = [statement.value.arn]
+    }
   }
 }
 
@@ -406,15 +424,20 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
   tags = local.tags
 }
 
-# Container Insights: CloudWatch agent (amazon-cloudwatch-observability addon).
+# Log shipping: Fluent Bit (amazon-cloudwatch-observability addon).
 #
 # EKS Auto Mode gives nodes a deliberately minimal role (only EKS worker + ECR pull),
-# so the agent must get its CloudWatch permissions via Pod Identity. Without an
-# association the cloudwatch-agent SA falls back to the node role and every publish
-# (cloudwatch:PutMetricData, logs:PutLogEvents) is AccessDenied: the
-# ContainerInsights namespace stays empty and the node_* cluster alarms sit in
-# INSUFFICIENT_DATA. Both the metrics agent and fluent-bit run as the cloudwatch-agent
-# SA, so one association covers metrics and logs.
+# so Fluent Bit must get its CloudWatch permissions via Pod Identity. Without an
+# association it falls back to the node role and every logs:PutLogEvents is
+# AccessDenied - container logs silently stop reaching CloudWatch, which is now the
+# only thing this addon does.
+#
+# Fluent Bit runs as the cloudwatch-agent SA (the name is historical), so this one
+# association still covers it even though the metrics agent it was named for is gone:
+# the addon config sets agents = [] and metrics come from Prometheus into Mimir now
+# (logical/kubernetes.tf). The role keeps cloudwatch:PutMetricData because the
+# managed CloudWatchAgentServerPolicy grants it; that is harmless with no agent
+# publishing, and swapping to a narrower logs-only policy is a separate change.
 resource "aws_iam_role" "cloudwatch_agent_pod_identity" {
   name = "${local.identifier}-${data.aws_region.current.region}-cw-agent-pod-identity"
 

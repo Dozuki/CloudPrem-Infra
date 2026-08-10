@@ -7,11 +7,8 @@ on:
   pull_request:
 
 jobs:
-  # The alerting lambdas are Python inside a Terraform repo, so nothing in the matrix
-  # below ever executes them - tofu validate only checks that the archive_file source
-  # exists. Their suite ran by hand until now, which meant the one guarantee protecting
-  # the aurora migration task (it has no CloudWatch alarm anywhere, so its Slack card is
-  # its only alerting) held only when someone remembered to run it.
+  # The alerting lambdas are Python inside a Terraform repo, so the matrix below does
+  # not execute them - tofu validate only checks that the archive_file source exists.
   lambda-tests:
     name: 'Lambda tests'
     runs-on: ubuntu-latest
@@ -25,10 +22,8 @@ jobs:
         python-version: '3.12'   # the runtime aws_lambda_function.sns_to_slack declares
 
     # boto3 because the module imports it at import time; moto because the state
-    # machine's correctness lives in DynamoDB ConditionExpressions, and a mock that
-    # asserts "we sent the right request" cannot tell a correct condition from a
-    # nonsense one. Four review rounds found defects here that a mock-only suite
-    # passed clean through.
+    # machine's correctness lives in DynamoDB ConditionExpressions, which request-shape
+    # mocks cannot evaluate.
     - name: Install test dependencies
       run: pip install --disable-pip-version-check boto3 'moto[dynamodb]'
 

@@ -337,7 +337,7 @@ resource "kubernetes_manifest" "nodepool_spot" {
           # per node once the CNI agent is ready. App pods can ONLY land on
           # these custom pools (physical enables just the built-in system pool,
           # which is CriticalAddonsOnly), so coverage is total.
-          local.mesh_installed ? {
+          local.mesh_enabled ? {
             startupTaints = [{
               key    = "cni.istio.io/not-ready"
               effect = "NoSchedule"
@@ -437,7 +437,7 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
             ]
           },
           # See nodepool_spot for the startupTaints rationale.
-          local.mesh_installed ? {
+          local.mesh_enabled ? {
             startupTaints = [{
               key    = "cni.istio.io/not-ready"
               effect = "NoSchedule"
@@ -683,7 +683,54 @@ resource "aws_eks_addon" "cloudwatch_observability" {
   # unschedulable and stalled every deploy for helm's full 4h30m wait, and the
   # frontegg Node 12 images crashlooped on the injected SDK's optional
   # chaining. No injection anywhere is a superset of those excludes.
+  # This addon is now a LOG SHIPPER ONLY. Fluent Bit stays and keeps writing the
+  # application / dataplane / host log groups; the CloudWatch metrics agent is
+  # gone. Metrics are Prometheus' job now (kube-prometheus-stack scrapes and
+  # remote-writes to Mimir), so Container Insights was a second collector
+  # publishing a strictly smaller set of the same signals, and it cost 250m CPU
+  # of every node's 1780m allocatable to do it. The node_* alarms it fed were
+  # deleted with it (physical/monitoring.tf); node-exporter's rules already
+  # covered those three signals and about thirty more.
+  #
+  # `agents = []` rather than `containerInsights.enabled = false` ON PURPOSE.
+  # The fleet is on mixed addon schemas (5.4.0 through 6.4.0 as of this change),
+  # every schema sets additionalProperties=false, and `containerInsights` does
+  # not exist before 6.x - setting it fails the addon update outright on any
+  # stack still on 5.x. `agents` is an unconstrained array in every schema from
+  # 5.4.0 on, so an empty list is portable and drops the daemonset the same way.
+  # Revisit if addon_version ever gets pinned fleet-wide.
+  #
+  # Fluent Bit's memory request goes UP, not down. The addon default is 25Mi,
+  # which is below what it actually uses: measured over 3 days on the busiest
+  # commercial MPC env, median 44Mi, second-highest pod 58Mi, peak 68Mi. A
+  # daemonset requesting less than it uses is ranked first for eviction under
+  # node memory pressure, which is precisely backwards for the one component
+  # this addon still exists to run. 96Mi sits ~1.4x over the measured peak. CPU
+  # stays at the default 50m (measured median 6m, peak 21m).
+  #
+  # applicationSignals auto-monitor stays off. It is the bundled OTel operator
+  # webhook, not the agent, so removing the agent does not stop it injecting ADOT
+  # SDK init containers into every workload (that is why ratelimit.tf ignores
+  # template annotations, and why a Go node-exporter was carrying a JVM agent).
+  # This key is valid on both 5.x and 6.x; `applicationSignals.enabled` is 6.x
+  # only, so it stays out until the fleet's schemas converge.
   configuration_values = jsonencode({
+    agents = []
+    containerLogs = {
+      enabled = true
+      fluentBit = {
+        resources = {
+          requests = {
+            cpu    = "50m"
+            memory = "96Mi"
+          }
+          limits = {
+            cpu    = "500m"
+            memory = "250Mi"
+          }
+        }
+      }
+    }
     manager = {
       applicationSignals = {
         autoMonitor = {
