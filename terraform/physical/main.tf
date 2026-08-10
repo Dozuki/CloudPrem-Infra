@@ -60,9 +60,8 @@ locals {
   db_apply_immediately = coalesce(var.db_apply_immediately, !var.protect_resources)
 
   # --EKS--
-  cluster_access_role_name = "${local.identifier}-${data.aws_region.current.region}-cluster-access"
-  create_eks_kms           = var.eks_kms_key_id == "" ? true : false
-  eks_kms_key              = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
+  create_eks_kms = var.eks_kms_key_id == "" ? true : false
+  eks_kms_key    = local.create_eks_kms ? aws_kms_key.eks[0].arn : data.aws_kms_key.eks[0].arn
 
   # --Tags for all resources--
   // If you add a tag, it must never be blank.
@@ -155,9 +154,6 @@ locals {
   bi_db_resource_id = local.bi_uses_aurora ? module.bi_aurora[0].cluster_resource_id : (
     local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
   )
-
-  # Kept for compatibility with existing references to the old name.
-  bi_host = local.bi_db_host
 
   // Static map of all supported database instance types and their memory allocation, used for Memory Usage alarm.
   // (Neither RDS nor CloudWatch provides a metric or a queryable resource for instance memory size)
