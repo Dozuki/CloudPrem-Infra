@@ -642,6 +642,74 @@ resource "aws_lambda_function" "sns_to_slack" {
   tags = local.tags
 }
 
+# Keep the complete asynchronous invocation record when Lambda exhausts its function-error
+# retries. Without a destination, Lambda discards the SNS event after the final attempt and
+# a state-machine wedge becomes indistinguishable from an alert that never existed.
+resource "aws_sqs_queue" "sns_to_slack_failed_events" {
+  count = local.slack_notifications_enabled ? 1 : 0
+
+  name                       = "${local.identifier}-sns-to-slack-failed-events"
+  message_retention_seconds  = 1209600 # 14 days
+  sqs_managed_sse_enabled    = true
+  visibility_timeout_seconds = 30
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "sns_to_slack_failed_events" {
+  count = local.slack_notifications_enabled ? 1 : 0
+
+  name = "${local.identifier}-sns-to-slack-failed-events"
+  role = aws_iam_role.lambda_execution[0].name
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect   = "Allow",
+      Action   = ["sqs:SendMessage"],
+      Resource = aws_sqs_queue.sns_to_slack_failed_events[0].arn
+    }]
+  })
+}
+
+resource "aws_lambda_function_event_invoke_config" "sns_to_slack" {
+  count = local.slack_notifications_enabled ? 1 : 0
+
+  function_name                = aws_lambda_function.sns_to_slack[0].function_name
+  maximum_event_age_in_seconds = 21600 # six hours
+  maximum_retry_attempts       = 2
+
+  destination_config {
+    on_failure {
+      destination = aws_sqs_queue.sns_to_slack_failed_events[0].arn
+    }
+  }
+
+  # AWS validates destination permissions when this config is created.
+  depends_on = [aws_iam_role_policy.sns_to_slack_failed_events]
+}
+
+# The queue is retention, not observability. Page through the existing notification topic
+# as soon as one failed invocation is visible so it is investigated before the 14-day TTL.
+resource "aws_cloudwatch_metric_alarm" "sns_to_slack_failed_events" {
+  count = local.slack_notifications_enabled ? 1 : 0
+
+  alarm_name          = "${local.identifier}-sns-to-slack-failed-events"
+  alarm_description   = "The SNS-to-Slack Lambda exhausted its asynchronous retries; inspect its failed-event queue"
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  evaluation_periods  = 1
+  period              = 60
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  treat_missing_data  = "notBreaching"
+  dimensions = {
+    QueueName = aws_sqs_queue.sns_to_slack_failed_events[0].name
+  }
+  alarm_actions = [module.sns.topic_arn]
+  tags          = local.tags
+}
+
 # Correlate CloudWatch ALARM -> OK on the bot-token path so the recovery card threads
 # under the incident that fired instead of landing as a second, disconnected root post.
 # The ALARM card itself is never edited green: an audit found a week's worth of firing

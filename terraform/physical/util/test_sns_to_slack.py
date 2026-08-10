@@ -1113,6 +1113,107 @@ def dynamo_checks():
          bool(first) and len(posted) == 1 and final.get('Status') == {'S': 'RESOLVED'}),
     ])
 
+    # An OK can arrive after the invocation that claimed the red root exhausted its own
+    # retries. Once that root lease expires, the recovery must break the wedge. There is
+    # no trustworthy root ts to thread under, so the safe fallback is one visible,
+    # unthreaded recovery card with no reaction or broadcast-only Slack arguments.
+    def ok_after_abandoned_root(client, table):
+        alarm = alarm_fixture('ALARM')
+        alarm_at = sns_to_slack._event_epoch(alarm)
+        sns_to_slack._claim_alarm_root(alarm['AlarmArn'], alarm_at)
+        client.update_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': alarm['AlarmArn']}},
+            UpdateExpression='SET ClaimedAt = :old',
+            ExpressionAttributeValues={':old': {'N': str(
+                int(time.time()) - sns_to_slack.CLAIM_LEASE_SECONDS - 5)}},
+        )
+
+        posted, reactions = [], []
+        error = None
+
+        def post(*args, **kwargs):
+            posted.append(kwargs)
+            return 'recovery-root'
+
+        try:
+            with mock.patch.object(sns_to_slack, '_post_bot', side_effect=post), \
+                 mock.patch.object(sns_to_slack, '_already_posted', return_value=None), \
+                 mock.patch.object(sns_to_slack, '_add_reaction',
+                                   side_effect=lambda *args: reactions.append(args)):
+                sns_to_slack._deliver_cloudwatch_bot(
+                    'xoxb', alarm_fixture('OK'), 'acme-prod', 'us-east-1', '111', 'prod')
+        except RuntimeError as exc:
+            error = exc
+
+        final = client.get_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': alarm['AlarmArn']}},
+            ConsistentRead=True,
+        )['Item']
+        return error, posted, reactions, final
+
+    error, posted, reactions, final = _with_table(ok_after_abandoned_root)
+    checks.extend([
+        ("an OK breaks an expired ALARM_POSTING wedge", error is None),
+        ("that fallback posts exactly one unthreaded recovery",
+         len(posted) == 1 and posted[0].get('thread_ts') is None),
+        ("an unthreaded recovery is not marked reply_broadcast",
+         len(posted) == 1 and posted[0].get('reply_broadcast') is False),
+        ("an unthreaded recovery does not react to a missing root", reactions == []),
+        ("the abandoned-root recovery finalises the row",
+         final.get('Status') == {'S': 'RESOLVED'}),
+    ])
+
+    # The lease must outlive the function's 30-second timeout but expire before Lambda's
+    # first asynchronous retry at about 60 seconds. The boundary itself is reclaimable;
+    # a strict comparison would waste that first retry.
+    def lease_boundaries(client, table):
+        with mock.patch.object(sns_to_slack.time, 'time', return_value=1000):
+            sns_to_slack._claim_alarm_root('root', 100.0)
+        with mock.patch.object(sns_to_slack.time, 'time', return_value=1044):
+            try:
+                sns_to_slack._claim_alarm_root('root', 100.0)
+                root_before = 'claimed'
+            except RuntimeError:
+                root_before = 'held'
+        with mock.patch.object(sns_to_slack.time, 'time', return_value=1045):
+            try:
+                root_at = sns_to_slack._claim_alarm_root('root', 100.0)
+            except RuntimeError:
+                root_at = None
+
+        with mock.patch.object(sns_to_slack.time, 'time', return_value=900):
+            root = sns_to_slack._claim_alarm_root('resolve', 100.0)
+            sns_to_slack._finalize_alarm_root(
+                'resolve', root, 'root-ts', 'start', 100.0)
+        with mock.patch.object(sns_to_slack.time, 'time', return_value=1000):
+            sns_to_slack._claim_resolution('resolve', 200.0)
+        with mock.patch.object(sns_to_slack.time, 'time', return_value=1044):
+            try:
+                sns_to_slack._claim_resolution('resolve', 200.0)
+                resolve_before = 'claimed'
+            except RuntimeError:
+                resolve_before = 'held'
+        with mock.patch.object(sns_to_slack.time, 'time', return_value=1045):
+            try:
+                resolve_at = sns_to_slack._claim_resolution('resolve', 200.0)
+            except RuntimeError:
+                resolve_at = None
+        return root_before, root_at, resolve_before, resolve_at
+
+    root_before, root_at, resolve_before, resolve_at = _with_table(lease_boundaries)
+    checks.extend([
+        ("the claim lease is longer than timeout and shorter than first retry",
+         30 < sns_to_slack.CLAIM_LEASE_SECONDS < 60),
+        ("a root claim is still held one second before the boundary",
+         root_before == 'held'),
+        ("a root claim is reclaimable at the boundary", bool(root_at)),
+        ("a resolve claim is still held one second before the boundary",
+         resolve_before == 'held'),
+        ("a resolve claim is reclaimable at the boundary", bool(resolve_at)),
+    ])
+
     # TTL: a live incident must never inherit the tombstone's expiry.
     def ttl(client, table):
         first = sns_to_slack._claim_alarm_root('k', 100.0)

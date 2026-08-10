@@ -103,11 +103,10 @@ STATE_TTL_SECONDS = 30 * 24 * 3600
 #
 # The claim exists so that exactly one delivery of an OK posts the recovery card. The
 # lease exists so that a claim whose posting step then died does not silence the
-# recovery forever. Sized against the retry cadence rather than the posting time: SNS
-# and Lambda async retries are a minute or more apart, so a lease shorter than that
-# lets the retry re-claim and post, while a lease longer than that would make the
-# retry give up on a card that was never actually sent.
-CLAIM_LEASE_SECONDS = 60
+# recovery forever. It outlives the function's 30-second timeout but expires before
+# Lambda's first asynchronous function-error retry at about 60 seconds, leaving that
+# retry and the final retry able to recover the event.
+CLAIM_LEASE_SECONDS = 45
 
 # How far back to look in channel history when checking whether a red root was already
 # posted by an attempt that died. Only has to cover the gap between a crash and the
@@ -740,10 +739,12 @@ def _claim_resolution(alarm_key, event_at):
         ':resolving': {'S': 'RESOLVING'},
         ':token': {'S': token},
         ':alarm': {'S': 'ALARM'},
+        ':posting': {'S': 'ALARM_POSTING'},
         ':now': {'N': str(now)},
         ':lease': {'N': str(now - CLAIM_LEASE_SECONDS)},
     }
-    condition = ('(#s = :alarm OR (#s = :resolving AND ClaimedAt < :lease))')
+    condition = ('(#s = :alarm OR ((#s = :resolving OR #s = :posting)'
+                 ' AND ClaimedAt <= :lease))')
     update = 'SET #s = :resolving, ClaimedAt = :now, ClaimToken = :token'
     # Only order when the event carries a usable timestamp. Without one there is nothing
     # to compare, and refusing to claim would drop the recovery entirely.
@@ -826,7 +827,7 @@ def _claim_alarm_root(alarm_key, event_at):
         ':lease': {'N': str(now - CLAIM_LEASE_SECONDS)},
     }
     condition = ('(attribute_not_exists(AlarmKey) OR #s = :resolved OR #s = :resolving'
-                 ' OR (#s = :posting AND ClaimedAt < :lease))')
+                 ' OR (#s = :posting AND ClaimedAt <= :lease))')
     update = 'SET #s = :posting, ClaimedAt = :now, ClaimToken = :token'
     if event_at is not None:
         values[':evt'] = {'N': repr(event_at)}
@@ -1101,19 +1102,27 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
         # detail (duration, final reading, resource) it got when the alarm fired.
         # Broadcast because a thread reply alone leaves the channel showing red.
         #
+        # An expired ALARM_POSTING row has no trustworthy root ts: the root invocation
+        # exhausted its retries before finalising. Break that permanent wedge by posting
+        # the recovery as a visible root. There is nothing safe to thread under or react
+        # to, and reply_broadcast is only valid for an actual thread reply.
+        #
         # If this raises, the row stays RESOLVING and the Lambda retries. Once the
         # claim's lease expires the retry re-claims, finds the card above, and finalises
         # without duplicating it.
-        _post_bot(token, payload, thread_ts=prior['message_ts'],
-                  reply_broadcast=True, transition=transition)
-        try:
-            _add_reaction(token, prior['message_ts'], 'white_check_mark')
-        except Exception as exc:  # noqa: BLE001 - a reaction is decoration
-            # Never let a reactions failure (scope, already_reacted, Slack 5xx)
-            # bubble up: the recovery card is already posted, and raising here
-            # would leave the row RESOLVING and re-post it on the Lambda retry.
-            print(f'could not mark {metadata["alarm_name"]} '
-                  f'({prior["message_ts"]}) resolved: {exc}')
+        orphaned_root = prior.get('status') == 'ALARM_POSTING'
+        root_ts = None if orphaned_root else prior['message_ts']
+        _post_bot(token, payload, thread_ts=root_ts,
+                  reply_broadcast=not orphaned_root, transition=transition)
+        if root_ts:
+            try:
+                _add_reaction(token, root_ts, 'white_check_mark')
+            except Exception as exc:  # noqa: BLE001 - a reaction is decoration
+                # Never let a reactions failure (scope, already_reacted, Slack 5xx)
+                # bubble up: the recovery card is already posted, and raising here
+                # would leave the row RESOLVING and re-post it on the Lambda retry.
+                print(f'could not mark {metadata["alarm_name"]} '
+                      f'({root_ts}) resolved: {exc}')
         # Conditional on still owning the claim, not an unconditional write. A fast flap
         # can have handed the row to a new incident while this card was being posted.
         _finalize_resolution(alarm_key, claim_token, event_at)
