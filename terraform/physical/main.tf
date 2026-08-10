@@ -203,10 +203,15 @@ locals {
   //{ type = one of local.create_s3_bucket_names, destination = arn of destination bucket for replication, source = arn of source bucket for replication }
   existing_bucket_map = local.use_existing_buckets ? [for _, bucket_type in local.create_s3_bucket_names : { type = bucket_type, destination = aws_s3_bucket.guide_buckets[bucket_type].arn, source = data.aws_s3_bucket.guide_buckets[bucket_type].bucket }] : []
 
-  // Build lists for IAM policies to include all the source and destination buckets and objects
-  s3_source_bucket_arn_list                   = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : bucket.arn] : []
-  s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in one(flatten(toset(data.aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"] : []
-  s3_destination_bucket_arn_list_with_objects = [for _, bucket in one(flatten(toset(aws_s3_bucket.guide_buckets[*]))) : "${bucket.arn}/*"]
+  // Build lists for IAM policies to include all the source and destination buckets and objects.
+  // Iterate the for_each map directly instead of one(flatten(toset(...[*]))). The splat+toset
+  // round-trip converted the whole bucket object, which hoists the provider's deprecation marks
+  // (request_payer, website_endpoint, website_domain, acceleration_status, ...) onto the result and
+  // makes every plan print "Value derived from a deprecated source". Reading .arn off the map only
+  // touches .arn, so no marks come along. Same output either way.
+  s3_source_bucket_arn_list                   = local.use_existing_buckets ? [for _, bucket in data.aws_s3_bucket.guide_buckets : bucket.arn] : []
+  s3_source_bucket_arn_list_with_objects      = local.use_existing_buckets ? [for _, bucket in data.aws_s3_bucket.guide_buckets : "${bucket.arn}/*"] : []
+  s3_destination_bucket_arn_list_with_objects = [for _, bucket in aws_s3_bucket.guide_buckets : "${bucket.arn}/*"]
 
   // Conditional public access block to conform with unmanaged SCP
   s3_public_access_block_buckets = var.s3_block_public_access ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}
