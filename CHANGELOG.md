@@ -2,6 +2,17 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.0.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.20.0...v9.0.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **physical:** use_existing_s3_kms is removed. A stack that still sets it will fail to plan until the input is dropped, and dropping it moves that stack's bucket default encryption onto its own KMS key. Existing objects are unaffected: they keep decrypting with the key recorded on them at write time.
+
+### Bug Fixes
+
+* **physical:** always own the S3 encryption key ([#481](https://github.com/Dozuki/CloudPrem-Infra/issues/481)) ([708f3c7](https://github.com/Dozuki/CloudPrem-Infra/commit/708f3c7dfa28c05f9bfda3517f90a97e7e7def84))
+
 ## [8.20.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.19.0...v8.20.0) (2026-08-10)
 
 
