@@ -708,11 +708,10 @@ resource "aws_iam_role_policy" "sns_to_slack_alarm_state" {
       Effect = "Allow",
       Action = [
         "dynamodb:GetItem",
-        "dynamodb:PutItem",
         # UpdateItem carries the conditional ALARM -> RESOLVING claim that makes exactly
-        # one delivery of an OK post the recovery card. PutItem cannot express it: the
-        # condition has to read the row's current status and event time in the same
-        # atomic operation that writes the new one.
+        # one delivery of an OK post the recovery card. The condition has to read the
+        # row's current status and event time in the same atomic operation that writes
+        # the new one.
         "dynamodb:UpdateItem",
       ],
       Resource = aws_dynamodb_table.slack_alarm_state[0].arn

@@ -1020,6 +1020,99 @@ def dynamo_checks():
     checks.append(("an unexpired claim raises instead of dropping the event",
                    _with_table(unexpired) == 'raised'))
 
+    # The handler checks the watermark before it tries to reclaim an expired lease. A
+    # claim must therefore record the state that owns its new watermark. Otherwise a
+    # retry of that same event sees an equal timestamp paired with the previous state,
+    # classifies itself as a conflict, and never reaches the takeover condition.
+    def crashed_root_retry(client, table):
+        event = alarm_fixture('ALARM')
+        event_at = sns_to_slack._event_epoch(event)
+        alarm_key = event['AlarmArn']
+        old_root = sns_to_slack._claim_alarm_root(alarm_key, 100.0)
+        sns_to_slack._finalize_alarm_root(
+            alarm_key, old_root, 'old-root', 'start', 100.0)
+        old_ok = sns_to_slack._claim_resolution(alarm_key, 200.0)
+        sns_to_slack._finalize_resolution(alarm_key, old_ok, 200.0)
+
+        first = sns_to_slack._claim_alarm_root(event['AlarmArn'], event_at)
+        claimed = client.get_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': event['AlarmArn']}},
+            ConsistentRead=True,
+        )['Item']
+        client.update_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': event['AlarmArn']}},
+            UpdateExpression='SET ClaimedAt = :old',
+            ExpressionAttributeValues={':old': {'N': str(
+                int(time.time()) - sns_to_slack.CLAIM_LEASE_SECONDS - 5)}},
+        )
+        posted = []
+        with mock.patch.object(sns_to_slack, '_already_posted', return_value=None), \
+             mock.patch.object(sns_to_slack, '_post_bot',
+                               side_effect=lambda *args, **kwargs:
+                               posted.append(kwargs) or 'new-root'):
+            sns_to_slack._deliver_cloudwatch_bot(
+                'xoxb', event, 'acme-prod', 'us-east-1', '111', 'prod')
+        final = client.get_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': event['AlarmArn']}},
+            ConsistentRead=True,
+        )['Item']
+        return first, claimed, posted, final
+
+    first, claimed, posted, final = _with_table(crashed_root_retry)
+    checks.extend([
+        ("a pending root claim records the ALARM state for its watermark",
+         claimed.get('LastEventState') == {'S': 'ALARM'}),
+        ("a pending root claim clears the resolved tombstone TTL",
+         'ExpiresAt' not in claimed),
+        ("the same ALARM retries after its expired claim",
+         bool(first) and len(posted) == 1 and final.get('Status') == {'S': 'ALARM'}),
+    ])
+
+    def crashed_resolve_retry(client, table):
+        event = alarm_fixture('OK')
+        event_at = sns_to_slack._event_epoch(event)
+        root = sns_to_slack._claim_alarm_root(event['AlarmArn'], event_at - 60)
+        sns_to_slack._finalize_alarm_root(
+            event['AlarmArn'], root, 'root', event['StateChangeTime'], event_at - 60)
+        first = sns_to_slack._claim_resolution(event['AlarmArn'], event_at)
+        claimed = client.get_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': event['AlarmArn']}},
+            ConsistentRead=True,
+        )['Item']
+        client.update_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': event['AlarmArn']}},
+            UpdateExpression='SET ClaimedAt = :old',
+            ExpressionAttributeValues={':old': {'N': str(
+                int(time.time()) - sns_to_slack.CLAIM_LEASE_SECONDS - 5)}},
+        )
+        posted = []
+        with mock.patch.object(sns_to_slack, '_already_posted', return_value=None), \
+             mock.patch.object(sns_to_slack, '_post_bot',
+                               side_effect=lambda *args, **kwargs:
+                               posted.append(kwargs) or 'recovery'), \
+             mock.patch.object(sns_to_slack, '_add_reaction'):
+            sns_to_slack._deliver_cloudwatch_bot(
+                'xoxb', event, 'acme-prod', 'us-east-1', '111', 'prod')
+        final = client.get_item(
+            TableName=table,
+            Key={'AlarmKey': {'S': event['AlarmArn']}},
+            ConsistentRead=True,
+        )['Item']
+        return first, claimed, posted, final
+
+    first, claimed, posted, final = _with_table(crashed_resolve_retry)
+    checks.extend([
+        ("a pending resolve claim records the OK state for its watermark",
+         claimed.get('LastEventState') == {'S': 'OK'}),
+        ("the same OK retries after its expired claim",
+         bool(first) and len(posted) == 1 and final.get('Status') == {'S': 'RESOLVED'}),
+    ])
+
     # TTL: a live incident must never inherit the tombstone's expiry.
     def ttl(client, table):
         first = sns_to_slack._claim_alarm_root('k', 100.0)

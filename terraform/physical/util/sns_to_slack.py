@@ -724,8 +724,8 @@ def _claim_resolution(alarm_key, event_at):
     stops a delayed OK from a previous incident closing the current one. `<=` rather
     than `<` so a retry of the SAME event can re-claim once its lease expires.
 
-    Returns the claim token (the ClaimedAt we wrote) on success and None otherwise. The
-    token is what _finalize_resolution proves ownership with: between claiming and
+    Returns the unique claim token on success and None otherwise. The token is what
+    _finalize_resolution proves ownership with: between claiming and
     finalizing, a new ALARM can legitimately take the row over, and without the token the
     finalize would unconditionally stamp RESOLVED back on top of a live incident.
 
@@ -749,8 +749,9 @@ def _claim_resolution(alarm_key, event_at):
     # to compare, and refusing to claim would drop the recovery entirely.
     if event_at is not None:
         values[':evt'] = {'N': repr(event_at)}
+        values[':state'] = {'S': 'OK'}
         condition += (' AND (attribute_not_exists(LastEventAt) OR LastEventAt <= :evt)')
-        update += ', LastEventAt = :evt'
+        update += ', LastEventAt = :evt, LastEventState = :state'
     client = boto3.client('dynamodb')
     try:
         client.update_item(
@@ -829,8 +830,10 @@ def _claim_alarm_root(alarm_key, event_at):
     update = 'SET #s = :posting, ClaimedAt = :now, ClaimToken = :token'
     if event_at is not None:
         values[':evt'] = {'N': repr(event_at)}
+        values[':state'] = {'S': 'ALARM'}
         condition += ' AND (attribute_not_exists(LastEventAt) OR LastEventAt <= :evt)'
-        update += ', LastEventAt = :evt'
+        update += ', LastEventAt = :evt, LastEventState = :state'
+    update += ' REMOVE ExpiresAt'
     client = boto3.client('dynamodb')
     try:
         client.update_item(
@@ -898,9 +901,9 @@ def _finalize_resolution(alarm_key, claim_token, event_at):
     nothing - the exact failure this whole change exists to prevent, reintroduced one
     step further along.
 
-    ClaimedAt is the ownership token. If it no longer matches, someone else owns the row
-    and the right move is to leave it alone: our green card is already posted, and the
-    live incident keeps its own state.
+    ClaimToken is the ownership token. If it no longer matches, someone else owns the
+    row and the right move is to leave it alone: our green card is already posted, and
+    the live incident keeps its own state.
     """
     if not SLACK_STATE_TABLE:
         return False
