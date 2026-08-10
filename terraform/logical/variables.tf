@@ -59,6 +59,12 @@ variable "subsite_gateway_api_enabled" {
   default     = false
 }
 
+variable "enable_primary_site_grafana" {
+  description = "Turns on the dozuki-operator's reconciliation of the PRIMARY site's Grafana org (dozuki-operator.grafana.primarySite). Subsite discovery covers only subsites, so without this the primary site's Grafana datasource is never reconciled and keeps whatever the last manual provisioning run left behind, which makes dashboard queries against it fail. Off by default; requires enable_dashboards and a bundled dozuki-operator >= 4.1.0 (older pins silently ignore it). Enable per environment after validating on a non-production install: it has preconditions on that install's Grafana admin account, and the operator fails closed if a Subsite resource already targets the primary site rather than contending with the subsite controller over the same org."
+  type        = bool
+  default     = false
+}
+
 variable "enable_datadog" {
   description = "Installs the Datadog agent (lean: APM trace intake + SSI library injection + continuous profiler only) and instruments the monolith PHP pods. Dozuki-internal observability for MPC stacks - never enable on CloudPrem customer installs. AWS only; reads the API key from Vault secret/dozuki/global/datadog. See datadog.tf."
   type        = bool
