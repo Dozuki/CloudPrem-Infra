@@ -182,6 +182,7 @@ module "primary_database" {
   kms_key_id                   = local.rds_kms_key_arn
   apply_immediately            = local.db_apply_immediately
   allow_major_version_upgrade  = true
+  auto_minor_version_upgrade   = var.rds_auto_minor_version_upgrade
   performance_insights_enabled = true
   # iam_database_authentication_enabled = true
 
