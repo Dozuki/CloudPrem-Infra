@@ -7,9 +7,44 @@ on:
   pull_request:
 
 jobs:
+  # The alerting lambdas are Python inside a Terraform repo, so the matrix below does
+  # not execute them - tofu validate only checks that the archive_file source exists.
+  lambda-tests:
+    name: 'Lambda tests'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+    - name: Setup Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.12'   # the runtime aws_lambda_function.sns_to_slack declares
+
+    # boto3 because the module imports it at import time; moto because the state
+    # machine's correctness lives in DynamoDB ConditionExpressions, which request-shape
+    # mocks cannot evaluate.
+    - name: Install test dependencies
+      run: pip install --disable-pip-version-check boto3 'moto[dynamodb]'
+
+    - name: sns_to_slack
+      run: python3 test_sns_to_slack.py
+      working-directory: ./terraform/physical/util
+
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
+    # "Lambda tests" is a required context on master in its own right, so this coupling
+    # is belt-and-braces rather than the primary gate. It stays because the two together
+    # cover each other: branch protection can be edited in the UI without touching the
+    # repo, and this file cannot enforce itself.
+    #
+    # Both halves are needed. needs: alone would not gate, because GitHub treats a
+    # SKIPPED required context as satisfied - a failed dependency would skip the three
+    # Terraform contexts and leave the PR mergeable. always() keeps them running and the
+    # guard step below fails them explicitly instead.
+    needs: lambda-tests
+    if: ${{ always() }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +70,14 @@ jobs:
         shell: bash
 
     steps:
+    # First, so a lambda failure fails this required context rather than letting it pass
+    # on a technicality. See the always() note above.
+    - name: Enforce Lambda tests
+      if: ${{ needs.lambda-tests.result != 'success' }}
+      run: |
+        echo "::error::Lambda tests did not pass (result: ${{ needs.lambda-tests.result }})"
+        exit 1
+
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
