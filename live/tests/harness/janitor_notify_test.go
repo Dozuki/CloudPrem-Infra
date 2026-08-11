@@ -137,7 +137,7 @@ func TestResourceReaperJanitorYAMLContract(t *testing.T) {
 		"reaper_control_table:",
 		"reaper_shadow: 'true'",
 		"reaper_actions_enabled: 'false'",
-		"reaper_direct_slack_enabled: 'true'",
+		"reaper_direct_slack_enabled: 'false'",
 	} {
 		if !strings.Contains(config, key) {
 			t.Errorf("harness ConfigMap is missing explicit Resource Reaper setting %q", key)
