@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.1.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.0.0...v9.1.0) (2026-08-11)
+
+
+### Features
+
+* **physical:** expose auto minor version upgrade and an aurora replication source ([#484](https://github.com/Dozuki/CloudPrem-Infra/issues/484)) ([aedba27](https://github.com/Dozuki/CloudPrem-Infra/commit/aedba27bc2032df2fdf8ca28f27b6d99fcf60024))
+
+
+### Bug Fixes
+
+* **alerts:** make the slack state table ordered and single-writer, and run its suite in ci ([#471](https://github.com/Dozuki/CloudPrem-Infra/issues/471)) ([dab3814](https://github.com/Dozuki/CloudPrem-Infra/commit/dab3814984484ed4b076c2ec27d12020e7ae9202))
+
 ## [9.0.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v8.20.0...v9.0.0) (2026-08-10)
 
 
