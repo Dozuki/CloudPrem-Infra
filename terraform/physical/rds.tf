@@ -19,13 +19,6 @@ data "aws_rds_orderable_db_instance" "default" {
   vpc                          = true
 
   preferred_instance_classes = var.rds_preferred_instance_classes
-
-  lifecycle {
-    postcondition {
-      condition     = contains(keys(local.rds_instance_memory), self.instance_class)
-      error_message = "RDS instance type not supported. Please adjust the var.rds_preferred_instance_classes. All values must exist in local.rds_instance_memory."
-    }
-  }
 }
 
 data "aws_kms_key" "rds" {

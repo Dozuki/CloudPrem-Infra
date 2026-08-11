@@ -155,42 +155,6 @@ module "rds_cpu_alarm" {
   ]
 }
 
-module "rds_free_memory_alarm" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
-  version = "~> 5.0"
-
-  create_metric_alarm = var.db_engine == "rds"
-
-  alarm_name        = "${local.identifier}-rds-free-memory"
-  alarm_description = "Freeable Memory for RDS instance ${local.identifier}"
-  actions_enabled   = true
-
-  alarm_actions             = [module.sns.topic_arn]
-  ok_actions                = [module.sns.topic_arn]
-  insufficient_data_actions = [module.sns.topic_arn]
-
-  comparison_operator = "LessThanOrEqualToThreshold"
-  evaluation_periods  = "2"
-  threshold           = local.rds_instance_memory[data.aws_rds_orderable_db_instance.default.instance_class] * 0.20
-  unit                = "Bytes"
-
-  datapoints_to_alarm = "2"
-  treat_missing_data  = "missing"
-
-  metric_name = "FreeableMemory"
-  namespace   = "AWS/RDS"
-  period      = "300"
-  statistic   = "Average"
-
-  dimensions = {
-    DBInstanceIdentifier = local.identifier
-  }
-
-  tags = {
-    Name = "${local.identifier}-rds-free-memory"
-  }
-}
-
 module "rds_swap_usage_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
