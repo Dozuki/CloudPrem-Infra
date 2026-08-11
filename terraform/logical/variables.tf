@@ -468,7 +468,11 @@ variable "rustici_managed_password" {
 variable "chart_version" {
   description = "Dozuki chart version pulled from the registry (oci://<image_repository>/charts/dozuki)."
   type        = string
-  default     = "1.7.1"
+  # Current 2.x release. Every consumer pins this in its own env.hcl, so this
+  # default only applies to an env that forgets to - which is exactly the case
+  # worth protecting. It sat at 1.7.1 long enough that the fallback was a
+  # year-old chart. 2.x, not 3.x: 3.x is the slim/gated line.
+  default = "2.10.11"
 }
 
 variable "verify_artifact_pins" {
