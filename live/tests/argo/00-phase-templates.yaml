@@ -51,9 +51,9 @@ data:
   # both remain false during shadowing.
   reaper_shadow: 'true'
   reaper_actions_enabled: 'false'
-  # Temporary shadow-parity switch. Task 10 removes the direct Slack template and this
-  # key after the consolidated #mpc-alerts report is proven authoritative.
-  reaper_direct_slack_enabled: 'true'
+  # Keep the guarded direct path available for rollback, but route normal janitor
+  # findings only through the consolidated Resource Reaper report in #mpc-alerts.
+  reaper_direct_slack_enabled: 'false'
 ---
 # DDVtest has a hard ceiling of 10 VPCs per region and each test stack is about one VPC
 # (recovery is two). A nightly matrix plus a couple of PR runs will exhaust it mid-apply,
