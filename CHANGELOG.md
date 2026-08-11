@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.2.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.1.1...v9.2.0) (2026-08-11)
+
+
+### Features
+
+* **physical:** let each aurora instance take a provisioned class ([#490](https://github.com/Dozuki/CloudPrem-Infra/issues/490)) ([8f20475](https://github.com/Dozuki/CloudPrem-Infra/commit/8f20475a3a9b35c50b27ab26bba00298d2f4c88d))
+
 ## [9.1.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.1.0...v9.1.1) (2026-08-11)
 
 
