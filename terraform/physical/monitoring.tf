@@ -707,6 +707,7 @@ resource "aws_cloudwatch_metric_alarm" "sns_to_slack_failed_events" {
     QueueName = aws_sqs_queue.sns_to_slack_failed_events[0].name
   }
   alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
   tags          = local.tags
 }
 

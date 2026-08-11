@@ -1091,10 +1091,11 @@ def _deliver_cloudwatch_bot(token, message_json, identifier, region,
             # The attempt that died may have posted the card and gone before reacting,
             # so the root would keep its red-only scrollback forever. reactions.add is
             # idempotent enough for this - already_reacted is caught like any other.
-            try:
-                _add_reaction(token, prior['message_ts'], 'white_check_mark')
-            except Exception as exc:  # noqa: BLE001 - a reaction is decoration
-                print(f'could not mark {metadata["alarm_name"]} resolved: {exc}')
+            if prior.get('message_ts'):
+                try:
+                    _add_reaction(token, prior['message_ts'], 'white_check_mark')
+                except Exception as exc:  # noqa: BLE001 - a reaction is decoration
+                    print(f'could not mark {metadata["alarm_name"]} resolved: {exc}')
             _finalize_resolution(alarm_key, claim_token, event_at)
             return
 

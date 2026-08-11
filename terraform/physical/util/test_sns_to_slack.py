@@ -645,6 +645,21 @@ def lifecycle_checks():
     checks.append(("a resolve takeover with an empty thread posts the card",
                    len(r.posts) == 1))
 
+    # An abandoned root can recover as an unthreaded green card. If that invocation
+    # then dies before finalising, its retry finds the green card in channel history but
+    # still has no red root timestamp to react to.
+    orphaned_resolving = {
+        "message_ts": None,
+        "started_at": "2026-08-01T12:00:00.000+0000",
+        "status": "RESOLVING",
+    }
+    r = deliver_cloudwatch("OK", orphaned_resolving, already_posted=True)
+    checks.extend([
+        ("an orphaned recovery retry does not react without a root ts",
+         r.reactions == []),
+        ("an orphaned recovery retry still finalises", len(r.finals) == 1),
+    ])
+
     # The common path must not spend a Slack read: a claim taken from a live ALARM row
     # is a first attempt, and nothing can already be in the thread.
     r = deliver_cloudwatch("OK", firing)
