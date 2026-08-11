@@ -677,6 +677,58 @@ variable "aurora_max_acu" {
   default     = 16
 }
 
+variable "aurora_writer_instance_class" {
+  description = <<-EOT
+    Instance class for the Aurora cluster instance held under the map key "writer"
+    (identifier "<name>-writer"). db.serverless (the default) keeps Serverless v2, where
+    aurora_min_acu/aurora_max_acu drive capacity. A provisioned class (e.g. db.r6g.large)
+    bills a flat hourly rate instead, which is cheaper for a cluster whose ACU usage sits
+    at its floor.
+
+    The KEY IS NOT THE ROLE. "writer" and "reader" are terraform map keys that fix the
+    instance identifiers; the live writer/reader roles float across failovers and are
+    frequently the other way round. Check IsClusterWriter live before deciding which of
+    this pair to change.
+
+    serverlessv2_scaling_configuration stays on the cluster either way - AWS ignores it
+    for provisioned instances, and keeping it means a class can be moved back to
+    db.serverless in place without recreating anything.
+  EOT
+  type        = string
+  default     = "db.serverless"
+}
+
+variable "aurora_reader_instance_class" {
+  description = <<-EOT
+    Instance class for the Aurora cluster instance held under the map key "reader"
+    (identifier "<name>-reader"), which only exists when rds_multi_az is true. Same
+    semantics and same key-is-not-the-role caveat as aurora_writer_instance_class.
+  EOT
+  type        = string
+  default     = "db.serverless"
+}
+
+variable "aurora_writer_apply_immediately" {
+  description = <<-EOT
+    Per-instance override of db_apply_immediately for the "writer"-keyed Aurora instance.
+    Null (the default) inherits db_apply_immediately, which on a protected stack is false
+    - meaning an instance_class change is only SCHEDULED for preferred_maintenance_window
+    (sun:19:00-sun:23:00) and the apply returns green having done nothing.
+
+    Set true to make a class change land at apply time, inside whatever window the change
+    is being run in. It is scoped to this one instance so converting one side of a cluster
+    does not restate apply_immediately on its peer, the BI replica or the DR secondary.
+  EOT
+  type        = bool
+  default     = null
+}
+
+variable "aurora_reader_apply_immediately" {
+  description = "Per-instance override of db_apply_immediately for the \"reader\"-keyed Aurora instance. Same semantics as aurora_writer_apply_immediately."
+  type        = bool
+  default     = null
+}
+
 variable "aurora_engine_version" {
   description = "Aurora MySQL engine version, full aws RDS format (e.g. 8.4.mysql_aurora.8.4.7 — the bare 8.4.7 is rejected with 'Cannot find version'). Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
   type        = string

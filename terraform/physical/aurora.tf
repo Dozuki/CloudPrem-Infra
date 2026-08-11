@@ -67,9 +67,30 @@ module "aurora" {
     min_capacity = var.aurora_min_acu
     max_capacity = var.aurora_max_acu
   }
+  # db.serverless on both keys is the default, so the scaling configuration above is what
+  # sizes them. Point either class variable at a provisioned class (db.r6g.large) and that
+  # ONE instance converts in place; the scaling configuration stays and AWS ignores it for
+  # that instance, which is also what makes the move reversible.
+  #
+  # apply_immediately is per instance rather than the stack-wide db_apply_immediately
+  # because a protected stack has it false, and a class change with apply_immediately
+  # false is silently deferred to preferred_maintenance_window. Overriding it here keeps
+  # the flip off the peer instance, the BI replica and the DR secondary.
   instances = merge(
-    { writer = { instance_class = "db.serverless", performance_insights_enabled = true } },
-    var.rds_multi_az ? { reader = { instance_class = "db.serverless", performance_insights_enabled = true } } : {}
+    {
+      writer = {
+        instance_class               = var.aurora_writer_instance_class
+        performance_insights_enabled = true
+        apply_immediately            = var.aurora_writer_apply_immediately
+      }
+    },
+    var.rds_multi_az ? {
+      reader = {
+        instance_class               = var.aurora_reader_instance_class
+        performance_insights_enabled = true
+        apply_immediately            = var.aurora_reader_apply_immediately
+      }
+    } : {}
   )
 
   # Network guard during a migration: while state="provision" the cluster is
