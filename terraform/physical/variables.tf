@@ -267,6 +267,24 @@ variable "rds_engine_family" {
     error_message = "Only 5.7, 8.0 or 8.4 are allowed mysql engine families"
   }
 }
+
+variable "rds_auto_minor_version_upgrade" {
+  description = <<-EOT
+    Whether RDS may apply minor engine upgrades to the provisioned primary during its
+    maintenance window. Defaults to true, matching the provider and the rest of the fleet:
+    rds_engine_family resolves through data.aws_rds_engine_version, so auto-minor drift
+    normally never surfaces as a diff.
+
+    Pin this false only when a stack must hold a known patch level. The migration case is
+    an RDS -> Aurora move: Aurora's 8.4 line trails RDS MySQL's, so a source that
+    auto-upgrades mid-migration can move above every Aurora version that exists and
+    invalidate the seed. An out-of-band modify-db-instance reverts on the next apply,
+    because the provider default is true - this variable is what makes the freeze durable.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "rds_engine_version" {
   description = <<-EOT
     MySQL engine version for the PROVISIONED RDS primary (db_engine = "rds") and its read
@@ -663,6 +681,29 @@ variable "aurora_engine_version" {
   description = "Aurora MySQL engine version, full aws RDS format (e.g. 8.4.mysql_aurora.8.4.7 — the bare 8.4.7 is rejected with 'Cannot find version'). Fresh cluster: an 8.4 version. Snapshot-restore migration: an 8.0-compatible version first, then upgrade."
   type        = string
   default     = "8.4.mysql_aurora.8.4.7"
+}
+
+variable "aurora_replication_source_identifier" {
+  description = <<-EOT
+    ARN of an RDS MySQL instance to seed this Aurora cluster from as a MANAGED READ
+    REPLICA. Null (the default) builds a normal primary cluster and changes nothing.
+
+    Set it and the cluster is created with replication_source_identifier, which also
+    flips is_primary_cluster to false in the upstream module. That gates three things:
+    database_name and master_username are sent as null, and master_password_wo is
+    suppressed - the replica inherits the SOURCE instance's master credentials instead.
+    CPI still renders random_password.aurora into the credentials secret, so a managed-
+    replica cutover has to align the cluster's master password to that value once, after
+    promotion, via modify-db-cluster. There is no Terraform-side seam for it because the
+    module never asserts a password on a replica.
+
+    Leave it pinned forever once used. Clearing it flips is_primary_cluster back to true,
+    which re-asserts database_name (ForceNew) on a live cluster - a full replacement. The
+    module's lifecycle ignore_changes covers the attribute, so the pin is inert after
+    create and produces no diff when AWS clears it on promotion.
+  EOT
+  type        = string
+  default     = null
 }
 
 variable "aurora_snapshot_identifier" {

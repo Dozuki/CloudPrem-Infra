@@ -46,6 +46,13 @@ module "aurora" {
   engine_version  = var.aurora_engine_version
   master_username = local.db_username
 
+  # Managed read-replica seed (RDS -> Aurora). Null on every normal stack, so this pair
+  # is a no-op unless an env opts in. When set, the module sends database_name and
+  # master_username as null and suppresses master_password_wo below - the replica takes
+  # the source instance's credentials. See the variable for why the pin is permanent.
+  replication_source_identifier = var.aurora_replication_source_identifier
+  is_primary_cluster            = var.aurora_replication_source_identifier == null
+
   # Permit the in-place major-version upgrade path (Aurora MySQL v3/8.0 to v4/8.4):
   # AWS rejects a ModifyDBCluster engine_version bump across majors without it. Only
   # permits the upgrade; the engine_version change is what triggers one. Matches the
