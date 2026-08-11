@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.1.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.1.0...v9.1.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **physical:** remove the dead rds free-memory alarm, its instance-memory map and the class postcondition ([#486](https://github.com/Dozuki/CloudPrem-Infra/issues/486)) ([fb8761a](https://github.com/Dozuki/CloudPrem-Infra/commit/fb8761af1ee2aba0e071ad2faa489525ab3e9ca9))
+
 ## [9.1.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.0.0...v9.1.0) (2026-08-11)
 
 
