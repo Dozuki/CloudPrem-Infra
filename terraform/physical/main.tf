@@ -155,24 +155,6 @@ locals {
     local.dms_enabled ? module.dms_replica_database[0].db_instance_resource_id : local.db_resource_id
   )
 
-  // Static map of all supported database instance types and their memory allocation, used for Memory Usage alarm.
-  // (Neither RDS nor CloudWatch provides a metric or a queryable resource for instance memory size)
-  rds_instance_memory = {
-    "db.m4.large"    = 8192
-    "db.m4.xlarge"   = 16384
-    "db.m4.2xlarge"  = 32768
-    "db.m4.4xlarge"  = 65536
-    "db.m4.10xlarge" = 163840
-    "db.m5.large"    = 8192
-    "db.m5.xlarge"   = 16384
-    "db.m5.2xlarge"  = 32768
-    "db.m5.4xlarge"  = 65536
-    "db.m5.8xlarge"  = 131072
-    "db.m5.12xlarge" = 196608
-    "db.m5.16xlarge" = 262144
-    "db.m5.24xlarge" = 393216
-  }
-
   # --Access Config--
   secure_default_bi_access_cidrs = length(var.bi_access_cidrs) == 0 ? [local.vpc_cidr] : var.bi_access_cidrs
 

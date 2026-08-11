@@ -41,7 +41,6 @@
 | <a name="module_primary_database_sg"></a> [primary\_database\_sg](#module\_primary\_database\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
 | <a name="module_rds_connections_alarm"></a> [rds\_connections\_alarm](#module\_rds\_connections\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_rds_cpu_alarm"></a> [rds\_cpu\_alarm](#module\_rds\_cpu\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
-| <a name="module_rds_free_memory_alarm"></a> [rds\_free\_memory\_alarm](#module\_rds\_free\_memory\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_rds_read_latency_alarm"></a> [rds\_read\_latency\_alarm](#module\_rds\_read\_latency\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
 | <a name="module_rds_replica_database"></a> [rds\_replica\_database](#module\_rds\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_rds_swap_usage_alarm"></a> [rds\_swap\_usage\_alarm](#module\_rds\_swap\_usage\_alarm) | terraform-aws-modules/cloudwatch/aws//modules/metric-alarm | ~> 5.0 |
