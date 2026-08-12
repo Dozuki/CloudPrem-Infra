@@ -120,6 +120,51 @@ resource "helm_release" "cert_manager" {
 
   wait = true
 
+  # Webhook availability. cert-manager's webhook is failurePolicy=Fail and sits in the
+  # deploy path: while it has no endpoints, every create/patch of a cert-manager object
+  # fails outright - the chart's own ClusterIssuer, any gateway-shim Certificate. At one
+  # replica with no PDB a single Karpenter consolidation eviction takes it out for 30-60s,
+  # and on 2026-08-12 that window landed inside a Flux chart upgrade on dev-min: "cannot
+  # patch cert-issuer with kind ClusterIssuer: failed calling webhook webhook.cert-manager.io:
+  # no endpoints available for service cert-manager-webhook". The release failed and stalled.
+  #
+  # 3 replicas + a minAvailable=1 PDB is upstream's production recommendation
+  # (https://cert-manager.io/docs/installation/best-practice/). Deliberately NOT a
+  # karpenter.sh/do-not-disrupt pin: a pin holds its node out of consolidation permanently,
+  # which is the cost this rightsizing round exists to remove. Order matters - a PDB at one
+  # replica is worse than nothing (it only delays the eviction until the force-delete), so
+  # the replica raise is what makes the PDB a legitimate instrument here.
+  #
+  # priorityClassName is chart-global in v1.19.4 (there is no webhook-scoped key), so it also
+  # lands on the controller and cainjector. That is what upstream's best-practice guide
+  # prescribes for all three components anyway.
+  #
+  # The topology spread is soft (ScheduleAnyway) on purpose: three replicas packed onto one
+  # node would satisfy the PDB while a single node loss still took the whole webhook down.
+  # Soft keeps them schedulable on a small cluster instead of going Pending.
+  values = [yamlencode({
+    global = {
+      priorityClassName = "system-cluster-critical"
+    }
+    webhook = {
+      replicaCount = 3
+      podDisruptionBudget = {
+        enabled      = true
+        minAvailable = 1 # never set maxUnavailable too - the chart renders both and the API rejects that
+      }
+      topologySpreadConstraints = [{
+        maxSkew           = 1
+        topologyKey       = "kubernetes.io/hostname"
+        whenUnsatisfiable = "ScheduleAnyway"
+        labelSelector = { matchLabels = {
+          "app.kubernetes.io/name"      = "webhook"
+          "app.kubernetes.io/instance"  = "cert-manager"
+          "app.kubernetes.io/component" = "webhook"
+        } }
+      }]
+    }
+  })]
+
   set = [
     {
       name  = "crds.enabled"
