@@ -518,24 +518,55 @@ $mysqlcmd -sN -D sites -e "SELECT name FROM site_index WHERE domain='%s'"
 	return name, nil
 }
 
+// appPassPHPFailureMarkers are checked case-insensitively against sites.php's combined
+// output, BEFORE either path signature is checked. A PHP process that fataled cannot
+// be trusted to describe its own capabilities: a fatal-error dump (e.g. a stack trace
+// through the file that also happens to print the word "Usage" from an unrelated
+// context, or a truncated script that echoes part of its own source) can easily
+// contain either signature's substring by accident. This gate exists specifically so
+// that case can never be misread as a positive "B" identification — path B PERMANENTLY
+// rotates the seeded admin's password, so trusting a blown-up process's incidental
+// output there would be an irreversible mutation performed on bad information.
+var appPassPHPFailureMarkers = []string{"fatal error", "parse error", "uncaught"}
+
+func appPassLooksLikePHPFailure(s string) bool {
+	lower := strings.ToLower(s)
+	for _, marker := range appPassPHPFailureMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // detectAppPassAdminPath runs `php .../Exec/sites.php` with no arguments and inspects
 // its usage text to decide path A vs path B.
 //
 // Path B PERMANENTLY rotates the seeded admin's password — an irreversible mutation —
 // so a misdetection here is not a cosmetic bug, it is stage 0 silently performing the
-// wrong destructive action on a stack that may not be slim-lineage at all. Both
-// outcomes therefore require POSITIVE content-based identification: "A" only when the
-// output contains "create-site-admin", "B" only when it contains the tool's own stable
-// usage banner. A non-zero exit is expected and NOT itself disqualifying (a bare
+// wrong destructive action on a stack that may not be slim-lineage at all. Evaluation
+// order matters and is deliberate:
+//  1. A PHP failure signature anywhere in the output fails the stage outright, before
+//     either path signature is even checked — see appPassLooksLikePHPFailure.
+//  2. "create-site-admin" in the output → "A". Checked before the usage signature on
+//     purpose: a real slim image's usage text legitimately contains BOTH
+//     "create-site-admin" and the generic usage words, and "A" is the correct answer
+//     in that case, so this is not treated as an ambiguity.
+//  3. The tool's own stable usage banner ("Usage" and "sites.php" both present) → "B".
+//  4. Anything else — unrecognized output, empty output, with or without an exec
+//     error — fails the stage, naming the exec error when there was one.
+//
+// A non-zero exit is expected and NOT itself disqualifying on its own (a bare
 // usage/help invocation normally exits non-zero) as long as the output is
-// recognizable — but an exec error combined with unrecognized output, empty output, or
-// any output matching neither pattern fails the stage. Never defaults to a path.
+// recognizable and not a failure per (1). Never defaults to a path.
 func detectAppPassAdminPath(ctx context.Context, deps appPassDeps, opts AppPassOptions, pod string) (string, error) {
 	argv := kubectlExecArgv(opts.Kubeconfig, opts.Namespace, pod, false,
 		[]string{"php", "/home/ifixit/Code/Exec/sites.php"})
 	stdout, stderr, err := deps.exec(ctx, argv, nil)
 	combined := string(stdout) + string(stderr)
 	switch {
+	case appPassLooksLikePHPFailure(combined):
+		return "", fmt.Errorf("path detection: sites.php failed (php error in output — cannot trust it to describe its own capabilities): %q", appPassTruncateForError(combined, 300))
 	case strings.Contains(combined, "create-site-admin"):
 		return "A", nil
 	case strings.Contains(combined, "Usage") && strings.Contains(combined, "sites.php"):
@@ -1378,12 +1409,16 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	var authToken string
 	defer func() {
 		// Stage 8 must still run when the pass ceiling has already fired: draining on
-		// stageCtx would skip every delete the instant it's cancelled/expired, leaking
-		// everything created so far. teardownCtx is deliberately built from the
-		// ORIGINAL, uncancelled ctx (context.WithoutCancel detaches it from stageCtx's
-		// cancellation and any upstream cancellation of ctx itself) with its own short,
-		// independent bound — not derived from stageCtx or opts.Timeout.
-		teardownCtx, teardownCancel := context.WithTimeout(context.WithoutCancel(ctx), appPassTeardownTimeout)
+		// stageCtx would skip every delete the instant it expires, leaking everything
+		// created so far. Deriving teardownCtx from the ORIGINAL ctx (its parent, not
+		// stageCtx, which is ctx's own child) is sufficient for that: stageCtx expiring
+		// does not touch ctx, so a fresh child of ctx with its own bound survives the
+		// pass ceiling automatically. Deliberately NOT context.WithoutCancel(ctx): stage
+		// 8 is best-effort by design (the eventual stack destroy is the real cleanup),
+		// so a genuine upstream cancellation — an operator Ctrl-C, a harness shutdown —
+		// should still be allowed to abort in-flight teardown deletes rather than
+		// forcing every caller to wait out the full appPassTeardownTimeout regardless.
+		teardownCtx, teardownCancel := context.WithTimeout(ctx, appPassTeardownTimeout)
 		defer teardownCancel()
 		drainAppPassTeardown(teardownCtx, deps, base, authToken, log, &stack)
 	}()

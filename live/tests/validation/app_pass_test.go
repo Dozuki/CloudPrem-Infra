@@ -304,7 +304,7 @@ func TestDetectAppPassAdminPath_FailsClosed(t *testing.T) {
 	}{
 		{"exec error with unrecognized output", "permission denied\n", fmt.Errorf("exit status 1")},
 		{"exec error with empty output", "", fmt.Errorf("exit status 1")},
-		{"unrecognized output, no exec error", "php fatal error: class not found\n", nil},
+		{"unrecognized output, no exec error", "some unexpected diagnostic banner\n", nil},
 		{"empty output, no exec error", "", nil},
 	}
 	for _, tc := range cases {
@@ -338,6 +338,49 @@ func TestDetectAppPassAdminPath_PositiveContentWinsOverExecError(t *testing.T) {
 	}
 	if path != "B" {
 		t.Errorf("path = %q, want B", path)
+	}
+}
+
+// TestDetectAppPassAdminPath_PHPFailureGate proves the php-failure check runs BEFORE
+// either path signature: output that trips a php failure marker must fail the stage
+// even when it ALSO contains the usage banner (or, in principle, "create-site-admin")
+// — a fataled php process cannot be trusted to describe its own capabilities, and a
+// misread here would silently take path B, which PERMANENTLY rotates the seeded
+// admin's password.
+func TestDetectAppPassAdminPath_PHPFailureGate(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+	}{
+		{
+			"fatal error output containing the usage words",
+			"PHP Fatal error:  Uncaught Error: Class \"Foo\" not found in /home/ifixit/Code/Exec/sites.php on line 12\n" +
+				"Stack trace:\n#0 {main}\n  thrown in /home/ifixit/Code/Exec/sites.php on line 12\n" +
+				"Usage: sites.php <command>\n  create-site-admin <site>\n  list-sites\n",
+		},
+		{
+			"parse error output",
+			"PHP Parse error:  syntax error, unexpected token \";\" in /home/ifixit/Code/Exec/sites.php on line 40\n",
+		},
+		{
+			"uncaught exception, lowercase",
+			"uncaught exception 'RuntimeException' with message 'boom' in /home/ifixit/Code/Exec/sites.php:5\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+				return []byte(tc.output), nil, fmt.Errorf("exit status 255")
+			}}
+			deps := appPassDeps{exec: fe.runner()}
+			path, err := detectAppPassAdminPath(context.Background(), deps, testAppPassOpts("https://x"), "pod")
+			if err == nil {
+				t.Fatalf("want an error, got path %q with no error (a php failure must never resolve to a path, especially not B)", path)
+			}
+			if path != "" {
+				t.Errorf("path = %q on a php-failure output, want empty", path)
+			}
+		})
 	}
 }
 
