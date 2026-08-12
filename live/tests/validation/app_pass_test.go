@@ -639,30 +639,31 @@ const (
 )
 
 type appPassMockFlags struct {
-	loginStatus           int
-	registerOmitUserID    bool
-	wikiStatus            int
-	videoNeverReady       bool
-	videoReadyOnPoll      int
-	roundTripOmitObject   bool
-	omitImageGUID         bool // image step media.data[0] missing guid
-	omitImageSizeKeys     bool // image step media.data[0] missing BOTH standard and original
-	imageOmitStandard     bool // image step media.data[0] missing standard but keeps original (fallback path)
-	omitEncodingsURL      bool // object step media.data.encodings present but no entry has a url
-	omitDocumentURL       bool // documents[] entry missing url
-	publicPageOmitGUID    bool // public guide page HTML doesn't contain the image guid
-	getCourseWrongWikiID  bool
-	uploadStatus          int           // non-200 from every stage-4 upload
-	guideCreateStatus     int           // non-201 from POST /api/2.0/guides
-	addStepStatus         int           // non-201 from POST /api/2.0/guides/{id}/steps
-	publishPutStatus      int           // non-200 from PUT /api/2.0/guides/{id}/public
-	publishGetPublicFalse bool          // GET after publish reports public=false regardless of the PUT
-	publicPageStatus      int           // non-2xx from the anonymous public guide page GET
-	imageCDNStatus        int           // non-200 from the anonymous image CDN GET
-	videoEncStatus        int           // non-200 from the anonymous video encoding GET
-	docFetchStatus        int           // non-200 from the anonymous document GET
-	courseCreateStatus    int           // non-201 from POST /api/2.0/courses
-	guideCreateDelay      time.Duration // artificial delay before responding to POST /api/2.0/guides, for the real-ceiling test
+	loginStatus              int
+	registerOmitUserID       bool
+	wikiStatus               int
+	videoNeverReady          bool
+	videoReadyOnPoll         int
+	roundTripOmitObject      bool
+	omitImageGUID            bool // image step media.data[0] missing guid
+	omitImageSizeKeys        bool // image step media.data[0] missing BOTH standard and original
+	imageOmitStandard        bool // image step media.data[0] missing standard but keeps original (fallback path)
+	omitEncodingsURL         bool // object step media.data.encodings present but no entry has a url
+	omitDocumentURL          bool // documents[] entry missing url
+	publicPageOmitGUID       bool // public guide page HTML doesn't contain the image guid
+	getCourseWrongWikiID     bool
+	echoAuthTokenInWikiError bool          // non-201 create-wiki response body echoes the caller's auth token
+	uploadStatus             int           // non-200 from every stage-4 upload
+	guideCreateStatus        int           // non-201 from POST /api/2.0/guides
+	addStepStatus            int           // non-201 from POST /api/2.0/guides/{id}/steps
+	publishPutStatus         int           // non-200 from PUT /api/2.0/guides/{id}/public
+	publishGetPublicFalse    bool          // GET after publish reports public=false regardless of the PUT
+	publicPageStatus         int           // non-2xx from the anonymous public guide page GET
+	imageCDNStatus           int           // non-200 from the anonymous image CDN GET
+	videoEncStatus           int           // non-200 from the anonymous video encoding GET
+	docFetchStatus           int           // non-200 from the anonymous document GET
+	courseCreateStatus       int           // non-201 from POST /api/2.0/courses
+	guideCreateDelay         time.Duration // artificial delay before responding to POST /api/2.0/guides, for the real-ceiling test
 }
 
 type appPassMock struct {
@@ -739,6 +740,11 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		w.WriteHeader(status)
 		if status == http.StatusCreated {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "title": body["title"]})
+		} else if m.flags.echoAuthTokenInWikiError {
+			// Simulates a real failure mode: a non-2xx response that echoes request
+			// state (here, the caller's own Authorization header) back into its body,
+			// the way a validation error can echo a submitted payload.
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"error":"validation failed","authToken":%q}`, r.Header.Get("Authorization"))))
 		}
 	})
 	mux.HandleFunc("/api/2.0/wikis/CATEGORY/", func(w http.ResponseWriter, r *http.Request) {
@@ -748,6 +754,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "revisionid": appPassMockWikiRevisionID})
 		case http.MethodDelete:
+			m.assertNoRevisionIDInBody(r, "delete wiki")
 			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockWikiRevisionID) {
 				m.t.Errorf("delete wiki revisionid query param = %q, want %d", got, appPassMockWikiRevisionID)
 			}
@@ -782,8 +789,12 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		m.assertAuth(r)
 		var body map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["type"] != guideTypeHowTo {
-			m.t.Errorf("create guide type = %v, want %q", body["type"], guideTypeHowTo)
+		// Asserted against the LITERAL, not the guideTypeHowTo constant used to build
+		// the request: comparing against the same constant on both sides means a
+		// regression that reverts the constant (e.g. back to "technique") moves both
+		// sides together and this assertion would never fail.
+		if body["type"] != "how-to" {
+			m.t.Errorf("create guide type = %v, want %q", body["type"], "how-to")
 		}
 		if m.flags.guideCreateDelay > 0 {
 			// Bail out as soon as the client gives up (r.Context() is cancelled once
@@ -812,6 +823,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		case path == "/api/2.0/guides/500/steps" && r.Method == http.MethodPost:
 			m.handleAddStep(w, r)
 		case path == "/api/2.0/guides/500/public" && r.Method == http.MethodPut:
+			m.assertNoRevisionIDInBody(r, "publish guide")
 			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockGuideRevisionID) {
 				m.t.Errorf("publish revisionid query param = %q, want %d", got, appPassMockGuideRevisionID)
 			}
@@ -825,6 +837,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		case path == "/api/2.0/guides/500" && r.Method == http.MethodGet:
 			m.handleGetGuide(w)
 		case path == "/api/2.0/guides/500" && r.Method == http.MethodDelete:
+			m.assertNoRevisionIDInBody(r, "delete guide")
 			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockGuideRevisionID) {
 				m.t.Errorf("delete guide revisionid query param = %q, want %d", got, appPassMockGuideRevisionID)
 			}
@@ -924,6 +937,25 @@ func statusOr(v, def int) int {
 func (m *appPassMock) assertAuth(r *http.Request) {
 	if got := r.Header.Get("Authorization"); got != "api tok-1" {
 		m.t.Errorf("%s %s: Authorization = %q, want \"api tok-1\"", r.Method, r.URL.Path, got)
+	}
+}
+
+// assertNoRevisionIDInBody fails label if the request body carries a "revisionid"
+// field. revisionid is a query-parameter-only contract (publish PUT, guide/wiki
+// DELETE) — an implementation that sent it in BOTH the query string and an obsolete
+// JSON body field would pass a mock that only checked the query param, so this pins
+// the contract in the other direction too.
+func (m *appPassMock) assertNoRevisionIDInBody(r *http.Request, label string) {
+	b, err := io.ReadAll(r.Body)
+	if err != nil || len(b) == 0 {
+		return
+	}
+	var body map[string]interface{}
+	if json.Unmarshal(b, &body) != nil {
+		return
+	}
+	if v, ok := body["revisionid"]; ok {
+		m.t.Errorf("%s: revisionid must not appear in the request body (query param only), got %v in body %v", label, v, body)
 	}
 }
 
@@ -1141,6 +1173,16 @@ func pathBExecFn() func(argv []string, stdin []byte) (stdout, stderr []byte, err
 		default:
 			return nil, nil, fmt.Errorf("unexpected exec call: %v", argv)
 		}
+	}
+}
+
+// TestGuideTypeHowTo_IsLiteralHowTo pins the guide `type` contract independently of
+// the mock: the create-guide mock above asserts against the literal "how-to" (not the
+// guideTypeHowTo constant it was built from), and this test independently pins the
+// constant itself, so a regression on either side is caught.
+func TestGuideTypeHowTo_IsLiteralHowTo(t *testing.T) {
+	if guideTypeHowTo != "how-to" {
+		t.Fatalf("guideTypeHowTo = %q, want the literal \"how-to\"", guideTypeHowTo)
 	}
 }
 
@@ -1478,8 +1520,9 @@ func TestRunAppPass_HappyPath_NoSecretInLogs(t *testing.T) {
 
 // TestRunAppPass_Stage2PasswordIncludedInLeakScan proves finalizeAppPass's redaction
 // self-scan covers stage 2's generated registration password too, not just the
-// stage-0/1 admin secret: the scanner captures BOTH values over a real run, and a
-// deliberate leak of the stage-2 password (a future bug, same as
+// stage-0/1 admin secret: the scanner captures all three values over a real run (the
+// stage-0/1 admin password, the stage-1 auth token, and the stage-2 registration
+// password), and a deliberate leak of the stage-2 password (a future bug, same as
 // TestFinalizeAppPass_RedactsLeakedSecret's stage-0/1 case) is still caught.
 func TestRunAppPass_Stage2PasswordIncludedInLeakScan(t *testing.T) {
 	mock := newAppPassMock(t, appPassMockFlags{})
@@ -1498,10 +1541,13 @@ func TestRunAppPass_Stage2PasswordIncludedInLeakScan(t *testing.T) {
 	}
 
 	secrets := scanner.list()
-	if len(secrets) != 2 {
-		t.Fatalf("scanner captured %d secret(s), want 2 (stage 0/1 admin password + stage 2 registration password): %v", len(secrets), secrets)
+	if len(secrets) != 3 {
+		t.Fatalf("scanner captured %d secret(s), want 3 (stage 0/1 admin password + stage 1 auth token + stage 2 registration password): %v", len(secrets), secrets)
 	}
-	stage2Password := secrets[1]
+	if secrets[1] != "tok-1" {
+		t.Errorf("secrets[1] = %q, want the stage-1 auth token \"tok-1\"", secrets[1])
+	}
+	stage2Password := secrets[2]
 	if stage2Password == "" || stage2Password == mainSecret || len(stage2Password) != appPassRegistrationPasswordLength {
 		t.Fatalf("unexpected stage-2 password captured: %q", stage2Password)
 	}
@@ -1515,6 +1561,56 @@ func TestRunAppPass_Stage2PasswordIncludedInLeakScan(t *testing.T) {
 	log.Logf("app-pass: BUG this line accidentally contains %s", stage2Password)
 	if err := finalizeAppPass(log, nil, secrets...); err == nil || !strings.Contains(err.Error(), "SECRET LEAKED TO LOGS") {
 		t.Errorf("finalizeAppPass did not catch a leaked stage-2 password: %v", err)
+	}
+}
+
+// TestRunAppPass_AuthTokenNotLeakedOnErrorEcho proves the stage-1 auth token is
+// registered with the secret scanner (like the stage-0/1 and stage-2 passwords), so a
+// later failure whose response body echoes that live token back — a 4xx that echoes
+// request state, e.g. a validation error — cannot leak it in the error AppPass returns.
+func TestRunAppPass_AuthTokenNotLeakedOnErrorEcho(t *testing.T) {
+	mock := newAppPassMock(t, appPassMockFlags{
+		wikiStatus:               http.StatusUnprocessableEntity,
+		echoAuthTokenInWikiError: true,
+	})
+	defer mock.server.Close()
+
+	mainSecret := "deadbeefdeadbeefdeadbeefdeadbeef"
+	fe := &fakeExec{fn: pathBExecFn()}
+	clk := newFakeAppPassClock()
+	scanner := &appPassSecretScanner{}
+	scanner.add(mainSecret)
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk, secrets: scanner}
+	log := newAppPassLogger()
+
+	runErr := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, mainSecret, "salt011")
+	if runErr == nil {
+		t.Fatal("want stage 3 (create wiki) to fail")
+	}
+
+	secrets := scanner.list()
+	found := false
+	for _, s := range secrets {
+		if s == "tok-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("scanner did not capture the stage-1 auth token; captured: %v", secrets)
+	}
+
+	// Confirm the test actually exercises the risk: the raw stage error legitimately
+	// contains the echoed token, proving the mock's error body really does carry it.
+	if !strings.Contains(runErr.Error(), "tok-1") {
+		t.Fatalf("test setup didn't actually echo the token into the raw error: %v", runErr)
+	}
+
+	finalErr := finalizeAppPass(log, runErr, secrets...)
+	if finalErr == nil || !strings.Contains(finalErr.Error(), "SECRET LEAKED TO LOGS") {
+		t.Errorf("finalizeAppPass did not catch the leaked auth token: %v", finalErr)
+	}
+	if strings.Contains(finalErr.Error(), "tok-1") {
+		t.Errorf("final error must not repeat the leaked auth token: %q", finalErr.Error())
 	}
 }
 

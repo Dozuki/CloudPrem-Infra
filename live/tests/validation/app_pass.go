@@ -522,10 +522,16 @@ func idField(m map[string]interface{}, key string) (int64, bool) {
 // appPassBodyPreview truncates body to at most n bytes for inclusion in a diagnostic
 // error message. A bounded preview of the ACTUAL response — not just its status code —
 // is what would have made the original stage-2 failure (a 422 with no visible reason)
-// cheap to diagnose instead of expensive. Safe to include in errors: every response
-// body this wraps came back from the app over doRaw, and AppPass's own generated
-// secrets only ever flow in a REQUEST body (see doRaw's doc comment), never a response,
-// so this cannot be the thing that leaks a password into an error string.
+// cheap to diagnose instead of expensive. This wraps a RESPONSE body, and a 422
+// validation failure can legitimately echo the submitted payload back, including a
+// generated secret — so the preview itself is not what keeps a secret out of an error
+// string. What does: every generated secret is registered with the scanner
+// (deps.secrets.add) BEFORE the request carrying it is ever sent, so by the time a
+// response could echo it back, finalizeAppPass's self-scan — which checks the final
+// error's own text, not just log lines — already has it on the list. The trade-off is
+// deliberate: a response that really does echo a registered secret gets reported as
+// "SECRET LEAKED TO LOGS" instead of the underlying HTTP reason, trading that one
+// diagnostic detail for never letting the secret text itself escape.
 func appPassBodyPreview(body []byte, n int) string {
 	s := strings.TrimSpace(string(body))
 	if s == "" {
@@ -534,7 +540,10 @@ func appPassBodyPreview(body []byte, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	// s[:n] slices bytes and can split a multi-byte UTF-8 rune mid-sequence;
+	// ToValidUTF8 drops any resulting partial rune at the cut point instead of
+	// emitting invalid UTF-8 into diagnostics.
+	return strings.ToValidUTF8(s[:n], "") + "…"
 }
 
 func boolField(m map[string]interface{}, key string) (bool, bool) {
@@ -1676,6 +1685,10 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return fmt.Errorf("app-pass: stage 1 (login): %w", err)
 	}
 	authToken = tok
+	// Registered with the scanner so finalizeAppPass's leak self-scan also covers the
+	// live session token, not just the generated passwords — a response body that
+	// happens to echo it back (e.g. into an error preview) must redact rather than leak.
+	deps.secrets.add(authToken)
 	log.Logf("app-pass: stage 1 (login) ok userid=%d", userid)
 
 	if derr := checkDeadline(deps.clock, deadline, opts.Timeout, "app-pass"); derr != nil {
