@@ -79,6 +79,15 @@ type RunManifest struct {
 // because when the refs are equal, AppliedRef == FromRef is uninformative (it also
 // equals ToRef), and today's behavior in that ambiguous case is to treat the run as
 // already on its target side.
+//
+// Why the fallback can never pick a "wrong" side: AppliedSide and the per-side
+// override maps (Config.BaselineVersions/TargetVersions) shipped in the same change.
+// So any manifest lacking AppliedSide necessarily belongs to a config with nil side
+// maps - one of the pre-existing configs that predates Side entirely - and for those,
+// MergedInputs's side-map merge layer is a no-op on both sides (sideVersions returns
+// nil either way), so baseline and target render identically regardless of which one
+// this fallback guesses. The fallback's guess can be wrong in the abstract; it can
+// never be wrong in a way that changes the rendered env.hcl.
 func teardownRefAndSide(rm *RunManifest) (string, Side) {
 	ref := rm.AppliedRef
 	if ref == "" {

@@ -2,10 +2,13 @@
 #
 # Timing: 4 configs x ~2h with the harness-semaphore at 2 is two waves; bi_ha and full are
 # still the long poles (slim_upgrade is min-shaped), so the finish stays around
-# 06:00-07:00 ET. The children gate on the semaphore themselves (NEVER add a semaphore here
-# or at the matrix level: parent+child gating deadlocks any matrix larger than the
-# semaphore). Forbid means a still-running night blocks the next - the semaphore would
-# serialise them anyway, without the visibility.
+# 06:00-07:00 ET - optimistic, since 41-nightly-slim-fresh-cron.yaml's 03:30 ET run
+# contends for the SAME harness-semaphore (limit 2), so a wave of this matrix can lose a
+# slot to slim_fresh mid-run and push the finish later than the estimate above. The
+# children gate on the semaphore themselves (NEVER add a semaphore here or at the matrix
+# level: parent+child gating deadlocks any matrix larger than the semaphore). Forbid means
+# a still-running night blocks the next - the semaphore would serialise them anyway,
+# without the visibility.
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:

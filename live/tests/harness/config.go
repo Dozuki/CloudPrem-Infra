@@ -193,11 +193,13 @@ func (m *Matrix) VersionVar(ref, key string) interface{} {
 	return m.VersionDefaults[key]
 }
 
-// EffectiveVersionVar resolves a single version-var key with the exact same
-// precedence as MergedInputs (feature_flags -> version_defaults -> versions[ref] ->
-// the config's side map), for callers that only need one key and don't want to build
-// (and pay the harness-only-key filtering cost of) the whole input map. Returns nil
-// if no layer sets the key.
+// EffectiveVersionVar resolves a single version-var key's precedence (feature_flags ->
+// version_defaults -> versions[ref] -> the config's side map). It is NOT a drop-in
+// substitute for MergedInputs on every key: MergedInputs filters feature_flags through
+// harnessOnlyKeys (so a harness-only key like restore_drill never reaches this layer)
+// and always writes out["environment"] last, and this function does neither. It is
+// valid only for genuine version-var keys (app_image_flavor, chart_version, image_tag,
+// ...) - never for a harnessOnlyKeys entry or "environment".
 func (m *Matrix) EffectiveVersionVar(c Config, ref string, side Side, key string) interface{} {
 	var val interface{}
 	if v, ok := c.FeatureFlags[key]; ok {

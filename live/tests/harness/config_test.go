@@ -1,6 +1,9 @@
 package harness
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestLoadMatrixAndMergeInputs(t *testing.T) {
 	m, err := LoadMatrix("testdata/matrix.yaml")
@@ -215,7 +218,7 @@ func TestRegressionConfigsWithoutSideMapsAreUnaffected(t *testing.T) {
 				t.Fatalf("config %s ref %s: baseline/target maps differ in size (%d vs %d) though this config sets no side overrides", cfg.Name, ref, len(base), len(tgt))
 			}
 			for k, v := range base {
-				if tgt[k] != v {
+				if !reflect.DeepEqual(tgt[k], v) {
 					t.Errorf("config %s ref %s key %q: baseline=%v target=%v, want identical (no side overrides set)", cfg.Name, ref, k, v, tgt[k])
 				}
 			}

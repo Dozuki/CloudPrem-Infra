@@ -71,12 +71,12 @@ func (p PhaseParams) Config() (Config, error) {
 	return cfg.Salted(p.RunID), nil
 }
 
-// prepareWorktree is the pre-Side-parameter entry point, kept for run.go's two
-// call sites (recovery-scenario output reads, both against an already-provisioned
+// prepareWorktreeTargetSide is the pre-Side-parameter entry point, kept for run.go's
+// two call sites (recovery-scenario output reads, both against an already-provisioned
 // fresh/recover stack). Both of those are unconditionally target-side per the caller
-// table in prepareWorktreeSide's doc comment, so this is a thin, explicit-not-inferred
-// default rather than a guess.
-func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, deleteAfter string) (*Worktree, TGOptions, string, error) {
+// table in prepareWorktreeSide's doc comment - the name says so explicitly rather than
+// leaving it as an implicit default a reader has to go verify.
+func (p PhaseParams) prepareWorktreeTargetSide(ref string, initSub bool, cfg Config, deleteAfter string) (*Worktree, TGOptions, string, error) {
 	return p.prepareWorktreeSide(ref, initSub, cfg, deleteAfter, SideTarget)
 }
 
@@ -94,7 +94,7 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 //	Provision, scenario upgrade             FromRef      baseline
 //	Provision, scenario fresh/recover       ToRef        target
 //	Upgrade                                 ToRef        target
-//	Validate (standalone phase)             AppliedRef   target
+//	Validate (standalone phase)             ToRef        target
 //	Teardown                                AppliedRef   rm.AppliedSide (teardownRefAndSide)
 func (p PhaseParams) prepareWorktreeSide(ref string, initSub bool, cfg Config, deleteAfter string, side Side) (*Worktree, TGOptions, string, error) {
 	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
@@ -253,9 +253,12 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	// than surface as a confusing later assertion mismatch.
 	if scenario == "upgrade" {
 		targetFlavor, _ := p.Matrix.EffectiveVersionVar(cfg, toRef, SideTarget, "app_image_flavor").(string)
-		if targetFlavor == "slim" {
-			imageRepository, _ := p.Matrix.EffectiveVersionVar(cfg, applyRef, SideBaseline, "image_repository").(string)
-			if gerr := checkBaselineNotSlim(kc, namespace, imageRepository); gerr != nil {
+		if validation.SlimFlipApplies(targetFlavor) {
+			// image_repository is resolved on the TARGET side (toRef) - it is the
+			// monolith-app image the target is about to replace that this guard hunts
+			// for, not whatever repository the baseline side happens to resolve.
+			imageRepository, _ := p.Matrix.EffectiveVersionVar(cfg, toRef, SideTarget, "image_repository").(string)
+			if gerr := checkBaselineNotSlim(ctx, kc, namespace, imageRepository); gerr != nil {
 				return gerr
 			}
 		}
@@ -323,6 +326,9 @@ func assertNoMonolithImages(inv []PodImage, imageRepository string) error {
 	if imageRepository == "" {
 		return fmt.Errorf("baseline-flavor guard: config resolves no image_repository for the baseline side — cannot check for a monolith-app leak")
 	}
+	if len(inv) == 0 {
+		return fmt.Errorf("baseline-flavor guard: pod image inventory is empty — cannot verify the baseline is clean (a wrong namespace or a pre-pod snapshot must not pass as \"baseline verified clean\")")
+	}
 	prefix := monolithAppImagePrefix(imageRepository)
 	var hits []string
 	for _, pi := range inv {
@@ -359,7 +365,12 @@ func podImageInventory(ctx context.Context, cs kubernetes.Interface, namespace s
 // inventory unconditionally (evidence of what the baseline runs, pass or fail), then
 // asserts none of it is a monolith-app image. See assertNoMonolithImages for the
 // testable core.
-func checkBaselineNotSlim(kubeconfig, namespace, imageRepository string) error {
+func checkBaselineNotSlim(ctx context.Context, kubeconfig, namespace, imageRepository string) error {
+	if namespace == "" {
+		// client-go lists ALL namespaces when given "" - silently defaulting to
+		// "dozuki" here would hide that mistake instead of surfacing it.
+		return fmt.Errorf("baseline-flavor guard: namespace is empty — refusing to list pods cluster-wide")
+	}
 	restCfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return fmt.Errorf("baseline-flavor guard: build kubeconfig: %w", err)
@@ -368,7 +379,7 @@ func checkBaselineNotSlim(kubeconfig, namespace, imageRepository string) error {
 	if err != nil {
 		return fmt.Errorf("baseline-flavor guard: build client: %w", err)
 	}
-	inv, err := podImageInventory(context.Background(), cs, namespace)
+	inv, err := podImageInventory(ctx, cs, namespace)
 	if err != nil {
 		return fmt.Errorf("baseline-flavor guard: list pods: %w", err)
 	}
@@ -434,9 +445,15 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	}
 	p.ExtraInputs = rm.ExtraInputs
 	// Validate is a standalone CLI phase: side is always target (it is verifying the
-	// applied-target-code assertion suite), threaded explicitly rather than inferred
-	// from rm.AppliedRef - see prepareWorktreeSide's caller table.
-	wt, tg, _, err := p.prepareWorktreeSide(rm.AppliedRef, false, cfg, rm.DeleteAfter, SideTarget)
+	// applied-target-code assertion suite), threaded explicitly rather than inferred -
+	// see prepareWorktreeSide's caller table. Ref is rm.ToRef, not rm.AppliedRef: ref
+	// and side must both describe the same half of the upgrade, and AppliedRef == ToRef
+	// in every real ordering anyway (Validate only ever runs after Upgrade or a fresh
+	// Provision, both of which set AppliedRef = ToRef), so this is a no-op in practice.
+	// What it removes is the incoherent case of rendering the target's side-override
+	// map (BaselineVersions/TargetVersions) against a baseline ref, which AppliedRef
+	// could produce if this ever ran against a manifest that hadn't advanced yet.
+	wt, tg, _, err := p.prepareWorktreeSide(rm.ToRef, false, cfg, rm.DeleteAfter, SideTarget)
 	if err != nil {
 		return err
 	}
@@ -468,7 +485,7 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		beanstalkdTag, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "beanstalkd_tag").(string)
 		nextjsTag, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "nextjs_tag").(string)
 		step("verifying slim image flip in-cluster (namespace %s)", rm.Namespace)
-		if serr := validation.AssertSlimFlipComplete(kc, rm.Namespace, imageRepository, imageTag, beanstalkdTag, nextjsTag); serr != nil {
+		if serr := validation.AssertSlimFlipComplete(ctx, kc, rm.Namespace, imageRepository, imageTag, beanstalkdTag, nextjsTag); serr != nil {
 			return fmt.Errorf("slim-flip validation: %w", serr)
 		}
 	}

@@ -70,7 +70,7 @@ func TestPrepareWorktreeReentrant(t *testing.T) {
 	p := PhaseParams{RepoDir: repo, Matrix: m, Store: NewMemStore(), ConfigName: "min_default", RunID: "run1", Region: "us-east-1"}
 	cfg, _ := m.Config("min_default")
 
-	wt, tg, envDir, err := p.prepareWorktree("v0.0.1", true, cfg, "2026-06-25T00:00:00Z")
+	wt, tg, envDir, err := p.prepareWorktreeTargetSide("v0.0.1", true, cfg, "2026-06-25T00:00:00Z")
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestPrepareWorktreeReentrant(t *testing.T) {
 	}
 	// Re-entrancy: calling again on a fresh process-equivalent must not error.
 	_ = wt.Remove(repo)
-	if _, _, _, err := p.prepareWorktree("v0.0.1", true, cfg, "2026-06-25T00:00:00Z"); err != nil {
+	if _, _, _, err := p.prepareWorktreeTargetSide("v0.0.1", true, cfg, "2026-06-25T00:00:00Z"); err != nil {
 		t.Fatalf("second prepare (re-entrant): %v", err)
 	}
 }
@@ -131,9 +131,9 @@ func TestPrepareWorktreeSideThreading(t *testing.T) {
 // TestPrepareWorktreeDefaultsToTargetSide covers run.go's two call sites (recovery-
 // scenario output reads), which cannot pass Side explicitly because run.go is out of
 // this change's scope for editing prepareWorktreeSide's plumbing. The pre-existing
-// 4-arg prepareWorktree wrapper must still compile against those call sites AND must
-// render as target side - both of run.go's uses are against an already-provisioned
-// fresh/recover stack, which is always target per the caller table.
+// 4-arg prepareWorktreeTargetSide wrapper must still compile against those call sites
+// AND must render as target side - both of run.go's uses are against an
+// already-provisioned fresh/recover stack, which is always target per the caller table.
 func TestPrepareWorktreeDefaultsToTargetSide(t *testing.T) {
 	repo := makeTagRepo(t)
 	cfg := Config{
@@ -145,16 +145,16 @@ func TestPrepareWorktreeDefaultsToTargetSide(t *testing.T) {
 	m := &Matrix{Defaults: Defaults{Region: "us-east-1", EnvPath: "standard/us-east-1"}, Configs: []Config{cfg}}
 	p := PhaseParams{RepoDir: repo, Matrix: m, Store: NewMemStore(), ConfigName: "flip", RunID: "run1", Region: "us-east-1"}
 
-	_, _, envDir, err := p.prepareWorktree("v0.0.1", true, cfg, "2026-06-25T00:00:00Z")
+	_, _, envDir, err := p.prepareWorktreeTargetSide("v0.0.1", true, cfg, "2026-06-25T00:00:00Z")
 	if err != nil {
-		t.Fatalf("prepareWorktree: %v", err)
+		t.Fatalf("prepareWorktreeTargetSide: %v", err)
 	}
 	b, rerr := os.ReadFile(filepath.Join(envDir, "env.hcl"))
 	if rerr != nil {
 		t.Fatalf("read env.hcl: %v", rerr)
 	}
 	if !strings.Contains(string(b), `app_image_flavor = "slim"`) {
-		t.Errorf("prepareWorktree (legacy wrapper) must default to target side, got:\n%s", b)
+		t.Errorf("prepareWorktreeTargetSide (legacy wrapper) must default to target side, got:\n%s", b)
 	}
 }
 
@@ -192,9 +192,13 @@ func TestAssertNoMonolithImagesRequiresImageRepository(t *testing.T) {
 	}
 }
 
-func TestAssertNoMonolithImagesEmptyInventoryPasses(t *testing.T) {
-	if err := assertNoMonolithImages(nil, "example.com"); err != nil {
-		t.Fatalf("assertNoMonolithImages(nil, ...) = %v, want nil", err)
+// TestAssertNoMonolithImagesEmptyInventoryFails pins fail-closed behavior on an empty
+// inventory: a wrong namespace or a pre-pod snapshot must not pass as "baseline
+// verified clean" (this used to return nil - see validation.assertSlimImages for the
+// sibling assertion that already failed closed on this exact case).
+func TestAssertNoMonolithImagesEmptyInventoryFails(t *testing.T) {
+	if err := assertNoMonolithImages(nil, "example.com"); err == nil {
+		t.Fatal("assertNoMonolithImages(nil, ...) = nil, want an error (empty inventory must fail closed)")
 	}
 }
 

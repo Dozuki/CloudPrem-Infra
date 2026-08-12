@@ -36,12 +36,17 @@ func SlimFlipApplies(flavor string) bool {
 // cluster-health gate has already passed: builds a real clientset from the
 // kubeconfig validateStack generated, lists every pod in namespace, and asserts the
 // four slim-flip conditions. See assertSlimImages for the testable core.
-func AssertSlimFlipComplete(kubeconfig, namespace, imageRepository, imageTag, beanstalkdTag, nextjsTag string) error {
+func AssertSlimFlipComplete(ctx context.Context, kubeconfig, namespace, imageRepository, imageTag, beanstalkdTag, nextjsTag string) error {
+	if namespace == "" {
+		// client-go lists ALL namespaces when given "" - silently defaulting to
+		// "dozuki" here would hide that mistake instead of surfacing it.
+		return fmt.Errorf("slim-flip guard: namespace is empty — refusing to list pods cluster-wide")
+	}
 	cs, err := clientFor(kubeconfig)
 	if err != nil {
 		return fmt.Errorf("slim-flip guard: build client: %w", err)
 	}
-	pods, err := cs.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{})
+	pods, err := cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("slim-flip guard: list pods: %w", err)
 	}

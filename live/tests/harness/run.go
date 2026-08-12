@@ -301,7 +301,7 @@ func RunRecovery(p RunParams, recoverConfigName string) (err error) {
 	if rm.PromotedClusterID == "" || rm.DrillHeartbeats == 0 {
 		return fmt.Errorf("recovery: the source config must run the promotion drill (enable_dr + restore_drill) — no promoted cluster recorded")
 	}
-	wt, tg, _, werr := pp.prepareWorktree(rm.AppliedRef, false, cfg, rm.DeleteAfter)
+	wt, tg, _, werr := pp.prepareWorktreeTargetSide(rm.AppliedRef, false, cfg, rm.DeleteAfter)
 	if werr != nil {
 		return werr
 	}
@@ -362,7 +362,7 @@ func RunRecovery(p RunParams, recoverConfigName string) (err error) {
 	if m2err != nil || !ok2 {
 		return fmt.Errorf("recovery: load rebuild manifest: %w (ok=%v)", m2err, ok2)
 	}
-	wt2, tg2, _, w2err := pp2.prepareWorktree(rm2.AppliedRef, false, rcfg, rm2.DeleteAfter)
+	wt2, tg2, _, w2err := pp2.prepareWorktreeTargetSide(rm2.AppliedRef, false, rcfg, rm2.DeleteAfter)
 	if w2err != nil {
 		return w2err
 	}
