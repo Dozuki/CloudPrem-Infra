@@ -575,8 +575,8 @@ variable "db_migrations_active_deadline_seconds" {
 variable "flux_upgrade_timeout" {
   description = <<-EOT
     Per-attempt timeout for the dozuki HelmRelease's upgrade. The default is unchanged from what
-    was hardcoded before, so leaving it alone is a no-op; envs that want a failed rollout to reach
-    its terminal state sooner set it in env.hcl.
+    was hardcoded before, so leaving it alone is a no-op; envs that want a failing attempt to give
+    up sooner (and so retry sooner) set it in env.hcl.
 
     Why the default is this large: disableWait=false makes helm block on every resource in the
     release, including the db-migrations Job, so this must clear the slowest legitimate migration.
@@ -585,19 +585,21 @@ variable "flux_upgrade_timeout" {
     and pod readiness, NOT the chart's own 14400 default that CPI overrides. Raise both together
     before an exceptional migration.
 
-    Do not read a short timeout as "it just rolls back". remediation.retries=2 with
-    remediateLastFailure=false means Flux rolls back between the first two failed attempts (old
-    app image against a partly migrated schema) and then performs NO rollback on the third, so a
-    terminal failure leaves the release failed with live state partially applied, pending operator
-    recovery. Cutting a migration short is bad in either branch.
+    Do not read a short timeout as "it just rolls back". The upgrade runs under
+    strategy=RetryOnFailure (see flux.tf), so Flux never rolls back at all: a cut-off attempt
+    leaves live state partially applied, and the next attempt starts one retryInterval later
+    against that same partly migrated schema. Cutting a migration short buys nothing.
 
     Why an env may still want it short: on an env with no large migration to run, a crashlooping
     rollout just burns the whole window before helm gives up (dev-slim, 2026-08-07, 04:07-08:37).
-    retries=2 multiplies this by up to 3 for the full failure cycle. Detection does not depend on
-    this value: FluxHelmReleaseStuck already fires after 30m of ready=Unknown.
+    Retries are unbounded, so a short timeout tightens that loop rather than ending it. Detection
+    does not depend on this value, and this is now the PRIMARY signal rather than a backstop:
+    RetryOnFailure never sets Ready=False and never reaches Stalled, it parks at ready=Unknown
+    between attempts, which is exactly what FluxHelmReleaseStuck fires on after 30m.
 
     Upgrade only. install keeps its own timeout: a fresh install always runs the full schema
-    import, and install remediation uninstalls rather than rolls back.
+    import, and install carries no remediation and no retry strategy, so a failed install stays
+    failed until a human intervenes.
   EOT
   type        = string
   default     = "4h30m"
