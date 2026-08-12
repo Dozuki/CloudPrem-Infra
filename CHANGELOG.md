@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.2.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.0...v9.2.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **logical:** drop do-not-disrupt from the three volume-less pods, right-size requests ([#492](https://github.com/Dozuki/CloudPrem-Infra/issues/492)) ([57ba9e5](https://github.com/Dozuki/CloudPrem-Infra/commit/57ba9e5853f9b82b99e00ed6fb00705680bd7f32))
+
 ## [9.2.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.1.1...v9.2.0) (2026-08-11)
 
 
