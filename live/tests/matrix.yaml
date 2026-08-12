@@ -297,3 +297,57 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+  # slim_fresh / slim_upgrade carry no `paths:` key, but that does NOT mean they run on
+  # every PR the way min_default does. Nightly-only for these two is enforced by the PR
+  # workflow's hardcoded config set (.github/workflows/upgrade-tests.yml only ever submits
+  # from a fixed list), not by this file's paths gate.
+  - name: slim_fresh
+    env: min
+    feature_flags:
+      enable_bi: false
+      db_engine: aurora
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      protect_resources: false
+      enable_dr: false
+      rds_adopt_dr_cmk: true        # greenfield: matches dev-slim and the new-stack default
+      alarm_email: "devops@dozuki.com"
+      customer: "smoke"
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
+      alertmanager_slack_enabled: false
+    # Pins mirror infra-live standard/_mcp/dev/us-east-1/slim/env.hcl (dev-slim).
+    # Update these when dev-slim's env.hcl moves.
+    target_versions:
+      app_image_flavor: "slim"
+      chart_version: "3.1.1"
+      image_tag: "0.0.0-05d4e70bd52-mpcfix5"
+      beanstalkd_tag: "6f41576"
+      nextjs_tag: "0.0.0-f28af33fdb7"
+  - name: slim_upgrade
+    env: min
+    feature_flags:
+      enable_bi: false
+      db_engine: aurora
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      protect_resources: false
+      enable_dr: false
+      rds_adopt_dr_cmk: false       # baseline is provisioned at an older ref; same CMK-immutability rationale as min_default
+      alarm_email: "devops@dozuki.com"
+      customer: "smoke"
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
+      alertmanager_slack_enabled: false
+    # Baseline = legacy flavor from version_defaults (no baseline_versions needed).
+    # Target flips to the slim set: the legacy->slim migration path, in place.
+    target_versions:
+      app_image_flavor: "slim"
+      chart_version: "3.1.1"
+      image_tag: "0.0.0-05d4e70bd52-mpcfix5"
+      beanstalkd_tag: "6f41576"
+      nextjs_tag: "0.0.0-f28af33fdb7"

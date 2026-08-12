@@ -1,7 +1,8 @@
 # Nightly upgrade matrix. All knobs live on harness-matrix; this is only the clock.
 #
-# Timing: 3 configs x ~2h with the harness-semaphore at 2 lands the finish around
-# 06:00 ET. The children gate on the semaphore themselves (NEVER add a semaphore here
+# Timing: 4 configs x ~2h with the harness-semaphore at 2 is two waves; bi_ha and full are
+# still the long poles (slim_upgrade is min-shaped), so the finish stays around
+# 06:00-07:00 ET. The children gate on the semaphore themselves (NEVER add a semaphore here
 # or at the matrix level: parent+child gating deadlocks any matrix larger than the
 # semaphore). Forbid means a still-running night blocks the next - the semaphore would
 # serialise them anyway, without the visibility.

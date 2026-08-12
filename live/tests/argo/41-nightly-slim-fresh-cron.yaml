@@ -1,0 +1,35 @@
+# Nightly slim greenfield coverage. Runs the slim_fresh config with scenario=fresh
+# (provision-only, no baseline/upgrade phase) so the slim image/chart pairing gets a
+# from-scratch install checked every night, separate from the upgrade matrix in
+# 40-nightly-cron.yaml. One matrix submission carries one scenario, so fresh needs
+# its own cron rather than folding into the upgrade matrix's configs list.
+#
+# No semaphore here or at the matrix level, same rule as 40-nightly-cron.yaml: the
+# child (harness-scenario) gates on harness-semaphore itself, and gating both here
+# and there is a documented deadlock, not just redundant.
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: harness-nightly-slim-fresh
+  namespace: argo
+spec:
+  # v4 renamed the singular `schedule` away, same as synchronization.semaphore(s).
+  schedules:
+    - '30 3 * * *'
+  timezone: America/New_York
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowMetadata:
+    labels:
+      harness/trigger: cron
+  workflowSpec:
+    workflowTemplateRef:
+      name: harness-matrix
+    arguments:
+      parameters:
+        - name: configs
+          value: '["slim_fresh"]'
+        - name: scenario
+          value: fresh
