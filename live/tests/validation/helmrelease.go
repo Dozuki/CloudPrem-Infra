@@ -22,10 +22,12 @@ import (
 // has to establish readiness itself.
 //
 // Ask Flux rather than guessing a duration. helm-controller publishes the authoritative
-// answer on the HelmRelease's status conditions, which beats waiting on a timer in both
-// directions: we wait exactly as long as a slow-but-healthy install needs, and we fail
-// in seconds on a broken one instead of burning the whole budget to reach the same
-// conclusion. Timer-based waiting can only ever report "still not ready", never why.
+// answer on the HelmRelease's status conditions, which beats waiting on a timer: we wait
+// exactly as long as a slow-but-healthy install needs, and where the failure IS terminal
+// (an install, or a pre-v9.2.2 baseline upgrade) we fail in seconds instead of burning
+// the whole budget to reach the same conclusion. An upgrade running RetryOnFailure has no
+// terminal state and does use the full timeout, but it still reports WHY, which is the
+// part timer-based waiting can never do.
 
 // The HelmRelease CR is created in flux-system (terraform/logical/flux.tf), NOT in the
 // namespace the release deploys into.
@@ -86,8 +88,19 @@ func findHelmRelease(ctx context.Context, dc dynamic.Interface, appNamespace, na
 }
 
 // AwaitHelmReleaseReady blocks until Flux reports the HelmRelease Ready, or returns the
-// failure Flux recorded. timeout bounds only the wait for a verdict — it is a backstop
-// for a controller that never reconciles at all, not a readiness estimate.
+// failure Flux recorded. timeout is not a readiness estimate: for a terminal failure it
+// is a backstop against a controller that never reconciles at all, and for an upgrade
+// retrying forever it is the only thing that ends the wait.
+//
+// Since CPI v9.2.2 the upgrade path runs spec.upgrade.strategy RetryOnFailure with no
+// remediation block, so a failed UPGRADE is no longer terminal: it never sets Stalled
+// and never drives Ready to False, it parks at Ready=Unknown and retries every
+// retryInterval. Ready is therefore a lying signal during a retry loop. The real cause
+// is on the Released condition, so we read that too: a Released=False upgrade is
+// reported as it happens and recorded, but not fast-failed, because the next retry may
+// genuinely fix it. Install is unchanged (retries = 0), and a first-install failure
+// still resolves to the install config forever, so the Stalled / Ready=False fast-fail
+// below is still the path that catches it.
 func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Duration) error {
 	dc, err := dynamicFor(kubeconfig)
 	if err != nil {
@@ -97,6 +110,9 @@ func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Dura
 	started := time.Now()
 	deadline := started.Add(timeout)
 	lastMsg := ""
+	lastFailure := ""
+	lastUnscopedFailure := ""
+	lastGen := int64(-1)
 
 	for {
 		hr, _, gerr := findHelmRelease(ctx, dc, namespace, name)
@@ -106,8 +122,16 @@ func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Dura
 			}
 			// Not created yet — keep waiting rather than failing.
 		} else {
-			ready, reason, msg := condition(hr, "Ready")
-			stalled, sReason, sMsg := condition(hr, "Stalled")
+			ready, reason, msg, _ := condition(hr, "Ready")
+			stalled, sReason, sMsg, _ := condition(hr, "Stalled")
+			released, rReason, rMsg, rGen := condition(hr, "Released")
+
+			// A new generation means a new spec attempt, so anything recorded about the
+			// previous one no longer describes what we are waiting for.
+			if gen := hr.GetGeneration(); gen != lastGen {
+				lastGen = gen
+				lastFailure = ""
+			}
 
 			if ready == "True" {
 				fmt.Fprintf(os.Stderr, ">> [harness %s] HelmRelease %s Ready (%s) — %s\n",
@@ -115,14 +139,46 @@ func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Dura
 				return nil
 			}
 
-			// Terminal failures. CPI sets remediation.retries = 0, so an install/upgrade
-			// failure is final: waiting longer cannot change it, and the message names the
-			// actual cause (a failed hook, an unready workload, a values error).
+			// Terminal failures. Install still runs remediation.retries = 0, and a release
+			// with no successful history stays on the install config forever, so these two
+			// checks remain final: waiting longer cannot change the answer, and the message
+			// names the actual cause (a failed hook, an unready workload, a values error).
+			// They also still catch a pre-v9.2.2 baseline, which has no retry strategy and
+			// does drive Ready to False on a failed upgrade.
 			if stalled == "True" {
 				return fmt.Errorf("HelmRelease %s stalled (%s): %s", name, sReason, firstLine(sMsg))
 			}
 			if ready == "False" && isTerminalReason(reason) {
 				return fmt.Errorf("HelmRelease %s failed (%s): %s", name, reason, firstLine(msg))
+			}
+
+			// Retryable but reported. Under RetryOnFailure the only honest record of a
+			// failed upgrade is Released=False, so surface it the moment it changes and
+			// keep it for the timeout message, but do not fast-fail on it: the next retry
+			// may succeed.
+			//
+			// Only a condition whose observedGeneration matches the generation we are
+			// waiting on can be attributed to it. Flux sets that field, so this is the
+			// normal path. If it is ever missing we cannot tell whether the error belongs
+			// to this attempt or a previous one, and neither silently claiming it nor
+			// silently dropping it is honest — dropping it would restore the original
+			// empty verdict. Keep it apart and say what it is when reporting.
+			if rReason != "" && released == "False" {
+				f := fmt.Sprintf("%s: %s", rReason, firstLine(rMsg))
+				switch {
+				case rGen == lastGen && f != lastFailure:
+					lastFailure = f
+					fmt.Fprintf(os.Stderr, ">> [harness %s] HelmRelease %s release failed, retrying: %s\n",
+						time.Now().Format("15:04:05"), name, f)
+				case rGen == -1 && f != lastUnscopedFailure:
+					lastUnscopedFailure = f
+					fmt.Fprintf(os.Stderr, ">> [harness %s] HelmRelease %s release failed (generation unknown): %s\n",
+						time.Now().Format("15:04:05"), name, f)
+				}
+			}
+			if released == "True" && rGen == lastGen {
+				lastFailure = ""
+				lastUnscopedFailure = ""
 			}
 
 			if m := firstLine(msg); m != "" && m != lastMsg {
@@ -133,6 +189,12 @@ func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Dura
 		}
 
 		if time.Now().After(deadline) {
+			switch {
+			case lastFailure != "":
+				return fmt.Errorf("HelmRelease %s still failing under the retry strategy after %s (last release error %s)", name, timeout, lastFailure)
+			case lastUnscopedFailure != "":
+				return fmt.Errorf("HelmRelease %s produced no verdict within %s; an unscoped Released error was seen and may predate the current generation (%s)", name, timeout, lastUnscopedFailure)
+			}
 			return fmt.Errorf("HelmRelease %s produced no verdict within %s (last: %s)", name, timeout, lastMsg)
 		}
 		time.Sleep(20 * time.Second)
@@ -140,8 +202,12 @@ func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Dura
 }
 
 // isTerminalReason lists the helm-controller reasons that will not resolve on their own
-// under remediation.retries = 0. Anything else (Progressing, ArtifactFailed while the
-// source is still pulling, ...) is treated as in-flight and waited out.
+// once they reach the Ready condition as False. Anything else (Progressing,
+// ArtifactFailed while the source is still pulling, ...) is treated as in-flight and
+// waited out. UpgradeFailed stays in this set on purpose: it is unreachable on a release
+// running RetryOnFailure (which is why the Released check above exists), but it is still
+// how a pre-v9.2.2 baseline reports a dead upgrade, and the harness runs upgrade tests
+// from those baselines.
 func isTerminalReason(reason string) bool {
 	switch reason {
 	case "InstallFailed", "UpgradeFailed", "TestFailed", "RollbackFailed", "UninstallFailed", "ChartPullFailed":
@@ -150,10 +216,14 @@ func isTerminalReason(reason string) bool {
 	return false
 }
 
-func condition(hr *unstructured.Unstructured, condType string) (status, reason, message string) {
+// condition returns the named condition's status, reason and message, plus the generation
+// the controller had observed when it wrote it. That last value is what tells a caller
+// whether the condition describes the spec currently being waited on or a previous one;
+// it is -1 when the condition is absent or carries no observedGeneration.
+func condition(hr *unstructured.Unstructured, condType string) (status, reason, message string, observedGeneration int64) {
 	conds, found, err := unstructured.NestedSlice(hr.Object, "status", "conditions")
 	if err != nil || !found {
-		return "", "", ""
+		return "", "", "", -1
 	}
 	for _, c := range conds {
 		cm, ok := c.(map[string]interface{})
@@ -166,9 +236,18 @@ func condition(hr *unstructured.Unstructured, condType string) (status, reason, 
 		status, _ = cm["status"].(string)
 		reason, _ = cm["reason"].(string)
 		message, _ = cm["message"].(string)
-		return status, reason, message
+		// The dynamic client decodes JSON integers as int64, but tolerate float64 so a
+		// different decode path cannot silently turn this into "generation unknown".
+		observedGeneration = -1
+		switch g := cm["observedGeneration"].(type) {
+		case int64:
+			observedGeneration = g
+		case float64:
+			observedGeneration = int64(g)
+		}
+		return status, reason, message, observedGeneration
 	}
-	return "", "", ""
+	return "", "", "", -1
 }
 
 func firstLine(s string) string {
