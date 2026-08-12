@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.2.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.1...v9.2.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **logical:** consolidation kept evicting cert-manager-webhook mid-upgrade and wedging flux ([#495](https://github.com/Dozuki/CloudPrem-Infra/issues/495)) ([b5e26cf](https://github.com/Dozuki/CloudPrem-Infra/commit/b5e26cfa7a2756ae1959cdfc01eecc07f74eb4f7))
+
 ## [9.2.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.0...v9.2.1) (2026-08-12)
 
 
