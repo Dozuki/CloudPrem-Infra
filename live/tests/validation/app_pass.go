@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -289,6 +290,121 @@ func generateAppPassRunSalt() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// appPassUsernamePattern is the site's required shape for both `username` and
+// `unique_username` on POST /api/2.0/users — VERIFIED against a live app: a hyphenated
+// value ("qa-harness-user-<hex>") 422'd, while this underscore-only charset/length
+// window is accepted (201). Generated usernames are checked against it before the
+// request is sent, matching this file's other pre-flight validation (appPassHostPattern,
+// appPassSitePattern) rather than discovering a mismatch only from the server's
+// response. Also reused by app_pass_test.go's mock to assert the request body itself,
+// so a future regression back to hyphens fails the test, not just a live run.
+var appPassUsernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{2,29}$`)
+
+// appPassRegistrationPasswordLength is the length of the password stage 2 generates for
+// its registered user. Deliberately different from generateAppPassSecret's plain 32-hex
+// stage-0/1 admin password (which is hashed straight into the database via a shell
+// pipeline and never faces a password validator, so hex keeps that transport simple):
+// this password travels only as a JSON body field over HTTPS to POST /api/2.0/users,
+// which VERIFIED-rejects the old all-hex-lowercase shape (no uppercase, no special
+// character) on any site with a stricter password policy.
+const appPassRegistrationPasswordLength = 20
+
+const (
+	appPassPasswordUpper   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	appPassPasswordLower   = "abcdefghijklmnopqrstuvwxyz"
+	appPassPasswordDigits  = "0123456789"
+	appPassPasswordSpecial = "!@#$%^&*()-_=+"
+)
+
+// appPassRandIndex returns a crypto/rand index in [0, n).
+func appPassRandIndex(n int) (int, error) {
+	v, err := crand.Int(crand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0, err
+	}
+	return int(v.Int64()), nil
+}
+
+// generateAppPassRegistrationPassword produces a random appPassRegistrationPasswordLength-
+// character password for stage 2's registered user, GUARANTEED (by construction, then
+// double-checked via appPassPasswordMeetsPolicy before it is ever returned) to contain
+// at least one uppercase letter, one lowercase letter, one digit, and one special
+// character — a shape VERIFIED to satisfy the site's password policy, unlike the
+// 32-hex-char password this replaced. See appPassRegistrationPasswordLength's comment
+// for why this is intentionally NOT the same generator as the stage-0/1 admin secret.
+func generateAppPassRegistrationPassword() (string, error) {
+	classes := []string{appPassPasswordUpper, appPassPasswordLower, appPassPasswordDigits, appPassPasswordSpecial}
+	all := appPassPasswordUpper + appPassPasswordLower + appPassPasswordDigits + appPassPasswordSpecial
+
+	buf := make([]byte, appPassRegistrationPasswordLength)
+	for i, charset := range classes {
+		idx, err := appPassRandIndex(len(charset))
+		if err != nil {
+			return "", fmt.Errorf("generate registration password: %w", err)
+		}
+		buf[i] = charset[idx]
+	}
+	for i := len(classes); i < len(buf); i++ {
+		idx, err := appPassRandIndex(len(all))
+		if err != nil {
+			return "", fmt.Errorf("generate registration password: %w", err)
+		}
+		buf[i] = all[idx]
+	}
+	// Fisher-Yates shuffle (crypto/rand-backed) so the four guaranteed-class characters
+	// aren't always sitting in positions 0-3.
+	for i := len(buf) - 1; i > 0; i-- {
+		j, err := appPassRandIndex(i + 1)
+		if err != nil {
+			return "", fmt.Errorf("generate registration password: %w", err)
+		}
+		buf[i], buf[j] = buf[j], buf[i]
+	}
+	password := string(buf)
+	if err := appPassPasswordMeetsPolicy(password); err != nil {
+		return "", fmt.Errorf("generated password failed its own policy self-check: %w", err)
+	}
+	return password, nil
+}
+
+// appPassPasswordMeetsPolicy checks pw against the shape
+// generateAppPassRegistrationPassword guarantees by construction: length >= 12, and at
+// least one uppercase letter, one lowercase letter, one digit, and one special
+// character. Used both as generateAppPassRegistrationPassword's own self-check and by
+// app_pass_test.go's mock, so a future regression to a weaker generated password fails
+// the test rather than only a live run.
+func appPassPasswordMeetsPolicy(pw string) error {
+	if len(pw) < 12 {
+		return fmt.Errorf("password length %d, want >= 12", len(pw))
+	}
+	var hasUpper, hasLower, hasDigit, hasSpecial bool
+	for _, r := range pw {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			hasUpper = true
+		case r >= 'a' && r <= 'z':
+			hasLower = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		default:
+			hasSpecial = true
+		}
+	}
+	if !hasUpper {
+		return fmt.Errorf("password has no uppercase letter")
+	}
+	if !hasLower {
+		return fmt.Errorf("password has no lowercase letter")
+	}
+	if !hasDigit {
+		return fmt.Errorf("password has no digit")
+	}
+	if !hasSpecial {
+		return fmt.Errorf("password has no special character")
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------------
 // small HTTP helpers
 // ---------------------------------------------------------------------------------
@@ -401,6 +517,33 @@ func idField(m map[string]interface{}, key string) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// appPassBodyPreview truncates body to at most n bytes for inclusion in a diagnostic
+// error message. A bounded preview of the ACTUAL response — not just its status code —
+// is what would have made the original stage-2 failure (a 422 with no visible reason)
+// cheap to diagnose instead of expensive. This wraps a RESPONSE body, and a 422
+// validation failure can legitimately echo the submitted payload back, including a
+// generated secret — so the preview itself is not what keeps a secret out of an error
+// string. What does: every generated secret is registered with the scanner
+// (deps.secrets.add) BEFORE the request carrying it is ever sent, so by the time a
+// response could echo it back, finalizeAppPass's self-scan — which checks the final
+// error's own text, not just log lines — already has it on the list. The trade-off is
+// deliberate: a response that really does echo a registered secret gets reported as
+// "SECRET LEAKED TO LOGS" instead of the underlying HTTP reason, trading that one
+// diagnostic detail for never letting the secret text itself escape.
+func appPassBodyPreview(body []byte, n int) string {
+	s := strings.TrimSpace(string(body))
+	if s == "" {
+		return "<empty body>"
+	}
+	if len(s) <= n {
+		return s
+	}
+	// s[:n] slices bytes and can split a multi-byte UTF-8 rune mid-sequence;
+	// ToValidUTF8 drops any resulting partial rune at the cut point instead of
+	// emitting invalid UTF-8 into diagnostics.
+	return strings.ToValidUTF8(s[:n], "") + "…"
 }
 
 func boolField(m map[string]interface{}, key string) (bool, bool) {
@@ -738,7 +881,7 @@ func stage1Login(ctx context.Context, deps appPassDeps, base, email string, secr
 		return "", 0, fmt.Errorf("login request: %w", err)
 	}
 	if res.status != http.StatusCreated {
-		return "", 0, fmt.Errorf("login: want status 201, got %d", res.status)
+		return "", 0, fmt.Errorf("login: want status 201, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	tok, ok := stringField(res.json, "authToken")
 	if !ok || tok == "" {
@@ -756,15 +899,20 @@ func stage1Login(ctx context.Context, deps appPassDeps, base, email string, secr
 // ---------------------------------------------------------------------------------
 
 func stage2RegisterUser(ctx context.Context, deps appPassDeps, base, authToken, runsalt string) (int64, error) {
-	pwBuf := make([]byte, 16)
-	if _, err := crand.Read(pwBuf); err != nil {
+	password, err := generateAppPassRegistrationPassword()
+	if err != nil {
 		return 0, fmt.Errorf("generate stage-2 password: %w", err)
 	}
-	password := hex.EncodeToString(pwBuf)
 	// Registered with the scanner so finalizeAppPass's leak self-scan covers this
 	// generated secret too, not just the stage-0/1 admin password.
 	deps.secrets.add(password)
-	username := fmt.Sprintf("qa-harness-user-%s", runsalt)
+	// unique_username VERIFIED against a live app: must match appPassUsernamePattern —
+	// hyphens are illegal ("qa-harness-user-<hex>" 422'd). Underscores throughout, never
+	// hyphens.
+	username := fmt.Sprintf("qa_harness_user_%s", runsalt)
+	if !appPassUsernamePattern.MatchString(username) {
+		return 0, fmt.Errorf("generated username %q fails required pattern %s", username, appPassUsernamePattern.String())
+	}
 	res, err := deps.doJSON(ctx, http.MethodPost, base+"/api/2.0/users", authToken, map[string]string{
 		"username":        username,
 		"unique_username": username,
@@ -775,7 +923,7 @@ func stage2RegisterUser(ctx context.Context, deps appPassDeps, base, authToken, 
 		return 0, fmt.Errorf("register user request: %w", err)
 	}
 	if res.status != http.StatusCreated {
-		return 0, fmt.Errorf("register user: want status 201, got %d", res.status)
+		return 0, fmt.Errorf("register user: want status 201, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	uid, ok := idField(res.json, "userid")
 	if !ok {
@@ -793,12 +941,15 @@ func stage3CreateWiki(ctx context.Context, deps appPassDeps, base, authToken, ru
 	res, err := deps.doJSON(ctx, http.MethodPost, base+"/api/2.0/wikis", authToken, map[string]string{
 		"namespace": "CATEGORY",
 		"title":     title,
+		// contents is REQUIRED — VERIFIED against a live app: namespace+title alone
+		// 422'd with missing_field; adding contents returns 201.
+		"contents": "QA harness category (created by AppPass, torn down in stage 8)",
 	})
 	if err != nil {
 		return 0, "", fmt.Errorf("create wiki request: %w", err)
 	}
 	if res.status != http.StatusCreated {
-		return 0, "", fmt.Errorf("create wiki: want status 201, got %d", res.status)
+		return 0, "", fmt.Errorf("create wiki: want status 201, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	wikiid, ok := idField(res.json, "wikiid")
 	if !ok {
@@ -811,12 +962,22 @@ func stage3CreateWiki(ctx context.Context, deps appPassDeps, base, authToken, ru
 	stack.push(appPassTeardownEntry{
 		kind: "wiki",
 		do: func(ctx context.Context, deps appPassDeps, base, authToken string) error {
-			res, err := deps.doJSON(ctx, http.MethodDelete, base+"/api/2.0/wikis/CATEGORY/"+url.PathEscape(gotTitle), authToken, nil)
+			wikiURL := base + "/api/2.0/wikis/CATEGORY/" + url.PathEscape(gotTitle)
+			// DELETE requires ?revisionid= as a query param (VERIFIED) — fetch the
+			// category's current revisionid immediately beforehand, the same
+			// GET-then-act pattern stage 6 already uses for the guide (see
+			// appPassFetchRevisionID).
+			revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, wikiURL)
+			if rerr != nil {
+				return fmt.Errorf("delete wiki: %w", rerr)
+			}
+			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s?revisionid=%d", wikiURL, revisionID), authToken, nil)
 			if err != nil {
 				return err
 			}
+			// Deletes return 204, not 200 — accept any 2xx.
 			if res.status/100 != 2 {
-				return fmt.Errorf("delete wiki: status %d", res.status)
+				return fmt.Errorf("delete wiki: status %d: %s", res.status, appPassBodyPreview(res.body, 500))
 			}
 			return nil
 		},
@@ -824,8 +985,38 @@ func stage3CreateWiki(ctx context.Context, deps appPassDeps, base, authToken, ru
 	return wikiid, gotTitle, nil
 }
 
+// appPassFetchRevisionID GETs url and extracts its "revisionid" field. Used by stage 8
+// to obtain the ?revisionid= query param DELETE requires on both the guide and the wiki
+// category routes: VERIFIED for the guide (the same route/field stage 6 already reads
+// for the publish call — see stage6Publish); applied to the wiki category route by the
+// same GET-the-resource-you're-about-to-delete pattern, since it mirrors the guide route
+// one level up (both are revisioned Objects in this app).
+func appPassFetchRevisionID(ctx context.Context, deps appPassDeps, authToken, resourceURL string) (int64, error) {
+	res, err := deps.doJSON(ctx, http.MethodGet, resourceURL, authToken, nil)
+	if err != nil {
+		return 0, fmt.Errorf("fetch revisionid: %w", err)
+	}
+	if res.status != http.StatusOK {
+		return 0, fmt.Errorf("fetch revisionid: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
+	}
+	revisionID, ok := idField(res.json, "revisionid")
+	if !ok {
+		return 0, fmt.Errorf("fetch revisionid: response missing revisionid")
+	}
+	return revisionID, nil
+}
+
 // ---------------------------------------------------------------------------------
 // stage 4: media uploads
+//
+// UNVERIFIED SPOT (1 of 3, see the app-pass task brief): the live proof run failed at
+// stage 2 and never reached here, so none of the following have been hand-verified
+// against a running app and are left exactly as originally written — the raw-bytes
+// upload request shape (stage4UploadOne), the video encode-poll route
+// (stage4WaitForVideoReady), and the media URL assertions used later to verify a
+// published guide's image/video/document data (appPassGuideImageURL,
+// appPassGuideVideoURL, appPassGuideDocumentURL, and their size/guid/encodings shape
+// assumptions). Do not invent a corrected contract for any of these from this pass.
 // ---------------------------------------------------------------------------------
 
 type appPassAsset struct {
@@ -856,7 +1047,7 @@ func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken stri
 		return 0, fmt.Errorf("upload request: %w", err)
 	}
 	if res.status != http.StatusOK {
-		return 0, fmt.Errorf("upload %s: want status 200, got %d", asset.assetType, res.status)
+		return 0, fmt.Errorf("upload %s: want status 200, got %d: %s", asset.assetType, res.status, appPassBodyPreview(res.body, 500))
 	}
 	id, ok := idField(res.json, "id")
 	if !ok {
@@ -870,8 +1061,9 @@ func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken stri
 			if err != nil {
 				return err
 			}
+			// Deletes return 204, not 200 — accept any 2xx.
 			if res.status/100 != 2 {
-				return fmt.Errorf("delete media %s/%d: status %d", assetType, itemID, res.status)
+				return fmt.Errorf("delete media %s/%d: status %d: %s", assetType, itemID, res.status, appPassBodyPreview(res.body, 500))
 			}
 			return nil
 		},
@@ -896,7 +1088,7 @@ func stage4WaitForVideoReady(ctx context.Context, deps appPassDeps, clk appPassC
 			return fmt.Errorf("video status poll: %w", err)
 		}
 		if res.status != http.StatusOK {
-			return fmt.Errorf("video status poll: want status 200, got %d", res.status)
+			return fmt.Errorf("video status poll: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 		}
 		if ready, ok := boolField(res.json, "isReady"); ok && ready {
 			return nil
@@ -936,20 +1128,18 @@ func stage4Uploads(ctx context.Context, deps appPassDeps, clk appPassClock, base
 // stage 5: guide + steps
 // ---------------------------------------------------------------------------------
 
-// guideTypeTechnique is a valid literal for the guide `type` field. guides.php's PUT
-// handler (Guide/UI/api/2.0/guides.php, case 'type') validates against
-// ServerConstants::getGuideTypes() (Libs/ServerConstants.php:702), which falls back to
-// SiteSettingsLib::getDefaultGuideTypes() (Libs/SiteSettingsLib.php:205) whenever a
-// site's `guide-types` setting doesn't override a given key. "technique" is one of the
-// ten defaults there (replacement, installation, repair, disassembly, maintenance,
-// troubleshooting, project, how-to, teardown, technique), present on every site unless
-// a customer explicitly disabled it — a safe literal for a throwaway QA guide.
-const guideTypeTechnique = "technique"
+// guideTypeHowTo is the guide `type` field literal AppPass sends when creating its
+// stage-5 QA guide. VERIFIED against a live app: "technique" (this file's original
+// assumption, based on ServerConstants::getGuideTypes()'s / SiteSettingsLib's default
+// ten-type list) was rejected — "Invalid guide type. Got technique Was expecting one
+// of: how-to." — meaning this site's `guide-types` setting has narrowed the allowed set
+// down to just "how-to". Use "how-to" as the literal observed to work.
+const guideTypeHowTo = "how-to"
 
 func stage5CreateGuide(ctx context.Context, deps appPassDeps, base, authToken, category, runsalt string, documentID int64, stack *appPassTeardownStack) (int64, error) {
 	res, err := deps.doJSON(ctx, http.MethodPost, base+"/api/2.0/guides", authToken, map[string]interface{}{
 		"category":  category,
-		"type":      guideTypeTechnique,
+		"type":      guideTypeHowTo,
 		"title":     fmt.Sprintf("QA-Harness-Guide-%s", runsalt),
 		"documents": []int64{documentID},
 	})
@@ -957,7 +1147,7 @@ func stage5CreateGuide(ctx context.Context, deps appPassDeps, base, authToken, c
 		return 0, fmt.Errorf("create guide request: %w", err)
 	}
 	if res.status != http.StatusCreated {
-		return 0, fmt.Errorf("create guide: want status 201, got %d", res.status)
+		return 0, fmt.Errorf("create guide: want status 201, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	guideID, ok := idField(res.json, "guideid")
 	if !ok {
@@ -966,12 +1156,21 @@ func stage5CreateGuide(ctx context.Context, deps appPassDeps, base, authToken, c
 	stack.push(appPassTeardownEntry{
 		kind: "guide",
 		do: func(ctx context.Context, deps appPassDeps, base, authToken string) error {
-			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID), authToken, nil)
+			guideURL := fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID)
+			// DELETE requires ?revisionid= as a query param (VERIFIED) — same
+			// GET-then-act pattern as the wiki category and stage 6's publish call;
+			// see appPassFetchRevisionID.
+			revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, guideURL)
+			if rerr != nil {
+				return fmt.Errorf("delete guide %d: %w", guideID, rerr)
+			}
+			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s?revisionid=%d", guideURL, revisionID), authToken, nil)
 			if err != nil {
 				return err
 			}
+			// Deletes return 204, not 200 — accept any 2xx.
 			if res.status/100 != 2 {
-				return fmt.Errorf("delete guide %d: status %d", guideID, res.status)
+				return fmt.Errorf("delete guide %d: status %d: %s", guideID, res.status, appPassBodyPreview(res.body, 500))
 			}
 			return nil
 		},
@@ -979,15 +1178,32 @@ func stage5CreateGuide(ctx context.Context, deps appPassDeps, base, authToken, c
 	return guideID, nil
 }
 
-func stage5AddStep(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64, mediaType string, data interface{}) (int64, error) {
+// appPassStepLine is a single entry of a step's `lines[]`. VERIFIED against a live app:
+// the API requires `text` (not `text_raw`), an integer `level` (0 is valid; a first
+// line with level 1 is rejected — "Invalid line indentation"), and a bullet style via
+// `bullet` (a name, e.g. "black") or `bullet_styleid`.
+type appPassStepLine struct {
+	Text   string `json:"text"`
+	Level  int    `json:"level"`
+	Bullet string `json:"bullet"`
+}
+
+func stage5AddStep(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64, mediaType string, data interface{}, orderby int) (int64, error) {
 	res, err := deps.doJSON(ctx, http.MethodPost, fmt.Sprintf("%s/api/2.0/guides/%d/steps", base, guideID), authToken, map[string]interface{}{
-		"media": map[string]interface{}{"type": mediaType, "data": data},
+		// orderby and lines[] are REQUIRED — VERIFIED against a live app: a body
+		// carrying only `media` 422'd. This exact shape (text/level/bullet) returned
+		// 201: {"orderby":1,"title":"QA step","lines":[{"text":"probe","level":0,
+		// "bullet":"black"}]}.
+		"orderby": orderby,
+		"title":   fmt.Sprintf("QA step %d", orderby),
+		"lines":   []appPassStepLine{{Text: "probe", Level: 0, Bullet: "black"}},
+		"media":   map[string]interface{}{"type": mediaType, "data": data},
 	})
 	if err != nil {
 		return 0, fmt.Errorf("add %s step request: %w", mediaType, err)
 	}
 	if res.status != http.StatusCreated {
-		return 0, fmt.Errorf("add %s step: want status 201, got %d", mediaType, res.status)
+		return 0, fmt.Errorf("add %s step: want status 201, got %d: %s", mediaType, res.status, appPassBodyPreview(res.body, 500))
 	}
 	stepID, ok := idField(res.json, "stepid")
 	if !ok {
@@ -1005,7 +1221,7 @@ func stage5VerifyRoundTrip(ctx context.Context, deps appPassDeps, base, authToke
 		return nil, fmt.Errorf("get guide request: %w", err)
 	}
 	if res.status != http.StatusOK {
-		return nil, fmt.Errorf("get guide: want status 200, got %d", res.status)
+		return nil, fmt.Errorf("get guide: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	hasImage, hasObject := appPassGuideStepMediaTypes(res.json)
 	if !hasImage {
@@ -1200,20 +1416,29 @@ func requireAppPassFetchScheme(rawURL string) error {
 // ---------------------------------------------------------------------------------
 
 func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64) error {
-	res, err := deps.doJSON(ctx, http.MethodPut, fmt.Sprintf("%s/api/2.0/guides/%d/public", base, guideID), authToken, nil)
+	// revisionid is a QUERY PARAMETER on the publish PUT, not a JSON body field —
+	// VERIFIED against a live app: a body-borne revisionid 422'd missing_field. It
+	// comes from the guide GET response's own revisionid field.
+	guideURL := fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID)
+	revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, guideURL)
+	if rerr != nil {
+		return fmt.Errorf("publish guide: %w", rerr)
+	}
+
+	res, err := deps.doJSON(ctx, http.MethodPut, fmt.Sprintf("%s/public?revisionid=%d", guideURL, revisionID), authToken, nil)
 	if err != nil {
 		return fmt.Errorf("publish guide request: %w", err)
 	}
 	if res.status != http.StatusOK {
-		return fmt.Errorf("publish guide: want status 200, got %d", res.status)
+		return fmt.Errorf("publish guide: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 
-	res, err = deps.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID), authToken, nil)
+	res, err = deps.doJSON(ctx, http.MethodGet, guideURL, authToken, nil)
 	if err != nil {
 		return fmt.Errorf("get guide (public check) request: %w", err)
 	}
 	if res.status != http.StatusOK {
-		return fmt.Errorf("get guide (public check): want status 200, got %d", res.status)
+		return fmt.Errorf("get guide (public check): want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	if public, ok := boolField(res.json, "public"); !ok || !public {
 		return fmt.Errorf("get guide (public check): public flag not true")
@@ -1254,12 +1479,18 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 
 	// Everything below is a plain anonymous read (no Authorization header) — this is
 	// exactly the "is it actually public" question stage 6 exists to answer.
+	//
+	// UNVERIFIED SPOT (2 of 3, see the app-pass task brief): the live proof run failed
+	// at stage 2 and never reached publish, so none of these anonymous/public delivery
+	// assertions (the guide page fetch, the image-guid-in-HTML check, and the CDN/video/
+	// document GETs below) have been hand-verified against a running app. Left exactly
+	// as originally written; do not invent a corrected contract here.
 	pageRes, err := deps.doRaw(ctx, http.MethodGet, guideURL, "", nil, "")
 	if err != nil {
 		return fmt.Errorf("get public guide page: %w", err)
 	}
 	if pageRes.status/100 != 2 {
-		return fmt.Errorf("get public guide page: want 2xx, got %d", pageRes.status)
+		return fmt.Errorf("get public guide page: want 2xx, got %d: %s", pageRes.status, appPassBodyPreview(pageRes.body, 500))
 	}
 	// The page may render a different SIZE variant than the one appPassGuideImageURL
 	// picked, so assert the stable guid rather than the size-specific CDN url.
@@ -1272,7 +1503,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("get image CDN url: %w", err)
 	}
 	if imgRes.status != http.StatusOK {
-		return fmt.Errorf("get image CDN url: want status 200, got %d", imgRes.status)
+		return fmt.Errorf("get image CDN url: want status 200, got %d: %s", imgRes.status, appPassBodyPreview(imgRes.body, 500))
 	}
 
 	vidRes, err := deps.doRaw(ctx, http.MethodGet, videoURL, "", nil, "")
@@ -1280,7 +1511,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("get video encoding url: %w", err)
 	}
 	if vidRes.status != http.StatusOK {
-		return fmt.Errorf("get video encoding url: want status 200, got %d", vidRes.status)
+		return fmt.Errorf("get video encoding url: want status 200, got %d: %s", vidRes.status, appPassBodyPreview(vidRes.body, 500))
 	}
 
 	docRes, err := deps.doRaw(ctx, http.MethodGet, viewURL, "", nil, "")
@@ -1288,13 +1519,20 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("get document url (anonymous): %w", err)
 	}
 	if docRes.status != http.StatusOK {
-		return fmt.Errorf("get document url (anonymous): want status 200, got %d", docRes.status)
+		return fmt.Errorf("get document url (anonymous): want status 200, got %d: %s", docRes.status, appPassBodyPreview(docRes.body, 500))
 	}
 	return nil
 }
 
 // ---------------------------------------------------------------------------------
 // stage 7: course
+//
+// UNVERIFIED SPOT (3 of 3, see the app-pass task brief): the live proof run failed at
+// stage 2 and never reached here. This stage only exercises the guide-CMS course APIs
+// (POST /api/2.0/courses and the getCourse ajax route) below; it does not yet call
+// through the app's separate Next.js-served course route, so that path remains
+// unverified against a live app. Left exactly as originally written; do not invent a
+// corrected contract here.
 // ---------------------------------------------------------------------------------
 
 func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64, runsalt string, stack *appPassTeardownStack) (int64, error) {
@@ -1307,7 +1545,7 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 		return 0, fmt.Errorf("create course request: %w", err)
 	}
 	if res.status != http.StatusCreated {
-		return 0, fmt.Errorf("create course: want status 201, got %d", res.status)
+		return 0, fmt.Errorf("create course: want status 201, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	wikiid, ok := idField(res.json, "wikiid")
 	if !ok {
@@ -1323,8 +1561,9 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 			if err != nil {
 				return err
 			}
+			// Deletes return 204, not 200 — accept any 2xx.
 			if res.status/100 != 2 {
-				return fmt.Errorf("delete course %d: status %d", wikiid, res.status)
+				return fmt.Errorf("delete course %d: status %d: %s", wikiid, res.status, appPassBodyPreview(res.body, 500))
 			}
 			return nil
 		},
@@ -1335,7 +1574,7 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 		return 0, fmt.Errorf("getCourse request: %w", err)
 	}
 	if getRes.status != http.StatusOK {
-		return 0, fmt.Errorf("getCourse: want status 200, got %d", getRes.status)
+		return 0, fmt.Errorf("getCourse: want status 200, got %d: %s", getRes.status, appPassBodyPreview(getRes.body, 500))
 	}
 	if gotWikiID, ok := idField(getRes.json, "wikiid"); !ok || gotWikiID != wikiid {
 		return 0, fmt.Errorf("getCourse response does not carry wikiid %d", wikiid)
@@ -1446,6 +1685,10 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return fmt.Errorf("app-pass: stage 1 (login): %w", err)
 	}
 	authToken = tok
+	// Registered with the scanner so finalizeAppPass's leak self-scan also covers the
+	// live session token, not just the generated passwords — a response body that
+	// happens to echo it back (e.g. into an error preview) must redact rather than leak.
+	deps.secrets.add(authToken)
 	log.Logf("app-pass: stage 1 (login) ok userid=%d", userid)
 
 	if derr := checkDeadline(deps.clock, deadline, opts.Timeout, "app-pass"); derr != nil {
@@ -1486,10 +1729,10 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
-	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "image", []int64{imageID}); err != nil {
+	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "image", []int64{imageID}, 1); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
-	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "object", videoID); err != nil {
+	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "object", videoID, 2); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
 	if _, err := stage5VerifyRoundTrip(stageCtx, deps, base, authToken, guideID, documentID); err != nil {
