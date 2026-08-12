@@ -629,6 +629,13 @@ func TestStage0EphemeralAdmin_PathA(t *testing.T) {
 const (
 	appPassMockImageGUID    = "guid-mock-abc123"
 	appPassMockDocumentPath = "/Document/102/app_pass_probe.pdf"
+	// appPassMockGuideRevisionID / appPassMockWikiRevisionID are the fixed revisionid
+	// values the mock's guide/wiki GET responses report, and the exact values the
+	// publish PUT and the guide/wiki DELETE calls must carry as a ?revisionid= query
+	// param — proving stage6Publish/stage8's teardown actually read revisionid from a
+	// GET response and pass it through as a query param, not a body field.
+	appPassMockGuideRevisionID = 700
+	appPassMockWikiRevisionID  = 800
 )
 
 type appPassMockFlags struct {
@@ -692,12 +699,26 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 
 	mux.HandleFunc("/api/2.0/users", func(w http.ResponseWriter, r *http.Request) {
 		m.assertAuth(r)
-		w.WriteHeader(http.StatusCreated)
-		body := map[string]interface{}{}
-		if !m.flags.registerOmitUserID {
-			body["userid"] = 2
+		var reqBody map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		// unique_username (and username) must match appPassUsernamePattern — a
+		// hyphenated value must fail this assertion, proving a regression back to
+		// "qa-harness-user-<hex>" would fail the test.
+		if !appPassUsernamePattern.MatchString(reqBody["unique_username"]) {
+			m.t.Errorf("register user unique_username = %q, fails required pattern %s", reqBody["unique_username"], appPassUsernamePattern.String())
 		}
-		_ = json.NewEncoder(w).Encode(body)
+		if !appPassUsernamePattern.MatchString(reqBody["username"]) {
+			m.t.Errorf("register user username = %q, fails required pattern %s", reqBody["username"], appPassUsernamePattern.String())
+		}
+		if perr := appPassPasswordMeetsPolicy(reqBody["password"]); perr != nil {
+			m.t.Errorf("register user password fails complexity policy: %v", perr)
+		}
+		w.WriteHeader(http.StatusCreated)
+		respBody := map[string]interface{}{}
+		if !m.flags.registerOmitUserID {
+			respBody["userid"] = 2
+		}
+		_ = json.NewEncoder(w).Encode(respBody)
 	})
 
 	mux.HandleFunc("/api/2.0/wikis", func(w http.ResponseWriter, r *http.Request) {
@@ -711,6 +732,9 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		if body["namespace"] != "CATEGORY" {
 			m.t.Errorf("create wiki namespace = %v, want CATEGORY", body["namespace"])
 		}
+		if contents, ok := body["contents"].(string); !ok || contents == "" {
+			m.t.Errorf("create wiki body missing non-empty contents: %v", body["contents"])
+		}
 		status := statusOr(m.flags.wikiStatus, http.StatusCreated)
 		w.WriteHeader(status)
 		if status == http.StatusCreated {
@@ -718,13 +742,20 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		}
 	})
 	mux.HandleFunc("/api/2.0/wikis/CATEGORY/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			http.NotFound(w, r)
-			return
-		}
 		m.assertAuth(r)
-		m.recordDelete("wiki")
-		w.WriteHeader(http.StatusOK)
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "revisionid": appPassMockWikiRevisionID})
+		case http.MethodDelete:
+			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockWikiRevisionID) {
+				m.t.Errorf("delete wiki revisionid query param = %q, want %d", got, appPassMockWikiRevisionID)
+			}
+			m.recordDelete("wiki")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
 	})
 
 	mux.HandleFunc("/api/2.0/user/media/", func(w http.ResponseWriter, r *http.Request) {
@@ -751,8 +782,8 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		m.assertAuth(r)
 		var body map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["type"] != guideTypeTechnique {
-			m.t.Errorf("create guide type = %v, want %q", body["type"], guideTypeTechnique)
+		if body["type"] != guideTypeHowTo {
+			m.t.Errorf("create guide type = %v, want %q", body["type"], guideTypeHowTo)
 		}
 		if m.flags.guideCreateDelay > 0 {
 			// Bail out as soon as the client gives up (r.Context() is cancelled once
@@ -781,6 +812,9 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		case path == "/api/2.0/guides/500/steps" && r.Method == http.MethodPost:
 			m.handleAddStep(w, r)
 		case path == "/api/2.0/guides/500/public" && r.Method == http.MethodPut:
+			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockGuideRevisionID) {
+				m.t.Errorf("publish revisionid query param = %q, want %d", got, appPassMockGuideRevisionID)
+			}
 			status := statusOr(m.flags.publishPutStatus, http.StatusOK)
 			m.mu.Lock()
 			if status == http.StatusOK {
@@ -791,8 +825,11 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		case path == "/api/2.0/guides/500" && r.Method == http.MethodGet:
 			m.handleGetGuide(w)
 		case path == "/api/2.0/guides/500" && r.Method == http.MethodDelete:
+			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockGuideRevisionID) {
+				m.t.Errorf("delete guide revisionid query param = %q, want %d", got, appPassMockGuideRevisionID)
+			}
 			m.recordDelete("guide")
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
 		}
@@ -818,7 +855,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		}
 		m.assertAuth(r)
 		m.recordDelete("course")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/api/courses/_shared/getCourse", func(w http.ResponseWriter, r *http.Request) {
 		m.assertAuth(r)
@@ -951,12 +988,44 @@ func (m *appPassMock) handleMediaDelete(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	m.recordDelete("media:" + parts[0])
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (m *appPassMock) handleAddStep(w http.ResponseWriter, r *http.Request) {
 	var body map[string]interface{}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	// orderby (int) and lines[] (with text/level/bullet) are REQUIRED alongside media —
+	// a body carrying only `media` must fail these assertions, proving a regression
+	// back to the old media-only shape would fail the test.
+	if _, ok := body["orderby"].(float64); !ok {
+		m.t.Errorf("add step body missing numeric orderby: %v", body["orderby"])
+	}
+	if title, ok := body["title"].(string); !ok || title == "" {
+		m.t.Errorf("add step body missing non-empty title: %v", body["title"])
+	}
+	lines, ok := body["lines"].([]interface{})
+	if !ok || len(lines) == 0 {
+		m.t.Errorf("add step body missing non-empty lines[]: %v", body["lines"])
+	}
+	for _, l := range lines {
+		line, ok := l.(map[string]interface{})
+		if !ok {
+			m.t.Errorf("add step lines[] entry is not an object: %v", l)
+			continue
+		}
+		if text, ok := line["text"].(string); !ok || text == "" {
+			m.t.Errorf("add step lines[] entry missing non-empty text (not text_raw): %v", line)
+		}
+		if _, ok := line["level"].(float64); !ok {
+			m.t.Errorf("add step lines[] entry missing numeric level: %v", line)
+		}
+		_, hasBulletStyle := line["bullet_styleid"]
+		if bullet, ok := line["bullet"].(string); (!ok || bullet == "") && !hasBulletStyle {
+			m.t.Errorf("add step lines[] entry missing bullet or bullet_styleid: %v", line)
+		}
+	}
+
 	media, _ := body["media"].(map[string]interface{})
 	mtype, _ := media["type"].(string)
 	var stepid int
@@ -1035,11 +1104,12 @@ func (m *appPassMock) handleGetGuide(w http.ResponseWriter) {
 		doc["url"] = appPassMockDocumentPath
 	}
 	guide := map[string]interface{}{
-		"guideid":   500,
-		"public":    published && !m.flags.publishGetPublicFalse,
-		"url":       m.server.URL + "/Guide/QA-Harness-Guide/500",
-		"steps":     steps,
-		"documents": []interface{}{doc},
+		"guideid":    500,
+		"revisionid": appPassMockGuideRevisionID,
+		"public":     published && !m.flags.publishGetPublicFalse,
+		"url":        m.server.URL + "/Guide/QA-Harness-Guide/500",
+		"steps":      steps,
+		"documents":  []interface{}{doc},
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(guide)
@@ -1432,8 +1502,11 @@ func TestRunAppPass_Stage2PasswordIncludedInLeakScan(t *testing.T) {
 		t.Fatalf("scanner captured %d secret(s), want 2 (stage 0/1 admin password + stage 2 registration password): %v", len(secrets), secrets)
 	}
 	stage2Password := secrets[1]
-	if stage2Password == "" || stage2Password == mainSecret || len(stage2Password) != 32 {
+	if stage2Password == "" || stage2Password == mainSecret || len(stage2Password) != appPassRegistrationPasswordLength {
 		t.Fatalf("unexpected stage-2 password captured: %q", stage2Password)
+	}
+	if err := appPassPasswordMeetsPolicy(stage2Password); err != nil {
+		t.Errorf("stage-2 password fails its own generator's complexity policy: %v", err)
 	}
 
 	// The real run above never leaked it (finalizeAppPass would have converted the
@@ -1465,5 +1538,53 @@ func TestGenerateAppPassSecret_Format(t *testing.T) {
 	s2, _ := generateAppPassSecret()
 	if s == s2 {
 		t.Error("two generated secrets were identical — crypto/rand not being used?")
+	}
+}
+
+func TestGenerateAppPassRegistrationPassword_MeetsPolicy(t *testing.T) {
+	pw, err := generateAppPassRegistrationPassword()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pw) != appPassRegistrationPasswordLength {
+		t.Errorf("password length = %d, want %d", len(pw), appPassRegistrationPasswordLength)
+	}
+	if err := appPassPasswordMeetsPolicy(pw); err != nil {
+		t.Errorf("generated password fails its own policy: %v", err)
+	}
+	pw2, _ := generateAppPassRegistrationPassword()
+	if pw == pw2 {
+		t.Error("two generated passwords were identical — crypto/rand not being used?")
+	}
+}
+
+func TestAppPassPasswordMeetsPolicy_RejectsWeakShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		pw   string
+	}{
+		{"too short", "Ab1!Ab1!Ab1"},
+		{"no upper", "abcdefgh1234!@#$"},
+		{"no lower", "ABCDEFGH1234!@#$"},
+		{"no digit", "ABCDefgh!@#$WXYZ"},
+		{"no special", "ABCDefgh12345678"},
+		// The exact shape this fix replaces: 32 lowercase hex characters.
+		{"old all-hex shape", "deadbeefdeadbeefdeadbeefdeadbeef"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := appPassPasswordMeetsPolicy(tc.pw); err == nil {
+				t.Errorf("appPassPasswordMeetsPolicy(%q) = nil, want an error", tc.pw)
+			}
+		})
+	}
+}
+
+func TestAppPassUsernamePattern_RejectsHyphensAcceptsUnderscores(t *testing.T) {
+	if appPassUsernamePattern.MatchString("qa-harness-user-deadbeef") {
+		t.Error("pattern accepted a hyphenated username, want rejection")
+	}
+	if !appPassUsernamePattern.MatchString("qa_harness_user_deadbeef") {
+		t.Error("pattern rejected a valid underscored username")
 	}
 }
