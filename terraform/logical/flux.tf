@@ -746,33 +746,55 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       chartRef         = { kind = "OCIRepository", name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
       install          = { disableWait = false, timeout = "4h30m", remediation = { retries = 0 } }
       # crds=CreateReplace so chart CRD changes actually apply on upgrade - helm-controller skips CRD updates by default.
-      # upgrade retries=2: with retries=0 ONE failed upgrade (an eviction, a
-      # not-yet-mirrored image, a transient webhook) stalls the release until a
-      # human does the requestedAt+forceAt dance (seen live 2026-07-30). Two
-      # retries let it self-heal once the cause clears. What that costs:
-      # remediation (strategy defaults to rollback) runs BETWEEN each attempt,
-      # so retries=2 means up to 2 rollbacks per failed upgrade, and the counter
-      # resets on a chart version change, so it bounds one cycle and not the
-      # loop (dev-min 2026-08-01). remediateLastFailure=false is load-bearing,
-      # not redundant: Flux defaults it to TRUE whenever retries > 0. It governs
-      # only the failure after retries are spent: Flux performs no rollback, so the
-      # release stays failed and live state may be left partially applied, pending
-      # operator recovery. A human sees a failed release rather than a chart
-      # silently older than the schema already in the database.
-      # Install keeps retries=0: install remediation uninstalls
-      # first, which is not a loop we want running unattended.
-      # upgrade.force pinned false for the same reason as rollback.force below, and it
-      # carries more weight here: every reconcile that produces a change goes through
-      # upgrade, while rollback only runs on remediation. It is also the knob reached
-      # for to punch through immutable-field errors, where it makes things worse, not
-      # better (see below).
-      # upgrade.timeout is per-attempt and now env-tunable (var.flux_upgrade_timeout, default
-      # unchanged at 4h30m). Its floor is db_migrations_active_deadline_seconds plus headroom, not
-      # an arbitrary number: helm blocks on the db-migrations Job, so a timeout below the Job's own
-      # deadline cuts a migration off part way. retries=2 multiplies it by up to 3 for a full
-      # cycle, and per remediateLastFailure=false below the terminal failure is not rolled back at
-      # all, so a short timeout does not buy a clean revert.
-      upgrade = { disableWait = false, timeout = var.flux_upgrade_timeout, crds = "CreateReplace", force = false, remediation = { retries = 2, remediateLastFailure = false } }
+      #
+      # upgrade.strategy=RetryOnFailure (needs helm-controller >= v1.4.0; the fleet runs v1.6.2
+      # from the flux2 chart pin above) REPLACES the remediation stanza that used to sit here.
+      # There is no upgrade.remediation block any more because the two are mutually exclusive at
+      # runtime: on a failed release the controller checks for an active retry strategy and
+      # returns a plain upgrade before it ever reads the remediation config, so retries /
+      # strategy / remediateLastFailure would be dead settings.
+      #
+      # Why retry rather than remediate. Remediation's default strategy is rollback, and a
+      # rollback here downgrades the chart and re-runs the OLD chart's pre-upgrade db-migrations
+      # hook against MySQL DDL that is not transactional - the same hazard the helm-controller
+      # do-not-disrupt pin above exists to avoid. Rollback also has a dead end: when
+      # .status.history carries no prior snapshot (a HelmRelease that adopted a pre-existing
+      # release, or a fresh bootstrap) there is nothing to roll back to, so the release goes
+      # Stalled=True / MissingRollbackTarget and sits there until a human forces a reconcile.
+      # dev-min hit exactly that on 2026-08-12 when a consolidation storm evicted
+      # cert-manager-webhook mid-upgrade. RetryOnFailure cannot reach that state at all: the
+      # missing-rollback-target error is only raised on the rollback branch, which the retry path
+      # never enters.
+      #
+      # What it costs, written down because it is not obvious. Retries are UNBOUNDED and the
+      # release never reaches a terminal Stalled state (fluxcd/helm-controller#1551 is open to add
+      # a bound - take it when it ships). And the retry path leaves the Ready condition stale,
+      # normally Unknown rather than False; only Released=False and the per-attempt UpgradeFailed
+      # event carry the real error. So do NOT key any alert or dashboard on a HelmRelease's Ready
+      # condition. Use the events (which the Slack Alert further down already forwards) or
+      # Released.
+      #
+      # retryInterval 15m rather than the 5m default: upgrades are merge-triggered and not
+      # latency-critical, and every attempt re-runs the pre-upgrade db-migrations Job, so a
+      # genuinely broken release churns 4 hook Jobs an hour instead of 12.
+      #
+      # Install is deliberately left alone (remediation.retries=0, no strategy). Install
+      # remediation uninstalls first, which is not a loop we want running unattended, and an
+      # install is a one-time attended bootstrap with no consolidation-storm exposure.
+      #
+      # upgrade.force pinned false for the same reason as rollback.force below. It is the knob
+      # people reach for to punch through immutable-field errors, where it makes things worse.
+      # upgrade.timeout is per-attempt and env-tunable (var.flux_upgrade_timeout, default 4h30m).
+      # Its floor is db_migrations_active_deadline_seconds plus headroom, not an arbitrary number:
+      # helm blocks on the db-migrations Job, so a timeout below the Job's own deadline cuts a
+      # migration off part way.
+      upgrade = {
+        disableWait = false
+        timeout     = var.flux_upgrade_timeout
+        crds        = "CreateReplace"
+        force       = false
+        strategy    = { name = "RetryOnFailure", retryInterval = "15m" }
+      }
       # Both force knobs pinned false explicitly. That is already the Helm default, but the
       # semantics are widely misread, so they get written down rather than inherited.
       # What force actually does, checked against source (helm v3.19.0 pkg/kube/client.go
@@ -789,6 +811,9 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # here is on the SSA line, so today both pins are defense-in-depth for client-side or
       # adopted releases rather than an active guard. Neither governs the ordinary
       # create/prune cycle that happens when the Job name changes.
+      # spec.rollback only governs a remediation rollback, and under RetryOnFailure none ever
+      # runs, so this setting is dormant. It stays pinned so the semantics are already correct if
+      # the strategy is ever reverted.
       rollback = { force = false }
       # driftDetection=enabled corrects cluster drift back to the chart's desired state. Promoted from warn after a fleet
       # sweep (2026-07-30) found drift on exactly one env, and it was stale old-chart state helm's 3-way merge could never
