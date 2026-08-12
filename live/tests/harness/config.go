@@ -13,6 +13,7 @@ import (
 // must NOT be written into env.hcl as terraform inputs.
 var harnessOnlyKeys = map[string]bool{
 	"restore_drill": true,
+	"app_pass":      true,
 }
 
 type Defaults struct {

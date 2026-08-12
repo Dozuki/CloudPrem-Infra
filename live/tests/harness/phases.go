@@ -24,6 +24,11 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// appPassTimeout mirrors validation.RunAppPass's own default ceiling (validation/
+// app_pass.go) so Validate can pass it explicitly to validation.AppPassOptions.Timeout
+// without an extra cross-package export — keep the two literals in sync.
+const appPassTimeout = 15 * time.Minute
+
 // PhaseParams carries everything a single re-entrant phase needs. Unlike RunParams
 // (which held in-memory worktree/appliedWT state for a whole run), PhaseParams holds
 // only inputs derivable from CLI flags + the matrix; durable cross-phase state lives
@@ -585,6 +590,15 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	// The drill records its results on rm even when it errors; persist them either way
 	// so a recovery phase (or a rescue by hand) knows what the drill left behind.
 	ierr := runInfraValidators(ctx, rp, p.Region, kc, caps, outs, verifyContinuity, rm)
+	if ierr == nil && cfg.HarnessFlag("app_pass") {
+		step("running AppPass (8-stage in-app API exercise)")
+		if aerr := validation.RunAppPass(ctx, validation.AppPassOptions{
+			BaseURL: outs.DozukiURL, Kubeconfig: kc, Namespace: rm.Namespace,
+			Timeout: appPassTimeout,
+		}); aerr != nil {
+			ierr = fmt.Errorf("app-pass: %w", aerr)
+		}
+	}
 	if rm.PromotedClusterID != "" {
 		if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil && ierr == nil {
 			ierr = serr
