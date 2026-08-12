@@ -254,11 +254,17 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	if scenario == "upgrade" {
 		targetFlavor, _ := p.Matrix.EffectiveVersionVar(cfg, toRef, SideTarget, "app_image_flavor").(string)
 		if validation.SlimFlipApplies(targetFlavor) {
-			// image_repository is resolved on the TARGET side (toRef) - it is the
-			// monolith-app image the target is about to replace that this guard hunts
-			// for, not whatever repository the baseline side happens to resolve.
-			imageRepository, _ := p.Matrix.EffectiveVersionVar(cfg, toRef, SideTarget, "image_repository").(string)
-			if gerr := checkBaselineNotSlim(ctx, kc, namespace, imageRepository); gerr != nil {
+			// image_repository is resolved on BOTH sides: the guard inspects BASELINE
+			// pods, so a baseline-side-only resolution is the one that actually matches
+			// what is running, but a per-config side override could in principle set
+			// image_repository differently on the target side too. Rather than pick a
+			// side, resolve both (they resolve identically today - no config overrides
+			// image_repository per side) and fail if a monolith-app image matching
+			// EITHER prefix is running on the baseline.
+			baselineRepo, _ := p.Matrix.EffectiveVersionVar(cfg, applyRef, SideBaseline, "image_repository").(string)
+			targetRepo, _ := p.Matrix.EffectiveVersionVar(cfg, toRef, SideTarget, "image_repository").(string)
+			imageRepositories := dedupeNonEmpty(baselineRepo, targetRepo)
+			if gerr := checkBaselineNotSlim(ctx, kc, namespace, imageRepositories); gerr != nil {
 				return gerr
 			}
 		}
@@ -319,21 +325,44 @@ func monolithAppImagePrefix(imageRepository string) string {
 	return imageRepository + "/monolith-app:"
 }
 
-// assertNoMonolithImages fails if any pod in inv runs a monolith-app image, per
-// monolithAppImagePrefix(imageRepository). Pure over an already-collected inventory,
-// deliberately: this is the piece the tests exercise directly, no cluster required.
-func assertNoMonolithImages(inv []PodImage, imageRepository string) error {
-	if imageRepository == "" {
-		return fmt.Errorf("baseline-flavor guard: config resolves no image_repository for the baseline side — cannot check for a monolith-app leak")
+// dedupeNonEmpty returns the non-empty entries of ss, order-preserved, with duplicates
+// removed. Used to merge the baseline- and target-side image_repository resolutions
+// into one list the guard checks without checking the same prefix twice.
+func dedupeNonEmpty(ss ...string) []string {
+	seen := make(map[string]bool, len(ss))
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// assertNoMonolithImages fails if any pod in inv runs a monolith-app image under any of
+// imageRepositories, per monolithAppImagePrefix. Pure over an already-collected
+// inventory, deliberately: this is the piece the tests exercise directly, no cluster
+// required.
+func assertNoMonolithImages(inv []PodImage, imageRepositories []string) error {
+	if len(imageRepositories) == 0 {
+		return fmt.Errorf("baseline-flavor guard: config resolves no image_repository — cannot check for a monolith-app leak")
 	}
 	if len(inv) == 0 {
 		return fmt.Errorf("baseline-flavor guard: pod image inventory is empty — cannot verify the baseline is clean (a wrong namespace or a pre-pod snapshot must not pass as \"baseline verified clean\")")
 	}
-	prefix := monolithAppImagePrefix(imageRepository)
+	prefixes := make([]string, len(imageRepositories))
+	for i, repo := range imageRepositories {
+		prefixes[i] = monolithAppImagePrefix(repo)
+	}
 	var hits []string
 	for _, pi := range inv {
-		if strings.HasPrefix(pi.Image, prefix) {
-			hits = append(hits, pi.String())
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(pi.Image, prefix) {
+				hits = append(hits, pi.String())
+				break
+			}
 		}
 	}
 	if len(hits) > 0 {
@@ -363,9 +392,9 @@ func podImageInventory(ctx context.Context, cs kubernetes.Interface, namespace s
 // checkBaselineNotSlim is the production wrapper Provision calls: builds a real
 // clientset from the kubeconfig validateStack already generated, logs the pod image
 // inventory unconditionally (evidence of what the baseline runs, pass or fail), then
-// asserts none of it is a monolith-app image. See assertNoMonolithImages for the
-// testable core.
-func checkBaselineNotSlim(ctx context.Context, kubeconfig, namespace, imageRepository string) error {
+// asserts none of it is a monolith-app image under any of imageRepositories. See
+// assertNoMonolithImages for the testable core.
+func checkBaselineNotSlim(ctx context.Context, kubeconfig, namespace string, imageRepositories []string) error {
 	if namespace == "" {
 		// client-go lists ALL namespaces when given "" - silently defaulting to
 		// "dozuki" here would hide that mistake instead of surfacing it.
@@ -384,7 +413,7 @@ func checkBaselineNotSlim(ctx context.Context, kubeconfig, namespace, imageRepos
 		return fmt.Errorf("baseline-flavor guard: list pods: %w", err)
 	}
 	step("baseline pod image inventory (namespace %s): %s", namespace, formatPodImageInventory(inv))
-	return assertNoMonolithImages(inv, imageRepository)
+	return assertNoMonolithImages(inv, imageRepositories)
 }
 
 // Upgrade applies the target ref against the SAME state prefix the baseline used,
@@ -427,6 +456,22 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 	return p.Store.Save(ctx, p.statePrefix(cfg), rm)
 }
 
+// validatePreconditions enforces the ordering invariant Validate's target-side render
+// depends on: for an upgrade scenario, the manifest's AppliedRef must already equal
+// ToRef before Validate renders SideTarget. This used to be an unenforced assumption
+// ("AppliedRef == ToRef in every real ordering") - a standalone CLI `validate` run
+// between Provision and Upgrade would have AppliedRef == FromRef != ToRef and would
+// silently render the target's side-override map (BaselineVersions/TargetVersions)
+// against a stack still running baseline code. Converting the assumption into a real
+// precondition here is what makes rendering ToRef in Validate safe. Extracted as a
+// pure helper so the invariant is unit-testable without a worktree/terragrunt/cluster.
+func validatePreconditions(rm *RunManifest) error {
+	if rm.Scenario == "upgrade" && rm.AppliedRef != rm.ToRef {
+		return fmt.Errorf("validate expects the target ref to be applied, but the manifest still shows the baseline ref %q as applied (target %q) — run upgrade first", rm.AppliedRef, rm.ToRef)
+	}
+	return nil
+}
+
 // Validate runs the post-apply assertion suite against the currently-applied ref.
 // For upgrades it also proves the helm revision advanced past the manifest's
 // recorded BaselineRev and verifies the continuity sentinel; for fresh it skips
@@ -443,16 +488,17 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	if !ok {
 		return fmt.Errorf("no manifest for %s — run provision first", p.statePrefix(cfg))
 	}
+	if perr := validatePreconditions(rm); perr != nil {
+		return perr
+	}
 	p.ExtraInputs = rm.ExtraInputs
 	// Validate is a standalone CLI phase: side is always target (it is verifying the
 	// applied-target-code assertion suite), threaded explicitly rather than inferred -
 	// see prepareWorktreeSide's caller table. Ref is rm.ToRef, not rm.AppliedRef: ref
-	// and side must both describe the same half of the upgrade, and AppliedRef == ToRef
-	// in every real ordering anyway (Validate only ever runs after Upgrade or a fresh
-	// Provision, both of which set AppliedRef = ToRef), so this is a no-op in practice.
-	// What it removes is the incoherent case of rendering the target's side-override
-	// map (BaselineVersions/TargetVersions) against a baseline ref, which AppliedRef
-	// could produce if this ever ran against a manifest that hadn't advanced yet.
+	// and side must both describe the same half of the upgrade. validatePreconditions
+	// above turns "AppliedRef == ToRef" into an enforced precondition rather than an
+	// unenforced assumption, which is what makes rendering the target's side-override
+	// map (BaselineVersions/TargetVersions) against ToRef safe here.
 	wt, tg, _, err := p.prepareWorktreeSide(rm.ToRef, false, cfg, rm.DeleteAfter, SideTarget)
 	if err != nil {
 		return err

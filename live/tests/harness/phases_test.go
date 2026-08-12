@@ -165,7 +165,7 @@ func TestAssertNoMonolithImagesPassesWhenAbsent(t *testing.T) {
 		{Pod: "dozuki-app-abc", Container: "app", Image: "069174876992.dkr.ecr.us-east-1.amazonaws.com/slim-app:0.0.0-x"},
 		{Pod: "dozuki-nextjs-def", Container: "nextjs", Image: "069174876992.dkr.ecr.us-east-1.amazonaws.com/nextjs:2.23.0"},
 	}
-	if err := assertNoMonolithImages(inv, "069174876992.dkr.ecr.us-east-1.amazonaws.com"); err != nil {
+	if err := assertNoMonolithImages(inv, []string{"069174876992.dkr.ecr.us-east-1.amazonaws.com"}); err != nil {
 		t.Fatalf("assertNoMonolithImages = %v, want nil (no monolith-app image present)", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestAssertNoMonolithImagesFiresOnMonolithPod(t *testing.T) {
 		{Pod: "dozuki-app-abc", Container: "app", Image: repo + "/monolith-app:3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"},
 		{Pod: "dozuki-nextjs-def", Container: "nextjs", Image: repo + "/nextjs:2.23.0"},
 	}
-	err := assertNoMonolithImages(inv, repo)
+	err := assertNoMonolithImages(inv, []string{repo})
 	if err == nil {
 		t.Fatal("assertNoMonolithImages = nil, want an error (a monolith-app image is present on a baseline about to flip to slim)")
 	}
@@ -185,10 +185,29 @@ func TestAssertNoMonolithImagesFiresOnMonolithPod(t *testing.T) {
 	}
 }
 
+// TestAssertNoMonolithImagesCatchesSecondRepositoryInList proves the guard checks
+// EVERY resolved repository, not just the first: fix 2 resolves image_repository on
+// both baseline and target sides and passes both through, so a monolith-app image
+// under either prefix must still be caught.
+func TestAssertNoMonolithImagesCatchesSecondRepositoryInList(t *testing.T) {
+	repoA := "111111111111.dkr.ecr.us-east-1.amazonaws.com"
+	repoB := "222222222222.dkr.ecr.us-east-1.amazonaws.com"
+	inv := []PodImage{
+		{Pod: "dozuki-app-abc", Container: "app", Image: repoB + "/monolith-app:3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"},
+	}
+	err := assertNoMonolithImages(inv, []string{repoA, repoB})
+	if err == nil {
+		t.Fatal("assertNoMonolithImages = nil, want an error (monolith-app image under the SECOND repository must still be caught)")
+	}
+	if !strings.Contains(err.Error(), "dozuki-app-abc") || !strings.Contains(err.Error(), "monolith-app") {
+		t.Errorf("error %q does not identify the offending pod/image", err.Error())
+	}
+}
+
 func TestAssertNoMonolithImagesRequiresImageRepository(t *testing.T) {
 	inv := []PodImage{{Pod: "p", Container: "c", Image: "example.com/monolith-app:x"}}
-	if err := assertNoMonolithImages(inv, ""); err == nil {
-		t.Fatal("assertNoMonolithImages with empty imageRepository = nil, want an error (cannot check for a leak with nothing to check against)")
+	if err := assertNoMonolithImages(inv, nil); err == nil {
+		t.Fatal("assertNoMonolithImages with no image repositories = nil, want an error (cannot check for a leak with nothing to check against)")
 	}
 }
 
@@ -197,8 +216,38 @@ func TestAssertNoMonolithImagesRequiresImageRepository(t *testing.T) {
 // verified clean" (this used to return nil - see validation.assertSlimImages for the
 // sibling assertion that already failed closed on this exact case).
 func TestAssertNoMonolithImagesEmptyInventoryFails(t *testing.T) {
-	if err := assertNoMonolithImages(nil, "example.com"); err == nil {
+	if err := assertNoMonolithImages(nil, []string{"example.com"}); err == nil {
 		t.Fatal("assertNoMonolithImages(nil, ...) = nil, want an error (empty inventory must fail closed)")
+	}
+}
+
+// ---- validatePreconditions: enforces AppliedRef == ToRef before Validate renders
+// the target side ----
+
+func TestValidatePreconditionsErrorsWhenBaselineStillApplied(t *testing.T) {
+	rm := &RunManifest{Scenario: "upgrade", FromRef: "v1", ToRef: "v2", AppliedRef: "v1"}
+	err := validatePreconditions(rm)
+	if err == nil {
+		t.Fatal("validatePreconditions = nil, want an error (manifest still shows the baseline ref applied on an upgrade scenario)")
+	}
+	if !strings.Contains(err.Error(), "v1") || !strings.Contains(err.Error(), "v2") {
+		t.Errorf("error %q does not mention both refs", err.Error())
+	}
+}
+
+func TestValidatePreconditionsPassesWhenTargetApplied(t *testing.T) {
+	rm := &RunManifest{Scenario: "upgrade", FromRef: "v1", ToRef: "v2", AppliedRef: "v2"}
+	if err := validatePreconditions(rm); err != nil {
+		t.Fatalf("validatePreconditions = %v, want nil (AppliedRef already equals ToRef)", err)
+	}
+}
+
+func TestValidatePreconditionsSkipsNonUpgradeScenarios(t *testing.T) {
+	for _, scenario := range []string{"fresh", "recover"} {
+		rm := &RunManifest{Scenario: scenario, FromRef: "v1", ToRef: "v2", AppliedRef: "v1"}
+		if err := validatePreconditions(rm); err != nil {
+			t.Fatalf("validatePreconditions(%s) = %v, want nil (precondition only applies to upgrade)", scenario, err)
+		}
 	}
 }
 

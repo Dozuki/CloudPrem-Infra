@@ -58,6 +58,12 @@ func renderGolden(m *Matrix, cfg Config) string {
 // configs (see TestRegressionConfigsWithoutSideMapsAreUnaffected) - so capturing it now
 // is capturing the correct pre-change bytes, not merely "whatever the code does today".
 //
+// These goldens were verified byte-identical to the pre-change render at
+// origin/master 967059c - all five configs, both sides, every ref - by rendering the
+// same matrix.yaml through the pre-change and post-change trees and diffing.
+// Regenerating with UPDATE_GOLDEN=1 discards that guarantee, so read the diff before
+// ever doing it.
+//
 // Regenerate the goldens (e.g. after a deliberate, reviewed change to version_defaults
 // or a config's feature_flags in matrix.yaml) by running:
 //
@@ -110,5 +116,37 @@ func TestGoldenRenderUnchangedForPreExistingConfigs(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("goldenConfigs is empty - golden guard did not actually check anything")
+	}
+}
+
+// TestGoldenConfigsCoversAllNonSlimConfigs guards against silent drift between
+// goldenConfigs (a hardcoded list) and ../matrix.yaml: a future non-slim config added
+// to the matrix would otherwise never get a golden and never be checked by
+// TestGoldenRenderUnchangedForPreExistingConfigs above. This fails the moment such a
+// config is added without a golden.
+func TestGoldenConfigsCoversAllNonSlimConfigs(t *testing.T) {
+	m, err := LoadMatrix("../matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix(../matrix.yaml): %v", err)
+	}
+
+	var want []string
+	for _, cfg := range m.Configs {
+		if !strings.HasPrefix(cfg.Name, "slim_") {
+			want = append(want, cfg.Name)
+		}
+	}
+	sort.Strings(want)
+
+	got := append([]string(nil), goldenConfigs...)
+	sort.Strings(got)
+
+	if len(want) != len(got) {
+		t.Fatalf("goldenConfigs covers %d non-slim config(s), ../matrix.yaml has %d: want %v, got %v", len(got), len(want), want, got)
+	}
+	for i := range want {
+		if want[i] != got[i] {
+			t.Fatalf("goldenConfigs does not match the non-slim configs in ../matrix.yaml: want %v, got %v", want, got)
+		}
 	}
 }
