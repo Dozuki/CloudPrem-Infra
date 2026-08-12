@@ -146,6 +146,22 @@ resource "helm_release" "datadog" {
       serviceMonitoring = {
         enabled = false
       }
+      # agent >= 7.78 auto-enables service discovery (spawns system-probe);
+      # a lean install wants neither the extra privileged container nor the
+      # noise. The chart pins 7.80.1, so this is on unless we say otherwise.
+      discovery = {
+        enabled = false
+      }
+
+      # The chart bundles datadog-operator as a subchart, on by default. We
+      # install the agent with helm directly and don't want a second
+      # controller reconciling it. This is the key that actually gates the
+      # subchart (its Chart.yaml condition); the top-level operator.* keys
+      # only toggle controllers INSIDE the operator and leave the Deployment
+      # running.
+      operator = {
+        enabled = false
+      }
       sbom = {
         containerImage = { enabled = false }
         host           = { enabled = false }
@@ -205,6 +221,31 @@ resource "helm_release" "datadog" {
       enabled = true
       admissionController = {
         enabled = true
+        # Pinned rather than inherited from the chart default: the documented
+        # rollback path (scale the cluster agent to 0, delete the webhook)
+        # depends on a racing pod starting uninstrumented instead of being
+        # blocked by an admission timeout.
+        failurePolicy = "Ignore"
+      }
+    }
+
+    # July 2026 live-test hardening (see PR #251 history).
+    agents = {
+      # Auto Mode spot nodes carry eks.amazonaws.com/capacity-type; app pods
+      # schedule there, and an untolerated agent means silent trace drop.
+      tolerations = [{ operator = "Exists" }]
+      containers = {
+        agent = {
+          # No requests = starved CFS shares on packed nodes = startup-probe
+          # kill loop (observed live 2026-07-15).
+          resources = {
+            requests = { cpu = "100m", memory = "256Mi" }
+            limits   = { memory = "512Mi" }
+          }
+          startupProbe = {
+            failureThreshold = 24
+          }
+        }
       }
     }
 
