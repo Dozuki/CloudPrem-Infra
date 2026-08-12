@@ -131,16 +131,6 @@ configs:
       # explicit access entry for it collides with the auto-created creator entry
       # (ResourceInUseException). The creator already has cluster admin, so the
       # harness needs no explicit entry; leaving it unset works for local + CI.
-      #
-      # Harness-only flag, NOT a terraform input: config.go's harnessOnlyKeys filters it out
-      # of the generated env.hcl and Config.HarnessFlag("app_pass") is the only reader. It
-      # turns on AppPass, the 8-stage in-app API exercise that runs last in Validate
-      # (authenticate, create user/category, upload media, author + publish a guide, check
-      # public delivery and the Next.js tier, then clean up). Widening coverage is a YAML
-      # change only - add the key to another config, no image rebuild. One precondition:
-      # min_default runs the legacy image (credential path B), so the slim credential path
-      # is live-unproven; prove it on a slim config before enabling it there.
-      app_pass: true
   - name: bi_ha
     env: bi
     # What this scenario actually exercises: DMS Serverless replication (physical/bi.tf),
