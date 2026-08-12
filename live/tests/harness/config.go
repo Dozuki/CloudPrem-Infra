@@ -33,6 +33,40 @@ type Config struct {
 	// the primary region - the recovery config stands its stack up in the DR region.
 	EnvPath string `yaml:"env_path"`
 	Region  string `yaml:"region"`
+	// BaselineVersions / TargetVersions are optional per-config, per-side version-var
+	// overrides (app_image_flavor, chart_version, image_tag, ...). They win over
+	// version_defaults and versions[ref] for whichever side a caller is rendering -
+	// see Side, Matrix.MergedInputs and Matrix.EffectiveVersionVar. A config that sets
+	// neither (every pre-existing config) merges exactly as it did before these
+	// existed: both maps are nil, so the extra merge layer is a no-op.
+	BaselineVersions map[string]interface{} `yaml:"baseline_versions"`
+	TargetVersions   map[string]interface{} `yaml:"target_versions"`
+}
+
+// Side names which half of an upgrade a ref/inputs render represents. It is always
+// supplied explicitly by the caller (PhaseParams.prepareWorktreeSide's callers in
+// phases.go) and never inferred from comparing a ref string to FromRef/ToRef - that
+// comparison breaks the moment FromRef == ToRef (a docs-only bump, or a flavor flip
+// applied in place), which is exactly the case AppliedSide (manifest.go) exists to
+// disambiguate durably.
+type Side string
+
+const (
+	SideBaseline Side = "baseline"
+	SideTarget   Side = "target"
+)
+
+// sideVersions returns c's version-override map for side, or nil if side is neither
+// known value (there are only two; nil merges as a no-op).
+func (c Config) sideVersions(side Side) map[string]interface{} {
+	switch side {
+	case SideBaseline:
+		return c.BaselineVersions
+	case SideTarget:
+		return c.TargetVersions
+	default:
+		return nil
+	}
 }
 
 // EnvPathOr / RegionOr resolve a config's overrides against the matrix defaults.
@@ -118,7 +152,13 @@ func (m *Matrix) Config(name string) (Config, error) {
 	return Config{}, fmt.Errorf("config %q not found in matrix", name)
 }
 
-func (m *Matrix) MergedInputs(c Config, ref string) map[string]interface{} {
+// MergedInputs resolves the full terraform-input map for (c, ref, side). Merge order
+// (later layers win): feature_flags -> version_defaults -> versions[ref] ->
+// c.BaselineVersions or c.TargetVersions per side. side is required and must be
+// supplied explicitly by the caller - see Side. Callers that also seed runtime
+// ExtraInputs (recovery's adopted-bucket/snapshot values) must merge those AFTER this
+// return value, not before - see PhaseParams.prepareWorktreeSide.
+func (m *Matrix) MergedInputs(c Config, ref string, side Side) map[string]interface{} {
 	out := map[string]interface{}{}
 	for k, v := range c.FeatureFlags {
 		if !harnessOnlyKeys[k] {
@@ -132,12 +172,18 @@ func (m *Matrix) MergedInputs(c Config, ref string) map[string]interface{} {
 	for k, v := range m.Versions[ref] {
 		out[k] = v
 	}
+	// The config's per-side override map wins over everything above. nil on every
+	// config that predates this field, so this loop is a no-op for them.
+	for k, v := range c.sideVersions(side) {
+		out[k] = v
+	}
 	out["environment"] = c.Env
 	return out
 }
 
 // VersionVar returns a single version variable for a ref: the ref-specific
 // entry wins, otherwise the version_defaults value (nil if neither sets it).
+// Config-unaware - EffectiveVersionVar is the config-and-side-aware equivalent.
 func (m *Matrix) VersionVar(ref, key string) interface{} {
 	if rv, ok := m.Versions[ref]; ok {
 		if v, ok := rv[key]; ok {
@@ -145,6 +191,32 @@ func (m *Matrix) VersionVar(ref, key string) interface{} {
 		}
 	}
 	return m.VersionDefaults[key]
+}
+
+// EffectiveVersionVar resolves a single version-var key's precedence (feature_flags ->
+// version_defaults -> versions[ref] -> the config's side map). It is NOT a drop-in
+// substitute for MergedInputs on every key: MergedInputs filters feature_flags through
+// harnessOnlyKeys (so a harness-only key like restore_drill never reaches this layer)
+// and always writes out["environment"] last, and this function does neither. It is
+// valid only for genuine version-var keys (app_image_flavor, chart_version, image_tag,
+// ...) - never for a harnessOnlyKeys entry or "environment".
+func (m *Matrix) EffectiveVersionVar(c Config, ref string, side Side, key string) interface{} {
+	var val interface{}
+	if v, ok := c.FeatureFlags[key]; ok {
+		val = v
+	}
+	if v, ok := m.VersionDefaults[key]; ok {
+		val = v
+	}
+	if rv, ok := m.Versions[ref]; ok {
+		if v, ok := rv[key]; ok {
+			val = v
+		}
+	}
+	if v, ok := c.sideVersions(side)[key]; ok {
+		val = v
+	}
+	return val
 }
 
 // HarnessFlag returns the boolean value of a harness-only feature flag for

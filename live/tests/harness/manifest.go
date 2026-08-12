@@ -15,12 +15,20 @@ const ManifestObjectName = "harness-manifest.json"
 // currently applied (drives teardown), and the pre-upgrade baseline helm revision
 // (gone once the upgrade applies, but needed by the upgrade proof).
 type RunManifest struct {
-	Scenario     string `json:"scenario"` // "upgrade" | "fresh" | "recover"
-	ConfigName   string `json:"config_name"`
-	FromRef      string `json:"from_ref"` // empty for fresh
-	ToRef        string `json:"to_ref"`
-	DeleteAfter  string `json:"delete_after"` // RFC3339, shared by both worktrees
-	AppliedRef   string `json:"applied_ref"`  // ref whose code matches deployed state
+	Scenario    string `json:"scenario"` // "upgrade" | "fresh" | "recover"
+	ConfigName  string `json:"config_name"`
+	FromRef     string `json:"from_ref"` // empty for fresh
+	ToRef       string `json:"to_ref"`
+	DeleteAfter string `json:"delete_after"` // RFC3339, shared by both worktrees
+	AppliedRef  string `json:"applied_ref"`  // ref whose code matches deployed state
+	// AppliedSide records which side (Side) AppliedRef represents. Refs alone cannot
+	// encode this when FromRef == ToRef (a docs-only bump, or a flavor flip applied in
+	// place with no version bump), so this is durable manifest state written at both
+	// AppliedRef write points (Provision, Upgrade - phases.go) rather than derived from
+	// the ref string. Empty on a manifest written before this field existed; callers
+	// must use teardownRefAndSide (or reimplement its fallback) rather than reading
+	// this field raw.
+	AppliedSide  string `json:"applied_side,omitempty"`
 	BaselineRev  int    `json:"baseline_rev"` // helm revision before upgrade (0 until set)
 	Namespace    string `json:"namespace"`
 	AccountID    string `json:"account_id"`
@@ -60,6 +68,38 @@ type RunManifest struct {
 	// only the latter should fall back to any other source (the workflow index).
 	KeepOnFailure         bool `json:"keep_on_failure,omitempty"`
 	KeepOnFailureRecorded bool `json:"keep_on_failure_recorded,omitempty"`
+}
+
+// teardownRefAndSide resolves the ref whose code matches deployed state (AppliedRef,
+// falling back to ToRef for a manifest that never recorded a successful apply) and the
+// Side that ref represents, for Teardown's prepareWorktreeSide call. AppliedSide wins
+// when present. A manifest written before AppliedSide existed falls back to exactly
+// today's (pre-Side) AppliedRef semantics: baseline iff (scenario == "upgrade" AND
+// AppliedRef == FromRef AND FromRef != ToRef) - the FromRef != ToRef guard matters
+// because when the refs are equal, AppliedRef == FromRef is uninformative (it also
+// equals ToRef), and today's behavior in that ambiguous case is to treat the run as
+// already on its target side.
+//
+// Why the fallback can never pick a "wrong" side: AppliedSide and the per-side
+// override maps (Config.BaselineVersions/TargetVersions) shipped in the same change.
+// So any manifest lacking AppliedSide necessarily belongs to a config with nil side
+// maps - one of the pre-existing configs that predates Side entirely - and for those,
+// MergedInputs's side-map merge layer is a no-op on both sides (sideVersions returns
+// nil either way), so baseline and target render identically regardless of which one
+// this fallback guesses. The fallback's guess can be wrong in the abstract; it can
+// never be wrong in a way that changes the rendered env.hcl.
+func teardownRefAndSide(rm *RunManifest) (string, Side) {
+	ref := rm.AppliedRef
+	if ref == "" {
+		ref = rm.ToRef
+	}
+	if rm.AppliedSide != "" {
+		return ref, Side(rm.AppliedSide)
+	}
+	if rm.Scenario == "upgrade" && rm.AppliedRef == rm.FromRef && rm.FromRef != rm.ToRef {
+		return ref, SideBaseline
+	}
+	return ref, SideTarget
 }
 
 // ManifestStore persists a RunManifest keyed by state prefix (e.g. "run1-min/").

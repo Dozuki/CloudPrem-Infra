@@ -88,3 +88,134 @@ func TestManifestBackwardCompatMissingNewFields(t *testing.T) {
 		t.Fatalf("pre-existing fields corrupted by the new ones: %+v", got)
 	}
 }
+
+// TestTeardownRefAndSideProvisionOnlyFailure simulates the manifest state left behind
+// when an upgrade-scenario Provision applied the baseline and saved AppliedRef/
+// AppliedSide, then failed before Upgrade ever ran (Provision's validation step
+// erroring, say). A re-entrant teardown reading this manifest fresh (its own process,
+// no in-memory state from the failed run) must destroy against the BASELINE ref/side.
+func TestTeardownRefAndSideProvisionOnlyFailure(t *testing.T) {
+	rm := &RunManifest{
+		Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release",
+		AppliedRef: "v6.0.3", AppliedSide: string(SideBaseline),
+	}
+	ref, side := teardownRefAndSide(rm)
+	if ref != "v6.0.3" || side != SideBaseline {
+		t.Fatalf("teardownRefAndSide = (%q, %q), want (v6.0.3, baseline)", ref, side)
+	}
+}
+
+// TestTeardownRefAndSideCompletedUpgrade simulates the manifest state after Upgrade
+// ran to completion (AppliedRef/AppliedSide both flipped to the target). Teardown must
+// destroy against the TARGET ref/side.
+func TestTeardownRefAndSideCompletedUpgrade(t *testing.T) {
+	rm := &RunManifest{
+		Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release",
+		AppliedRef: "v6.1-release", AppliedSide: string(SideTarget),
+	}
+	ref, side := teardownRefAndSide(rm)
+	if ref != "v6.1-release" || side != SideTarget {
+		t.Fatalf("teardownRefAndSide = (%q, %q), want (v6.1-release, target)", ref, side)
+	}
+}
+
+// TestTeardownRefAndSideFromRefEqualsToRefExplicitSideWins is the case Part 2 exists
+// for: a flavor flip applied with no ref bump at all (FromRef == ToRef), so the ref
+// string alone cannot say which side is currently applied. A provision-only failure
+// here still explicitly recorded AppliedSide=baseline; teardownRefAndSide must trust
+// that recorded field rather than falling back (the fallback can't distinguish this
+// case from "already on target" - see the next test).
+func TestTeardownRefAndSideFromRefEqualsToRefExplicitSideWins(t *testing.T) {
+	rm := &RunManifest{
+		Scenario: "upgrade", FromRef: "v9.0", ToRef: "v9.0",
+		AppliedRef: "v9.0", AppliedSide: string(SideBaseline),
+	}
+	ref, side := teardownRefAndSide(rm)
+	if ref != "v9.0" || side != SideBaseline {
+		t.Fatalf("teardownRefAndSide = (%q, %q), want (v9.0, baseline) - the explicit AppliedSide field must win when refs are equal", ref, side)
+	}
+}
+
+// TestTeardownRefAndSideFallbackMatchesPreSideSemantics covers manifests written
+// before AppliedSide existed (AppliedSide == ""). The fallback must reproduce exactly
+// today's AppliedRef-only behavior, including the FromRef==ToRef edge case where the
+// old logic could not tell baseline from target and defaulted to treating the run as
+// already on target.
+func TestTeardownRefAndSideFallbackMatchesPreSideSemantics(t *testing.T) {
+	cases := []struct {
+		name     string
+		rm       *RunManifest
+		wantRef  string
+		wantSide Side
+	}{
+		{
+			name:     "upgrade scenario, applied ref is FromRef, refs differ -> baseline",
+			rm:       &RunManifest{Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release", AppliedRef: "v6.0.3"},
+			wantRef:  "v6.0.3",
+			wantSide: SideBaseline,
+		},
+		{
+			name:     "upgrade scenario, applied ref is ToRef -> target",
+			rm:       &RunManifest{Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release", AppliedRef: "v6.1-release"},
+			wantRef:  "v6.1-release",
+			wantSide: SideTarget,
+		},
+		{
+			name:     "upgrade scenario, FromRef == ToRef -> target (refs alone are ambiguous; old behavior defaults target)",
+			rm:       &RunManifest{Scenario: "upgrade", FromRef: "v9.0", ToRef: "v9.0", AppliedRef: "v9.0"},
+			wantRef:  "v9.0",
+			wantSide: SideTarget,
+		},
+		{
+			name:     "fresh scenario -> target",
+			rm:       &RunManifest{Scenario: "fresh", ToRef: "v7.1.0", AppliedRef: "v7.1.0"},
+			wantRef:  "v7.1.0",
+			wantSide: SideTarget,
+		},
+		{
+			name:     "no successful apply recorded -> falls back to ToRef, target",
+			rm:       &RunManifest{Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release"},
+			wantRef:  "v6.1-release",
+			wantSide: SideTarget,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ref, side := teardownRefAndSide(c.rm)
+			if ref != c.wantRef || side != c.wantSide {
+				t.Fatalf("teardownRefAndSide = (%q, %q), want (%q, %q)", ref, side, c.wantRef, c.wantSide)
+			}
+		})
+	}
+}
+
+// TestManifestRoundTripAppliedSide proves AppliedSide survives a Save/Load cycle like
+// every other manifest field, and that a pre-existing manifest JSON blob (no
+// applied_side key at all) loads with it defaulting to empty rather than erroring.
+func TestManifestRoundTripAppliedSide(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemStore()
+	want := &RunManifest{ConfigName: "min_default", AppliedRef: "v6.0.3", AppliedSide: string(SideBaseline)}
+	if err := s.Save(ctx, "run1-min/", want); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, ok, err := s.Load(ctx, "run1-min/")
+	if err != nil || !ok {
+		t.Fatalf("load after save: ok=%v err=%v", ok, err)
+	}
+	if got.AppliedSide != string(SideBaseline) {
+		t.Fatalf("AppliedSide = %q, want %q", got.AppliedSide, SideBaseline)
+	}
+
+	old := `{"scenario":"upgrade","config_name":"min_default","applied_ref":"v6.0.3"}`
+	s.mu.Lock()
+	s.m["run2-min/"] = []byte(old)
+	s.mu.Unlock()
+	got2, ok2, err2 := s.Load(ctx, "run2-min/")
+	if err2 != nil || !ok2 {
+		t.Fatalf("load of pre-AppliedSide manifest: ok=%v err=%v", ok2, err2)
+	}
+	if got2.AppliedSide != "" {
+		t.Fatalf("AppliedSide = %q, want empty on a manifest that never wrote it", got2.AppliedSide)
+	}
+}
