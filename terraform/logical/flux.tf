@@ -349,11 +349,14 @@ locals {
   # has none of the keys, so try(...,{}) yields {} and the merged result equals base.
   # AWS-only: pin every EBS-backed subchart workload to the on-demand NodePool.
   #
-  # These pods (opensearch, prometheus, alertmanager, dashboards-grafana) each own a
-  # zonal EBS volume. On the spot pool, an AZ-wide spot shortage left them Pending with
-  # no legal fallback - the volume pins the zone, the on-demand pool's taint blocked
-  # entry, and that is the old spot-fleet stranding incident reproduced (adversarial
-  # AZ/PVC review, 2026-07-28; observed live: all three volumes on one spot c4.xlarge).
+  # These pods (opensearch, prometheus, alertmanager) each own a zonal EBS volume -
+  # exactly three, verified by PVC live on m3-apac and dev-min. On the spot pool, an
+  # AZ-wide spot shortage left them Pending with no legal fallback - the volume pins
+  # the zone, the on-demand pool's taint blocked entry, and that is the old spot-fleet
+  # stranding incident reproduced (adversarial AZ/PVC review, 2026-07-28; observed
+  # live: all three volumes on one spot c4.xlarge).
+  # This list used to name dashboards-grafana too. That was wrong: it is MySQL-backed
+  # and owns no PVC (pvc=NONE live in every env checked). See the de-pin note below.
   # On-demand placement plus the pod-level do-not-disrupt annotation set below
   # (local.do_not_disrupt_annotation) makes their disruptions rare and their
   # replacement capacity reliably provisionable in the volume's AZ. The pool
@@ -394,6 +397,25 @@ locals {
   # metrics-server 3.13.1 and prometheus-adapter 5.3.0 all have a top-level
   # `podAnnotations` consumed by their Deployment templates.
   #
+  # DE-PIN 2026-08-12: the annotation is now carried by the three EBS-volume owners
+  # ONLY. dashboards-grafana, metrics-server and prometheus-adapter keep their
+  # on-demand nodeSelector and tolerations but LOST the annotation. A pin audit found
+  # that none of the three owns a volume, so the stranding argument above never
+  # applied to them; each was instead pinning whatever node it happened to land on.
+  # Observed cost was ~5 pinned on-demand nodes per env against the ~2 this comment
+  # predicts, because the volume trio already co-locates. Thinning the annotated set
+  # is what the pool's WhenEmptyOrUnderutilized policy was designed around, not a
+  # departure from it.
+  #
+  # Accepted consequence: consolidation may now move these three, and metrics-server
+  # and prometheus-adapter are the HPA control plane, so a scale-up can briefly
+  # compute on stale metrics while they reschedule. Short gaps are the approved
+  # posture. A stall still live 5 minutes after the pod is Ready again is NOT - treat
+  # that as a regression, not as the mechanical cost. dashboards-grafana stays
+  # single-replica with no PDB by decision: at one replica a minAvailable=1 PDB makes
+  # the pod undrainable, Karpenter respects it, and the pin comes back under another
+  # name with the savings forfeited. Do not add one here.
+  #
   # Rollout note: this changes every one of these pod templates, so each env
   # rolls opensearch, prometheus, alertmanager and the customer grafana once -
   # a real EBS detach/reattach and a search/metrics gap, the same event the
@@ -402,7 +424,7 @@ locals {
   # sequence it per env like any other stateful rollout (dev-min/qa first).
   #
   # Floor: a pod carrying this annotation pins its node against consolidation
-  # for as long as the pod lives there, so these six workloads set a practical
+  # for as long as the pod lives there, so the three volume owners set a practical
   # floor of roughly 2 on-demand nodes per env - consolidation can shrink
   # everything else on the pool, it cannot repack these onto fewer nodes.
   do_not_disrupt_annotation = { "karpenter.sh/do-not-disrupt" = "true" }
@@ -428,29 +450,29 @@ locals {
       # The customer dashboards Grafana (top-level `grafana` key; the kps ops grafana
       # is emptyDir-only and stays on spot). Deep-merged below - base sets env and
       # secret mounts under the same key.
+      # De-pinned 2026-08-12 (see the DE-PIN note above): MySQL-backed, owns no PVC.
+      # Stays on the on-demand pool, but consolidation may now repack it.
       grafana = {
-        nodeSelector   = local.stateful_node_selector
-        tolerations    = local.stateful_tolerations
-        podAnnotations = local.do_not_disrupt_annotation
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
       }
       # Not EBS-backed, but the HPA control plane: metrics-server serves metrics.k8s.io
       # and prometheus-adapter serves external.metrics.k8s.io, and both are single
-      # replica. On the spot pool their consolidation churn left every HPA computing on
-      # stale/absent metrics (a commercial env: FailedGetExternalMetric x45 over 5d, 30-min
-      # metric gaps). A PDB is the wrong tool at 1 replica (it only delays the eviction
-      # until the force-delete); do-not-disrupt is the protection, same as the volumes
-      # above - now that the pool itself is WhenEmptyOrUnderutilized, these two need
-      # their own pod-level exclusion or that same incident reproduces on
-      # every consolidation pass. Deep-merged below - base sets args under metrics-server.
+      # replica. The incident that first pinned them was on the SPOT pool, where
+      # consolidation churn left every HPA computing on stale/absent metrics (a
+      # commercial env: FailedGetExternalMetric x45 over 5d, 30-min metric gaps).
+      # Moving them to the on-demand pool is what actually fixed that; the annotation
+      # was belt-and-braces on top and cost a pinned node each. De-pinned 2026-08-12 -
+      # the nodeSelector below is the protection that matters. A PDB is still the wrong
+      # tool at 1 replica (it only delays eviction until the force-delete), so do not
+      # add one. Deep-merged below - base sets args under metrics-server.
       "metrics-server" = {
-        nodeSelector   = local.stateful_node_selector
-        tolerations    = local.stateful_tolerations
-        podAnnotations = local.do_not_disrupt_annotation
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
       }
       "prometheus-adapter" = {
-        nodeSelector   = local.stateful_node_selector
-        tolerations    = local.stateful_tolerations
-        podAnnotations = local.do_not_disrupt_annotation
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
         # Was running with zero requests fleet-wide (5+ envs confirmed live), which
         # put it in BestEffort QoS and made it invisible to Karpenter's bin-packing
         # math - it occupied a node slot for free and was first in line for
@@ -562,7 +584,10 @@ resource "helm_release" "flux" {
     imageAutomationController = { create = false }
     imageReflectionController = { create = false }
     kustomizeController       = { create = false }
-    notificationController    = { create = local.flux_slack_enabled }
+    notificationController = {
+      create    = local.flux_slack_enabled
+      resources = { requests = { memory = "256Mi" } }
+    }
     # do-not-disrupt on helm-controller ONLY. Karpenter VOLUNTARY DISRUPTION was
     # evicting it mid-upgrade, which kills the reconciliation context and fails the
     # release:
@@ -600,11 +625,25 @@ resource "helm_release" "flux" {
     #
     # The value must stay a QUOTED string: Kubernetes annotation values are
     # strings and an unquoted true is rejected at apply time.
+    #
+    # Memory requests below are measured, not the chart defaults. All three controllers
+    # ship a 64Mi request and every one of them runs several times that in every env
+    # (14d window, 9 envs: helm-controller max 214Mi, source and notification 198Mi
+    # each). A request that far under real usage makes the pod look nearly free to
+    # bin-packing and puts it near the front of the queue under node memory pressure -
+    # which for helm-controller is the eviction the annotation above exists to prevent,
+    # arriving by the one route the annotation does not cover. Values are F2
+    # (max working set x 1.2, rounded up to 32Mi). No limits, deliberately: an
+    # OOMKilled helm-controller mid-upgrade is the failure mode being designed out.
     helmController = {
       create      = true
       annotations = { "karpenter.sh/do-not-disrupt" = "true" }
+      resources   = { requests = { memory = "288Mi" } }
     }
-    sourceController = { create = true }
+    sourceController = {
+      create    = true
+      resources = { requests = { memory = "256Mi" } }
+    }
   })]
 }
 
