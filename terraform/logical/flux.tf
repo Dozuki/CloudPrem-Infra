@@ -749,17 +749,19 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       #
       # upgrade.strategy=RetryOnFailure (needs helm-controller >= v1.4.0; the fleet runs v1.6.2
       # from the flux2 chart pin above) REPLACES the remediation stanza that used to sit here.
-      # There is no upgrade.remediation block any more because the two are mutually exclusive at
-      # runtime: on a failed release the controller checks for an active retry strategy and
-      # returns a plain upgrade before it ever reads the remediation config, so retries /
-      # strategy / remediateLastFailure would be dead settings.
+      # The schema still accepts both together, but at runtime strategy wins outright: on a
+      # failed release the controller checks for an active retry strategy and returns a plain
+      # upgrade before it ever reads the remediation config. So upgrade.remediation's retries,
+      # remediateLastFailure and its own inner `strategy` (rollback/uninstall, not this one)
+      # would all be dead settings, and the block is deleted rather than left to mislead.
       #
       # Why retry rather than remediate. Remediation's default strategy is rollback, and a
       # rollback here downgrades the chart and re-runs the OLD chart's pre-upgrade db-migrations
       # hook against MySQL DDL that is not transactional - the same hazard the helm-controller
       # do-not-disrupt pin above exists to avoid. Rollback also has a dead end: when
-      # .status.history carries no prior snapshot (a HelmRelease that adopted a pre-existing
-      # release, or a fresh bootstrap) there is nothing to roll back to, so the release goes
+      # .status.history carries no prior snapshot - a HelmRelease that ADOPTED a pre-existing helm
+      # release and has not yet completed a Flux-driven upgrade - there is nothing to roll back
+      # to, so the release goes
       # Stalled=True / MissingRollbackTarget and sits there until a human forces a reconcile.
       # dev-min hit exactly that on 2026-08-12 when a consolidation storm evicted
       # cert-manager-webhook mid-upgrade. RetryOnFailure cannot reach that state at all: the
@@ -770,17 +772,37 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       # release never reaches a terminal Stalled state (fluxcd/helm-controller#1551 is open to add
       # a bound - take it when it ships). And the retry path leaves the Ready condition stale,
       # normally Unknown rather than False; only Released=False and the per-attempt UpgradeFailed
-      # event carry the real error. So do NOT key any alert or dashboard on a HelmRelease's Ready
-      # condition. Use the events (which the Slack Alert further down already forwards) or
-      # Released.
+      # event carry the real error. So nothing may key on Ready=FALSE for this object - that
+      # state no longer occurs. Ready=UNKNOWN is the state to watch, and the app chart's
+      # FluxHelmReleaseStuck alert (gotk_resource_info ready="Unknown", for 30m) already does
+      # exactly that, which makes it the primary detector here rather than a backstop. The Slack
+      # Alert further down also forwards each attempt's UpgradeFailed event. When you see one
+      # retrying, fix the cause and leave it alone - the next interval picks the fix up on its
+      # own, no forced reconcile needed.
+      #
+      # Third consequence, easy to miss: every failed attempt writes a helm revision, so at a
+      # 15m interval a broken release churns through maxHistory (20, above) within hours and
+      # the stored history ends up all-failed. Nothing in this configuration depends on that
+      # history, since this strategy never rolls back, but a human reaching for `helm rollback`
+      # or a future revert to remediation would find a poor target. Fix forward.
       #
       # retryInterval 15m rather than the 5m default: upgrades are merge-triggered and not
       # latency-critical, and every attempt re-runs the pre-upgrade db-migrations Job, so a
       # genuinely broken release churns 4 hook Jobs an hour instead of 12.
       #
-      # Install is deliberately left alone (remediation.retries=0, no strategy). Install
-      # remediation uninstalls first, which is not a loop we want running unattended, and an
-      # install is a one-time attended bootstrap with no consolidation-storm exposure.
+      # Install is deliberately left alone: remediation.retries=0, no strategy block. Be clear
+      # about what that costs, because it is the one remaining path that stalls for good. The
+      # install path is reachable whenever helm storage holds no release - a fresh env, or the
+      # uninstall-and-rerun recovery runbook - and Karpenter is live for the whole 4h30m install
+      # window, so a mid-install eviction leaves a failed release that a human has to reconcile.
+      # Accepted: an install is human-initiated either way, so the failure lands on someone who
+      # is already watching, and an unboundedly retrying install has no prior good release
+      # underneath it to fall back on.
+      # The retry strategy above does NOT cover this transitively. The controller picks the
+      # install-vs-upgrade config from status.lastAttemptedReleaseAction, so a first-install
+      # failure resolves to the install settings on every later reconcile and stays failed
+      # (helm-controller v1.6.2, actionForState). Only once a release has succeeded at least
+      # once does a later failure resolve to the upgrade settings and pick up RetryOnFailure.
       #
       # upgrade.force pinned false for the same reason as rollback.force below. It is the knob
       # people reach for to punch through immutable-field errors, where it makes things worse.
