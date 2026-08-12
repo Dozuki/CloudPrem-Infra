@@ -177,12 +177,17 @@ resource "helm_release" "envoy_gateway" {
     # probe stays responsive; no CPU limit so reconciliation can burst. (The chart
     # does not expose the controller's probe timeouts, so we fix this via resources;
     # verify this value path against the pinned gateway-helm chart on version bumps.)
+    # Memory trimmed to the measured value (14d, 9 envs: max working set 158Mi, x1.2
+    # rounded up = 192Mi). CPU stays 500m - a right-sizing pass measured p95 25.4m and
+    # proposed 40m, which is precisely the starvation the paragraph above describes.
+    # We know 500m does not crashloop; we do not know what value starts to. Do not
+    # trade a known-good incident fix for CPU request that buys no nodes.
     deployment = {
       envoyGateway = {
         resources = {
           requests = {
             cpu    = "500m"
-            memory = "256Mi"
+            memory = "192Mi"
           }
         }
       }
@@ -197,6 +202,16 @@ resource "helm_release" "envoy_gateway" {
           kubernetes = {
             rateLimitDeployment = {
               container = {
+                # gateway-helm ships this at 100m/512Mi. Measured over 14d across 9
+                # envs it runs p95 16.3m of CPU against a 28Mi working set - the 512Mi
+                # request alone was reserving half a gigabyte per env for a process
+                # that never touches it, the largest single overstatement in the fleet.
+                resources = {
+                  requests = {
+                    cpu    = "25m"
+                    memory = "64Mi"
+                  }
+                }
                 env = [
                   {
                     name = "REDIS_AUTH"
@@ -719,9 +734,12 @@ resource "aws_eks_addon" "cloudwatch_observability" {
     containerLogs = {
       enabled = true
       fluentBit = {
+        # DaemonSet, so this request is charged on every node in the fleet and the
+        # trim multiplies by node count. cpu from 14d measured usage (p95 23.6m);
+        # memory left at 96Mi, which is only a hair above the 72Mi max working set.
         resources = {
           requests = {
-            cpu    = "50m"
+            cpu    = "40m"
             memory = "96Mi"
           }
           limits = {
@@ -732,6 +750,14 @@ resource "aws_eks_addon" "cloudwatch_observability" {
       }
     }
     manager = {
+      # The operator reconciles a handful of CRs and then idles: p95 7.7m of CPU over
+      # 14d across 9 envs against the addon default of 100m. Memory left alone - its
+      # 58Mi working set is close enough to the 64Mi default to leave standing.
+      resources = {
+        requests = {
+          cpu = "15m"
+        }
+      }
       applicationSignals = {
         autoMonitor = {
           monitorAllServices = false

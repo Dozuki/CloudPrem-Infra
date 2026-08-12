@@ -175,9 +175,13 @@ resource "kubernetes_deployment_v1" "ratelimit_redis" {
             mount_path = "/data"
           }
 
+          # cpu request from 14d measured usage across 9 envs (p95 7.0m). Memory and
+          # both limits left alone on purpose: at an 8Mi working set the 32Mi request
+          # is already small, and the sizing pass actually flagged it as a candidate to
+          # RAISE to 64Mi rather than cut. Raises are a separate exercise, so it stands.
           resources {
             requests = {
-              cpu    = "25m"
+              cpu    = "15m"
               memory = "32Mi"
             }
             limits = {
