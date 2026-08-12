@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.2.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.2...v9.2.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* **logical:** harden datadog agent install for auto mode ([#498](https://github.com/Dozuki/CloudPrem-Infra/issues/498)) ([76d3c3a](https://github.com/Dozuki/CloudPrem-Infra/commit/76d3c3afd7b2eee89c5ab4a789b409d7e1369778))
+
 ## [9.2.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.1...v9.2.2) (2026-08-12)
 
 
