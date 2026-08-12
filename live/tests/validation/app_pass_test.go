@@ -290,6 +290,65 @@ func TestDetectAppPassAdminPath(t *testing.T) {
 	}
 }
 
+// TestDetectAppPassAdminPath_FailsClosed proves detectAppPassAdminPath never defaults
+// to a path (path B PERMANENTLY rotates the seeded admin's password, so a
+// misdetection here is an irreversible mutation on the wrong path). Positive content
+// match wins regardless of exec error; anything else — an exec error paired with
+// unrecognized output, or unrecognized output with no error at all — must fail instead
+// of silently falling through to "B".
+func TestDetectAppPassAdminPath_FailsClosed(t *testing.T) {
+	cases := []struct {
+		name    string
+		output  string
+		execErr error
+	}{
+		{"exec error with unrecognized output", "permission denied\n", fmt.Errorf("exit status 1")},
+		{"exec error with empty output", "", fmt.Errorf("exit status 1")},
+		{"unrecognized output, no exec error", "php fatal error: class not found\n", nil},
+		{"empty output, no exec error", "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+				return []byte(tc.output), nil, tc.execErr
+			}}
+			deps := appPassDeps{exec: fe.runner()}
+			path, err := detectAppPassAdminPath(context.Background(), deps, testAppPassOpts("https://x"), "pod")
+			if err == nil {
+				t.Fatalf("want an error, got path %q with no error", path)
+			}
+			if path != "" {
+				t.Errorf("path = %q on failure, want empty", path)
+			}
+		})
+	}
+}
+
+// TestDetectAppPassAdminPath_PositiveContentWinsOverExecError proves an exec error
+// does NOT itself disqualify a positively-recognized output (a bare usage/help
+// invocation normally exits non-zero) — only unrecognized output does.
+func TestDetectAppPassAdminPath_PositiveContentWinsOverExecError(t *testing.T) {
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		return []byte("Usage: sites.php <command>\n  list-sites\n"), nil, fmt.Errorf("exit status 1")
+	}}
+	deps := appPassDeps{exec: fe.runner()}
+	path, err := detectAppPassAdminPath(context.Background(), deps, testAppPassOpts("https://x"), "pod")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != "B" {
+		t.Errorf("path = %q, want B", path)
+	}
+}
+
+// TestCreateAppPassAdminPathA_ExactArgvSecretOnlyInStdin asserts the HOST-SIDE kubectl
+// argv only: the secret never appears in what THIS PROCESS passes to kubectl. It does
+// NOT — and cannot — speak to what happens once bash expands "$PW" inside the pod's
+// shell for the "--password=" flag: that puts the cleartext into the in-pod php
+// process's own argv, visible to `ps`/`/proc/<pid>/cmdline` in that container for the
+// process's lifetime. That in-pod exposure is a known, accepted residual (see the
+// comment on createAppPassAdminPathA) — this test's name should not be read as
+// covering it.
 func TestCreateAppPassAdminPathA_ExactArgvSecretOnlyInStdin(t *testing.T) {
 	secret := []byte("deadbeefdeadbeefdeadbeefdeadbeef")
 	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
@@ -530,19 +589,30 @@ const (
 )
 
 type appPassMockFlags struct {
-	loginStatus          int
-	registerOmitUserID   bool
-	wikiStatus           int
-	videoNeverReady      bool
-	videoReadyOnPoll     int
-	roundTripOmitObject  bool
-	omitImageGUID        bool // image step media.data[0] missing guid
-	omitImageSizeKeys    bool // image step media.data[0] missing BOTH standard and original
-	imageOmitStandard    bool // image step media.data[0] missing standard but keeps original (fallback path)
-	omitEncodingsURL     bool // object step media.data.encodings present but no entry has a url
-	omitDocumentURL      bool // documents[] entry missing url
-	publicPageOmitGUID   bool // public guide page HTML doesn't contain the image guid
-	getCourseWrongWikiID bool
+	loginStatus           int
+	registerOmitUserID    bool
+	wikiStatus            int
+	videoNeverReady       bool
+	videoReadyOnPoll      int
+	roundTripOmitObject   bool
+	omitImageGUID         bool // image step media.data[0] missing guid
+	omitImageSizeKeys     bool // image step media.data[0] missing BOTH standard and original
+	imageOmitStandard     bool // image step media.data[0] missing standard but keeps original (fallback path)
+	omitEncodingsURL      bool // object step media.data.encodings present but no entry has a url
+	omitDocumentURL       bool // documents[] entry missing url
+	publicPageOmitGUID    bool // public guide page HTML doesn't contain the image guid
+	getCourseWrongWikiID  bool
+	uploadStatus          int           // non-200 from every stage-4 upload
+	guideCreateStatus     int           // non-201 from POST /api/2.0/guides
+	addStepStatus         int           // non-201 from POST /api/2.0/guides/{id}/steps
+	publishPutStatus      int           // non-200 from PUT /api/2.0/guides/{id}/public
+	publishGetPublicFalse bool          // GET after publish reports public=false regardless of the PUT
+	publicPageStatus      int           // non-2xx from the anonymous public guide page GET
+	imageCDNStatus        int           // non-200 from the anonymous image CDN GET
+	videoEncStatus        int           // non-200 from the anonymous video encoding GET
+	docFetchStatus        int           // non-200 from the anonymous document GET
+	courseCreateStatus    int           // non-201 from POST /api/2.0/courses
+	guideCreateDelay      time.Duration // artificial delay before responding to POST /api/2.0/guides, for the real-ceiling test
 }
 
 type appPassMock struct {
@@ -624,7 +694,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 			m.handleVideoStatus(w)
 		case r.Method == http.MethodDelete:
 			m.assertAuth(r)
-			m.handleMediaDelete(w, path)
+			m.handleMediaDelete(w, r, path)
 		default:
 			http.NotFound(w, r)
 		}
@@ -641,7 +711,24 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		if body["type"] != guideTypeTechnique {
 			m.t.Errorf("create guide type = %v, want %q", body["type"], guideTypeTechnique)
 		}
-		w.WriteHeader(http.StatusCreated)
+		if m.flags.guideCreateDelay > 0 {
+			// Bail out as soon as the client gives up (r.Context() is cancelled once
+			// the client aborts the request, which is exactly what a real ceiling
+			// firing looks like) instead of sleeping the full delay regardless —
+			// otherwise httptest.Server.Close()'s "wait for outstanding requests"
+			// behavior would make every test using this flag pay the full delay in
+			// wall time even though the client-side assertion doesn't need it to.
+			select {
+			case <-time.After(m.flags.guideCreateDelay):
+			case <-r.Context().Done():
+				return
+			}
+		}
+		status := statusOr(m.flags.guideCreateStatus, http.StatusCreated)
+		w.WriteHeader(status)
+		if status != http.StatusCreated {
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"guideid": 500})
 	})
 	mux.HandleFunc("/api/2.0/guides/", func(w http.ResponseWriter, r *http.Request) {
@@ -651,10 +738,13 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		case path == "/api/2.0/guides/500/steps" && r.Method == http.MethodPost:
 			m.handleAddStep(w, r)
 		case path == "/api/2.0/guides/500/public" && r.Method == http.MethodPut:
+			status := statusOr(m.flags.publishPutStatus, http.StatusOK)
 			m.mu.Lock()
-			m.published = true
+			if status == http.StatusOK {
+				m.published = true
+			}
 			m.mu.Unlock()
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(status)
 		case path == "/api/2.0/guides/500" && r.Method == http.MethodGet:
 			m.handleGetGuide(w)
 		case path == "/api/2.0/guides/500" && r.Method == http.MethodDelete:
@@ -671,7 +761,11 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 			return
 		}
 		m.assertAuth(r)
-		w.WriteHeader(http.StatusCreated)
+		status := statusOr(m.flags.courseCreateStatus, http.StatusCreated)
+		w.WriteHeader(status)
+		if status != http.StatusCreated {
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 900})
 	})
 	mux.HandleFunc("/api/2.0/courses/900", func(w http.ResponseWriter, r *http.Request) {
@@ -697,30 +791,34 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		if r.Header.Get("Authorization") != "" {
 			m.t.Errorf("public guide page must be fetched anonymously")
 		}
+		status := statusOr(m.flags.publicPageStatus, http.StatusOK)
+		w.WriteHeader(status)
+		if status/100 != 2 {
+			return
+		}
 		html := "<html><body>guide page, no image here</body></html>"
 		if !m.flags.publicPageOmitGUID {
 			html = fmt.Sprintf("<html><body><img data-guid=%q></body></html>", appPassMockImageGUID)
 		}
-		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(html))
 	})
 	mux.HandleFunc("/cdn/image/101-standard.png", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {
 			m.t.Errorf("image CDN url must be fetched anonymously")
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(statusOr(m.flags.imageCDNStatus, http.StatusOK))
 	})
 	mux.HandleFunc("/cdn/image/101-original.png", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {
 			m.t.Errorf("image CDN url must be fetched anonymously")
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(statusOr(m.flags.imageCDNStatus, http.StatusOK))
 	})
 	mux.HandleFunc("/cdn/video/103/encoding", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {
 			m.t.Errorf("video encoding url must be fetched anonymously")
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(statusOr(m.flags.videoEncStatus, http.StatusOK))
 	})
 	// Registered at the RELATIVE path itself (not under /cdn/) so a request only
 	// reaches here if resolveAppPassURL actually joined base + the relative
@@ -729,7 +827,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		if r.Header.Get("Authorization") != "" {
 			m.t.Errorf("document url must be fetched WITHOUT the auth header (anonymous)")
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(statusOr(m.flags.docFetchStatus, http.StatusOK))
 	})
 
 	m.server = httptest.NewServer(mux)
@@ -776,7 +874,11 @@ func (m *appPassMock) handleUpload(w http.ResponseWriter, r *http.Request) {
 	default:
 		m.t.Fatalf("unexpected upload filename %q", file)
 	}
-	w.WriteHeader(http.StatusOK)
+	status := statusOr(m.flags.uploadStatus, http.StatusOK)
+	w.WriteHeader(status)
+	if status != http.StatusOK {
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": id})
 }
 
@@ -798,11 +900,11 @@ func (m *appPassMock) handleVideoStatus(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"isReady": ready})
 }
 
-func (m *appPassMock) handleMediaDelete(w http.ResponseWriter, path string) {
+func (m *appPassMock) handleMediaDelete(w http.ResponseWriter, r *http.Request, path string) {
 	rest := strings.TrimPrefix(path, "/api/2.0/user/media/")
 	parts := strings.SplitN(rest, "/", 2)
 	if len(parts) != 2 {
-		http.NotFound(nil, nil)
+		http.NotFound(w, r)
 		return
 	}
 	m.recordDelete("media:" + parts[0])
@@ -829,7 +931,11 @@ func (m *appPassMock) handleAddStep(w http.ResponseWriter, r *http.Request) {
 	default:
 		m.t.Fatalf("unexpected step media type %q", mtype)
 	}
-	w.WriteHeader(http.StatusCreated)
+	status := statusOr(m.flags.addStepStatus, http.StatusCreated)
+	w.WriteHeader(status)
+	if status != http.StatusCreated {
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"stepid": stepid})
 }
 
@@ -887,7 +993,7 @@ func (m *appPassMock) handleGetGuide(w http.ResponseWriter) {
 	}
 	guide := map[string]interface{}{
 		"guideid":   500,
-		"public":    published,
+		"public":    published && !m.flags.publishGetPublicFalse,
 		"url":       m.server.URL + "/Guide/QA-Harness-Guide/500",
 		"steps":     steps,
 		"documents": []interface{}{doc},
@@ -1013,12 +1119,22 @@ func TestRunAppPass_NegativeStages(t *testing.T) {
 		{"stage2 register missing userid", appPassMockFlags{registerOmitUserID: true}, "stage 2 (register user)"},
 		{"stage3 create wiki fails", appPassMockFlags{wikiStatus: http.StatusInternalServerError}, "stage 3 (create wiki)"},
 		{"stage4 video never ready", appPassMockFlags{videoNeverReady: true}, "stage 4 (media uploads)"},
+		{"stage4 upload not 200", appPassMockFlags{uploadStatus: http.StatusInternalServerError}, "stage 4 (media uploads)"},
+		{"stage5 create guide not 201", appPassMockFlags{guideCreateStatus: http.StatusInternalServerError}, "stage 5 (guide + steps)"},
+		{"stage5 add step not 201", appPassMockFlags{addStepStatus: http.StatusInternalServerError}, "stage 5 (guide + steps)"},
 		{"stage5 round trip missing object media", appPassMockFlags{roundTripOmitObject: true}, "stage 5 (guide + steps)"},
+		{"stage6 publish PUT not 200", appPassMockFlags{publishPutStatus: http.StatusInternalServerError}, "stage 6 (publish)"},
+		{"stage6 public flag false after publish", appPassMockFlags{publishGetPublicFalse: true}, "stage 6 (publish)"},
 		{"stage6 image missing guid", appPassMockFlags{omitImageGUID: true}, "stage 6 (publish)"},
 		{"stage6 image missing standard and original size keys", appPassMockFlags{omitImageSizeKeys: true}, "stage 6 (publish)"},
 		{"stage6 video encodings has no url", appPassMockFlags{omitEncodingsURL: true}, "stage 6 (publish)"},
 		{"stage6 document missing url", appPassMockFlags{omitDocumentURL: true}, "stage 6 (publish)"},
 		{"stage6 public page missing image guid", appPassMockFlags{publicPageOmitGUID: true}, "stage 6 (publish)"},
+		{"stage6 public page non-2xx", appPassMockFlags{publicPageStatus: http.StatusNotFound}, "stage 6 (publish)"},
+		{"stage6 image CDN GET non-200", appPassMockFlags{imageCDNStatus: http.StatusInternalServerError}, "stage 6 (publish)"},
+		{"stage6 video encoding GET non-200", appPassMockFlags{videoEncStatus: http.StatusInternalServerError}, "stage 6 (publish)"},
+		{"stage6 document GET non-200", appPassMockFlags{docFetchStatus: http.StatusInternalServerError}, "stage 6 (publish)"},
+		{"stage7 create course not 201", appPassMockFlags{courseCreateStatus: http.StatusInternalServerError}, "stage 7 (course)"},
 		{"stage7 getCourse wrong wikiid", appPassMockFlags{getCourseWrongWikiID: true}, "stage 7 (course)"},
 	}
 	for _, tc := range cases {
@@ -1077,6 +1193,87 @@ func TestRunAppPass_TeardownDrainsOnMidPassFailure(t *testing.T) {
 	}
 	if !sawFailure {
 		t.Error("expected a 'draining 6 entries' log line")
+	}
+}
+
+// TestRunAppPass_TeardownDrainsAfterRealCeilingExpires proves opts.Timeout is a REAL
+// ceiling (stageCtx = context.WithTimeout, not just the fake-clock-driven checkDeadline
+// poll between stages) AND that stage 8 still runs — and actually SUCCEEDS — on an
+// independent context once that ceiling has fired mid-flight.
+//
+// Deterministic by construction, not by timing luck: the mock's guide-create handler
+// (stage 5) sleeps far longer (2s) than the pass's own ceiling (300ms), so stage 5's
+// in-flight HTTP call is guaranteed to be interrupted by stageCtx's expiry long before
+// the mock would ever respond — stages 0-4 (in-memory exec + a handful of fast
+// loopback calls) have ample headroom to finish inside 300ms either way. If teardown
+// drained on the SAME (now-expired) stageCtx instead of its own independent context,
+// every one of these deletes would fail immediately with a context error; asserting
+// they all succeed is what proves the independent-context fix, not just that stage 8
+// was invoked.
+func TestRunAppPass_TeardownDrainsAfterRealCeilingExpires(t *testing.T) {
+	mock := newAppPassMock(t, appPassMockFlags{guideCreateDelay: 2 * time.Second})
+	defer mock.server.Close()
+
+	fe := &fakeExec{fn: pathBExecFn()}
+	clk := newFakeAppPassClock()
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	log := newAppPassLogger()
+
+	opts := testAppPassOpts(mock.server.URL)
+	opts.Timeout = 300 * time.Millisecond
+
+	err := runAppPass(context.Background(), opts, deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt009")
+	if err == nil {
+		t.Fatal("want the pass to fail once the real ceiling trips mid-flight")
+	}
+	if !strings.Contains(err.Error(), "stage 5") {
+		t.Errorf("error = %q, want it to name stage 5 (where the ceiling should trip)", err.Error())
+	}
+
+	wantDeleteOrder := []string{"media:video", "media:document", "media:image", "wiki"}
+	if !stringSliceEqual(mock.deleteLog, wantDeleteOrder) {
+		t.Errorf("teardown deletes after ceiling expiry = %v, want %v (stage 8 must drain, and SUCCEED, on an independent context)", mock.deleteLog, wantDeleteOrder)
+	}
+}
+
+// ---------------------------------------------------------------------------------
+// ID field extraction
+// ---------------------------------------------------------------------------------
+
+func TestIdField_RejectsFractionalAndNonPositive(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+	}{
+		{"fractional", `{"userid": 12.9}`},
+		{"zero", `{"userid": 0}`},
+		{"negative", `{"userid": -1}`},
+		{"zero string", `{"userid": "0"}`},
+		{"non-numeric string", `{"userid": "abc"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var m map[string]interface{}
+			if err := json.Unmarshal([]byte(tc.json), &m); err != nil {
+				t.Fatalf("bad test JSON: %v", err)
+			}
+			if id, ok := idField(m, "userid"); ok {
+				t.Errorf("idField(%s) = (%d, true), want ok=false", tc.json, id)
+			}
+		})
+	}
+}
+
+func TestIdField_AcceptsPositiveIntegral(t *testing.T) {
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(`{"userid": 42, "wikiid": "17"}`), &m); err != nil {
+		t.Fatalf("bad test JSON: %v", err)
+	}
+	if id, ok := idField(m, "userid"); !ok || id != 42 {
+		t.Errorf("idField(userid) = (%d, %v), want (42, true)", id, ok)
+	}
+	if id, ok := idField(m, "wikiid"); !ok || id != 17 {
+		t.Errorf("idField(wikiid) = (%d, %v), want (17, true)", id, ok)
 	}
 }
 
@@ -1163,6 +1360,45 @@ func TestRunAppPass_HappyPath_NoSecretInLogs(t *testing.T) {
 				t.Errorf("argv element contains the secret: %q", a)
 			}
 		}
+	}
+}
+
+// TestRunAppPass_Stage2PasswordIncludedInLeakScan proves finalizeAppPass's redaction
+// self-scan covers stage 2's generated registration password too, not just the
+// stage-0/1 admin secret: the scanner captures BOTH values over a real run, and a
+// deliberate leak of the stage-2 password (a future bug, same as
+// TestFinalizeAppPass_RedactsLeakedSecret's stage-0/1 case) is still caught.
+func TestRunAppPass_Stage2PasswordIncludedInLeakScan(t *testing.T) {
+	mock := newAppPassMock(t, appPassMockFlags{})
+	defer mock.server.Close()
+
+	mainSecret := "deadbeefdeadbeefdeadbeefdeadbeef"
+	fe := &fakeExec{fn: pathBExecFn()}
+	clk := newFakeAppPassClock()
+	scanner := &appPassSecretScanner{}
+	scanner.add(mainSecret)
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk, secrets: scanner}
+	log := newAppPassLogger()
+
+	if err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, mainSecret, "salt010"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	secrets := scanner.list()
+	if len(secrets) != 2 {
+		t.Fatalf("scanner captured %d secret(s), want 2 (stage 0/1 admin password + stage 2 registration password): %v", len(secrets), secrets)
+	}
+	stage2Password := secrets[1]
+	if stage2Password == "" || stage2Password == mainSecret || len(stage2Password) != 32 {
+		t.Fatalf("unexpected stage-2 password captured: %q", stage2Password)
+	}
+
+	// The real run above never leaked it (finalizeAppPass would have converted the
+	// result already) — now simulate a future bug leaking it and confirm the scan
+	// still catches it when both secrets are passed through.
+	log.Logf("app-pass: BUG this line accidentally contains %s", stage2Password)
+	if err := finalizeAppPass(log, nil, secrets...); err == nil || !strings.Contains(err.Error(), "SECRET LEAKED TO LOGS") {
+		t.Errorf("finalizeAppPass did not catch a leaked stage-2 password: %v", err)
 	}
 }
 

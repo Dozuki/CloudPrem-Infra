@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -53,6 +54,13 @@ type AppPassOptions struct {
 // RunAppPass — see normalizeAppPassTimeout.
 const appPassTimeout = 15 * time.Minute
 
+// appPassTeardownTimeout bounds stage 8's own drain. Deliberately independent of
+// opts.Timeout / stageCtx (see runAppPass): teardown must still get a real chance to
+// run — and to actually succeed, on a still-live context — after the pass ceiling
+// itself has already fired, not be cut off by the same expired deadline that stopped
+// stages 0-7.
+const appPassTeardownTimeout = 3 * time.Minute
+
 // execRunner is the injectable boundary for every kubectl invocation AppPass makes.
 // argv is everything after the "kubectl" binary name; stdin, when non-nil, is piped to
 // the process. The real implementation (kubectlExecRunner) is a thin adapter over
@@ -75,13 +83,20 @@ func RunAppPass(ctx context.Context, opts AppPassOptions) error {
 	}
 
 	log := newAppPassLogger()
+	// scanner accumulates every secret minted over the run — the stage-0/1 admin
+	// password plus any other per-stage generated secret (stage 2's registration
+	// password) — so finalizeAppPass's self-scan below covers all of them, not just
+	// the first one.
+	scanner := &appPassSecretScanner{}
+	scanner.add(secret)
 	deps := appPassDeps{
-		exec:   kubectlExecRunner(),
-		client: newAppPassClient(),
-		clock:  realAppPassClock{},
+		exec:    kubectlExecRunner(),
+		client:  newAppPassClient(),
+		clock:   realAppPassClock{},
+		secrets: scanner,
 	}
 	runErr := runAppPass(ctx, opts, deps, log, secret, runsalt)
-	return finalizeAppPass(log, runErr, secret)
+	return finalizeAppPass(log, runErr, scanner.list()...)
 }
 
 // normalizeAppPassTimeout maps a zero (or negative) timeout to appPassTimeout and
@@ -94,21 +109,53 @@ func normalizeAppPassTimeout(t time.Duration) time.Duration {
 }
 
 // finalizeAppPass is redaction layer (b): before returning ANY result, it scans every
-// log line AppPass emitted (plus the final error's own text, if there is one) for the
-// exact generated secret. A hit converts the result into a distinct, secret-free
-// failure rather than ever letting the raw error (which might carry the leak) escape —
-// layers (a)/(c) are the unit tests asserting this and that nothing else is needed.
-func finalizeAppPass(log *appPassLogger, runErr error, secret string) error {
+// log line AppPass emitted (plus the final error's own text, if there is one) against
+// EVERY secret generated over the run (variadic — the stage-0/1 admin password, stage
+// 2's registration password, and any future per-stage secret). A hit converts the
+// result into a distinct, secret-free failure rather than ever letting the raw error
+// (which might carry the leak) escape — layers (a)/(c) are the unit tests asserting
+// this and that nothing else is needed.
+func finalizeAppPass(log *appPassLogger, runErr error, secrets ...string) error {
 	lines := log.Lines()
 	if runErr != nil {
 		lines = append(lines, runErr.Error())
 	}
 	for _, l := range lines {
-		if strings.Contains(l, secret) {
-			return fmt.Errorf("app-pass: SECRET LEAKED TO LOGS")
+		for _, secret := range secrets {
+			if secret != "" && strings.Contains(l, secret) {
+				return fmt.Errorf("app-pass: SECRET LEAKED TO LOGS")
+			}
 		}
 	}
 	return runErr
+}
+
+// appPassSecretScanner accumulates every value that must never appear in a log line or
+// error string over one AppPass run, so finalizeAppPass's self-scan can check all of
+// them, not just the one secret generated at the top level. Safe to use with a nil
+// receiver (add/list are both no-ops) so stage-level unit tests that build an
+// appPassDeps without a scanner don't have to construct one just to compile.
+type appPassSecretScanner struct {
+	mu      sync.Mutex
+	secrets []string
+}
+
+func (s *appPassSecretScanner) add(secret string) {
+	if s == nil || secret == "" {
+		return
+	}
+	s.mu.Lock()
+	s.secrets = append(s.secrets, secret)
+	s.mu.Unlock()
+}
+
+func (s *appPassSecretScanner) list() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string{}, s.secrets...)
 }
 
 // ---------------------------------------------------------------------------------
@@ -116,9 +163,10 @@ func finalizeAppPass(log *appPassLogger, runErr error, secret string) error {
 // ---------------------------------------------------------------------------------
 
 type appPassDeps struct {
-	exec   execRunner
-	client *http.Client
-	clock  appPassClock
+	exec    execRunner
+	client  *http.Client
+	clock   appPassClock
+	secrets *appPassSecretScanner // nil-safe; see appPassSecretScanner
 }
 
 // appPassClock abstracts time.Now/time.Sleep so the stage-4 video-encoding poll (5m
@@ -321,7 +369,12 @@ func stringField(m map[string]interface{}, key string) (string, bool) {
 	return s, ok
 }
 
-func numberField(m map[string]interface{}, key string) (int64, bool) {
+// idField extracts an ID field (userid, wikiid, guideid, stepid, id, documentid, ...).
+// Every one of these is a positive integer by construction on the real API, so this
+// requires an integral value and rejects zero/negative — a fractional value like 12.9
+// silently truncating to 12, or a bare 0, would otherwise pass extraction as if it were
+// a real, valid ID and only surface as confusion several calls later.
+func idField(m map[string]interface{}, key string) (int64, bool) {
 	if m == nil {
 		return 0, false
 	}
@@ -331,10 +384,20 @@ func numberField(m map[string]interface{}, key string) (int64, bool) {
 	}
 	switch n := v.(type) {
 	case float64:
-		return int64(n), true
+		if n != math.Trunc(n) {
+			return 0, false
+		}
+		id := int64(n)
+		if id <= 0 {
+			return 0, false
+		}
+		return id, true
 	case string:
-		i, err := strconv.ParseInt(n, 10, 64)
-		return i, err == nil
+		id, err := strconv.ParseInt(n, 10, 64)
+		if err != nil || id <= 0 {
+			return 0, false
+		}
+		return id, true
 	default:
 		return 0, false
 	}
@@ -456,25 +519,60 @@ $mysqlcmd -sN -D sites -e "SELECT name FROM site_index WHERE domain='%s'"
 }
 
 // detectAppPassAdminPath runs `php .../Exec/sites.php` with no arguments and inspects
-// its usage text for "create-site-admin" to decide path A vs path B. A non-zero exit is
-// expected (it's a usage/help invocation) and is not itself a failure.
+// its usage text to decide path A vs path B.
+//
+// Path B PERMANENTLY rotates the seeded admin's password — an irreversible mutation —
+// so a misdetection here is not a cosmetic bug, it is stage 0 silently performing the
+// wrong destructive action on a stack that may not be slim-lineage at all. Both
+// outcomes therefore require POSITIVE content-based identification: "A" only when the
+// output contains "create-site-admin", "B" only when it contains the tool's own stable
+// usage banner. A non-zero exit is expected and NOT itself disqualifying (a bare
+// usage/help invocation normally exits non-zero) as long as the output is
+// recognizable — but an exec error combined with unrecognized output, empty output, or
+// any output matching neither pattern fails the stage. Never defaults to a path.
 func detectAppPassAdminPath(ctx context.Context, deps appPassDeps, opts AppPassOptions, pod string) (string, error) {
 	argv := kubectlExecArgv(opts.Kubeconfig, opts.Namespace, pod, false,
 		[]string{"php", "/home/ifixit/Code/Exec/sites.php"})
 	stdout, stderr, err := deps.exec(ctx, argv, nil)
 	combined := string(stdout) + string(stderr)
-	if combined == "" && err != nil {
-		return "", fmt.Errorf("could not invoke sites.php for path detection: %v", err)
-	}
-	if strings.Contains(combined, "create-site-admin") {
+	switch {
+	case strings.Contains(combined, "create-site-admin"):
 		return "A", nil
+	case strings.Contains(combined, "Usage") && strings.Contains(combined, "sites.php"):
+		return "B", nil
+	case err != nil:
+		return "", fmt.Errorf("path detection: exec error and output did not positively match either path signature (exec error: %v; output seen: %q)", err, appPassTruncateForError(combined, 300))
+	default:
+		return "", fmt.Errorf("path detection: output did not positively match either path signature (output seen: %q)", appPassTruncateForError(combined, 300))
 	}
-	return "B", nil
+}
+
+// appPassTruncateForError bounds how much raw exec output an error message can quote,
+// so a pathological usage dump doesn't blow up an error string. Path-detection output
+// never carries the secret (it happens before any password is generated into the
+// script/stdin path), so quoting it here is safe.
+func appPassTruncateForError(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // createAppPassAdminPathA creates a fresh site admin via the documented CLI subcommand.
 // The password travels ONLY via stdin (a `read -r PW` at the top of the exec'd script);
 // the script text itself never contains it.
+// createAppPassAdminPathA's `--password="$PW"` line is deliberate, ACCEPTED residual
+// exposure, reviewed and left as-is: `$PW` still never appears in kubectl argv, in the
+// exec'd script's literal text, or in any log/error string (the harness-side rule this
+// file is held to everywhere else). But once bash expands "$PW" into the php process's
+// argv INSIDE the pod, the cleartext password is visible there for that process's
+// lifetime — to `ps`, to `/proc/<pid>/cmdline`, to anything else running in that
+// container. This is accepted rather than fixed because the verified
+// `create-site-admin` CLI has no stdin/env form (only a positional --password flag),
+// and the exposure is confined to a single-tenant, ephemeral pod on a throwaway smoke
+// stack this same run tears down in stage 8 — nothing outside that pod's lifetime can
+// observe it. Do not change this transport without re-verifying the CLI signature.
 func createAppPassAdminPathA(ctx context.Context, deps appPassDeps, opts AppPassOptions, pod, site, email string, secret []byte) error {
 	script := fmt.Sprintf("read -r PW\nphp /home/ifixit/Code/Exec/sites.php create-site-admin %q --email=%q --password=\"$PW\"\n", site, email)
 	argv := kubectlExecArgv(opts.Kubeconfig, opts.Namespace, pod, true, []string{"bash", "-c", script})
@@ -615,7 +713,7 @@ func stage1Login(ctx context.Context, deps appPassDeps, base, email string, secr
 	if !ok || tok == "" {
 		return "", 0, fmt.Errorf("login response missing authToken")
 	}
-	uid, ok := numberField(res.json, "userid")
+	uid, ok := idField(res.json, "userid")
 	if !ok {
 		return "", 0, fmt.Errorf("login response missing userid")
 	}
@@ -631,11 +729,15 @@ func stage2RegisterUser(ctx context.Context, deps appPassDeps, base, authToken, 
 	if _, err := crand.Read(pwBuf); err != nil {
 		return 0, fmt.Errorf("generate stage-2 password: %w", err)
 	}
+	password := hex.EncodeToString(pwBuf)
+	// Registered with the scanner so finalizeAppPass's leak self-scan covers this
+	// generated secret too, not just the stage-0/1 admin password.
+	deps.secrets.add(password)
 	username := fmt.Sprintf("qa-harness-user-%s", runsalt)
 	res, err := deps.doJSON(ctx, http.MethodPost, base+"/api/2.0/users", authToken, map[string]string{
 		"username":        username,
 		"unique_username": username,
-		"password":        hex.EncodeToString(pwBuf),
+		"password":        password,
 		"email":           fmt.Sprintf("qa-harness-user-%s@dozuki.test", runsalt),
 	})
 	if err != nil {
@@ -644,7 +746,7 @@ func stage2RegisterUser(ctx context.Context, deps appPassDeps, base, authToken, 
 	if res.status != http.StatusCreated {
 		return 0, fmt.Errorf("register user: want status 201, got %d", res.status)
 	}
-	uid, ok := numberField(res.json, "userid")
+	uid, ok := idField(res.json, "userid")
 	if !ok {
 		return 0, fmt.Errorf("register user response missing userid")
 	}
@@ -667,7 +769,7 @@ func stage3CreateWiki(ctx context.Context, deps appPassDeps, base, authToken, ru
 	if res.status != http.StatusCreated {
 		return 0, "", fmt.Errorf("create wiki: want status 201, got %d", res.status)
 	}
-	wikiid, ok := numberField(res.json, "wikiid")
+	wikiid, ok := idField(res.json, "wikiid")
 	if !ok {
 		return 0, "", fmt.Errorf("create wiki response missing wikiid")
 	}
@@ -725,7 +827,7 @@ func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken stri
 	if res.status != http.StatusOK {
 		return 0, fmt.Errorf("upload %s: want status 200, got %d", asset.assetType, res.status)
 	}
-	id, ok := numberField(res.json, "id")
+	id, ok := idField(res.json, "id")
 	if !ok {
 		return 0, fmt.Errorf("upload %s response missing id", asset.assetType)
 	}
@@ -784,6 +886,15 @@ func stage4Uploads(ctx context.Context, deps appPassDeps, clk appPassClock, base
 		}
 		ids[asset.assetType] = id
 	}
+	// Defensive, not reachable via a live server response (stage4UploadOne already
+	// fails closed on a missing id): guards against appPassStageAssets itself ever
+	// losing one of its three entries, which would otherwise silently poll video id 0
+	// below instead of failing loud.
+	for _, want := range []string{"image", "document", "video"} {
+		if _, ok := ids[want]; !ok {
+			return 0, 0, 0, fmt.Errorf("upload: no %s asset produced an id (appPassStageAssets contract error)", want)
+		}
+	}
 	if verr := stage4WaitForVideoReady(ctx, deps, clk, base, authToken, ids["video"]); verr != nil {
 		return 0, 0, 0, verr
 	}
@@ -817,7 +928,7 @@ func stage5CreateGuide(ctx context.Context, deps appPassDeps, base, authToken, c
 	if res.status != http.StatusCreated {
 		return 0, fmt.Errorf("create guide: want status 201, got %d", res.status)
 	}
-	guideID, ok := numberField(res.json, "guideid")
+	guideID, ok := idField(res.json, "guideid")
 	if !ok {
 		return 0, fmt.Errorf("create guide response missing guideid")
 	}
@@ -847,7 +958,7 @@ func stage5AddStep(ctx context.Context, deps appPassDeps, base, authToken string
 	if res.status != http.StatusCreated {
 		return 0, fmt.Errorf("add %s step: want status 201, got %d", mediaType, res.status)
 	}
-	stepID, ok := numberField(res.json, "stepid")
+	stepID, ok := idField(res.json, "stepid")
 	if !ok {
 		return 0, fmt.Errorf("add %s step response missing stepid", mediaType)
 	}
@@ -906,7 +1017,7 @@ func appPassGuideHasDocument(guide map[string]interface{}, documentID int64) boo
 		if !ok {
 			continue
 		}
-		if id, ok := numberField(doc, "documentid"); ok && id == documentID {
+		if id, ok := idField(doc, "documentid"); ok && id == documentID {
 			return true
 		}
 	}
@@ -1037,6 +1148,22 @@ func resolveAppPassURL(base, ref string) (string, error) {
 	return baseURL.ResolveReference(refURL).String(), nil
 }
 
+// requireAppPassFetchScheme rejects any URL AppPass is about to fetch that isn't plain
+// http/https. Every URL it guards is server-supplied (parsed out of the guide API's
+// own JSON response), so this is a cheap backstop against a corrupted or malicious
+// response handing back a file://, data:, or other scheme this stage should never
+// blindly dereference.
+func requireAppPassFetchScheme(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parse url %q: %w", rawURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url %q has scheme %q, want http or https", rawURL, u.Scheme)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------------
 // stage 6: publish
 // ---------------------------------------------------------------------------------
@@ -1082,6 +1209,16 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 	viewURL, rerr := resolveAppPassURL(base, docRef)
 	if rerr != nil {
 		return fmt.Errorf("get guide (public check): resolve document url: %w", rerr)
+	}
+
+	// All four of these are server-supplied (the app's own API decided them, but
+	// nothing stops a corrupted or malicious response handing back a file://, data:,
+	// or other non-http(s) scheme) — refuse to dereference anything but plain
+	// http/https before fetching any of them.
+	for _, u := range []string{guideURL, imageURL, videoURL, viewURL} {
+		if serr := requireAppPassFetchScheme(u); serr != nil {
+			return fmt.Errorf("get guide (public check): %w", serr)
+		}
 	}
 
 	// Everything below is a plain anonymous read (no Authorization header) — this is
@@ -1141,7 +1278,7 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 	if res.status != http.StatusCreated {
 		return 0, fmt.Errorf("create course: want status 201, got %d", res.status)
 	}
-	wikiid, ok := numberField(res.json, "wikiid")
+	wikiid, ok := idField(res.json, "wikiid")
 	if !ok {
 		return 0, fmt.Errorf("create course response missing wikiid")
 	}
@@ -1169,7 +1306,7 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 	if getRes.status != http.StatusOK {
 		return 0, fmt.Errorf("getCourse: want status 200, got %d", getRes.status)
 	}
-	if gotWikiID, ok := numberField(getRes.json, "wikiid"); !ok || gotWikiID != wikiid {
+	if gotWikiID, ok := idField(getRes.json, "wikiid"); !ok || gotWikiID != wikiid {
 		return 0, fmt.Errorf("getCourse response does not carry wikiid %d", wikiid)
 	}
 	return wikiid, nil
@@ -1227,21 +1364,39 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	secret := []byte(secretHex)
 	deadline := deps.clock.Now().Add(opts.Timeout)
 
+	// stageCtx is what every stage 0-7 exec/HTTP call actually runs on: opts.Timeout is
+	// a REAL ceiling here, not only a between-stage poll — a hung kubectl exec or HTTP
+	// call is interrupted once it passes, rather than blocking indefinitely on the
+	// caller's ctx while the fake-clock-driven checkDeadline below never gets a chance
+	// to run again. checkDeadline still runs before each stage too, so a ceiling that
+	// has already passed fails immediately with a clean, stage-attributed message
+	// instead of waiting for whatever's in flight to notice cancellation.
+	stageCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+
 	var stack appPassTeardownStack
 	var authToken string
 	defer func() {
-		drainAppPassTeardown(ctx, deps, base, authToken, log, &stack)
+		// Stage 8 must still run when the pass ceiling has already fired: draining on
+		// stageCtx would skip every delete the instant it's cancelled/expired, leaking
+		// everything created so far. teardownCtx is deliberately built from the
+		// ORIGINAL, uncancelled ctx (context.WithoutCancel detaches it from stageCtx's
+		// cancellation and any upstream cancellation of ctx itself) with its own short,
+		// independent bound — not derived from stageCtx or opts.Timeout.
+		teardownCtx, teardownCancel := context.WithTimeout(context.WithoutCancel(ctx), appPassTeardownTimeout)
+		defer teardownCancel()
+		drainAppPassTeardown(teardownCtx, deps, base, authToken, log, &stack)
 	}()
 
 	if derr := checkDeadline(deps.clock, deadline, opts.Timeout, "app-pass"); derr != nil {
 		return derr
 	}
 	log.Logf("app-pass: stage 0 (ephemeral admin) starting")
-	pod, err := appPassResolvePod(ctx, deps, opts)
+	pod, err := appPassResolvePod(stageCtx, deps, opts)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 0 (ephemeral admin): %w", err)
 	}
-	loginEmail, path, err := stage0EphemeralAdmin(ctx, deps, opts, pod, secret, runsalt, log)
+	loginEmail, path, err := stage0EphemeralAdmin(stageCtx, deps, opts, pod, secret, runsalt, log)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 0 (ephemeral admin): %w", err)
 	}
@@ -1251,7 +1406,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 1 (login) starting")
-	tok, userid, err := stage1Login(ctx, deps, base, loginEmail, secret)
+	tok, userid, err := stage1Login(stageCtx, deps, base, loginEmail, secret)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 1 (login): %w", err)
 	}
@@ -1262,7 +1417,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 2 (register user) starting")
-	regUserID, err := stage2RegisterUser(ctx, deps, base, authToken, runsalt)
+	regUserID, err := stage2RegisterUser(stageCtx, deps, base, authToken, runsalt)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 2 (register user): %w", err)
 	}
@@ -1272,7 +1427,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 3 (create wiki) starting")
-	_, wikiTitle, err := stage3CreateWiki(ctx, deps, base, authToken, runsalt, &stack)
+	_, wikiTitle, err := stage3CreateWiki(stageCtx, deps, base, authToken, runsalt, &stack)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 3 (create wiki): %w", err)
 	}
@@ -1282,7 +1437,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 4 (media uploads) starting")
-	imageID, documentID, videoID, err := stage4Uploads(ctx, deps, deps.clock, base, authToken, &stack)
+	imageID, documentID, videoID, err := stage4Uploads(stageCtx, deps, deps.clock, base, authToken, &stack)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 4 (media uploads): %w", err)
 	}
@@ -1292,17 +1447,17 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 5 (guide + steps) starting")
-	guideID, err := stage5CreateGuide(ctx, deps, base, authToken, wikiTitle, runsalt, documentID, &stack)
+	guideID, err := stage5CreateGuide(stageCtx, deps, base, authToken, wikiTitle, runsalt, documentID, &stack)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
-	if _, err := stage5AddStep(ctx, deps, base, authToken, guideID, "image", []int64{imageID}); err != nil {
+	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "image", []int64{imageID}); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
-	if _, err := stage5AddStep(ctx, deps, base, authToken, guideID, "object", videoID); err != nil {
+	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "object", videoID); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
-	if _, err := stage5VerifyRoundTrip(ctx, deps, base, authToken, guideID, documentID); err != nil {
+	if _, err := stage5VerifyRoundTrip(stageCtx, deps, base, authToken, guideID, documentID); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
 	log.Logf("app-pass: stage 5 (guide + steps) ok guideid=%d", guideID)
@@ -1311,7 +1466,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 6 (publish) starting")
-	if err := stage6Publish(ctx, deps, base, authToken, guideID); err != nil {
+	if err := stage6Publish(stageCtx, deps, base, authToken, guideID); err != nil {
 		return fmt.Errorf("app-pass: stage 6 (publish): %w", err)
 	}
 	log.Logf("app-pass: stage 6 (publish) ok guideid=%d", guideID)
@@ -1320,7 +1475,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 7 (course) starting")
-	courseWikiID, err := stage7Course(ctx, deps, base, authToken, guideID, runsalt, &stack)
+	courseWikiID, err := stage7Course(stageCtx, deps, base, authToken, guideID, runsalt, &stack)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 7 (course): %w", err)
 	}
