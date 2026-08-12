@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,9 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // PhaseParams carries everything a single re-entrant phase needs. Unlike RunParams
@@ -67,11 +71,32 @@ func (p PhaseParams) Config() (Config, error) {
 	return cfg.Salted(p.RunID), nil
 }
 
-// prepareWorktree is the re-entrant replacement for run.go's inline worktree+tg
+// prepareWorktree is the pre-Side-parameter entry point, kept for run.go's two
+// call sites (recovery-scenario output reads, both against an already-provisioned
+// fresh/recover stack). Both of those are unconditionally target-side per the caller
+// table in prepareWorktreeSide's doc comment, so this is a thin, explicit-not-inferred
+// default rather than a guess.
+func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, deleteAfter string) (*Worktree, TGOptions, string, error) {
+	return p.prepareWorktreeSide(ref, initSub, cfg, deleteAfter, SideTarget)
+}
+
+// prepareWorktreeSide is the re-entrant replacement for run.go's inline worktree+tg
 // setup: recreate the worktree for ref, scaffold the gitignored live envs, write
 // env.hcl (with the shared deleteAfter), and return the worktree + its TGOptions +
 // the env dir. Safe to call from any phase/pod.
-func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, deleteAfter string) (*Worktree, TGOptions, string, error) {
+//
+// side selects which of Config's per-side version-override maps (BaselineVersions /
+// TargetVersions) wins in MergedInputs's merge for this render. It is always passed
+// explicitly by the caller below - never inferred from ref - because a ref string
+// alone cannot say which side it represents once FromRef == ToRef. Caller table:
+//
+//	caller                                  ref          side
+//	Provision, scenario upgrade             FromRef      baseline
+//	Provision, scenario fresh/recover       ToRef        target
+//	Upgrade                                 ToRef        target
+//	Validate (standalone phase)             AppliedRef   target
+//	Teardown                                AppliedRef   rm.AppliedSide (teardownRefAndSide)
+func (p PhaseParams) prepareWorktreeSide(ref string, initSub bool, cfg Config, deleteAfter string, side Side) (*Worktree, TGOptions, string, error) {
 	base := filepath.Join(p.RepoDir, "live", "tests", "__worktrees__", p.RunID)
 	wt, err := AddWorktree(p.RepoDir, base, ref, initSub)
 	if err != nil {
@@ -82,7 +107,7 @@ func (p PhaseParams) prepareWorktree(ref string, initSub bool, cfg Config, delet
 	}
 	envSub := filepath.Join(cfg.EnvPathOr(p.Matrix.Defaults.EnvPath), cfg.Env)
 	envDir := filepath.Join(wt.Dir, envSub)
-	inputs := withDeleteAfter(p.Matrix.MergedInputs(cfg, ref), deleteAfter)
+	inputs := withDeleteAfter(p.Matrix.MergedInputs(cfg, ref, side), deleteAfter)
 	for k, v := range p.ExtraInputs {
 		inputs[k] = v
 	}
@@ -187,10 +212,12 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 
 	applyRef := toRef
 	initSub := true
+	side := SideTarget
 	if scenario == "upgrade" {
 		applyRef = fromRef
+		side = SideBaseline
 	}
-	wt, tg, _, err := p.prepareWorktree(applyRef, initSub, cfg, rm.DeleteAfter)
+	wt, tg, _, err := p.prepareWorktreeSide(applyRef, initSub, cfg, rm.DeleteAfter, side)
 	if err != nil {
 		return err
 	}
@@ -208,14 +235,30 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 		}
 	}
 	rm.AppliedRef = applyRef
+	rm.AppliedSide = string(side)
 	if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
 		return serr
 	}
 
 	rp := RunParams{Matrix: p.Matrix, Namespace: namespace, Profile: p.Profile}
-	rev, _, caps, verr := validateStack(tg, rp, p.Region)
+	rev, kc, caps, verr := validateStack(tg, rp, p.Region)
 	if verr != nil {
 		return fmt.Errorf("provision validation: %w", verr)
+	}
+	// Baseline-flavor guard: only meaningful on an upgrade scenario about to flip to a
+	// slim target - a fresh/recover baseline IS the target, so there is nothing to
+	// leak. Fires AFTER validateStack so the cluster is known-healthy first; a slim
+	// image on the baseline is a test-authoring defect (the run stops testing a flip
+	// at all), not a flaky infra symptom, so it must fail loud and distinctly rather
+	// than surface as a confusing later assertion mismatch.
+	if scenario == "upgrade" {
+		targetFlavor, _ := p.Matrix.EffectiveVersionVar(cfg, toRef, SideTarget, "app_image_flavor").(string)
+		if targetFlavor == "slim" {
+			imageRepository, _ := p.Matrix.EffectiveVersionVar(cfg, applyRef, SideBaseline, "image_repository").(string)
+			if gerr := checkBaselineNotSlim(kc, namespace, imageRepository); gerr != nil {
+				return gerr
+			}
+		}
 	}
 	if scenario == "upgrade" {
 		rm.BaselineRev = rev
@@ -236,6 +279,103 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	return nil
 }
 
+// PodImage is a bare (pod, container, image) tuple - the unit the baseline-flavor
+// guard reasons about. Kept separate from any k8s type so the guard logic below is
+// testable with a plain literal slice, no cluster or fake clientset required.
+type PodImage struct {
+	Pod       string
+	Container string
+	Image     string
+}
+
+// String renders one inventory entry as "pod/container=image", the unit
+// formatPodImageInventory joins into the one-line log line.
+func (pi PodImage) String() string {
+	return pi.Pod + "/" + pi.Container + "=" + pi.Image
+}
+
+// formatPodImageInventory renders the whole inventory as one deterministic line
+// (sorted so repeated runs against the same pods are diffable), for the "unconditional
+// evidence of what the baseline runs" log line the guard always emits.
+func formatPodImageInventory(inv []PodImage) string {
+	if len(inv) == 0 {
+		return "(no pods found)"
+	}
+	entries := make([]string, len(inv))
+	for i, pi := range inv {
+		entries[i] = pi.String()
+	}
+	sort.Strings(entries)
+	return strings.Join(entries, "; ")
+}
+
+// monolithAppImagePrefix is the image prefix the baseline-flavor guard treats as a
+// leak: a monolith-app image running on a baseline that is about to flip to the slim
+// target defeats the point of the run (it would no longer be testing a flip at all).
+func monolithAppImagePrefix(imageRepository string) string {
+	return imageRepository + "/monolith-app:"
+}
+
+// assertNoMonolithImages fails if any pod in inv runs a monolith-app image, per
+// monolithAppImagePrefix(imageRepository). Pure over an already-collected inventory,
+// deliberately: this is the piece the tests exercise directly, no cluster required.
+func assertNoMonolithImages(inv []PodImage, imageRepository string) error {
+	if imageRepository == "" {
+		return fmt.Errorf("baseline-flavor guard: config resolves no image_repository for the baseline side — cannot check for a monolith-app leak")
+	}
+	prefix := monolithAppImagePrefix(imageRepository)
+	var hits []string
+	for _, pi := range inv {
+		if strings.HasPrefix(pi.Image, prefix) {
+			hits = append(hits, pi.String())
+		}
+	}
+	if len(hits) > 0 {
+		sort.Strings(hits)
+		return fmt.Errorf("baseline-flavor guard: this run flips to a slim target, but %d pod(s) on the baseline already run a monolith-app image (slim leaked into the baseline — the run is not testing a flip): %s",
+			len(hits), strings.Join(hits, "; "))
+	}
+	return nil
+}
+
+// podImageInventory lists every container image running in namespace, for the
+// baseline-flavor guard's log line and assertion.
+func podImageInventory(ctx context.Context, cs kubernetes.Interface, namespace string) ([]PodImage, error) {
+	pods, err := cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var out []PodImage
+	for _, pod := range pods.Items {
+		for _, c := range pod.Spec.Containers {
+			out = append(out, PodImage{Pod: pod.Name, Container: c.Name, Image: c.Image})
+		}
+	}
+	return out, nil
+}
+
+// checkBaselineNotSlim is the production wrapper Provision calls: builds a real
+// clientset from the kubeconfig validateStack already generated, logs the pod image
+// inventory unconditionally (evidence of what the baseline runs, pass or fail), then
+// asserts none of it is a monolith-app image. See assertNoMonolithImages for the
+// testable core.
+func checkBaselineNotSlim(kubeconfig, namespace, imageRepository string) error {
+	restCfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return fmt.Errorf("baseline-flavor guard: build kubeconfig: %w", err)
+	}
+	cs, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("baseline-flavor guard: build client: %w", err)
+	}
+	inv, err := podImageInventory(context.Background(), cs, namespace)
+	if err != nil {
+		return fmt.Errorf("baseline-flavor guard: list pods: %w", err)
+	}
+	step("baseline pod image inventory (namespace %s): %s", namespace, formatPodImageInventory(inv))
+	return assertNoMonolithImages(inv, imageRepository)
+}
+
 // Upgrade applies the target ref against the SAME state prefix the baseline used,
 // then records ToRef as applied. Requires a prior upgrade-scenario Provision.
 func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
@@ -254,7 +394,7 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 		return fmt.Errorf("upgrade phase invalid for fresh scenario (run %s)", p.statePrefix(cfg))
 	}
 	p.ExtraInputs = rm.ExtraInputs
-	wt, tg, _, err := p.prepareWorktree(rm.ToRef, false, cfg, rm.DeleteAfter)
+	wt, tg, _, err := p.prepareWorktreeSide(rm.ToRef, false, cfg, rm.DeleteAfter, SideTarget)
 	if err != nil {
 		return err
 	}
@@ -272,6 +412,7 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 		}
 	}
 	rm.AppliedRef = rm.ToRef
+	rm.AppliedSide = string(SideTarget)
 	return p.Store.Save(ctx, p.statePrefix(cfg), rm)
 }
 
@@ -292,7 +433,10 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		return fmt.Errorf("no manifest for %s — run provision first", p.statePrefix(cfg))
 	}
 	p.ExtraInputs = rm.ExtraInputs
-	wt, tg, _, err := p.prepareWorktree(rm.AppliedRef, false, cfg, rm.DeleteAfter)
+	// Validate is a standalone CLI phase: side is always target (it is verifying the
+	// applied-target-code assertion suite), threaded explicitly rather than inferred
+	// from rm.AppliedRef - see prepareWorktreeSide's caller table.
+	wt, tg, _, err := p.prepareWorktreeSide(rm.AppliedRef, false, cfg, rm.DeleteAfter, SideTarget)
 	if err != nil {
 		return err
 	}
@@ -309,6 +453,24 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 	}
 	if rev < 1 {
 		return fmt.Errorf("helm release not deployed (revision %d)", rev)
+	}
+	// Slim-image flip guard: only meaningful when the target config actually flips to
+	// the slim flavor - everything else is a no-op here. Fires AFTER validateStack so
+	// the cluster is already known-healthy; this is a narrower question than "is the
+	// release Ready" (a stuck rollout or an unflipped chart default can leave the
+	// release Ready while still serving legacy images), so it belongs in the
+	// standalone Validate phase, never in Provision's generic validateStack gate,
+	// which also runs against legacy baselines that must not trip it.
+	targetFlavor, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "app_image_flavor").(string)
+	if validation.SlimFlipApplies(targetFlavor) {
+		imageRepository, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "image_repository").(string)
+		imageTag, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "image_tag").(string)
+		beanstalkdTag, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "beanstalkd_tag").(string)
+		nextjsTag, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "nextjs_tag").(string)
+		step("verifying slim image flip in-cluster (namespace %s)", rm.Namespace)
+		if serr := validation.AssertSlimFlipComplete(kc, rm.Namespace, imageRepository, imageTag, beanstalkdTag, nextjsTag); serr != nil {
+			return fmt.Errorf("slim-flip validation: %w", serr)
+		}
 	}
 	outs, oerr := readOutputs(tg, p.Region)
 	if oerr != nil {
@@ -340,8 +502,13 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 
 	verifyContinuity := false
 	if rm.Scenario == "upgrade" {
-		wantChart, _ := p.Matrix.VersionVar(rm.ToRef, "chart_version").(string)
-		fromChart, _ := p.Matrix.VersionVar(rm.FromRef, "chart_version").(string)
+		// Config-aware: a config-level baseline_versions/target_versions override (the
+		// slim-flip configs) can move the chart even when the matrix-wide versions[ref]
+		// entries don't, so the ref-only VersionVar would miss exactly the delta this
+		// scenario exists to detect. EffectiveVersionVar resolves the same precedence
+		// MergedInputs writes into env.hcl, per side.
+		wantChart, _ := p.Matrix.EffectiveVersionVar(cfg, rm.ToRef, SideTarget, "chart_version").(string)
+		fromChart, _ := p.Matrix.EffectiveVersionVar(cfg, rm.FromRef, SideBaseline, "chart_version").(string)
 		// A ref delta with no chart delta (a docs-only or infra-only PR) upgrades
 		// nothing through Flux, so the release revision stays put. Only demand an
 		// advance when the chart version actually moved between the refs.
@@ -408,12 +575,14 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 		step("teardown SKIPPED (--keep-on-failure): stack for %s left up for debugging", p.statePrefix(cfg))
 		return nil
 	}
-	ref := rm.AppliedRef
-	if ref == "" {
-		ref = rm.ToRef
-	}
+	// ref/side both come from the manifest (teardownRefAndSide), never inferred here:
+	// AppliedSide is exactly the durable state that lets a re-entrant teardown pod
+	// (its own process, no in-memory context) get the side right when FromRef == ToRef
+	// makes the ref alone ambiguous. See teardownRefAndSide's doc comment for the
+	// pre-AppliedSide-manifest fallback.
+	ref, side := teardownRefAndSide(rm)
 	p.ExtraInputs = rm.ExtraInputs // teardown must render the exact env.hcl the apply used
-	wt, tg, _, err := p.prepareWorktree(ref, false, cfg, rm.DeleteAfter)
+	wt, tg, _, err := p.prepareWorktreeSide(ref, false, cfg, rm.DeleteAfter, side)
 	if err != nil {
 		return err
 	}
