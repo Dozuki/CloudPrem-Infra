@@ -81,7 +81,13 @@ janitor can all clean up a given run. That is the structural fix for the trap in
 manifest in S3 records the config by NAME, not its contents, so teardown re-resolves that name
 out of `matrix.yaml` at whatever ref the teardown pod checks out. Default that to master and a
 config which only ever existed on a branch is simply not there, so teardown fails and the stack
-leaks until the janitor catches it. Pass the frozen SHA the run was submitted at:
+leaks.
+
+**The janitor is NOT a safety net for this case.** It resolves `ConfigName` against its own
+checked-out matrix too, so a missing config lands the stack in `needs-review` (`janitor.go`,
+`StateNeedsReview` - "we could not establish the facts; never acted on"). It is reported and
+never swept, and the reaper cannot rebuild the inputs without the config either. A branch-only
+stack whose branch is gone needs a human. Pass the frozen SHA the run was submitted at:
 
     argo submit --from workflowtemplate/harness-scenario \
       -p config=<name> -p scenario=teardown -p repo-ref=<the run's SHA>

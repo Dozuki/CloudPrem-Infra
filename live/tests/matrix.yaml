@@ -374,6 +374,16 @@ configs:
   # excludes slim_-prefixed configs from goldenConfigs, and a config carrying
   # baseline_versions/target_versions cannot be in goldenConfigs. Runtime slim behavior keys off
   # the VALUES (app_image_flavor), which this config never sets, so it stays legacy on both sides.
+  #
+  # MANUAL DISPATCH ONLY, on purpose. No cron and no PR workflow selects it: the nightly runs
+  # the default set, 41-nightly-slim-fresh-cron runs slim_fresh, and the PR workflow's config
+  # list is hardcoded. This is a diagnostic you reach for when slim_upgrade fails and you need
+  # to know whether the app image or the flavor flip did it, not something to run every night.
+  #
+  # "Only image_tag moves" holds for the default ref pair. MergedInputs applies versions[ref]
+  # BEFORE the per-side maps, so hand-picking a ref that carries its own nextjs_tag or
+  # image_repository override could introduce a second difference. The invariant test asserts
+  # the two sides differ in image_tag alone; if you pin unusual refs, re-check that first.
   - name: slim_legacy_appbump
     env: min
     feature_flags:

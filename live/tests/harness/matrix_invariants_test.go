@@ -106,6 +106,58 @@ func TestSlimMatrixPinsMatchRecordedSnapshot(t *testing.T) {
 		},
 	}
 
+	// slim_legacy_appbump is not in the loop above because its whole point is that the two
+	// SIDES differ, which a single target-side snapshot cannot express. Assert the property
+	// directly instead: both sides pinned, and image_tag the only difference between them.
+	// Without this, the config could silently decay into a chart bump or a flavor flip and
+	// still look like an app-only test.
+	t.Run("slim_legacy_appbump moves only image_tag", func(t *testing.T) {
+		m, err := LoadMatrix("../matrix.yaml")
+		if err != nil {
+			t.Fatalf("LoadMatrix: %v", err)
+		}
+		cfg, err := m.Config("slim_legacy_appbump")
+		if err != nil {
+			t.Fatalf("config slim_legacy_appbump: %v", err)
+		}
+		if len(cfg.BaselineVersions) == 0 || len(cfg.TargetVersions) == 0 {
+			t.Fatal("slim_legacy_appbump must pin BOTH sides explicitly; an inherited side lets version_defaults move one of them")
+		}
+		for _, side := range []struct {
+			name string
+			vars map[string]interface{}
+		}{{"baseline", cfg.BaselineVersions}, {"target", cfg.TargetVersions}} {
+			if got := side.vars["chart_version"]; got != "2.10.0" {
+				t.Errorf("%s chart_version = %v, want 2.10.0 pinned explicitly", side.name, got)
+			}
+			if _, ok := side.vars["app_image_flavor"]; ok {
+				t.Errorf("%s sets app_image_flavor; this config must stay legacy on both sides", side.name)
+			}
+		}
+		if cfg.BaselineVersions["image_tag"] == cfg.TargetVersions["image_tag"] {
+			t.Error("baseline and target image_tag are equal; this config would test nothing")
+		}
+		// Any key present on one side must be present on the other with an equal value,
+		// image_tag excepted - that is the one thing allowed to move.
+		for _, pair := range []struct{ a, b map[string]interface{} }{
+			{cfg.BaselineVersions, cfg.TargetVersions}, {cfg.TargetVersions, cfg.BaselineVersions},
+		} {
+			for key, want := range pair.a {
+				if key == "image_tag" {
+					continue
+				}
+				got, ok := pair.b[key]
+				if !ok {
+					t.Errorf("version var %q is set on only one side; the sides must differ in image_tag alone", key)
+					continue
+				}
+				if got != want {
+					t.Errorf("version var %q differs across sides (%v vs %v); only image_tag may move", key, want, got)
+				}
+			}
+		}
+	})
+
 	m, err := LoadMatrix("../matrix.yaml")
 	if err != nil {
 		t.Fatalf("LoadMatrix: %v", err)
