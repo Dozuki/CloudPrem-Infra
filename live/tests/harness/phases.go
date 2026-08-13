@@ -482,6 +482,15 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 // upgrade's "run upgrade first" wording.
 func validatePreconditions(rm *RunManifest) error {
 	if rm.AppliedRef == rm.ToRef {
+		// The ref comparison above is VACUOUS when from_ref == to_ref - a flavor flip or a
+		// chart-only bump applied in place. Provision records the BASELINE side under a ref
+		// that already equals ToRef, so ref equality proves nothing and the ordering
+		// invariant has to come from AppliedSide, which exists for exactly this ambiguity.
+		// Empty AppliedSide means a manifest written before that field existed; those keep
+		// the old ref-only behaviour rather than failing closed on data they never carried.
+		if rm.Scenario == "upgrade" && rm.AppliedSide == string(SideBaseline) {
+			return fmt.Errorf("validate expects the target side to be applied, but the manifest still shows the baseline side applied at ref %q — from_ref equals to_ref, so the refs alone cannot tell the sides apart; run upgrade first", rm.AppliedRef)
+		}
 		return nil
 	}
 	if rm.Scenario == "upgrade" {

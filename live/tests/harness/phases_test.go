@@ -242,6 +242,43 @@ func TestValidatePreconditionsPassesWhenTargetApplied(t *testing.T) {
 	}
 }
 
+// The from_ref == to_ref case: a flavor flip or chart-only bump applied in place. Provision
+// records the BASELINE side under a ref that already equals ToRef, so the AppliedRef == ToRef
+// comparison is vacuous and only AppliedSide can tell the sides apart. Without this, Validate
+// would render target-side inputs against a stack still running the baseline.
+func TestValidatePreconditionsErrorsWhenRefsMatchButBaselineStillApplied(t *testing.T) {
+	rm := &RunManifest{
+		Scenario: "upgrade", FromRef: "v1", ToRef: "v1",
+		AppliedRef: "v1", AppliedSide: string(SideBaseline),
+	}
+	err := validatePreconditions(rm)
+	if err == nil {
+		t.Fatal("validatePreconditions = nil, want an error: refs match but the baseline side is still applied")
+	}
+	if !strings.Contains(err.Error(), "baseline") {
+		t.Errorf("error %q does not say which side is still applied", err.Error())
+	}
+}
+
+func TestValidatePreconditionsPassesWhenRefsMatchAndTargetApplied(t *testing.T) {
+	rm := &RunManifest{
+		Scenario: "upgrade", FromRef: "v1", ToRef: "v1",
+		AppliedRef: "v1", AppliedSide: string(SideTarget),
+	}
+	if err := validatePreconditions(rm); err != nil {
+		t.Fatalf("validatePreconditions = %v, want nil (upgrade already applied the target side)", err)
+	}
+}
+
+// A manifest written before AppliedSide existed carries "", and must keep the old ref-only
+// behaviour rather than failing closed on a field it never had.
+func TestValidatePreconditionsPassesWhenRefsMatchAndSideUnrecorded(t *testing.T) {
+	rm := &RunManifest{Scenario: "upgrade", FromRef: "v1", ToRef: "v1", AppliedRef: "v1"}
+	if err := validatePreconditions(rm); err != nil {
+		t.Fatalf("validatePreconditions = %v, want nil (pre-AppliedSide manifest)", err)
+	}
+}
+
 func TestValidatePreconditionsErrorsOnStaleManifestForNonUpgradeScenarios(t *testing.T) {
 	for _, scenario := range []string{"fresh", "recover"} {
 		rm := &RunManifest{Scenario: scenario, FromRef: "v1", ToRef: "v2", AppliedRef: "v1"}
