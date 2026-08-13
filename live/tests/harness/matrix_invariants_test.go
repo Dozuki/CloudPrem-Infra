@@ -62,6 +62,62 @@ func TestPostStatusUsesEvidenceSubcommand(t *testing.T) {
 	}
 }
 
+// TestSlimMatrixPinsMatchRecordedSnapshot guards matrix.yaml's own promise on
+// slim_fresh/slim_upgrade's target_versions comment: "Pins mirror infra-live
+// standard/_mcp/dev/us-east-1/slim/env.hcl (dev-slim). Update these when dev-slim's
+// env.hcl moves." Nothing enforced that promise - a matrix.yaml edit that changed one
+// of these pins (by hand, or by a bad merge) without also bumping dev-slim's env.hcl
+// (or vice versa) would drift silently, since both configs are nightly-only and get no
+// PR coverage. This test cannot reach infra-live or dev-slim's live env.hcl (no network,
+// no cross-repo read - see the CONSTRAINTS this harness runs under), so it is not a
+// live drift check against the real source of truth. It is a recorded-snapshot check:
+// wantSlimTargetVersions below is the pin set as of the last time someone confirmed
+// matrix.yaml matched dev-slim. If this test fails, it means EITHER matrix.yaml moved
+// without this snapshot being updated to match, OR (less likely, but just as real) this
+// snapshot was hand-edited without checking matrix.yaml still matches dev-slim - either
+// way, a human must reconcile the three of matrix.yaml, dev-slim's env.hcl, and this
+// snapshot, then update whichever ones are behind.
+func TestSlimMatrixPinsMatchRecordedSnapshot(t *testing.T) {
+	wantSlimTargetVersions := map[string]interface{}{
+		"app_image_flavor": "slim",
+		"chart_version":    "3.1.1",
+		"image_tag":        "0.0.0-05d4e70bd52-mpcfix5",
+		"beanstalkd_tag":   "6f41576",
+		"nextjs_tag":       "0.0.0-f28af33fdb7",
+	}
+
+	m, err := LoadMatrix("../matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	checked := 0
+	for _, name := range []string{"slim_fresh", "slim_upgrade"} {
+		cfg, err := m.Config(name)
+		if err != nil {
+			t.Fatalf("config %q: %v", name, err)
+		}
+		checked++
+		if len(cfg.TargetVersions) != len(wantSlimTargetVersions) {
+			t.Errorf("config %q: target_versions has %d keys, recorded snapshot has %d — matrix.yaml and this test's snapshot have drifted apart (dev-slim's env.hcl may have moved; update both matrix.yaml and wantSlimTargetVersions to match, or revert whichever one is wrong)",
+				name, len(cfg.TargetVersions), len(wantSlimTargetVersions))
+			continue
+		}
+		for key, want := range wantSlimTargetVersions {
+			got, ok := cfg.TargetVersions[key]
+			if !ok {
+				t.Errorf("config %q: target_versions is missing key %q (recorded snapshot expects %v)", name, key, want)
+				continue
+			}
+			if got != want {
+				t.Errorf("config %q: target_versions[%q] = %v, recorded snapshot expects %v — matrix.yaml's slim pins moved; if this was a deliberate dev-slim env.hcl bump, update wantSlimTargetVersions in this test to match", name, key, got, want)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("neither slim_fresh nor slim_upgrade found in matrix.yaml; this guard checked nothing")
+	}
+}
+
 // TestMatrixConfigsSaltProducesUniqueCustomer guards Config.Salted's documented no-op
 // path (config.go): a base customer already at or past the 10-char terraform cap salts
 // to itself. The janitor (harness/janitor.go) already refuses to reason about a candidate

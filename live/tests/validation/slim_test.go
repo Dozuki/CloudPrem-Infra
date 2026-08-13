@@ -129,6 +129,25 @@ func TestAssertSlimImages_IgnoresFailedAndEvictedPods(t *testing.T) {
 	}
 }
 
+func TestAssertSlimImages_IgnoresTerminatingPods(t *testing.T) {
+	// A pod on its way out can still report phase Running with a stale Ready=True
+	// condition for a few seconds after deletion is requested. It must not count as
+	// evidence the assertion passes - a leftover pod from an unrelated prior state is
+	// exactly the case eligiblePod's DeletionTimestamp check exists to exclude.
+	terminating := readyPod("dozuki-app-abc123", testRepo+"/monolith-app:"+testImageTag)
+	now := metav1.Now()
+	terminating.DeletionTimestamp = &now
+	pods := []corev1.Pod{
+		terminating,
+		readyPod("dozuki-beanstalkd-deployment-0", testRepo+"/beanstalkd:"+testBeanstalkTag),
+		readyPod("dozuki-nextjs-def456", testRepo+"/web-nextjs:"+testNextjsTag),
+	}
+	err := assertSlimImages(pods, testRepo, testImageTag, testBeanstalkTag, testNextjsTag)
+	if err == nil {
+		t.Fatal("expected failure: the only monolith-app pod is terminating, so assertion 1 must fail")
+	}
+}
+
 func TestAssertSlimImages_NotReadyDoesNotSatisfyPositiveAssertions(t *testing.T) {
 	pods := []corev1.Pod{
 		notReadyPod("dozuki-app-abc123", testRepo+"/monolith-app:"+testImageTag),
@@ -138,6 +157,30 @@ func TestAssertSlimImages_NotReadyDoesNotSatisfyPositiveAssertions(t *testing.T)
 	err := assertSlimImages(pods, testRepo, testImageTag, testBeanstalkTag, testNextjsTag)
 	if err == nil {
 		t.Fatal("expected failure: the only monolith-app pod is not Ready, so assertion 1 must fail")
+	}
+}
+
+func TestAssertSlimImages_EmptyVersionVarsNameTheField(t *testing.T) {
+	cases := []struct {
+		name                                       string
+		imageRepository, imageTag, beanTag, njsTag string
+		wantInError                                string
+	}{
+		{"empty image_repository", "", testImageTag, testBeanstalkTag, testNextjsTag, "image_repository"},
+		{"empty image_tag", testRepo, "", testBeanstalkTag, testNextjsTag, "image_tag"},
+		{"empty beanstalkd_tag", testRepo, testImageTag, "", testNextjsTag, "beanstalkd_tag"},
+		{"empty nextjs_tag", testRepo, testImageTag, testBeanstalkTag, "", "nextjs_tag"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := assertSlimImages(slimPodSet(), c.imageRepository, c.imageTag, c.beanTag, c.njsTag)
+			if err == nil {
+				t.Fatalf("expected an error for %s, got nil", c.name)
+			}
+			if !strings.Contains(err.Error(), c.wantInError) {
+				t.Errorf("error %q does not name the empty field %q", err.Error(), c.wantInError)
+			}
+		})
 	}
 }
 

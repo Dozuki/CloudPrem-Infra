@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 )
 
@@ -27,7 +28,8 @@ type RunManifest struct {
 	// AppliedRef write points (Provision, Upgrade - phases.go) rather than derived from
 	// the ref string. Empty on a manifest written before this field existed; callers
 	// must use teardownRefAndSide (or reimplement its fallback) rather than reading
-	// this field raw.
+	// this field raw. Must be "" (predates the field), "baseline", or "target" -
+	// teardownRefAndSide rejects any other value rather than silently converting it.
 	AppliedSide  string `json:"applied_side,omitempty"`
 	BaselineRev  int    `json:"baseline_rev"` // helm revision before upgrade (0 until set)
 	Namespace    string `json:"namespace"`
@@ -88,18 +90,30 @@ type RunManifest struct {
 // nil either way), so baseline and target render identically regardless of which one
 // this fallback guesses. The fallback's guess can be wrong in the abstract; it can
 // never be wrong in a way that changes the rendered env.hcl.
-func teardownRefAndSide(rm *RunManifest) (string, Side) {
+//
+// The AppliedSide -> Side conversion below is a plain string-to-defined-type
+// conversion, which Go never rejects at compile or run time even for a value that
+// matches neither SideBaseline nor SideTarget - a hand-edited or corrupted manifest
+// JSON blob could carry applied_side: "bogus" and this function would otherwise
+// return that as a well-typed Side silently. Validated explicitly here so a malformed
+// manifest fails teardown with a clear error instead of prepareWorktreeSide (or
+// something further downstream) misbehaving on an unrecognized Side value.
+func teardownRefAndSide(rm *RunManifest) (string, Side, error) {
 	ref := rm.AppliedRef
 	if ref == "" {
 		ref = rm.ToRef
 	}
 	if rm.AppliedSide != "" {
-		return ref, Side(rm.AppliedSide)
+		side := Side(rm.AppliedSide)
+		if side != SideBaseline && side != SideTarget {
+			return "", "", fmt.Errorf("manifest has malformed applied_side %q (want %q or %q)", rm.AppliedSide, SideBaseline, SideTarget)
+		}
+		return ref, side, nil
 	}
 	if rm.Scenario == "upgrade" && rm.AppliedRef == rm.FromRef && rm.FromRef != rm.ToRef {
-		return ref, SideBaseline
+		return ref, SideBaseline, nil
 	}
-	return ref, SideTarget
+	return ref, SideTarget, nil
 }
 
 // ManifestStore persists a RunManifest keyed by state prefix (e.g. "run1-min/").

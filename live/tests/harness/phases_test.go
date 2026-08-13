@@ -242,11 +242,24 @@ func TestValidatePreconditionsPassesWhenTargetApplied(t *testing.T) {
 	}
 }
 
-func TestValidatePreconditionsSkipsNonUpgradeScenarios(t *testing.T) {
+func TestValidatePreconditionsErrorsOnStaleManifestForNonUpgradeScenarios(t *testing.T) {
 	for _, scenario := range []string{"fresh", "recover"} {
 		rm := &RunManifest{Scenario: scenario, FromRef: "v1", ToRef: "v2", AppliedRef: "v1"}
+		err := validatePreconditions(rm)
+		if err == nil {
+			t.Fatalf("validatePreconditions(%s) = nil, want an error (manifest shows a stale applied ref)", scenario)
+		}
+		if !strings.Contains(err.Error(), "v1") || !strings.Contains(err.Error(), "v2") {
+			t.Errorf("validatePreconditions(%s) error %q does not mention both refs", scenario, err.Error())
+		}
+	}
+}
+
+func TestValidatePreconditionsPassesForNonUpgradeScenariosWhenTargetApplied(t *testing.T) {
+	for _, scenario := range []string{"fresh", "recover"} {
+		rm := &RunManifest{Scenario: scenario, FromRef: "v1", ToRef: "v2", AppliedRef: "v2"}
 		if err := validatePreconditions(rm); err != nil {
-			t.Fatalf("validatePreconditions(%s) = %v, want nil (precondition only applies to upgrade)", scenario, err)
+			t.Fatalf("validatePreconditions(%s) = %v, want nil (AppliedRef already equals ToRef)", scenario, err)
 		}
 	}
 }

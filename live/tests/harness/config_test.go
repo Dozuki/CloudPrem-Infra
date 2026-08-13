@@ -99,12 +99,12 @@ func TestVersionDefaults(t *testing.T) {
 		t.Errorf("v6.0 chart_version = %v, want 0.4.1 (inherited default)", old["chart_version"])
 	}
 
-	// VersionVar: ref override wins, else default.
-	if got := m.VersionVar("v6.0", "image_tag"); got != "old-app" {
-		t.Errorf("VersionVar(v6.0,image_tag) = %v, want old-app", got)
+	// EffectiveVersionVar with no config/side overrides: ref override wins, else default.
+	if got := m.EffectiveVersionVar(cfg, "v6.0", SideBaseline, "image_tag"); got != "old-app" {
+		t.Errorf("EffectiveVersionVar(v6.0,image_tag) = %v, want old-app", got)
 	}
-	if got := m.VersionVar("v7.1.2", "chart_version"); got != "0.4.1" {
-		t.Errorf("VersionVar(v7.1.2,chart_version) = %v, want 0.4.1", got)
+	if got := m.EffectiveVersionVar(cfg, "v7.1.2", SideTarget, "chart_version"); got != "0.4.1" {
+		t.Errorf("EffectiveVersionVar(v7.1.2,chart_version) = %v, want 0.4.1", got)
 	}
 
 	// VersionProfileExists is true for ANY ref once defaults are set.

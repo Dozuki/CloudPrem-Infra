@@ -182,18 +182,6 @@ func (m *Matrix) MergedInputs(c Config, ref string, side Side) map[string]interf
 	return out
 }
 
-// VersionVar returns a single version variable for a ref: the ref-specific
-// entry wins, otherwise the version_defaults value (nil if neither sets it).
-// Config-unaware - EffectiveVersionVar is the config-and-side-aware equivalent.
-func (m *Matrix) VersionVar(ref, key string) interface{} {
-	if rv, ok := m.Versions[ref]; ok {
-		if v, ok := rv[key]; ok {
-			return v
-		}
-	}
-	return m.VersionDefaults[key]
-}
-
 // EffectiveVersionVar resolves a single version-var key's precedence (feature_flags ->
 // version_defaults -> versions[ref] -> the config's side map). It is NOT a drop-in
 // substitute for MergedInputs on every key: MergedInputs filters feature_flags through
