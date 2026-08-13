@@ -739,7 +739,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		status := statusOr(m.flags.wikiStatus, http.StatusCreated)
 		w.WriteHeader(status)
 		if status == http.StatusCreated {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "title": body["title"]})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "title": body["title"], "revisionid": appPassMockWikiRevisionID})
 		} else if m.flags.echoAuthTokenInWikiError {
 			// Simulates a real failure mode: a non-2xx response that echoes request
 			// state (here, the caller's own Authorization header) back into its body,
@@ -751,8 +751,10 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		m.assertAuth(r)
 		switch r.Method {
 		case http.MethodGet:
+			// revisionid is deliberately NULL here: a live wiki CATEGORY GET returns
+			// null (VERIFIED), and only the CREATE response carries the real value.
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "revisionid": appPassMockWikiRevisionID})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "revisionid": nil})
 		case http.MethodDelete:
 			m.assertNoRevisionIDInBody(r, "delete wiki")
 			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockWikiRevisionID) {
@@ -770,7 +772,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		switch {
 		case path == "/api/2.0/user/media/uploads" && r.Method == http.MethodPost:
 			m.handleUpload(w, r)
-		case strings.HasPrefix(path, "/api/2.0/user/media/video/") && r.Method == http.MethodGet:
+		case strings.HasPrefix(path, "/api/2.0/user/media/GuideVideoObject/") && r.Method == http.MethodGet:
 			m.assertAuth(r)
 			m.handleVideoStatus(w)
 		case r.Method == http.MethodDelete:
@@ -870,7 +872,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		m.recordDelete("course")
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("/api/courses/_shared/getCourse", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/bff-api/courses/_shared/getCourse", func(w http.ResponseWriter, r *http.Request) {
 		m.assertAuth(r)
 		wikiid := int64(900)
 		if m.flags.getCourseWrongWikiID {
@@ -1019,7 +1021,16 @@ func (m *appPassMock) handleMediaDelete(w http.ResponseWriter, r *http.Request, 
 		http.NotFound(w, r)
 		return
 	}
-	m.recordDelete("media:" + parts[0])
+	// The live API rejects the harness's own asset labels on this segment with a 400,
+	// so the mock only accepts the mapped API media types and translates back for the
+	// teardown-order assertions.
+	label, ok := map[string]string{"GuideImage": "image", "Document": "document", "GuideVideoObject": "video"}[parts[0]]
+	if !ok {
+		m.t.Errorf("media delete path segment = %q, want an API media type (GuideImage/Document/GuideVideoObject)", parts[0])
+		http.Error(w, `{"message":"Invalid type provided in the route."}`, http.StatusBadRequest)
+		return
+	}
+	m.recordDelete("media:" + label)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1126,7 +1137,10 @@ func (m *appPassMock) handleGetGuide(w http.ResponseWriter) {
 		steps = append(steps, map[string]interface{}{
 			"stepid": 602,
 			"media": map[string]interface{}{
-				"type": "object",
+				// READ type, deliberately not the "object" write type — the API is
+				// asymmetric here (VERIFIED live) and matching the write value on
+				// read-back finds no video step at all.
+				"type": "video",
 				"data": videoData,
 			},
 		})

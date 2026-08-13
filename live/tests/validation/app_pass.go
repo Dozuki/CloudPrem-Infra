@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
@@ -225,9 +226,23 @@ func kubectlExecRunner() execRunner {
 // nothing outside it — the same posture endpoints.go documents for CheckEndpoint. If
 // AppPass is ever pointed at a static or shared credential, or a stack that outlives
 // the run, this must be revisited.
+// The cookie jar is load-bearing for stage 7, not incidental. The Next.js /bff-api
+// surface is COOKIE-authenticated and ignores the "Authorization: api <token>" header
+// every other stage uses — VERIFIED live: /bff-api/courses/_shared/getCourse with the
+// api token alone returns 401 "Invalid login", and with the session cookie alone returns
+// 200. The cookie is set by the stage-1 token mint (POST /api/2.0/user/token) on the same
+// response that returns the authToken, so a jar on this client is all that is needed to
+// carry it forward; nothing has to parse or store it by hand. The cookie's name is
+// site-scoped (session_<siteid>, e.g. session_2 on min_default), which is the other
+// reason to let the jar handle it rather than matching on a hardcoded name.
+//
+// cookiejar.New(nil) never returns an error (documented), so the error is discarded
+// rather than propagated through every caller of this constructor.
 func newAppPassClient() *http.Client {
+	jar, _ := cookiejar.New(nil)
 	return &http.Client{
 		Timeout:   30 * time.Second,
+		Jar:       jar,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
 }
@@ -959,19 +974,23 @@ func stage3CreateWiki(ctx context.Context, deps appPassDeps, base, authToken, ru
 	if !ok || gotTitle == "" {
 		return 0, "", fmt.Errorf("create wiki response missing title")
 	}
+	// The wiki's revisionid is captured HERE, from the create response, and closed over
+	// below. It cannot be re-fetched at teardown time the way the guide's can: a wiki
+	// CATEGORY GET returns "revisionid": null (and "source_revisionid": null with it),
+	// while the CREATE response carries the real value. VERIFIED live — create returned
+	// revisionid 4, the follow-up GET returned null, DELETE without the param 422'd
+	// ("field":"revisionid","code":"missing_field"), and DELETE with the create-time 4
+	// returned 204. This is why appPassFetchRevisionID is NOT used for the wiki; it
+	// remains correct for the GUIDE, whose GET does return a non-null revisionid.
+	wikiRevisionID, ok := idField(res.json, "revisionid")
+	if !ok {
+		return 0, "", fmt.Errorf("create wiki response missing revisionid")
+	}
 	stack.push(appPassTeardownEntry{
 		kind: "wiki",
 		do: func(ctx context.Context, deps appPassDeps, base, authToken string) error {
 			wikiURL := base + "/api/2.0/wikis/CATEGORY/" + url.PathEscape(gotTitle)
-			// DELETE requires ?revisionid= as a query param (VERIFIED) — fetch the
-			// category's current revisionid immediately beforehand, the same
-			// GET-then-act pattern stage 6 already uses for the guide (see
-			// appPassFetchRevisionID).
-			revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, wikiURL)
-			if rerr != nil {
-				return fmt.Errorf("delete wiki: %w", rerr)
-			}
-			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s?revisionid=%d", wikiURL, revisionID), authToken, nil)
+			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s?revisionid=%d", wikiURL, wikiRevisionID), authToken, nil)
 			if err != nil {
 				return err
 			}
@@ -1057,7 +1076,13 @@ func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken stri
 	stack.push(appPassTeardownEntry{
 		kind: "media:" + assetType,
 		do: func(ctx context.Context, deps appPassDeps, base, authToken string) error {
-			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s/api/2.0/user/media/%s/%d", base, assetType, itemID), authToken, nil)
+			// The path segment is the API's media TYPE, not the harness's asset label —
+			// see appPassMediaAPIType. Passing assetType straight through 400s.
+			mediaType, terr := appPassMediaAPIType(assetType)
+			if terr != nil {
+				return fmt.Errorf("delete media %s/%d: %w", assetType, itemID, terr)
+			}
+			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s/api/2.0/user/media/%s/%d", base, mediaType, itemID), authToken, nil)
 			if err != nil {
 				return err
 			}
@@ -1069,6 +1094,26 @@ func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken stri
 		},
 	})
 	return id, nil
+}
+
+// appPassMediaAPIType maps the harness's own asset label to the media TYPE the 2.0 API
+// expects as a path segment on /api/2.0/user/media/{type}/{id}. The two vocabularies are
+// NOT the same, and the API rejects the harness's labels outright — VERIFIED live:
+// GET /api/2.0/user/media/video/1 and DELETE /api/2.0/user/media/image/2 both return 400
+// "Invalid type provided in the route. Type must one of: GuideImage, GuideVideoObject,
+// GuideEmbedObject, Document.", while the mapped forms return 200 and 204 respectively.
+// GuideEmbedObject is the fourth legal value and AppPass never produces one.
+func appPassMediaAPIType(assetType string) (string, error) {
+	switch assetType {
+	case "image":
+		return "GuideImage", nil
+	case "document":
+		return "Document", nil
+	case "video":
+		return "GuideVideoObject", nil
+	default:
+		return "", fmt.Errorf("no API media type for asset label %q", assetType)
+	}
 }
 
 // stage4WaitForVideoReady polls the video status route every appPassVideoPollInterval
@@ -1083,7 +1128,11 @@ func stage4WaitForVideoReady(ctx context.Context, deps appPassDeps, clk appPassC
 			return ctx.Err()
 		default:
 		}
-		res, err := deps.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/api/2.0/user/media/video/%d", base, videoID), authToken, nil)
+		videoType, terr := appPassMediaAPIType("video")
+		if terr != nil {
+			return fmt.Errorf("video status poll: %w", terr)
+		}
+		res, err := deps.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/api/2.0/user/media/%s/%d", base, videoType, videoID), authToken, nil)
 		if err != nil {
 			return fmt.Errorf("video status poll: %w", err)
 		}
@@ -1223,12 +1272,12 @@ func stage5VerifyRoundTrip(ctx context.Context, deps appPassDeps, base, authToke
 	if res.status != http.StatusOK {
 		return nil, fmt.Errorf("get guide: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
-	hasImage, hasObject := appPassGuideStepMediaTypes(res.json)
+	hasImage, hasVideo := appPassGuideStepMediaTypes(res.json)
 	if !hasImage {
 		return nil, fmt.Errorf("get guide: no image media found in steps[]")
 	}
-	if !hasObject {
-		return nil, fmt.Errorf("get guide: no object media found in steps[]")
+	if !hasVideo {
+		return nil, fmt.Errorf("get guide: no video media found in steps[]")
 	}
 	if !appPassGuideHasDocument(res.json, documentID) {
 		return nil, fmt.Errorf("get guide: documents[] does not contain documentid %d", documentID)
@@ -1236,7 +1285,18 @@ func stage5VerifyRoundTrip(ctx context.Context, deps appPassDeps, base, authToke
 	return res.json, nil
 }
 
-func appPassGuideStepMediaTypes(guide map[string]interface{}) (hasImage, hasObject bool) {
+// appPassStepVideoWriteType / appPassStepVideoReadType exist as a PAIR because the API is
+// asymmetric about a video step's media.type: it is WRITTEN as "object" and READ BACK as
+// "video". VERIFIED live — a step created with media.type "object" (201) reads back from
+// GET /api/2.0/guides/{id} as {"stepid":2,"media":{"type":"video",...}}. Matching the
+// write value on read silently finds no video step at all, which is exactly what the
+// original single "object" constant did here and in appPassGuideVideoURL.
+const (
+	appPassStepVideoWriteType = "object"
+	appPassStepVideoReadType  = "video"
+)
+
+func appPassGuideStepMediaTypes(guide map[string]interface{}) (hasImage, hasVideo bool) {
 	steps, _ := guide["steps"].([]interface{})
 	for _, s := range steps {
 		step, ok := s.(map[string]interface{})
@@ -1250,11 +1310,11 @@ func appPassGuideStepMediaTypes(guide map[string]interface{}) (hasImage, hasObje
 		switch t, _ := stringField(media, "type"); t {
 		case "image":
 			hasImage = true
-		case "object":
-			hasObject = true
+		case appPassStepVideoReadType:
+			hasVideo = true
 		}
 	}
-	return hasImage, hasObject
+	return hasImage, hasVideo
 }
 
 func appPassGuideHasDocument(guide map[string]interface{}, documentID int64) bool {
@@ -1354,7 +1414,7 @@ func appPassGuideVideoURL(guide map[string]interface{}) (string, error) {
 		if !ok {
 			continue
 		}
-		if t, _ := stringField(media, "type"); t != "object" {
+		if t, _ := stringField(media, "type"); t != appPassStepVideoReadType {
 			continue
 		}
 		data, ok := media["data"].(map[string]interface{})
@@ -1527,12 +1587,12 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 // ---------------------------------------------------------------------------------
 // stage 7: course
 //
-// UNVERIFIED SPOT (3 of 3, see the app-pass task brief): the live proof run failed at
-// stage 2 and never reached here. This stage only exercises the guide-CMS course APIs
-// (POST /api/2.0/courses and the getCourse ajax route) below; it does not yet call
-// through the app's separate Next.js-served course route, so that path remains
-// unverified against a live app. Left exactly as originally written; do not invent a
-// corrected contract here.
+// VERIFIED live 2026-08-13 against a kept smoke stack. This stage exercises BOTH the
+// guide-CMS course API (POST /api/2.0/courses, 201, returns wikiid + a non-null
+// revisionid) and the Next.js-served course route (POST /bff-api/courses/_shared/
+// getCourse, 200, response carries top-level wikiid/title/namespace:"COURSE"). The
+// earlier note here claiming this stage did not reach the Next.js route was wrong: it
+// always called it, just at the un-routed /api prefix, which is why it 404'd.
 // ---------------------------------------------------------------------------------
 
 func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64, runsalt string, stack *appPassTeardownStack) (int64, error) {
@@ -1569,7 +1629,12 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 		},
 	})
 
-	getRes, err := deps.doJSON(ctx, http.MethodPost, base+"/api/courses/_shared/getCourse", authToken, map[string]interface{}{"wikiid": wikiid})
+	// /bff-api, NOT /api. Next.js rewrites /bff-api/:path* -> /api/:path* internally
+	// (next.config.js), and /bff-api is the only prefix the gateway routes to the nextjs
+	// service, so the internal form 404s from outside — VERIFIED live: /api/... returned
+	// 404 (an HTML error page) and /bff-api/... returned 200. Auth here rides on the
+	// session cookie in the client's jar, not on authToken; see newAppPassClient.
+	getRes, err := deps.doJSON(ctx, http.MethodPost, base+"/bff-api/courses/_shared/getCourse", authToken, map[string]interface{}{"wikiid": wikiid})
 	if err != nil {
 		return 0, fmt.Errorf("getCourse request: %w", err)
 	}
@@ -1732,7 +1797,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "image", []int64{imageID}, 1); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
-	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "object", videoID, 2); err != nil {
+	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, appPassStepVideoWriteType, videoID, 2); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
 	if _, err := stage5VerifyRoundTrip(stageCtx, deps, base, authToken, guideID, documentID); err != nil {
