@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.4.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.3.0...v9.4.0) (2026-08-13)
+
+
+### Features
+
+* **logical:** tiered datadog enablement (logs, infra metrics, workload autoscaling) ([#505](https://github.com/Dozuki/CloudPrem-Infra/issues/505)) ([bdcb41f](https://github.com/Dozuki/CloudPrem-Infra/commit/bdcb41f28cad57ed77d84461302328cfb33f40eb))
+
 ## [9.3.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.3...v9.3.0) (2026-08-13)
 
 
