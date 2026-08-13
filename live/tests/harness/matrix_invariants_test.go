@@ -78,12 +78,32 @@ func TestPostStatusUsesEvidenceSubcommand(t *testing.T) {
 // way, a human must reconcile the three of matrix.yaml, dev-slim's env.hcl, and this
 // snapshot, then update whichever ones are behind.
 func TestSlimMatrixPinsMatchRecordedSnapshot(t *testing.T) {
-	wantSlimTargetVersions := map[string]interface{}{
-		"app_image_flavor": "slim",
-		"chart_version":    "3.1.1",
-		"image_tag":        "0.0.0-05d4e70bd52-mpcfix5",
-		"beanstalkd_tag":   "6f41576",
-		"nextjs_tag":       "0.0.0-f28af33fdb7",
+	// Per config, because the two slim configs are no longer required to agree.
+	// slim_fresh mirrors dev-slim's env.hcl, which is the original point of this guard.
+	// slim_upgrade deliberately LEADS dev-slim on chart_version: it exists to prove an
+	// upgrade path before the fleet takes it, so pinning it to whatever dev-slim already
+	// runs would mean the harness only ever tests a chart that has already shipped.
+	// Everything except chart_version still has to match, so an unnoticed image-tag drift
+	// is still a failure.
+	wantTargetVersions := map[string]map[string]interface{}{
+		"slim_fresh": {
+			"app_image_flavor": "slim",
+			"chart_version":    "3.1.1",
+			"image_tag":        "0.0.0-05d4e70bd52-mpcfix5",
+			"beanstalkd_tag":   "6f41576",
+			"nextjs_tag":       "0.0.0-f28af33fdb7",
+		},
+		// 3.3.0 is the first published chart pinning operator 4.2.2, the release that fixed
+		// the server-side-apply strategy defect (an install created below operator 4.1.0
+		// could not be upgraded past it: `spec.strategy.rollingUpdate: Forbidden`, forever).
+		// Move this to dev-slim's value once dev-slim is on 3.3.0 or newer.
+		"slim_upgrade": {
+			"app_image_flavor": "slim",
+			"chart_version":    "3.3.0",
+			"image_tag":        "0.0.0-05d4e70bd52-mpcfix5",
+			"beanstalkd_tag":   "6f41576",
+			"nextjs_tag":       "0.0.0-f28af33fdb7",
+		},
 	}
 
 	m, err := LoadMatrix("../matrix.yaml")
@@ -95,6 +115,10 @@ func TestSlimMatrixPinsMatchRecordedSnapshot(t *testing.T) {
 		cfg, err := m.Config(name)
 		if err != nil {
 			t.Fatalf("config %q: %v", name, err)
+		}
+		wantSlimTargetVersions := wantTargetVersions[name]
+		if wantSlimTargetVersions == nil {
+			t.Fatalf("config %q has no recorded snapshot; add one rather than skipping it", name)
 		}
 		checked++
 		if len(cfg.TargetVersions) != len(wantSlimTargetVersions) {

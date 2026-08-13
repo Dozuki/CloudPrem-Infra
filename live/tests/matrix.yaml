@@ -345,9 +345,17 @@ configs:
       alertmanager_slack_enabled: false
     # Baseline = legacy flavor from version_defaults (no baseline_versions needed).
     # Target flips to the slim set: the legacy->slim migration path, in place.
+    #
+    # chart 3.3.0, not 3.1.1: 3.1.1 pins operator 4.2.1, which cannot be applied over an
+    # install created below operator 4.1.0. Those older charts rendered no Deployment strategy
+    # key, so the API server defaulted spec.strategy with nobody owning it, and server-side
+    # apply cannot remove an unowned field - the upgrade fails with
+    # `spec.strategy.rollingUpdate: Forbidden` and retries forever. 3.3.0 pins operator 4.2.2,
+    # which renders explicit RollingUpdate values instead, so the apply lands and also heals an
+    # install already wedged on the old shape.
     target_versions:
       app_image_flavor: "slim"
-      chart_version: "3.1.1"
+      chart_version: "3.3.0"
       image_tag: "0.0.0-05d4e70bd52-mpcfix5"
       beanstalkd_tag: "6f41576"
       nextjs_tag: "0.0.0-f28af33fdb7"
