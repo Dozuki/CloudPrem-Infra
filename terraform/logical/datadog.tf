@@ -7,13 +7,31 @@
 # only on AWS (the flag is folded with var.cloud below so an Azure stack that
 # sets it gets nothing rather than a broken aws_eks_cluster index).
 #
-# Deliberately lean install. Log aggregation and container metrics stay on
-# CloudWatch/Container Insights; Datadog's job here is trace intake, the
-# admission-controller library injection (Single Step Instrumentation), and
-# the continuous profiler. Everything else the chart enables by default is
-# flipped off so we don't ship (and pay for) a second copy of telemetry we
-# already collect. The node agent daemonset itself cannot be disabled - every
-# node bills as a Datadog infra host; that is the floor for SSI.
+# Lean core plus three opt-in tiers. The core install (enable_datadog alone)
+# is trace intake, the admission-controller library injection (Single Step
+# Instrumentation), and the continuous profiler - everything else the chart
+# enables by default is flipped off so we don't ship (and pay for) a second
+# copy of telemetry we already collect. The node agent daemonset itself cannot
+# be disabled - every node bills as a Datadog infra host; that is the floor
+# for SSI.
+#
+# Each tier is a separate bool, all default false, all requiring
+# enable_datadog:
+#
+#   enable_datadog_logs   log collection (containerCollectAll). Dual-ships
+#                         with CloudWatch/Container Insights on purpose until
+#                         a migration decision is made - do not read this as
+#                         "logs moved to Datadog".
+#   enable_datadog_infra  kube-state-metrics core, cluster checks, the
+#                         orchestrator explorer, process/container collection
+#                         and Kubernetes event collection.
+#   enable_datadog_dpa    Remote Configuration + the workload autoscaling
+#                         controller and its CRD, plus the app key. Installs
+#                         the machinery only; creating a DatadogPodAutoscaler
+#                         is a separate deliberate act.
+#
+# The tiers are being cost-measured on one env at a time. Turning one on
+# fleet-wide is a decision that needs the measured numbers, not a default.
 #
 # SSI scoping: when instrumentation.targets is non-empty the cluster agent
 # ONLY injects pods matching a target - there is no instrument-everything
@@ -80,9 +98,18 @@ resource "kubernetes_secret_v1" "datadog_api_key" {
     namespace = kubernetes_namespace_v1.datadog[0].metadata[0].name
   }
 
-  data = {
-    "api-key" = data.vault_kv_secret_v2.datadog[0].data["api_key"]
-  }
+  # app-key rides in the same secret only when the workload autoscaling tier is
+  # on: the cluster agent authenticates its recommendation calls with an app
+  # key, and datadog.appKeyExistingSecret's contract is the "app-key" field of
+  # the secret already named by apiKeyExistingSecret.
+  data = merge(
+    {
+      "api-key" = data.vault_kv_secret_v2.datadog[0].data["api_key"]
+    },
+    var.enable_datadog_dpa ? {
+      "app-key" = data.vault_kv_secret_v2.datadog[0].data["app_key"]
+    } : {},
+  )
 }
 
 resource "helm_release" "datadog" {
@@ -101,11 +128,18 @@ resource "helm_release" "datadog" {
   wait    = true
 
   values = [yamlencode({
-    # Declarative SSI works with Remote Config off; RC only matters for
-    # UI/Fleet-Automation-driven enablement, which we don't want competing
-    # with terraform.
+    # Declarative SSI works with Remote Config off, and off is still the
+    # default here. RC goes on only with the workload autoscaling tier, which
+    # requires it: the cluster agent receives its scaling recommendations over
+    # the RC channel, so there is no DPA without it.
+    #
+    # Terraform remains the source of truth for agent CONFIG. RC being on
+    # opens a second write path (Datadog UI / Fleet Automation) that Terraform
+    # does not see. RC traffic belonging to the autoscaling feature's own data
+    # plane is expected; any RC-originated change to logs, APM, metrics or
+    # feature config is config drift and gets escalated, not absorbed.
     remoteConfiguration = {
-      enabled = false
+      enabled = var.enable_datadog_dpa
     }
 
     datadog = {
@@ -118,27 +152,43 @@ resource "helm_release" "datadog" {
 
       tags = ["env:${local.datadog_env}"]
 
-      # ---- lean: flip the chart defaults that are on ----
-      collectEvents = false
+      # The app key is only mounted for the workload autoscaling tier. Empty
+      # string is the chart default and is falsy in its templates, so the
+      # tier-off render is unchanged.
+      appKeyExistingSecret = var.enable_datadog_dpa ? kubernetes_secret_v1.datadog_api_key[0].metadata[0].name : ""
+
+      # Gates the datadog-crds subchart (DatadogPodAutoscaler) and the cluster
+      # agent's workload autoscaling controller. Needs remoteConfiguration on,
+      # above. NOT the datadog-operator: the CRD ships with the crds subchart
+      # and the controller lives in the cluster agent, so operator stays off.
+      autoscaling = {
+        workload = {
+          enabled = var.enable_datadog_dpa
+        }
+      }
+
+      # ---- tiers: off by default, same render as the lean install ----
+      collectEvents = var.enable_datadog_infra
       kubeStateMetricsCore = {
-        enabled = false
+        enabled = var.enable_datadog_infra
       }
       clusterChecks = {
-        enabled = false
+        enabled = var.enable_datadog_infra
       }
       orchestratorExplorer = {
-        enabled = false
+        enabled = var.enable_datadog_infra
       }
       processAgent = {
-        processCollection   = false
-        processDiscovery    = false
-        containerCollection = false
+        processCollection   = var.enable_datadog_infra
+        processDiscovery    = var.enable_datadog_infra
+        containerCollection = var.enable_datadog_infra
       }
-      # Already off by default; pinned so a chart bump can't silently start
-      # double-shipping logs we keep in CloudWatch.
+      # Off by default and pinned so a chart bump can't silently start
+      # double-shipping logs we keep in CloudWatch. When the tier is on the
+      # dual-ship is deliberate and time-boxed, not a migration.
       logs = {
-        enabled             = false
-        containerCollectAll = false
+        enabled             = var.enable_datadog_logs
+        containerCollectAll = var.enable_datadog_logs
       }
       networkMonitoring = {
         enabled = false
@@ -219,6 +269,15 @@ resource "helm_release" "datadog" {
     # racing the webhook starts uninstrumented instead of being blocked.
     clusterAgent = {
       enabled = true
+      # KSM core, the orchestrator explorer, cluster checks and the workload
+      # autoscaling controller all run here, so the cluster agent needs real
+      # headroom once any tier is on. Sized for the tiers-on case rather than
+      # varying per tier: a request change is a pod roll, and one shape is
+      # easier to reason about than four.
+      resources = {
+        requests = { cpu = "200m", memory = "512Mi" }
+        limits   = { memory = "1Gi" }
+      }
       admissionController = {
         enabled = true
         # Pinned rather than inherited from the chart default: the documented
@@ -237,14 +296,29 @@ resource "helm_release" "datadog" {
       containers = {
         agent = {
           # No requests = starved CFS shares on packed nodes = startup-probe
-          # kill loop (observed live 2026-07-15).
+          # kill loop (observed live 2026-07-15). Requests stay at the
+          # measured-healthy lean figure so scheduling pressure is unchanged;
+          # the limit doubles because log tailing and process collection are
+          # the documented memory adders and 512Mi is where the lean agent
+          # already sat.
           resources = {
             requests = { cpu = "100m", memory = "256Mi" }
-            limits   = { memory = "512Mi" }
+            limits   = { memory = "1Gi" }
           }
           startupProbe = {
             failureThreshold = 24
           }
+        }
+        traceAgent = {
+          # Prometheus scrapes were 21.8% of span volume in the APM pilot at
+          # zero analytical value - every /metrics pull became a trace. Drop
+          # them at the trace agent rather than paying to ingest and filter.
+          env = [
+            {
+              name  = "DD_APM_IGNORE_RESOURCES"
+              value = "GET /metrics"
+            },
+          ]
         }
       }
     }
