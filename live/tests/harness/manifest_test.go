@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -99,7 +100,10 @@ func TestTeardownRefAndSideProvisionOnlyFailure(t *testing.T) {
 		Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release",
 		AppliedRef: "v6.0.3", AppliedSide: string(SideBaseline),
 	}
-	ref, side := teardownRefAndSide(rm)
+	ref, side, err := teardownRefAndSide(rm)
+	if err != nil {
+		t.Fatalf("teardownRefAndSide error = %v, want nil", err)
+	}
 	if ref != "v6.0.3" || side != SideBaseline {
 		t.Fatalf("teardownRefAndSide = (%q, %q), want (v6.0.3, baseline)", ref, side)
 	}
@@ -113,7 +117,10 @@ func TestTeardownRefAndSideCompletedUpgrade(t *testing.T) {
 		Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release",
 		AppliedRef: "v6.1-release", AppliedSide: string(SideTarget),
 	}
-	ref, side := teardownRefAndSide(rm)
+	ref, side, err := teardownRefAndSide(rm)
+	if err != nil {
+		t.Fatalf("teardownRefAndSide error = %v, want nil", err)
+	}
 	if ref != "v6.1-release" || side != SideTarget {
 		t.Fatalf("teardownRefAndSide = (%q, %q), want (v6.1-release, target)", ref, side)
 	}
@@ -130,9 +137,30 @@ func TestTeardownRefAndSideFromRefEqualsToRefExplicitSideWins(t *testing.T) {
 		Scenario: "upgrade", FromRef: "v9.0", ToRef: "v9.0",
 		AppliedRef: "v9.0", AppliedSide: string(SideBaseline),
 	}
-	ref, side := teardownRefAndSide(rm)
+	ref, side, err := teardownRefAndSide(rm)
+	if err != nil {
+		t.Fatalf("teardownRefAndSide error = %v, want nil", err)
+	}
 	if ref != "v9.0" || side != SideBaseline {
 		t.Fatalf("teardownRefAndSide = (%q, %q), want (v9.0, baseline) - the explicit AppliedSide field must win when refs are equal", ref, side)
+	}
+}
+
+// TestTeardownRefAndSideRejectsMalformedAppliedSide covers a manifest whose
+// applied_side JSON field was hand-edited or corrupted to a value that is neither
+// "baseline" nor "target". teardownRefAndSide must fail loud with a clear error
+// rather than returning a Side value nothing downstream recognizes.
+func TestTeardownRefAndSideRejectsMalformedAppliedSide(t *testing.T) {
+	rm := &RunManifest{
+		Scenario: "upgrade", FromRef: "v6.0.3", ToRef: "v6.1-release",
+		AppliedRef: "v6.0.3", AppliedSide: "bogus",
+	}
+	_, _, err := teardownRefAndSide(rm)
+	if err == nil {
+		t.Fatal("teardownRefAndSide error = nil, want an error for malformed applied_side")
+	}
+	if !strings.Contains(err.Error(), "bogus") {
+		t.Errorf("error %q does not mention the malformed value", err.Error())
 	}
 }
 
@@ -181,7 +209,10 @@ func TestTeardownRefAndSideFallbackMatchesPreSideSemantics(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ref, side := teardownRefAndSide(c.rm)
+			ref, side, err := teardownRefAndSide(c.rm)
+			if err != nil {
+				t.Fatalf("teardownRefAndSide error = %v, want nil", err)
+			}
 			if ref != c.wantRef || side != c.wantSide {
 				t.Fatalf("teardownRefAndSide = (%q, %q), want (%q, %q)", ref, side, c.wantRef, c.wantSide)
 			}

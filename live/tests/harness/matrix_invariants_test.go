@@ -62,6 +62,138 @@ func TestPostStatusUsesEvidenceSubcommand(t *testing.T) {
 	}
 }
 
+// TestSlimMatrixPinsMatchRecordedSnapshot guards matrix.yaml's own promise on
+// slim_fresh/slim_upgrade's target_versions comment: "Pins mirror infra-live
+// standard/_mcp/dev/us-east-1/slim/env.hcl (dev-slim). Update these when dev-slim's
+// env.hcl moves." Nothing enforced that promise - a matrix.yaml edit that changed one
+// of these pins (by hand, or by a bad merge) without also bumping dev-slim's env.hcl
+// (or vice versa) would drift silently, since both configs are nightly-only and get no
+// PR coverage. This test cannot reach infra-live or dev-slim's live env.hcl (no network,
+// no cross-repo read - see the CONSTRAINTS this harness runs under), so it is not a
+// live drift check against the real source of truth. It is a recorded-snapshot check:
+// wantSlimTargetVersions below is the pin set as of the last time someone confirmed
+// matrix.yaml matched dev-slim. If this test fails, it means EITHER matrix.yaml moved
+// without this snapshot being updated to match, OR (less likely, but just as real) this
+// snapshot was hand-edited without checking matrix.yaml still matches dev-slim - either
+// way, a human must reconcile the three of matrix.yaml, dev-slim's env.hcl, and this
+// snapshot, then update whichever ones are behind.
+func TestSlimMatrixPinsMatchRecordedSnapshot(t *testing.T) {
+	// Per config, because the two slim configs are no longer required to agree.
+	// slim_fresh mirrors dev-slim's env.hcl, which is the original point of this guard.
+	// slim_upgrade deliberately LEADS dev-slim on chart_version: it exists to prove an
+	// upgrade path before the fleet takes it, so pinning it to whatever dev-slim already
+	// runs would mean the harness only ever tests a chart that has already shipped.
+	// Everything except chart_version still has to match, so an unnoticed image-tag drift
+	// is still a failure.
+	wantTargetVersions := map[string]map[string]interface{}{
+		"slim_fresh": {
+			"app_image_flavor": "slim",
+			"chart_version":    "3.1.1",
+			"image_tag":        "0.0.0-05d4e70bd52-mpcfix5",
+			"beanstalkd_tag":   "6f41576",
+			"nextjs_tag":       "0.0.0-f28af33fdb7",
+		},
+		// 3.3.0 is the first published chart pinning operator 4.2.2, the release that fixed
+		// the server-side-apply strategy defect (an install created below operator 4.1.0
+		// could not be upgraded past it: `spec.strategy.rollingUpdate: Forbidden`, forever).
+		// Move this to dev-slim's value once dev-slim is on 3.3.0 or newer.
+		"slim_upgrade": {
+			"app_image_flavor": "slim",
+			"chart_version":    "3.3.0",
+			"image_tag":        "0.0.0-05d4e70bd52-mpcfix5",
+			"beanstalkd_tag":   "6f41576",
+			"nextjs_tag":       "0.0.0-f28af33fdb7",
+		},
+	}
+
+	// slim_legacy_appbump is not in the loop above because its whole point is that the two
+	// SIDES differ, which a single target-side snapshot cannot express. Assert the property
+	// directly instead: both sides pinned, and image_tag the only difference between them.
+	// Without this, the config could silently decay into a chart bump or a flavor flip and
+	// still look like an app-only test.
+	t.Run("slim_legacy_appbump moves only image_tag", func(t *testing.T) {
+		m, err := LoadMatrix("../matrix.yaml")
+		if err != nil {
+			t.Fatalf("LoadMatrix: %v", err)
+		}
+		cfg, err := m.Config("slim_legacy_appbump")
+		if err != nil {
+			t.Fatalf("config slim_legacy_appbump: %v", err)
+		}
+		if len(cfg.BaselineVersions) == 0 || len(cfg.TargetVersions) == 0 {
+			t.Fatal("slim_legacy_appbump must pin BOTH sides explicitly; an inherited side lets version_defaults move one of them")
+		}
+		for _, side := range []struct {
+			name string
+			vars map[string]interface{}
+		}{{"baseline", cfg.BaselineVersions}, {"target", cfg.TargetVersions}} {
+			if got := side.vars["chart_version"]; got != "2.10.0" {
+				t.Errorf("%s chart_version = %v, want 2.10.0 pinned explicitly", side.name, got)
+			}
+			if _, ok := side.vars["app_image_flavor"]; ok {
+				t.Errorf("%s sets app_image_flavor; this config must stay legacy on both sides", side.name)
+			}
+		}
+		if cfg.BaselineVersions["image_tag"] == cfg.TargetVersions["image_tag"] {
+			t.Error("baseline and target image_tag are equal; this config would test nothing")
+		}
+		// Any key present on one side must be present on the other with an equal value,
+		// image_tag excepted - that is the one thing allowed to move.
+		for _, pair := range []struct{ a, b map[string]interface{} }{
+			{cfg.BaselineVersions, cfg.TargetVersions}, {cfg.TargetVersions, cfg.BaselineVersions},
+		} {
+			for key, want := range pair.a {
+				if key == "image_tag" {
+					continue
+				}
+				got, ok := pair.b[key]
+				if !ok {
+					t.Errorf("version var %q is set on only one side; the sides must differ in image_tag alone", key)
+					continue
+				}
+				if got != want {
+					t.Errorf("version var %q differs across sides (%v vs %v); only image_tag may move", key, want, got)
+				}
+			}
+		}
+	})
+
+	m, err := LoadMatrix("../matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	checked := 0
+	for _, name := range []string{"slim_fresh", "slim_upgrade"} {
+		cfg, err := m.Config(name)
+		if err != nil {
+			t.Fatalf("config %q: %v", name, err)
+		}
+		wantSlimTargetVersions := wantTargetVersions[name]
+		if wantSlimTargetVersions == nil {
+			t.Fatalf("config %q has no recorded snapshot; add one rather than skipping it", name)
+		}
+		checked++
+		if len(cfg.TargetVersions) != len(wantSlimTargetVersions) {
+			t.Errorf("config %q: target_versions has %d keys, recorded snapshot has %d — matrix.yaml and this test's snapshot have drifted apart (dev-slim's env.hcl may have moved; update both matrix.yaml and wantSlimTargetVersions to match, or revert whichever one is wrong)",
+				name, len(cfg.TargetVersions), len(wantSlimTargetVersions))
+			continue
+		}
+		for key, want := range wantSlimTargetVersions {
+			got, ok := cfg.TargetVersions[key]
+			if !ok {
+				t.Errorf("config %q: target_versions is missing key %q (recorded snapshot expects %v)", name, key, want)
+				continue
+			}
+			if got != want {
+				t.Errorf("config %q: target_versions[%q] = %v, recorded snapshot expects %v — matrix.yaml's slim pins moved; if this was a deliberate dev-slim env.hcl bump, update wantSlimTargetVersions in this test to match", name, key, got, want)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("neither slim_fresh nor slim_upgrade found in matrix.yaml; this guard checked nothing")
+	}
+}
+
 // TestMatrixConfigsSaltProducesUniqueCustomer guards Config.Salted's documented no-op
 // path (config.go): a base customer already at or past the 10-char terraform cap salts
 // to itself. The janitor (harness/janitor.go) already refuses to reason about a candidate

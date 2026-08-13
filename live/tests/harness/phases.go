@@ -462,19 +462,41 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 }
 
 // validatePreconditions enforces the ordering invariant Validate's target-side render
-// depends on: for an upgrade scenario, the manifest's AppliedRef must already equal
-// ToRef before Validate renders SideTarget. This used to be an unenforced assumption
-// ("AppliedRef == ToRef in every real ordering") - a standalone CLI `validate` run
-// between Provision and Upgrade would have AppliedRef == FromRef != ToRef and would
-// silently render the target's side-override map (BaselineVersions/TargetVersions)
-// against a stack still running baseline code. Converting the assumption into a real
-// precondition here is what makes rendering ToRef in Validate safe. Extracted as a
-// pure helper so the invariant is unit-testable without a worktree/terragrunt/cluster.
+// depends on: the manifest's AppliedRef must already equal ToRef before Validate
+// renders SideTarget. This used to be an unenforced assumption ("AppliedRef == ToRef
+// in every real ordering") checked only for the upgrade scenario - a standalone CLI
+// `validate` run between Provision and Upgrade would have AppliedRef == FromRef !=
+// ToRef and would silently render the target's side-override map (BaselineVersions/
+// TargetVersions) against a stack still running baseline code. Converting the
+// assumption into a real precondition here is what makes rendering ToRef in Validate
+// safe. Extracted as a pure helper so the invariant is unit-testable without a
+// worktree/terragrunt/cluster.
+//
+// fresh and recover apply ToRef directly in Provision (side is always SideTarget for
+// those two - see Provision's side selection), so AppliedRef should already equal
+// ToRef by the time Validate runs; there is no separate Upgrade phase for them. A
+// mismatch there is not the ordering bug upgrade guards against, but it is still a
+// stale-manifest condition Validate must not silently render against (e.g. the
+// manifest was reused across a matrix.yaml change that moved ToRef), so it gets the
+// same enforcement with a message describing the actual scenario rather than
+// upgrade's "run upgrade first" wording.
 func validatePreconditions(rm *RunManifest) error {
-	if rm.Scenario == "upgrade" && rm.AppliedRef != rm.ToRef {
+	if rm.AppliedRef == rm.ToRef {
+		// The ref comparison above is VACUOUS when from_ref == to_ref - a flavor flip or a
+		// chart-only bump applied in place. Provision records the BASELINE side under a ref
+		// that already equals ToRef, so ref equality proves nothing and the ordering
+		// invariant has to come from AppliedSide, which exists for exactly this ambiguity.
+		// Empty AppliedSide means a manifest written before that field existed; those keep
+		// the old ref-only behaviour rather than failing closed on data they never carried.
+		if rm.Scenario == "upgrade" && rm.AppliedSide == string(SideBaseline) {
+			return fmt.Errorf("validate expects the target side to be applied, but the manifest still shows the baseline side applied at ref %q — from_ref equals to_ref, so the refs alone cannot tell the sides apart; run upgrade first", rm.AppliedRef)
+		}
+		return nil
+	}
+	if rm.Scenario == "upgrade" {
 		return fmt.Errorf("validate expects the target ref to be applied, but the manifest still shows the baseline ref %q as applied (target %q) — run upgrade first", rm.AppliedRef, rm.ToRef)
 	}
-	return nil
+	return fmt.Errorf("validate expects ref %q to be applied for scenario %q, but the manifest shows %q as applied — the manifest may be stale (e.g. ToRef changed since provision ran)", rm.ToRef, rm.Scenario, rm.AppliedRef)
 }
 
 // Validate runs the post-apply assertion suite against the currently-applied ref.
@@ -657,7 +679,10 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	// (its own process, no in-memory context) get the side right when FromRef == ToRef
 	// makes the ref alone ambiguous. See teardownRefAndSide's doc comment for the
 	// pre-AppliedSide-manifest fallback.
-	ref, side := teardownRefAndSide(rm)
+	ref, side, serr := teardownRefAndSide(rm)
+	if serr != nil {
+		return fmt.Errorf("teardown: %w", serr)
+	}
 	p.ExtraInputs = rm.ExtraInputs // teardown must render the exact env.hcl the apply used
 	wt, tg, _, err := p.prepareWorktreeSide(ref, false, cfg, rm.DeleteAfter, side)
 	if err != nil {

@@ -54,10 +54,18 @@ func AssertSlimFlipComplete(ctx context.Context, kubeconfig, namespace, imageRep
 }
 
 // eligiblePod reports whether pod counts toward the slim-flip inventory at all:
-// phase Running or Succeeded. That alone excludes Failed pods, which is also how
-// an Evicted pod reports (phase Failed, reason Evicted) - there is no separate
-// check needed for it.
+// phase Running or Succeeded, AND not already terminating. Phase alone excludes
+// Failed pods, which is also how an Evicted pod reports (phase Failed, reason
+// Evicted) - there is no separate check needed for it. The DeletionTimestamp check
+// excludes a pod that is on its way out but hasn't flipped phase yet: a Terminating
+// pod can sit at phase Running with a stale Ready=True condition for several seconds,
+// and it is exactly the kind of leftover a stray/unrelated pod set (a prior release's
+// pod not yet garbage-collected, a manually-run debug pod, ...) would use to make
+// this assertion pass on evidence that doesn't describe the current rollout.
 func eligiblePod(pod corev1.Pod) bool {
+	if pod.DeletionTimestamp != nil {
+		return false
+	}
 	return pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodSucceeded
 }
 
@@ -102,8 +110,23 @@ func nonInitImages(pod corev1.Pod) []string {
 //  4. At least 1 Ready pod runs <repo>/web-nextjs:<nextjsTag> (the nextjs
 //     Deployment).
 func assertSlimImages(pods []corev1.Pod, imageRepository, imageTag, beanstalkdTag, nextjsTag string) error {
+	// Each of these is a distinct version-var key resolved via EffectiveVersionVar
+	// (harness/phases.go Validate) for the target side of rm.ToRef. Naming the exact
+	// key here - rather than letting an empty value fall through to a confusing
+	// "no Ready pod runs <repo>/monolith-app:" (trailing colon, no tag) message below -
+	// is what makes a matrix.yaml gap (a slim config missing one of these keys)
+	// diagnosable from the error text alone.
 	if imageRepository == "" {
 		return fmt.Errorf("slim-flip guard: config resolves no image_repository for the target side — cannot verify the flip")
+	}
+	if imageTag == "" {
+		return fmt.Errorf("slim-flip guard: config resolves no image_tag for the target side — cannot verify the flip")
+	}
+	if beanstalkdTag == "" {
+		return fmt.Errorf("slim-flip guard: config resolves no beanstalkd_tag for the target side — cannot verify the flip")
+	}
+	if nextjsTag == "" {
+		return fmt.Errorf("slim-flip guard: config resolves no nextjs_tag for the target side — cannot verify the flip")
 	}
 
 	monolithPrefix := imageRepository + "/monolith-app:"

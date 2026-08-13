@@ -345,9 +345,65 @@ configs:
       alertmanager_slack_enabled: false
     # Baseline = legacy flavor from version_defaults (no baseline_versions needed).
     # Target flips to the slim set: the legacy->slim migration path, in place.
+    #
+    # chart 3.3.0, not 3.1.1: 3.1.1 pins operator 4.2.1, which cannot be applied over an
+    # install created below operator 4.1.0. Those older charts rendered no Deployment strategy
+    # key, so the API server defaulted spec.strategy with nobody owning it, and server-side
+    # apply cannot remove an unowned field - the upgrade fails with
+    # `spec.strategy.rollingUpdate: Forbidden` and retries forever. 3.3.0 pins operator 4.2.2,
+    # which renders explicit RollingUpdate values instead, so the apply lands and also heals an
+    # install already wedged on the old shape.
     target_versions:
       app_image_flavor: "slim"
-      chart_version: "3.1.1"
+      chart_version: "3.3.0"
       image_tag: "0.0.0-05d4e70bd52-mpcfix5"
       beanstalkd_tag: "6f41576"
       nextjs_tag: "0.0.0-f28af33fdb7"
+  # Separates "the app image moved" from "the flavor flipped". slim_upgrade moves the flavor,
+  # the chart AND every image tag at once, so when it fails there is no way to tell which of
+  # those did it. This config holds everything still except image_tag: same legacy flavor both
+  # sides, chart 2.10.0 pinned explicitly on BOTH sides (not inherited, so a version_defaults
+  # bump cannot start moving the chart underneath it), same feature_flags as slim_upgrade.
+  # A failure here is an app-version problem; a failure only in slim_upgrade is the flavor flip.
+  #
+  # Both tags are real legacy builds of the app image: .10 (2026-07-28) -> .11 (2026-07-29,
+  # the newest clean legacy tag, and what version_defaults currently carries). The .12-tracing*
+  # tags are experiment builds and are deliberately not used here.
+  #
+  # The slim_ name prefix is required plumbing, not a claim about the flavor: golden_test.go
+  # excludes slim_-prefixed configs from goldenConfigs, and a config carrying
+  # baseline_versions/target_versions cannot be in goldenConfigs. Runtime slim behavior keys off
+  # the VALUES (app_image_flavor), which this config never sets, so it stays legacy on both sides.
+  #
+  # MANUAL DISPATCH ONLY, on purpose. No cron and no PR workflow selects it: the nightly runs
+  # the default set, 41-nightly-slim-fresh-cron runs slim_fresh, and the PR workflow's config
+  # list is hardcoded. This is a diagnostic you reach for when slim_upgrade fails and you need
+  # to know whether the app image or the flavor flip did it, not something to run every night.
+  #
+  # "Only image_tag moves" holds for the default ref pair. MergedInputs applies versions[ref]
+  # BEFORE the per-side maps, so hand-picking a ref that carries its own nextjs_tag or
+  # image_repository override could introduce a second difference. The invariant test asserts
+  # the two sides differ in image_tag alone; if you pin unusual refs, re-check that first.
+  - name: slim_legacy_appbump
+    env: min
+    feature_flags:
+      enable_bi: false
+      db_engine: aurora
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      protect_resources: false
+      enable_dr: false
+      rds_adopt_dr_cmk: false       # baseline is provisioned at an older ref; same CMK-immutability rationale as min_default
+      alarm_email: "devops@dozuki.com"
+      customer: "smoke"
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
+      alertmanager_slack_enabled: false
+    baseline_versions:
+      chart_version: "2.10.0"
+      image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.10"
+    target_versions:
+      chart_version: "2.10.0"
+      image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.11"
