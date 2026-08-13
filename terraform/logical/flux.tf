@@ -431,9 +431,51 @@ locals {
   app_stateful_scheduling = {
     for k, v in {
       opensearch = {
-        nodeSelector   = local.stateful_node_selector
-        tolerations    = local.stateful_tolerations
-        podAnnotations = local.do_not_disrupt_annotation
+        nodeSelector = local.stateful_node_selector
+        tolerations  = local.stateful_tolerations
+        # Pin stays below 3 replicas (a singleton or a transitional 2-node cluster
+        # still wants the 24h drift delay); at 3 the subchart PDB governs drains and
+        # the pin would only turn graceful drains back into force-kills, which is
+        # what took search down on one env 2026-08-12.
+        podAnnotations = var.opensearch_replicas >= 3 ? {} : local.do_not_disrupt_annotation
+        # singleNode=false drops discovery.type=single-node, and THAT is what makes the
+        # bootstrap checks fatal: with zen discovery and a non-loopback network.host
+        # (the chart sets 0.0.0.0) OpenSearch enters production mode and refuses to
+        # start if a limit is short, instead of just warning. The one that actually
+        # varies by node OS is vm.max_map_count, which nothing in this repo or the chart
+        # sets - the subchart's sysctl/sysctlInit are both false and stay false.
+        # Verified 2026-08-13 on all nine AWS MPC envs: every node is Bottlerocket (EKS
+        # Auto) and reports vm.max_map_count 1048576, 4x the required 262144, with
+        # nofile 65536 and nproc/fsize unlimited. So the checks pass on the fleet as it
+        # stands. If a future env ever runs a node OS that ships the AL2023-style 65530,
+        # its opensearch pod will CrashLoopBackOff the moment it takes this flip - set
+        # sysctlInit.enabled there (a pod-level `sysctls` entry will not work, kubelet
+        # rejects vm.max_map_count as unsafe). Re-check this when the node OS changes.
+        singleNode = false
+        replicas   = var.opensearch_replicas
+        # NO readinessProbe override - the subchart's port-up default is kept on
+        # purpose. Ready therefore does not mean joined, and the migration tolerates
+        # that: split-brain safety is bootstrap arithmetic (a fresh pod can never be
+        # a majority of cluster.initial_master_nodes), not readiness, so a premature
+        # roll can only cost a bounded availability wobble. A cluster-health
+        # readiness probe was evaluated and rejected: it couples every pod's Ready to
+        # master state (endpoint removal amplifies a masterless transit into a full
+        # outage) and can wedge a rolling update behind a probe that cannot succeed.
+        #
+        # The subchart applies topologySpreadConstraints with a bare toYaml (no tpl),
+        # so these labels must be literals. 3 pods at maxSkew 1 is satisfiable at any
+        # zone count (3 zones 1+1+1, 2 zones 2+1 = skew 1, 1 zone = one domain, skew
+        # 0), so DoNotSchedule cannot strand a sub-3-AZ env Pending; it forces the
+        # spread the env can actually give.
+        topologySpreadConstraints = [{
+          maxSkew           = 1
+          topologyKey       = "topology.kubernetes.io/zone"
+          whenUnsatisfiable = "DoNotSchedule"
+          labelSelector = { matchLabels = {
+            "app.kubernetes.io/instance" = "dozuki"
+            "app.kubernetes.io/name"     = "opensearch"
+          } }
+        }]
       }
       "kube-prometheus-stack" = {
         prometheus = { prometheusSpec = {
