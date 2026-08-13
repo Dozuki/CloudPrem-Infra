@@ -105,17 +105,22 @@ locals {
 
     ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
 
-    gateway = {
-      hosts    = local.app_gateway_hosts
-      clientIP = { mode = var.cloud == "azure" ? "none" : "proxyProtocol" }
-      stableProxyService = {
-        enabled = contains(["aws", "azure"], var.cloud)
-        targetGroupBindings = {
-          httpsArn = var.cloud == "aws" ? var.nlb_https_target_group_arn : ""
-          httpArn  = var.cloud == "aws" ? var.nlb_http_target_group_arn : ""
+    gateway = merge(
+      {
+        hosts    = local.app_gateway_hosts
+        clientIP = { mode = var.cloud == "azure" ? "none" : "proxyProtocol" }
+        stableProxyService = {
+          enabled = contains(["aws", "azure"], var.cloud)
+          targetGroupBindings = {
+            httpsArn = var.cloud == "aws" ? var.nlb_https_target_group_arn : ""
+            httpArn  = var.cloud == "aws" ? var.nlb_http_target_group_arn : ""
+          }
         }
-      }
-    }
+      },
+      # rateLimit is only emitted when set. A `rateLimit = null` value would render into
+      # the helm values and blank the chart's defaults instead of leaving them alone.
+      { for k, v in { rateLimit = var.gateway_rate_limit } : k => v if v != null },
+    )
 
     tls = {
       enabled             = local.tls_manual

@@ -219,6 +219,12 @@ variable "protect_resources" {
   default     = true
 }
 
+variable "gateway_rate_limit" {
+  description = "Passthrough merged under the chart's gateway.rateLimit for per-env rate-limit tuning without a chart release. A partial map (e.g. only perAuthedHost) is deep-merged by Helm over the chart defaults, so only set the keys an env needs to override. null (the default) omits the key entirely, leaving the chart defaults untouched."
+  type        = any
+  default     = null
+}
+
 variable "additional_gateway_hosts" {
   description = <<-EOT
     Extra exact-host HTTPS listeners on the Envoy gateway, one per entry, for multi-tenant
