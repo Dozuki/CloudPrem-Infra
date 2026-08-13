@@ -71,6 +71,24 @@ variable "enable_datadog" {
   default     = false
 }
 
+variable "enable_datadog_logs" {
+  description = "Adds Datadog log collection (logs.enabled + containerCollectAll) on top of the lean install. Requires enable_datadog. Costs: every container in the cluster ships its stdout/stderr to Datadog, billed per ingested GB and per indexed event, on top of the CloudWatch Container Insights copy we already pay for - this dual-ships until a migration decision is made. See datadog.tf."
+  type        = bool
+  default     = false
+}
+
+variable "enable_datadog_infra" {
+  description = "Adds Datadog infrastructure monitoring (kube-state-metrics core, cluster checks, orchestrator explorer, process/container collection, Kubernetes event collection) on top of the lean install. Requires enable_datadog. Costs: custom metrics volume, container monitoring per container, and the orchestrator explorer's resource inventory - all per-node/per-container categories that scale with cluster size. See datadog.tf."
+  type        = bool
+  default     = false
+}
+
+variable "enable_datadog_dpa" {
+  description = "Adds the Datadog workload autoscaling machinery: Remote Configuration, the DatadogPodAutoscaler CRD (via the datadog-crds subchart) and the cluster agent's autoscaling controller, plus an app key read from Vault into the agent secret. Requires enable_datadog. Costs: Remote Configuration lets Datadog-side config reach the agent, so Terraform stops being the only writer of agent config - see the RC note in datadog.tf. Creating a DatadogPodAutoscaler object is a separate, deliberate act; this flag only installs the machinery. See datadog.tf."
+  type        = bool
+  default     = false
+}
+
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string
