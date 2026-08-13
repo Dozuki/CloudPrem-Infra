@@ -6,6 +6,10 @@ locals {
   rds_multi_az = true
   highly_available_nat_gateway = false
   protect_resources = false
+  # 3-replica opensearch, matching prod. Fresh stacks bootstrap HA in one shot
+  # (empty disks can take any count); the two extra pods per stack are accepted.
+  # Existing singletons still step 1 -> 2 -> 3 per the HA runbook.
+  opensearch_replicas = 3
   bi_public_access = false
   bi_access_cidrs = ["0.0.0.0/0"]
   bi_vpn_access = false
