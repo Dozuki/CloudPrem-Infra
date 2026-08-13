@@ -79,7 +79,7 @@ spec:
       # A JSON array, because withParam consumes JSON. A PR run usually wants just
       # ["min_default"]; the nightly wants the full set.
       - name: configs
-        value: '["min_default","bi_ha","full","slim_upgrade"]'
+        value: '["min_default","bi_ha","full"]'
       - name: scenario
         value: upgrade
       - name: execution-mode

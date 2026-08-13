@@ -77,6 +77,20 @@ which is precisely when teardown matters. And because teardown reads the manifes
 cleanup is not tied to the process that created the stack: this pod, a retry, or the Phase 4
 janitor can all clean up a given run. That is the structural fix for the trap in `run.sh`.
 
+**Tearing down a config that is not on master REQUIRES `-p repo-ref=<the run's SHA>`.** The
+manifest in S3 records the config by NAME, not its contents, so teardown re-resolves that name
+out of `matrix.yaml` at whatever ref the teardown pod checks out. Default that to master and a
+config which only ever existed on a branch is simply not there, so teardown fails and the stack
+leaks until the janitor catches it. Pass the frozen SHA the run was submitted at:
+
+    argo submit --from workflowtemplate/harness-scenario \
+      -p config=<name> -p scenario=teardown -p repo-ref=<the run's SHA>
+
+Two corollaries. Do not delete the branch until its teardowns have Succeeded, because the clone
+fetches the ref. And re-resolving from the matrix means the file is live: editing a config after
+its run started changes what teardown sees, which is why values that must survive that edit
+(`AppliedCustomer`, `ExtraInputs`) are persisted into the manifest individually instead.
+
 **The janitor is the backstop for a teardown that doesn't retry its way out.** The exit
 handler above plus its own retry (this same `run` template, `retryPolicy: OnError`) covers
 a destroy that fails transiently. Neither covers a destroy that fails for a reason no retry

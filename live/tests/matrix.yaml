@@ -351,3 +351,41 @@ configs:
       image_tag: "0.0.0-05d4e70bd52-mpcfix5"
       beanstalkd_tag: "6f41576"
       nextjs_tag: "0.0.0-f28af33fdb7"
+  # Separates "the app image moved" from "the flavor flipped". slim_upgrade moves the flavor,
+  # the chart AND every image tag at once, so when it fails there is no way to tell which of
+  # those did it. This config holds everything still except image_tag: same legacy flavor both
+  # sides, chart 2.10.0 pinned explicitly on BOTH sides (not inherited, so a version_defaults
+  # bump cannot start moving the chart underneath it), same feature_flags as slim_upgrade.
+  # A failure here is an app-version problem; a failure only in slim_upgrade is the flavor flip.
+  #
+  # Both tags are real legacy builds of the app image: .10 (2026-07-28) -> .11 (2026-07-29,
+  # the newest clean legacy tag, and what version_defaults currently carries). The .12-tracing*
+  # tags are experiment builds and are deliberately not used here.
+  #
+  # The slim_ name prefix is required plumbing, not a claim about the flavor: golden_test.go
+  # excludes slim_-prefixed configs from goldenConfigs, and a config carrying
+  # baseline_versions/target_versions cannot be in goldenConfigs. Runtime slim behavior keys off
+  # the VALUES (app_image_flavor), which this config never sets, so it stays legacy on both sides.
+  - name: slim_legacy_appbump
+    env: min
+    feature_flags:
+      enable_bi: false
+      db_engine: aurora
+      rds_multi_az: false
+      highly_available_nat_gateway: false
+      protect_resources: false
+      enable_dr: false
+      rds_adopt_dr_cmk: false       # baseline is provisioned at an older ref; same CMK-immutability rationale as min_default
+      alarm_email: "devops@dozuki.com"
+      customer: "smoke"
+      enable_vault: true
+      vault_endpoint_service_name: "com.amazonaws.vpce.us-east-1.vpce-svc-0d7e9dff014f28174"
+      vault_address: "http://vault.internal.dozuki.com:8200"
+      managed_private_cloud: true
+      alertmanager_slack_enabled: false
+    baseline_versions:
+      chart_version: "2.10.0"
+      image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.10"
+    target_versions:
+      chart_version: "2.10.0"
+      image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.11"
