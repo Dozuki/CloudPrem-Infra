@@ -429,7 +429,7 @@ variable "azure_kubelogin_login" {
 }
 
 variable "opensearch_replicas" {
-  description = "OpenSearch master+data replica count. Default 1 is the migration-safe default. Envs reach 3 (HA) by stepping 1 -> 2 -> 3, ONE step per apply, per the opensearch HA runbook: never jump 1 -> 3 (a fresh pair can form a bootstrap majority and split-brain). A PR changing this value MUST state the prior value in its body so the one-step rule is reviewable. 2 is transitional only, never a standing configuration."
+  description = "OpenSearch master+data replica count. Default 1 is the migration-safe default: it never scales an env implicitly, but it is NOT a no-op - the pod template changes at 1 replica too (multi-node discovery env vars, topologySpreadConstraints), so an env taking this rolls its single OpenSearch pod once, with an EBS detach/reattach and a search gap of roughly 20 seconds. Sequence it per env like any other stateful rollout. Envs reach 3 (HA) by stepping 1 -> 2 -> 3, ONE step per apply, per the opensearch HA runbook: never jump 1 -> 3 (a fresh pair can form a bootstrap majority and split-brain). A PR changing this value MUST state the prior value in its body so the one-step rule is reviewable. 2 is transitional only, never a standing configuration."
   type        = number
   default     = 1
   validation {

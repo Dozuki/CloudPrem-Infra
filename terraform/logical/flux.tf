@@ -438,8 +438,21 @@ locals {
         # the pin would only turn graceful drains back into force-kills, which is
         # what took search down on one env 2026-08-12.
         podAnnotations = var.opensearch_replicas >= 3 ? {} : local.do_not_disrupt_annotation
-        singleNode     = false
-        replicas       = var.opensearch_replicas
+        # singleNode=false drops discovery.type=single-node, and THAT is what makes the
+        # bootstrap checks fatal: with zen discovery and a non-loopback network.host
+        # (the chart sets 0.0.0.0) OpenSearch enters production mode and refuses to
+        # start if a limit is short, instead of just warning. The one that actually
+        # varies by node OS is vm.max_map_count, which nothing in this repo or the chart
+        # sets - the subchart's sysctl/sysctlInit are both false and stay false.
+        # Verified 2026-08-13 on all nine AWS MPC envs: every node is Bottlerocket (EKS
+        # Auto) and reports vm.max_map_count 1048576, 4x the required 262144, with
+        # nofile 65536 and nproc/fsize unlimited. So the checks pass on the fleet as it
+        # stands. If a future env ever runs a node OS that ships the AL2023-style 65530,
+        # its opensearch pod will CrashLoopBackOff the moment it takes this flip - set
+        # sysctlInit.enabled there (a pod-level `sysctls` entry will not work, kubelet
+        # rejects vm.max_map_count as unsafe). Re-check this when the node OS changes.
+        singleNode = false
+        replicas   = var.opensearch_replicas
         # NO readinessProbe override - the subchart's port-up default is kept on
         # purpose. Ready therefore does not mean joined, and the migration tolerates
         # that: split-brain safety is bootstrap arithmetic (a fresh pod can never be
