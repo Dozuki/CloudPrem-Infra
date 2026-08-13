@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.3.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.3...v9.3.0) (2026-08-13)
+
+
+### Features
+
+* **logical:** opensearch multi-node HA behind opensearch_replicas ([#501](https://github.com/Dozuki/CloudPrem-Infra/issues/501)) ([fead872](https://github.com/Dozuki/CloudPrem-Infra/commit/fead8722c2111907d40b48b79844b69da6d6c95e))
+
 ## [9.2.3](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.2.2...v9.2.3) (2026-08-12)
 
 
