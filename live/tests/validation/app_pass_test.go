@@ -657,6 +657,7 @@ type appPassMockFlags struct {
 	guideCreateStatus        int           // non-201 from POST /api/2.0/guides
 	addStepStatus            int           // non-201 from POST /api/2.0/guides/{id}/steps
 	publishPutStatus         int           // non-200 from PUT /api/2.0/guides/{id}/public
+	anonGuideReadStatus      int           // stage 6's privacy probe: 200 = site serves anonymous reads (default), 401 = private
 	publishGetPublicFalse    bool          // GET after publish reports public=false regardless of the PUT
 	publicPageStatus         int           // non-2xx from the anonymous public guide page GET
 	imageCDNStatus           int           // non-200 from the anonymous image CDN GET
@@ -820,6 +821,14 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 	})
 	mux.HandleFunc("/api/2.0/guides/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		// Stage 6's privacy gate probes this same resource ANONYMOUSLY, so auth is
+		// asserted for every caller except that one. Keyed on the missing header
+		// rather than on a separate path because the probe deliberately reuses the
+		// guide's own API url — see the gate comment in stage6Publish.
+		if path == "/api/2.0/guides/500" && r.Method == http.MethodGet && r.Header.Get("Authorization") == "" {
+			w.WriteHeader(statusOr(m.flags.anonGuideReadStatus, http.StatusOK))
+			return
+		}
 		m.assertAuth(r)
 		switch {
 		case path == "/api/2.0/guides/500/steps" && r.Method == http.MethodPost:
@@ -1241,6 +1250,84 @@ func TestRunAppPass_HappyPath(t *testing.T) {
 		if !found {
 			t.Errorf("missing expected log line containing %q; got lines: %v", marker, lines)
 		}
+	}
+}
+
+// TestRunAppPass_PrivateSiteSkipsPublicDelivery covers David's Decision 2(ii): on a site
+// that refuses anonymous reads, stage 6 must log the skip and PASS rather than fail.
+//
+// Every anonymous endpoint is wired to 500 here on purpose. A gate that logged the skip
+// line but still issued the requests would fail the pass on those 500s, so this asserts
+// the skip actually skipped rather than merely announcing itself.
+func TestRunAppPass_PrivateSiteSkipsPublicDelivery(t *testing.T) {
+	mock := newAppPassMock(t, appPassMockFlags{
+		anonGuideReadStatus: http.StatusUnauthorized,
+		publicPageStatus:    http.StatusInternalServerError,
+		imageCDNStatus:      http.StatusInternalServerError,
+		videoEncStatus:      http.StatusInternalServerError,
+		docFetchStatus:      http.StatusInternalServerError,
+	})
+	defer mock.server.Close()
+
+	fe := &fakeExec{fn: pathBExecFn()}
+	clk := newFakeAppPassClock()
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	log := newAppPassLogger()
+
+	err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt001")
+	if err != nil {
+		t.Fatalf("private site must not fail the pass, got: %v", err)
+	}
+
+	// The skip must be visible in the log. WS5's proof definition counts this exact
+	// line as stage 6's pass on a private config, so the wording is load-bearing.
+	wantSkip := "app-pass: stage6 public-delivery SKIPPED (site private)"
+	found := false
+	for _, l := range log.Lines() {
+		if strings.Contains(l, wantSkip) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("missing the skip log line %q; got lines: %v", wantSkip, log.Lines())
+	}
+
+	// A skip is not an abort: the stage still has to report ok and the run has to go on
+	// to stage 7 and tear down.
+	for _, marker := range []string{"stage 6 (publish) ok", "stage 7 (course) ok"} {
+		hit := false
+		for _, l := range log.Lines() {
+			if strings.Contains(l, marker) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			t.Errorf("missing expected log line containing %q; got lines: %v", marker, log.Lines())
+		}
+	}
+}
+
+// TestRunAppPass_AnonProbeUnexpectedStatusFails pins the other half of the gate. Only
+// 401 means "private". Anything else - notably the 404 a site returns when it serves
+// anonymous traffic but the guide is missing - must fail loudly, because the whole risk
+// of a privacy gate is that it quietly swallows a real public-delivery regression.
+func TestRunAppPass_AnonProbeUnexpectedStatusFails(t *testing.T) {
+	mock := newAppPassMock(t, appPassMockFlags{anonGuideReadStatus: http.StatusNotFound})
+	defer mock.server.Close()
+
+	fe := &fakeExec{fn: pathBExecFn()}
+	clk := newFakeAppPassClock()
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	log := newAppPassLogger()
+
+	err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt001")
+	if err == nil {
+		t.Fatal("a 404 from the anonymous probe must fail stage 6, got nil")
+	}
+	if !strings.Contains(err.Error(), "probe anonymous guide read") {
+		t.Errorf("error should name the probe, got: %v", err)
 	}
 }
 

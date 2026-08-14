@@ -1475,17 +1475,23 @@ func requireAppPassFetchScheme(rawURL string) error {
 // stage 6: publish
 // ---------------------------------------------------------------------------------
 
-func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64) error {
+func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, base, authToken string, guideID int64) error {
 	// revisionid is a QUERY PARAMETER on the publish PUT, not a JSON body field —
 	// VERIFIED against a live app: a body-borne revisionid 422'd missing_field. It
 	// comes from the guide GET response's own revisionid field.
-	guideURL := fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID)
-	revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, guideURL)
+	//
+	// apiGuideURL (the REST resource) and pageURL (the human-facing guide page the
+	// response advertises) are deliberately separate variables. They used to be one,
+	// reassigned halfway down, which made every reference below depend on where in the
+	// function you were reading — and the privacy gate has to probe the API url
+	// specifically, so the distinction is now load-bearing.
+	apiGuideURL := fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID)
+	revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, apiGuideURL)
 	if rerr != nil {
 		return fmt.Errorf("publish guide: %w", rerr)
 	}
 
-	res, err := deps.doJSON(ctx, http.MethodPut, fmt.Sprintf("%s/public?revisionid=%d", guideURL, revisionID), authToken, nil)
+	res, err := deps.doJSON(ctx, http.MethodPut, fmt.Sprintf("%s/public?revisionid=%d", apiGuideURL, revisionID), authToken, nil)
 	if err != nil {
 		return fmt.Errorf("publish guide request: %w", err)
 	}
@@ -1493,7 +1499,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("publish guide: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 
-	res, err = deps.doJSON(ctx, http.MethodGet, guideURL, authToken, nil)
+	res, err = deps.doJSON(ctx, http.MethodGet, apiGuideURL, authToken, nil)
 	if err != nil {
 		return fmt.Errorf("get guide (public check) request: %w", err)
 	}
@@ -1506,8 +1512,8 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 	// guideURL (the guide's own page link) is a top-level field, always absolute
 	// (GuideAPILib_2_0.php:1708 -> GuideTranslation.php:929-946 viewLink(true)) — no
 	// resolution needed.
-	guideURL, ok := stringField(res.json, "url")
-	if !ok || guideURL == "" {
+	pageURL, ok := stringField(res.json, "url")
+	if !ok || pageURL == "" {
 		return fmt.Errorf("get guide (public check): response missing url")
 	}
 	imageURL, imageGUID, ierr := appPassGuideImageURL(res.json)
@@ -1531,21 +1537,59 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 	// nothing stops a corrupted or malicious response handing back a file://, data:,
 	// or other non-http(s) scheme) — refuse to dereference anything but plain
 	// http/https before fetching any of them.
-	for _, u := range []string{guideURL, imageURL, videoURL, viewURL} {
+	for _, u := range []string{pageURL, imageURL, videoURL, viewURL} {
 		if serr := requireAppPassFetchScheme(u); serr != nil {
 			return fmt.Errorf("get guide (public check): %w", serr)
 		}
 	}
 
-	// Everything below is a plain anonymous read (no Authorization header) — this is
-	// exactly the "is it actually public" question stage 6 exists to answer.
+	// THE PRIVACY GATE (David's Decision 2(ii), 2026-08-14).
 	//
+	// Everything above this point is authenticated and runs on every config. Everything
+	// below is a plain anonymous read (no Authorization header) — the "is it actually
+	// public" question stage 6 exists to answer. On a site that refuses logged-out
+	// traffic those assertions cannot pass, and that is the site's configuration
+	// working, not a defect: min_default is private and stays that way. So probe first
+	// and skip them with a log line rather than failing the stage.
+	//
+	// The probe keys on 401 SPECIFICALLY, and that is the whole design. A private site
+	// answers an anonymous API read with 401 (authentication required) — verified live
+	// 2026-08-13 against min_default on a kept smoke stack. A site that serves anonymous
+	// traffic but whose guide is genuinely broken or unpublished answers 404 or 403, and
+	// a working public site answers 200. Treating only 401 as "private" therefore keeps
+	// a real public-delivery regression loud instead of laundering it into a skip, which
+	// is the failure mode a privacy gate invites.
+	//
+	// Not probed via GET /api/2.0/site: that route is public but throws 405 unless the
+	// site has the mobile feature enabled (Guide/UI/api/2.0/site.php:121-124), so on a
+	// harness stack it reports nothing about privacy.
+	//
+	// The anonymous request must be the API url, not pageURL: the http client follows
+	// redirects by default (newAppPassClient sets no CheckRedirect), so a private site's
+	// page 302s to /Login and arrives as a 200 on the login page. The API route returns
+	// a bare 401 with no redirect, which is why the gate reads it.
+	anonProbe, err := deps.doRaw(ctx, http.MethodGet, apiGuideURL, "", nil, "")
+	if err != nil {
+		return fmt.Errorf("probe anonymous guide read: %w", err)
+	}
+	switch {
+	case anonProbe.status == http.StatusUnauthorized:
+		log.Logf("app-pass: stage6 public-delivery SKIPPED (site private)")
+		return nil
+	case anonProbe.status == http.StatusOK:
+		// The site serves anonymous reads, so the assertions below are meaningful and
+		// a failure in them is a real public-delivery defect. Fall through.
+	default:
+		return fmt.Errorf("probe anonymous guide read: want 200 (public) or 401 (private), got %d: %s",
+			anonProbe.status, appPassBodyPreview(anonProbe.body, 500))
+	}
+
 	// UNVERIFIED SPOT (2 of 3, see the app-pass task brief): the live proof run failed
 	// at stage 2 and never reached publish, so none of these anonymous/public delivery
 	// assertions (the guide page fetch, the image-guid-in-HTML check, and the CDN/video/
 	// document GETs below) have been hand-verified against a running app. Left exactly
 	// as originally written; do not invent a corrected contract here.
-	pageRes, err := deps.doRaw(ctx, http.MethodGet, guideURL, "", nil, "")
+	pageRes, err := deps.doRaw(ctx, http.MethodGet, pageURL, "", nil, "")
 	if err != nil {
 		return fmt.Errorf("get public guide page: %w", err)
 	}
@@ -1809,7 +1853,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 6 (publish) starting")
-	if err := stage6Publish(stageCtx, deps, base, authToken, guideID); err != nil {
+	if err := stage6Publish(stageCtx, deps, log, base, authToken, guideID); err != nil {
 		return fmt.Errorf("app-pass: stage 6 (publish): %w", err)
 	}
 	log.Logf("app-pass: stage 6 (publish) ok guideid=%d", guideID)
