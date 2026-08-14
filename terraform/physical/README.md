@@ -35,7 +35,7 @@
 | <a name="module_bi_database_sg"></a> [bi\_database\_sg](#module\_bi\_database\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
 | <a name="module_cluster_access_role_assumable"></a> [cluster\_access\_role\_assumable](#module\_cluster\_access\_role\_assumable) | terraform-aws-modules/iam/aws//modules/iam-role | ~> 6.0 |
 | <a name="module_dms_replica_database"></a> [dms\_replica\_database](#module\_dms\_replica\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
-| <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | ~> 21.0 |
+| <a name="module_eks_cluster"></a> [eks\_cluster](#module\_eks\_cluster) | terraform-aws-modules/eks/aws | 21.24.0 |
 | <a name="module_nlb"></a> [nlb](#module\_nlb) | terraform-aws-modules/alb/aws | ~> 10.0 |
 | <a name="module_primary_database"></a> [primary\_database](#module\_primary\_database) | terraform-aws-modules/rds/aws | 5.6.0 |
 | <a name="module_primary_database_sg"></a> [primary\_database\_sg](#module\_primary\_database\_sg) | terraform-aws-modules/security-group/aws | ~> 5.0 |
