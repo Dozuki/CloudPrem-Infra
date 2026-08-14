@@ -33,6 +33,54 @@ func TestLoadMatrixAndMergeInputs(t *testing.T) {
 	}
 }
 
+// TestEveryHarnessOnlyKeyIsExcluded drives off harnessOnlyKeys itself rather than off
+// testdata, so a newly added harness flag is covered the moment it is registered. The
+// per-key version of this test only covered restore_drill, which is how
+// app_pass_public_delivery reached review still leaking into the terraform inputs: the
+// harness reads it, but MergedInputs would have written it into env.hcl as though it
+// were an infrastructure variable, and nothing failed.
+func TestEveryHarnessOnlyKeyIsExcluded(t *testing.T) {
+	m, err := LoadMatrix("testdata/matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	// Spelled out rather than derived from harnessOnlyKeys. Iterating the map to test
+	// the map is self-referential: deleting an entry would delete its own coverage and
+	// the test would still pass. This list is what makes forgetting to register a new
+	// harness flag a test failure.
+	wantHarnessOnly := []string{"restore_drill", "app_pass", "app_pass_public_delivery"}
+	for _, k := range wantHarnessOnly {
+		if !harnessOnlyKeys[k] {
+			t.Errorf("%q must be registered in harnessOnlyKeys, or the harness reads it AND terraform receives it", k)
+		}
+	}
+	if len(harnessOnlyKeys) != len(wantHarnessOnly) {
+		t.Errorf("harnessOnlyKeys has %d entries, this test knows %d - add the new key here so it is covered",
+			len(harnessOnlyKeys), len(wantHarnessOnly))
+	}
+
+	flags := map[string]interface{}{"enable_dr": true}
+	for _, k := range wantHarnessOnly {
+		flags[k] = true
+	}
+	cfg := Config{Name: "synthetic", Env: "test", FeatureFlags: flags}
+
+	inputs := m.MergedInputs(cfg, "v6.0", SideBaseline)
+	for _, k := range wantHarnessOnly {
+		if _, ok := inputs[k]; ok {
+			t.Errorf("%q is harness-only and must not reach terraform inputs, but MergedInputs emitted it", k)
+		}
+		if !cfg.HarnessFlag(k) {
+			t.Errorf("HarnessFlag(%q) = false, want true", k)
+		}
+	}
+	// The control: a real terraform var alongside them still comes through, so the
+	// assertion above cannot pass by MergedInputs simply dropping everything.
+	if v, ok := inputs["enable_dr"]; !ok || v != true {
+		t.Errorf("enable_dr = %v (present=%v), want true", v, ok)
+	}
+}
+
 func TestMergedInputsExcludesHarnessOnlyKeys(t *testing.T) {
 	m, err := LoadMatrix("testdata/matrix.yaml")
 	if err != nil {

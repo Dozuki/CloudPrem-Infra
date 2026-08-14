@@ -12,8 +12,9 @@ import (
 // harnessOnlyKeys are feature_flags keys consumed by the harness itself and
 // must NOT be written into env.hcl as terraform inputs.
 var harnessOnlyKeys = map[string]bool{
-	"restore_drill": true,
-	"app_pass":      true,
+	"restore_drill":            true,
+	"app_pass":                 true,
+	"app_pass_public_delivery": true,
 }
 
 type Defaults struct {
