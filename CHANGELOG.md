@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.5.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.4.0...v9.5.0) (2026-08-14)
+
+
+### Features
+
+* **logical:** add gateway.rateLimit passthrough ([#507](https://github.com/Dozuki/CloudPrem-Infra/issues/507)) ([9009d4d](https://github.com/Dozuki/CloudPrem-Infra/commit/9009d4d6a3f5567257a90dde41315231f9b08925))
+
+
+### Bug Fixes
+
+* **physical:** rds storage alarm math could never fire, replace with plain free-storage floor and re-add a freeable-memory alarm ([#509](https://github.com/Dozuki/CloudPrem-Infra/issues/509)) ([1d58c80](https://github.com/Dozuki/CloudPrem-Infra/commit/1d58c809aacc212a1170405e65b6742e6e502932))
+
 ## [9.4.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.3.0...v9.4.0) (2026-08-13)
 
 
