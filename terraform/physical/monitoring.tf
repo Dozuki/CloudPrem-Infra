@@ -186,35 +186,66 @@ module "rds_swap_usage_alarm" {
   ]
 }
 
+locals {
+  # Effective free-storage floor. An explicit var wins; the derived default is
+  # max(2 GiB, 5% of the INITIAL allocation). Current allocation only grows
+  # from the initial value, so above 20 GiB allocated the derived floor sits
+  # below the 10%-of-current autoscaling trigger and autoscaling always gets
+  # first chance. Below 20 GiB the 2 GiB clamp may page first; deliberate,
+  # see the variable description.
+  rds_free_storage_floor_gib_effective = var.rds_free_storage_floor_gib != null ? var.rds_free_storage_floor_gib : max(2, var.rds_allocated_storage * 0.05)
+  rds_free_storage_floor_bytes         = floor(local.rds_free_storage_floor_gib_effective * 1024 * 1024 * 1024)
+}
+
 resource "aws_cloudwatch_metric_alarm" "rds_storage_space_alarm" {
   count = var.db_engine == "rds" ? 1 : 0
 
   alarm_name          = "${local.identifier}-rds-storage-space"
-  alarm_description   = "Storage space usage for RDS instance ${local.identifier}"
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = "2"
-  threshold           = 0.8 # 80% of used storage space
+  alarm_description   = "RDS ${local.identifier} free storage at or below ${format("%.2f", local.rds_free_storage_floor_gib_effective)} GiB. Storage autoscaling normally rescues before this fires; sustained means it can't (ceiling, cooldown, or disabled)."
+  comparison_operator = "LessThanOrEqualToThreshold"
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  metric_name         = "FreeStorageSpace"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = local.rds_free_storage_floor_bytes
   alarm_actions       = [module.sns.topic_arn]
   ok_actions          = [module.sns.topic_arn]
 
-  metric_query {
-    id          = "e1"
-    expression  = "1 - m1 / ${var.rds_max_allocated_storage} * 1.0e+9"
-    label       = "Storage space used"
-    return_data = true
+  dimensions = {
+    DBInstanceIdentifier = local.identifier
   }
 
-  metric_query {
-    id = "m1"
-    metric {
-      metric_name = "FreeStorageSpace"
-      namespace   = "AWS/RDS"
-      period      = "300"
-      stat        = "Average"
-      dimensions = {
-        DBInstanceIdentifier = local.identifier
-      }
+  lifecycle {
+    precondition {
+      condition     = var.rds_free_storage_floor_gib == null || var.rds_free_storage_floor_gib < var.rds_allocated_storage * 0.10
+      error_message = "rds_free_storage_floor_gib must stay below 10% of rds_allocated_storage so storage autoscaling triggers before the page."
     }
+  }
+
+  tags = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_freeable_memory" {
+  count = var.db_engine == "rds" ? 1 : 0
+
+  alarm_name          = "${local.identifier}-rds-freeable-memory"
+  alarm_description   = "RDS ${local.identifier} freeable memory below ${var.rds_freeable_memory_floor_mib} MiB. Late-stage pressure signal; the swap alarm fires earlier."
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  metric_name         = "FreeableMemory"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  # bytes: MiB * 1024^2
+  threshold     = var.rds_freeable_memory_floor_mib * 1024 * 1024
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+
+  dimensions = {
+    DBInstanceIdentifier = local.identifier
   }
 
   tags = local.tags

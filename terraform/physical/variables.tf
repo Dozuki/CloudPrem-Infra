@@ -246,6 +246,28 @@ variable "rds_max_allocated_storage" {
   }
 }
 
+variable "rds_free_storage_floor_gib" {
+  description = "Free-storage page floor in GiB. Null (the default) derives max(2, 5% of rds_allocated_storage), which for allocations above 20 GiB stays below the 10%-of-allocation storage-autoscaling trigger so autoscaling always gets first chance; the alarm then only sustains when autoscaling cannot rescue (ceiling reached, cooldown, or disabled). Set explicitly to override; validate the override against live headroom before shipping it."
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.rds_free_storage_floor_gib == null || (var.rds_free_storage_floor_gib >= 1 && var.rds_free_storage_floor_gib <= 50)
+    error_message = "rds_free_storage_floor_gib must be null or between 1 and 50 GiB."
+  }
+}
+
+variable "rds_freeable_memory_floor_mib" {
+  description = "Page when RDS FreeableMemory stays below this many MiB. Absolute floor on purpose: no instance-class lookup tables (see #486). This is a late-stage pressure signal; the swap alarm is the earlier companion."
+  type        = number
+  default     = 1024
+
+  validation {
+    condition     = var.rds_freeable_memory_floor_mib >= 256 && var.rds_freeable_memory_floor_mib <= 16384
+    error_message = "rds_freeable_memory_floor_mib must be between 256 and 16384 MiB."
+  }
+}
+
 variable "rds_backup_retention_period" {
   description = "The number of days to keep automatic database backups. Setting this value to 0 disables automatic backups."
   type        = number
