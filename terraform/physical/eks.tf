@@ -246,7 +246,7 @@ resource "aws_iam_policy" "assume_cross_account_role" {
 #tfsec:ignore:aws-eks-enable-control-plane-logging
 module "eks_cluster" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.0"
+  version = "21.24.0"
 
   # NO module-level depends_on here, ever. It defers EVERY data source inside
   # the module to apply time whenever a dependency has ANY pending diff, which
