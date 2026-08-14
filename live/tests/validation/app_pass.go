@@ -49,6 +49,13 @@ type AppPassOptions struct {
 	Kubeconfig string
 	Namespace  string
 	Timeout    time.Duration
+	// PublicDelivery declares whether this harness config's site is supposed to serve
+	// logged-out traffic. It drives stage 6's public-delivery assertions and is
+	// deliberately a declared expectation rather than something stage 6 infers from the
+	// app: inferring it lets a site that regressed into requiring auth look "private"
+	// and pass. False (the zero value, and min_default's state) means stage 6 asserts
+	// that anonymous reads are refused and then skips the delivery checks.
+	PublicDelivery bool
 }
 
 // appPassTimeout is the ceiling for an entire AppPass run (all 8 stages, including the
@@ -92,10 +99,11 @@ func RunAppPass(ctx context.Context, opts AppPassOptions) error {
 	scanner := &appPassSecretScanner{}
 	scanner.add(secret)
 	deps := appPassDeps{
-		exec:    kubectlExecRunner(),
-		client:  newAppPassClient(),
-		clock:   realAppPassClock{},
-		secrets: scanner,
+		exec:       kubectlExecRunner(),
+		client:     newAppPassClient(),
+		anonClient: newAppPassAnonClient(),
+		clock:      realAppPassClock{},
+		secrets:    scanner,
 	}
 	runErr := runAppPass(ctx, opts, deps, log, secret, runsalt)
 	return finalizeAppPass(log, runErr, scanner.list()...)
@@ -165,10 +173,18 @@ func (s *appPassSecretScanner) list() []string {
 // ---------------------------------------------------------------------------------
 
 type appPassDeps struct {
-	exec    execRunner
-	client  *http.Client
-	clock   appPassClock
-	secrets *appPassSecretScanner // nil-safe; see appPassSecretScanner
+	exec   execRunner
+	client *http.Client
+	// anonClient is client's cookie-free twin, and stage 6's anonymous assertions are
+	// worthless without it. client carries a cookie jar, and stage 1 logs in, so the
+	// jar holds a live session cookie for the rest of the run. Omitting the
+	// Authorization header therefore does NOT make a request anonymous: the jar
+	// re-attaches the session automatically, and a "public delivery" check would be
+	// quietly proving that an authenticated user can read the guide. Anything meant to
+	// be anonymous must go through this client instead.
+	anonClient *http.Client
+	clock      appPassClock
+	secrets    *appPassSecretScanner // nil-safe; see appPassSecretScanner
 }
 
 // appPassClock abstracts time.Now/time.Sleep so the stage-4 video-encoding poll (5m
@@ -243,6 +259,21 @@ func newAppPassClient() *http.Client {
 	return &http.Client{
 		Timeout:   30 * time.Second,
 		Jar:       jar,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	}
+}
+
+// newAppPassAnonClient is newAppPassClient with NO cookie jar, for requests that have
+// to be genuinely anonymous. Identical in every other respect (timeout, TLS, redirect
+// behavior) so a difference in outcome can only be the missing session, not a
+// difference in client configuration.
+//
+// A nil Jar makes net/http send no cookies and store none, which is the whole point:
+// dropping the Authorization header alone leaves the stage-1 session cookie attached
+// and turns an "anonymous" assertion into an authenticated one.
+func newAppPassAnonClient() *http.Client {
+	return &http.Client{
+		Timeout:   30 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
 }
@@ -455,6 +486,22 @@ func (d appPassDeps) doJSON(ctx context.Context, method, rawURL, authToken strin
 // only surface status codes and parsed, non-secret field values in errors, never a raw
 // payload (see the secret-transport rule in RunAppPass's doc comment).
 func (d appPassDeps) doRaw(ctx context.Context, method, rawURL, authToken string, body []byte, contentType string) (*apiResult, error) {
+	return d.do(ctx, d.client, method, rawURL, authToken, body, contentType)
+}
+
+// doAnon issues a genuinely anonymous GET: no Authorization header AND no cookie jar,
+// so no stage-1 session rides along. Every "can a logged-out visitor read this" check
+// must use this rather than doRaw with an empty token — see appPassDeps.anonClient.
+func (d appPassDeps) doAnon(ctx context.Context, rawURL string) (*apiResult, error) {
+	return d.do(ctx, d.anonClient, http.MethodGet, rawURL, "", nil, "")
+}
+
+func (d appPassDeps) do(ctx context.Context, client *http.Client, method, rawURL, authToken string, body []byte, contentType string) (*apiResult, error) {
+	// A deps built without one of the two clients would otherwise nil-panic deep inside
+	// a stage, which reads as a harness crash rather than the wiring mistake it is.
+	if client == nil {
+		return nil, fmt.Errorf("appPassDeps is missing an http client (both client and anonClient must be set)")
+	}
 	var reqBody io.Reader
 	if body != nil {
 		reqBody = bytes.NewReader(body)
@@ -469,7 +516,7 @@ func (d appPassDeps) doRaw(ctx context.Context, method, rawURL, authToken string
 	if authToken != "" {
 		req.Header.Set("Authorization", "api "+authToken)
 	}
-	resp, err := d.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -1475,7 +1522,7 @@ func requireAppPassFetchScheme(rawURL string) error {
 // stage 6: publish
 // ---------------------------------------------------------------------------------
 
-func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, base, authToken string, guideID int64) error {
+func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, base, authToken string, guideID int64, publicDelivery bool) error {
 	// revisionid is a QUERY PARAMETER on the publish PUT, not a JSON body field —
 	// VERIFIED against a live app: a body-borne revisionid 422'd missing_field. It
 	// comes from the guide GET response's own revisionid field.
@@ -1546,41 +1593,48 @@ func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, ba
 	// THE PRIVACY GATE (David's Decision 2(ii), 2026-08-14).
 	//
 	// Everything above this point is authenticated and runs on every config. Everything
-	// below is a plain anonymous read (no Authorization header) — the "is it actually
-	// public" question stage 6 exists to answer. On a site that refuses logged-out
-	// traffic those assertions cannot pass, and that is the site's configuration
-	// working, not a defect: min_default is private and stays that way. So probe first
-	// and skip them with a log line rather than failing the stage.
+	// below is a genuinely anonymous read — the "is it actually public" question stage 6
+	// exists to answer. A site that refuses logged-out traffic cannot pass those
+	// assertions, and that is its configuration working rather than a defect:
+	// min_default is private and stays that way.
 	//
-	// The probe keys on 401 SPECIFICALLY, and that is the whole design. A private site
-	// answers an anonymous API read with 401 (authentication required) — verified live
-	// 2026-08-13 against min_default on a kept smoke stack. A site that serves anonymous
-	// traffic but whose guide is genuinely broken or unpublished answers 404 or 403, and
-	// a working public site answers 200. Treating only 401 as "private" therefore keeps
-	// a real public-delivery regression loud instead of laundering it into a skip, which
-	// is the failure mode a privacy gate invites.
+	// WHAT DECIDES: the harness config, via publicDelivery, NOT the app's response. An
+	// earlier revision inferred privacy from an observed 401 and review rejected it,
+	// correctly: a public site that regressed into requiring auth also answers 401, so
+	// the run would classify a real outage as "private" and pass. Configuration is the
+	// only trustworthy source for what the site is SUPPOSED to be, so it decides, and
+	// the probe below is then an assertion about that expectation rather than the thing
+	// that forms it.
 	//
-	// Not probed via GET /api/2.0/site: that route is public but throws 405 unless the
-	// site has the mobile feature enabled (Guide/UI/api/2.0/site.php:121-124), so on a
-	// harness stack it reports nothing about privacy.
+	// Both directions are asserted, so neither config is a soft spot:
+	//   - declared private: the anonymous read MUST be 401. A 200 means the site is
+	//     serving content it should not be, which fails loudly instead of skipping.
+	//   - declared public: the anonymous read MUST be 200, and every delivery assertion
+	//     below then runs for real.
 	//
-	// The anonymous request must be the API url, not pageURL: the http client follows
-	// redirects by default (newAppPassClient sets no CheckRedirect), so a private site's
-	// page 302s to /Login and arrives as a 200 on the login page. The API route returns
-	// a bare 401 with no redirect, which is why the gate reads it.
-	anonProbe, err := deps.doRaw(ctx, http.MethodGet, apiGuideURL, "", nil, "")
+	// The request is the API url, not pageURL: the client follows redirects, so a
+	// private site's page 302s to /Login and comes back 200 on the login page. The API
+	// route answers a bare 401. GET /api/2.0/site would have been the tidier probe but
+	// throws 405 unless the site has the mobile feature enabled
+	// (Guide/UI/api/2.0/site.php:121-124), so it says nothing about privacy here.
+	//
+	// deps.doAnon, never doRaw with an empty token: doRaw uses the jarred client that
+	// still holds stage 1's session cookie, which would make every check below an
+	// authenticated read wearing an anonymous label.
+	anonProbe, err := deps.doAnon(ctx, apiGuideURL)
 	if err != nil {
 		return fmt.Errorf("probe anonymous guide read: %w", err)
 	}
-	switch {
-	case anonProbe.status == http.StatusUnauthorized:
+	if !publicDelivery {
+		if anonProbe.status != http.StatusUnauthorized {
+			return fmt.Errorf("config declares this site private, so an anonymous guide read must be 401, got %d: %s",
+				anonProbe.status, appPassBodyPreview(anonProbe.body, 500))
+		}
 		log.Logf("app-pass: stage6 public-delivery SKIPPED (site private)")
 		return nil
-	case anonProbe.status == http.StatusOK:
-		// The site serves anonymous reads, so the assertions below are meaningful and
-		// a failure in them is a real public-delivery defect. Fall through.
-	default:
-		return fmt.Errorf("probe anonymous guide read: want 200 (public) or 401 (private), got %d: %s",
+	}
+	if anonProbe.status != http.StatusOK {
+		return fmt.Errorf("config declares this site public, so an anonymous guide read must be 200, got %d: %s",
 			anonProbe.status, appPassBodyPreview(anonProbe.body, 500))
 	}
 
@@ -1589,7 +1643,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, ba
 	// assertions (the guide page fetch, the image-guid-in-HTML check, and the CDN/video/
 	// document GETs below) have been hand-verified against a running app. Left exactly
 	// as originally written; do not invent a corrected contract here.
-	pageRes, err := deps.doRaw(ctx, http.MethodGet, pageURL, "", nil, "")
+	pageRes, err := deps.doAnon(ctx, pageURL)
 	if err != nil {
 		return fmt.Errorf("get public guide page: %w", err)
 	}
@@ -1602,7 +1656,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, ba
 		return fmt.Errorf("get public guide page: image guid not present in HTML")
 	}
 
-	imgRes, err := deps.doRaw(ctx, http.MethodGet, imageURL, "", nil, "")
+	imgRes, err := deps.doAnon(ctx, imageURL)
 	if err != nil {
 		return fmt.Errorf("get image CDN url: %w", err)
 	}
@@ -1610,7 +1664,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, ba
 		return fmt.Errorf("get image CDN url: want status 200, got %d: %s", imgRes.status, appPassBodyPreview(imgRes.body, 500))
 	}
 
-	vidRes, err := deps.doRaw(ctx, http.MethodGet, videoURL, "", nil, "")
+	vidRes, err := deps.doAnon(ctx, videoURL)
 	if err != nil {
 		return fmt.Errorf("get video encoding url: %w", err)
 	}
@@ -1618,7 +1672,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, ba
 		return fmt.Errorf("get video encoding url: want status 200, got %d: %s", vidRes.status, appPassBodyPreview(vidRes.body, 500))
 	}
 
-	docRes, err := deps.doRaw(ctx, http.MethodGet, viewURL, "", nil, "")
+	docRes, err := deps.doAnon(ctx, viewURL)
 	if err != nil {
 		return fmt.Errorf("get document url (anonymous): %w", err)
 	}
@@ -1853,7 +1907,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 6 (publish) starting")
-	if err := stage6Publish(stageCtx, deps, log, base, authToken, guideID); err != nil {
+	if err := stage6Publish(stageCtx, deps, log, base, authToken, guideID, opts.PublicDelivery); err != nil {
 		return fmt.Errorf("app-pass: stage 6 (publish): %w", err)
 	}
 	log.Logf("app-pass: stage 6 (publish) ok guideid=%d", guideID)
