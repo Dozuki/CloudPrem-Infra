@@ -1075,14 +1075,25 @@ func appPassFetchRevisionID(ctx context.Context, deps appPassDeps, authToken, re
 // ---------------------------------------------------------------------------------
 // stage 4: media uploads
 //
-// UNVERIFIED SPOT (1 of 3, see the app-pass task brief): the live proof run failed at
-// stage 2 and never reached here, so none of the following have been hand-verified
-// against a running app and are left exactly as originally written — the raw-bytes
-// upload request shape (stage4UploadOne), the video encode-poll route
-// (stage4WaitForVideoReady), and the media URL assertions used later to verify a
-// published guide's image/video/document data (appPassGuideImageURL,
-// appPassGuideVideoURL, appPassGuideDocumentURL, and their size/guid/encodings shape
-// assumptions). Do not invent a corrected contract for any of these from this pass.
+// PARTLY VERIFIED — read this before changing anything below.
+//
+// Live-proven on a kept smoke stack, with the evidence recorded at each site:
+//   - the media TYPE vocabulary the 2.0 API expects as a path segment on
+//     /api/2.0/user/media/{type}/{id}, which is NOT the harness's own asset labels
+//     (appPassMediaAPIType, below, including the DELETE that teardown uses);
+//   - the published guide's video read type being "video" and not "object"
+//     (appPassGuideVideoURL).
+// Do NOT revert either of those to the raw asset labels. That re-introduces a live 400,
+// "Invalid type provided in the route".
+//
+// Still unverified, for one specific reason: the raw-bytes upload request/response shape
+// (stage4UploadOne's POST /api/2.0/user/media/uploads?file=), the encode-poll's isReady
+// field (stage4WaitForVideoReady), and the image/document URL assertions
+// (appPassGuideImageURL, appPassGuideDocumentURL, and their size/guid/encodings
+// assumptions) have never executed against a running app, because every upload 422'd on
+// an empty allowed-extension list before reaching them. Treat those shapes as
+// unconfirmed until a run gets past the upload, and do not invent corrected contracts
+// for them from a pass that never exercised them.
 // ---------------------------------------------------------------------------------
 
 type appPassAsset struct {
@@ -1638,11 +1649,18 @@ func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, ba
 			anonProbe.status, appPassBodyPreview(anonProbe.body, 500))
 	}
 
-	// UNVERIFIED SPOT (2 of 3, see the app-pass task brief): the live proof run failed
-	// at stage 2 and never reached publish, so none of these anonymous/public delivery
-	// assertions (the guide page fetch, the image-guid-in-HTML check, and the CDN/video/
-	// document GETs below) have been hand-verified against a running app. Left exactly
-	// as originally written; do not invent a corrected contract here.
+	// SHAPES UNVERIFIED, TRANSPORT DELIBERATELY CHANGED — the two halves differ here.
+	//
+	// Unverified: the assertions below (the guide page fetch, the image-guid-in-HTML
+	// check, and the CDN/video/document GETs) have never run against a published guide on
+	// a live app, because the proof run failed earlier and never reached publish. Do not
+	// invent a corrected contract for their shapes.
+	//
+	// Changed on purpose: every one of them now goes through deps.doAnon instead of
+	// deps.doRaw with an empty auth token. Omitting the Authorization header was never
+	// enough — the shared client carries a cookie jar, so stage 1's login re-attached
+	// session_<siteid> to each of these and they were silently AUTHENTICATED reads
+	// asserting anonymous behaviour. Do not route them back through the jarred client.
 	pageRes, err := deps.doAnon(ctx, pageURL)
 	if err != nil {
 		return fmt.Errorf("get public guide page: %w", err)
