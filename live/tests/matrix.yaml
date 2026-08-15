@@ -92,6 +92,7 @@ configs:
   - name: min_default
     env: min
     feature_flags:
+      app_pass: true
       enable_bi: false
       db_engine: aurora              # Aurora Serverless v2 — the new-stack default; rds_* sizing flags are ignored on aurora
       rds_multi_az: false
