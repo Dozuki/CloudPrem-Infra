@@ -1223,7 +1223,7 @@ func pathBExecFn() func(argv []string, stdin []byte) (stdout, stderr []byte, err
 		// FROM site_index, so matching on site_index first would answer the fixture with
 		// a one-line site name and fail it on line count.
 		case strings.Contains(joined, "document_extension_allowed"):
-			return []byte("0\n80\n80\n"), nil, nil
+			return seedOut(0, 80, 80, 80, 80), nil, nil
 		case strings.Contains(joined, "site_index"):
 			return []byte("acme\n"), nil, nil
 		case strings.Contains(joined, "essentials.php"):
@@ -1270,6 +1270,10 @@ func TestRunAppPass_HappyPath(t *testing.T) {
 	}
 
 	wantMarkers := []string{
+		// Not a stage, but it must appear in a happy-path log: it is the fixture that
+		// makes stage 4 possible, and its absence here is how a dropped call site would
+		// otherwise reach master unnoticed.
+		"allowlist FIXTURE",
 		"stage 0 (ephemeral admin) ok path=B",
 		"stage 1 (login) ok",
 		"stage 2 (register user) ok",
@@ -1858,15 +1862,24 @@ func TestAppPassUsernamePattern_RejectsHyphensAcceptsUnderscores(t *testing.T) {
 // ---------------------------------------------------------------------------------
 // allowlist FIXTURE (masks the document_extension_allowed provisioning defect)
 //
-// These guard the two properties that make the fixture safe to carry: it must seed
-// per-site rather than per-stack (a stack with one seeded subsite must still repair
-// base/onprem), and it must fail loudly rather than let stage 4 report the miss as a
-// media-contract defect.
+// These guard the properties that make the fixture safe to carry: it seeds per-site
+// rather than per-stack, it proves the SITE UNDER TEST got covered rather than trusting
+// a global row count, and it fails loudly and with the right cause named rather than
+// letting stage 4 report the miss as a media-contract defect.
+//
+// The five-line result protocol is: before, inserted, after, site rows, expected
+// extensions.
 // ---------------------------------------------------------------------------------
+
+// seedOut builds a fixture result body from the five counts, so a test states the
+// database state it is describing instead of a bare string of numbers.
+func seedOut(before, inserted, after, siteRows, wantExts int) []byte {
+	return []byte(fmt.Sprintf("%d\n%d\n%d\n%d\n%d\n", before, inserted, after, siteRows, wantExts))
+}
 
 func TestSeedAppPassAllowlist_SeedsAndReportsCounts(t *testing.T) {
 	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
-		return []byte("0\n80\n80\n"), nil, nil
+		return seedOut(0, 80, 80, 80, 80), nil, nil
 	}}
 	deps := appPassDeps{exec: fe.runner()}
 	log := newAppPassLogger()
@@ -1875,7 +1888,7 @@ func TestSeedAppPassAllowlist_SeedsAndReportsCounts(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(fe.calls) != 1 {
-		t.Fatalf("exec calls = %d, want exactly 1 (the seed must be ONE mysql session: ROW_COUNT() is connection-scoped)", len(fe.calls))
+		t.Fatalf("exec calls = %d, want exactly 1 (ROW_COUNT() is connection-scoped, so the seed must be ONE mysql session)", len(fe.calls))
 	}
 	if fe.calls[0].stdin != nil {
 		t.Errorf("stdin = %q, want nil", fe.calls[0].stdin)
@@ -1899,7 +1912,7 @@ func TestSeedAppPassAllowlist_SeedsAndReportsCounts(t *testing.T) {
 	if line == "" {
 		t.Fatal("no allowlist FIXTURE log line emitted")
 	}
-	for _, want := range []string{"before=0", "inserted=80", "after=80"} {
+	for _, want := range []string{"before=0", "inserted=80", "after=80", "site=80/80"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("log line %q missing %q", line, want)
 		}
@@ -1907,10 +1920,10 @@ func TestSeedAppPassAllowlist_SeedsAndReportsCounts(t *testing.T) {
 }
 
 // The script is asserted property by property rather than as one golden string: each
-// check below names a specific way the fixture could silently stop doing its job.
+// check names a specific way the fixture could silently stop doing its job.
 func TestSeedAppPassAllowlist_ScriptCarriesItsGuarantees(t *testing.T) {
 	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
-		return []byte("0\n80\n80\n"), nil, nil
+		return seedOut(0, 80, 80, 80, 80), nil, nil
 	}}
 	deps := appPassDeps{exec: fe.runner()}
 	if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", newAppPassLogger()); err != nil {
@@ -1920,7 +1933,7 @@ func TestSeedAppPassAllowlist_ScriptCarriesItsGuarantees(t *testing.T) {
 
 	checks := []struct{ want, why string }{
 		{". /bootstrap/helpers/db_helpers.sh", "must source db_helpers.sh for $mysqlcmd"},
-		{"$mysqlcmd -sN -D sites", "the three tables all live in the sites DB"},
+		{"$mysqlcmd -sN -D sites", "all three tables live in the sites DB"},
 		{"NOT EXISTS", "without the guard a re-run duplicate-keys against PRIMARY KEY (siteid, document_extension)"},
 		// Both correlation predicates, asserted separately. A NOT EXISTS that is present
 		// but under-correlated is the dangerous shape: correlating on siteid alone makes
@@ -1929,25 +1942,26 @@ func TestSeedAppPassAllowlist_ScriptCarriesItsGuarantees(t *testing.T) {
 		// worked. Testing only for the words "NOT EXISTS" cannot see that.
 		{"dea.siteid = s.siteid", "the guard must correlate on the site"},
 		{"dea.document_extension = dfi.document_extension", "the guard must ALSO correlate on the extension, or a partially seeded site is skipped"},
+		{"SELECT DISTINCT", "an in-statement duplicate pair would 1062 and roll the whole INSERT back"},
 		{"CROSS JOIN", "every site must be crossed with every allowed extension"},
 		{"'image','pdf','3d_model','video'", "the four MediaGroup values initializeAllowedDocumentTypes seeds"},
 		{"SELECT ROW_COUNT();", "the inserted count is read from the same session"},
+		// The per-site probe is what makes a global count insufficient. Without it, a
+		// stack whose subsite already has rows reports healthy while the site under test
+		// has none.
+		{"WHERE s.domain='127.0.0.1'", "coverage must be proven for the site under test, not globally"},
+		{"COUNT(DISTINCT document_extension) FROM document_file_information", "the expected extension count is what per-site coverage is measured against"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(script, c.want) {
 			t.Errorf("script missing %q: %s", c.want, c.why)
 		}
 	}
-	// Per-site, not per-stack. A stack-wide short circuit would skip base/onprem on any
-	// stack that already has a product-created subsite — the exact shape this repairs.
-	if strings.Contains(script, "COUNT(*) FROM document_extension_allowed WHERE") {
-		t.Error("script appears to gate on a per-stack count; the guard must be the per-row NOT EXISTS")
-	}
 }
 
 func TestSeedAppPassAllowlist_AlreadySeededInsertsNothing(t *testing.T) {
 	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
-		return []byte("80\n0\n80\n"), nil, nil
+		return seedOut(80, 0, 80, 80, 80), nil, nil
 	}}
 	deps := appPassDeps{exec: fe.runner()}
 	log := newAppPassLogger()
@@ -1956,35 +1970,67 @@ func TestSeedAppPassAllowlist_AlreadySeededInsertsNothing(t *testing.T) {
 	}
 	var found bool
 	for _, l := range log.Lines() {
-		if strings.Contains(l, "inserted=0") && strings.Contains(l, "after=80") {
+		if strings.Contains(l, "inserted=0") && strings.Contains(l, "site=80/80") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("want a no-op line reporting inserted=0 after=80, got %v", log.Lines())
+		t.Errorf("want a no-op line reporting inserted=0 site=80/80, got %v", log.Lines())
 	}
 }
 
-func TestSeedAppPassAllowlist_ZeroRowsAfterSeedingFails(t *testing.T) {
-	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
-		return []byte("0\n0\n0\n"), nil, nil
-	}}
-	deps := appPassDeps{exec: fe.runner()}
-	err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", newAppPassLogger())
-	if err == nil {
-		t.Fatal("want an error: 0 rows after seeding guarantees stage 4 will 422")
+// The three failure causes are distinguished on purpose: they look similar from the
+// outside and only one of them is the one an operator would guess.
+func TestSeedAppPassAllowlist_NamesTheRightCause(t *testing.T) {
+	cases := []struct {
+		name    string
+		out     []byte
+		wantErr string
+	}{
+		{
+			// The catalogue is empty or its document_group vocabulary differs.
+			name:    "empty catalogue",
+			out:     seedOut(0, 0, 0, 0, 0),
+			wantErr: "document_file_information lists 0 extensions",
+		},
+		{
+			// The global counts look healthy (a subsite has rows) but the site under test
+			// got nothing. A global-count check would have passed this.
+			name:    "site under test missing entirely",
+			out:     seedOut(40, 0, 40, 0, 80),
+			wantErr: "0 allowlist rows for the site at domain",
+		},
+		{
+			// Partial coverage: some extensions landed, so whether stage 4's assets are
+			// among them is luck.
+			name:    "partial coverage",
+			out:     seedOut(0, 30, 30, 30, 80),
+			wantErr: "30 of 80 expected extensions",
+		},
 	}
-	if !strings.Contains(err.Error(), "document_file_information") {
-		t.Errorf("error should name the likely cause, got: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+				return tc.out, nil, nil
+			}}
+			deps := appPassDeps{exec: fe.runner()}
+			err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", newAppPassLogger())
+			if err == nil {
+				t.Fatalf("want an error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error should contain %q, got: %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 
 func TestSeedAppPassAllowlist_MalformedOutputFails(t *testing.T) {
 	for name, out := range map[string]string{
-		"too few lines":  "0\n80\n",
-		"too many lines": "0\n80\n80\n80\n",
+		"too few lines":  "0\n80\n80\n80\n",
+		"too many lines": "0\n80\n80\n80\n80\n80\n",
 		"empty":          "",
-		"non-numeric":    "0\nlots\n80\n",
+		"non-numeric":    "0\nlots\n80\n80\n80\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
@@ -2009,5 +2055,81 @@ func TestSeedAppPassAllowlist_ExecErrorFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "allowlist fixture") {
 		t.Errorf("error must attribute itself to the fixture, not read as a stage-4 defect: %v", err)
+	}
+}
+
+func TestSeedAppPassAllowlist_BadHostFails(t *testing.T) {
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		return seedOut(0, 80, 80, 80, 80), nil, nil
+	}}
+	deps := appPassDeps{exec: fe.runner()}
+	if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://ho st'x:1"), "pod", newAppPassLogger()); err == nil {
+		t.Fatal("want error: the host reaches a single-quoted SQL literal and must be validated first")
+	}
+	if len(fe.calls) != 0 {
+		t.Errorf("exec calls = %d, want 0 — validation must happen before anything runs", len(fe.calls))
+	}
+}
+
+// TestRunAppPass_SeedsAllowlistBeforeAnyHTTP is the call-site guard. The unit tests above
+// all invoke seedAppPassAllowlist directly, so without this a refactor that drops the
+// call from runAppPass ships green and stage 4 silently goes back to 422ing.
+//
+// It also pins the ORDERING, which is the part that is easy to lose in a merge: the seed
+// must land before the pass makes its first HTTP request, or the app can cache the empty
+// allowlist and the fixture becomes a false success.
+func TestRunAppPass_SeedsAllowlistBeforeAnyHTTP(t *testing.T) {
+	var seeded, httpCalled bool
+	var seedWasFirst = true
+
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		joined := argvString(argv)
+		switch {
+		case strings.Contains(joined, "get pods"):
+			return []byte("app-pod-1\n"), nil, nil
+		case strings.Contains(joined, "document_extension_allowed"):
+			if httpCalled {
+				seedWasFirst = false
+			}
+			seeded = true
+			return seedOut(0, 80, 80, 80, 80), nil, nil
+		case strings.Contains(joined, "site_index"):
+			return []byte("acme\n"), nil, nil
+		case strings.Contains(joined, "essentials.php"):
+			return []byte("saltXYZ\thashXYZ\n"), nil, nil
+		case strings.Contains(joined, "SELECT userid"):
+			return []byte("42\n"), nil, nil
+		case strings.Contains(joined, "UPDATE"):
+			return []byte("1\n"), nil, nil
+		case strings.Contains(joined, "Exec/sites.php") && !strings.Contains(joined, "create-site-admin"):
+			return []byte("Usage: sites.php <command>\n  list-sites\n"), nil, nil
+		default:
+			return nil, nil, fmt.Errorf("unexpected exec call: %v", argv)
+		}
+	}}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalled = true
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	opts := testAppPassOpts(srv.URL)
+	deps := appPassDeps{
+		exec:       fe.runner(),
+		client:     newAppPassClient(),
+		anonClient: newAppPassAnonClient(),
+		clock:      realAppPassClock{},
+		secrets:    &appPassSecretScanner{},
+	}
+	// The pass is expected to fail (the server 500s everything); only the seed's
+	// occurrence and its ordering are under test.
+	_ = runAppPass(context.Background(), opts, deps, newAppPassLogger(), strings.Repeat("a", 32)+"A1!", "abc123")
+
+	if !seeded {
+		t.Fatal("runAppPass never ran the allowlist fixture — the call site is missing")
+	}
+	if !seedWasFirst {
+		t.Error("the allowlist seed ran AFTER an HTTP request; it must run before any, or the app may cache the empty list")
 	}
 }

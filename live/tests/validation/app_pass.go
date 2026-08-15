@@ -1147,8 +1147,15 @@ const (
 // still gets them. A stack-wide "skip if any rows exist" test would be wrong here: a
 // stack with one product-created subsite has rows for that subsite and none for
 // base/onprem, and would be skipped in exactly the state the fixture exists to repair.
+// DISTINCT is belt-and-braces. document_file_information is PRIMARY KEY
+// (document_extension) at monolith 4ea36c94076 (Migrations/SchemaSQL/sites.sql), so one
+// row per extension and the CROSS JOIN cannot yield a duplicate pair today. NOT EXISTS
+// screens only against already-committed rows and could not save us if that ever changed
+// (MySQL materializes the SELECT before inserting, so an in-statement duplicate would
+// 1062 against the target's PRIMARY KEY and roll the whole INSERT back). DISTINCT costs
+// nothing and makes the statement correct without depending on another repo's schema.
 const appPassAllowlistSeedSQL = `INSERT INTO document_extension_allowed (siteid, document_extension)
-SELECT s.siteid, dfi.document_extension
+SELECT DISTINCT s.siteid, dfi.document_extension
 FROM site_index s
 CROSS JOIN document_file_information dfi
 WHERE dfi.document_group IN ('image','pdf','3d_model','video')
@@ -1156,53 +1163,79 @@ WHERE dfi.document_group IN ('image','pdf','3d_model','video')
                   WHERE dea.siteid = s.siteid
                     AND dea.document_extension = dfi.document_extension);`
 
-// seedAppPassAllowlist runs the seed and both counts in ONE mysql session (one heredoc,
+// seedAppPassAllowlist runs the seed and every count in ONE mysql session (one heredoc,
 // one $mysqlcmd invocation) because ROW_COUNT() is connection-scoped and could not
 // observe the INSERT from a separate exec — the same reason rotateAppPassAdminPassword
-// is structured this way. Emits three numbers: rows before, rows inserted, rows after.
+// is structured this way.
 //
-// A failure here fails the pass rather than falling through to stage 4. Stage 4 would
-// fail anyway, with a 422 that reads as a media-contract defect instead of a missing
-// fixture, and that misattribution is the whole cost of being quiet here.
+// It emits five numbers, and the two that actually gate the result are the last two.
+// A global "are there any rows now" check is NOT sufficient: on a stack that already has
+// a product-created subsite the global count is large and positive while the site under
+// test still has nothing, which is precisely the misattributed stage-4 422 this exists to
+// prevent. So the gate is per-site coverage — the site behind opts.BaseURL must hold at
+// least as many extensions as document_file_information lists for the four media groups.
+//
+// A failure here fails the pass rather than falling through to stage 4, and names which
+// of the three possible causes it is, because all three produce a similar-looking result
+// and only one of them is the one an operator would guess.
 func seedAppPassAllowlist(ctx context.Context, deps appPassDeps, opts AppPassOptions, pod string, log *appPassLogger) error {
+	u, err := url.Parse(normalizeURL(opts.BaseURL))
+	if err != nil {
+		return fmt.Errorf("allowlist fixture: parse base URL: %w", err)
+	}
+	host := u.Hostname()
+	// Same validation and quoting convention as resolveAppPassSite: the pattern admits
+	// only alnum/./- so no quote can reach the single-quoted SQL literal below.
+	if host == "" || !appPassHostPattern.MatchString(host) {
+		return fmt.Errorf("allowlist fixture: base URL host %q fails validation", host)
+	}
 	script := fmt.Sprintf(`. /bootstrap/helpers/db_helpers.sh >/dev/null 2>&1 || exit 92
 set +exu
 $mysqlcmd -sN -D sites <<'SQL'
 SELECT COUNT(*) FROM document_extension_allowed;
-%s
+%[1]s
 SELECT ROW_COUNT();
 SELECT COUNT(*) FROM document_extension_allowed;
+SELECT COUNT(*) FROM document_extension_allowed dea JOIN site_index s ON s.siteid = dea.siteid WHERE s.domain='%[2]s';
+SELECT COUNT(DISTINCT document_extension) FROM document_file_information WHERE document_group IN ('image','pdf','3d_model','video');
 SQL
-`, appPassAllowlistSeedSQL)
+`, appPassAllowlistSeedSQL, host)
 	argv := kubectlExecArgv(opts.Kubeconfig, opts.Namespace, pod, false, []string{"bash", "-c", script})
 	stdout, stderr, err := deps.exec(ctx, argv, nil)
 	if err != nil {
 		return fmt.Errorf("allowlist fixture: %v: %s", err, strings.TrimSpace(string(stderr)))
 	}
 	rows := appPassNonEmptyLines(string(stdout))
-	if len(rows) != 3 {
-		return fmt.Errorf("allowlist fixture: expected 3 result lines (before, inserted, after), got %d", len(rows))
+	if len(rows) != 5 {
+		return fmt.Errorf("allowlist fixture: expected 5 result lines (before, inserted, after, site rows, expected extensions), got %d", len(rows))
 	}
-	before, err := strconv.Atoi(rows[0])
-	if err != nil {
-		return fmt.Errorf("allowlist fixture: could not parse before-count %q: %w", rows[0], err)
+	labels := []string{"before-count", "inserted-count", "after-count", "site-row-count", "expected-extension-count"}
+	nums := make([]int, len(rows))
+	for i, r := range rows {
+		n, perr := strconv.Atoi(r)
+		if perr != nil {
+			return fmt.Errorf("allowlist fixture: could not parse %s %q: %w", labels[i], r, perr)
+		}
+		nums[i] = n
 	}
-	inserted, err := strconv.Atoi(rows[1])
-	if err != nil {
-		return fmt.Errorf("allowlist fixture: could not parse inserted-count %q: %w", rows[1], err)
+	before, inserted, after, siteRows, wantExts := nums[0], nums[1], nums[2], nums[3], nums[4]
+
+	// Cause 1: the catalogue itself is empty, or its document_group vocabulary is not the
+	// four MediaGroup values this seeds from. Nothing could have been inserted for anyone.
+	if wantExts == 0 {
+		return fmt.Errorf("allowlist fixture: document_file_information lists 0 extensions in groups image/pdf/3d_model/video (before=%d inserted=%d after=%d) — the catalogue is unpopulated or its document_group values differ; stage 4 cannot pass", before, inserted, after)
 	}
-	after, err := strconv.Atoi(rows[2])
-	if err != nil {
-		return fmt.Errorf("allowlist fixture: could not parse after-count %q: %w", rows[2], err)
+	// Cause 2: the site under test is not in site_index under this domain, so the CROSS
+	// JOIN never produced rows for it however healthy the global counts look.
+	if siteRows == 0 {
+		return fmt.Errorf("allowlist fixture: 0 allowlist rows for the site at domain %q after seeding (global before=%d inserted=%d after=%d) — site_index likely has no row for this domain; stage 4 cannot pass", host, before, inserted, after)
 	}
-	// after==0 means the seed matched nothing AND nothing was there to begin with, so
-	// stage 4 is still guaranteed to 422. Most likely document_file_information is itself
-	// unpopulated, which is a different provisioning problem worth naming here rather
-	// than rediscovering from a 422 one stage later.
-	if after == 0 {
-		return fmt.Errorf("allowlist fixture: 0 rows after seeding (before=%d inserted=%d) — document_file_information is likely empty; stage 4 cannot pass", before, inserted)
+	// Cause 3: partial coverage. Some extensions landed but not the full set, so whether
+	// stage 4's png/pdf/mp4 are among them is luck.
+	if siteRows < wantExts {
+		return fmt.Errorf("allowlist fixture: site at domain %q has %d of %d expected extensions after seeding (before=%d inserted=%d after=%d) — coverage is partial; stage 4 may still 422", host, siteRows, wantExts, before, inserted, after)
 	}
-	log.Logf("app-pass: allowlist FIXTURE before=%d inserted=%d after=%d (masks the provisioning defect)", before, inserted, after)
+	log.Logf("app-pass: allowlist FIXTURE before=%d inserted=%d after=%d site=%d/%d (masks the provisioning defect)", before, inserted, after, siteRows, wantExts)
 	return nil
 }
 
@@ -1944,6 +1977,23 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 0 (ephemeral admin): %w", err)
 	}
+	// FIXTURE, not a stage: seeds document_extension_allowed so stage 4's uploads are not
+	// rejected by an empty allowed-extension list. See seedAppPassAllowlist — it masks a
+	// real provisioning defect and is meant to be deleted once that defect is fixed.
+	//
+	// Placed HERE, before stage 0 and therefore before the pass makes its first HTTP
+	// request, on purpose. The app caches config-shaped data (memcached is fleet-wide),
+	// and this list is read on the upload path. Seeding after stages 1-3 have already
+	// talked to the site risks the empty list being cached first: the fixture would then
+	// insert its rows, log a healthy before/inserted/after, and stage 4 would still 422
+	// against the cached empty list — a false-success fixture is worse than none, because
+	// it converts a known blocker into a mysterious media-contract failure. Running
+	// before any HTTP traffic removes the ordering question entirely. It still sits
+	// inside the deadline-checked sequence, so a hung exec cannot outlive the ceiling.
+	if serr := seedAppPassAllowlist(stageCtx, deps, opts, pod, log); serr != nil {
+		return fmt.Errorf("app-pass: %w", serr)
+	}
+
 	loginEmail, path, err := stage0EphemeralAdmin(stageCtx, deps, opts, pod, secret, runsalt, log)
 	if err != nil {
 		return fmt.Errorf("app-pass: stage 0 (ephemeral admin): %w", err)
@@ -1988,15 +2038,6 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	if derr := checkDeadline(deps.clock, deadline, opts.Timeout, "app-pass"); derr != nil {
 		return derr
 	}
-	// FIXTURE, not a stage: seeds document_extension_allowed so stage 4's uploads are not
-	// rejected by an empty allowed-extension list. See seedAppPassAllowlist — it masks a
-	// real provisioning defect and is meant to be deleted once that defect is fixed.
-	// Runs here rather than at stage 0 so it sits next to the stage it unblocks, and
-	// inside the deadline-checked sequence so a hung exec cannot outlive the pass ceiling.
-	if serr := seedAppPassAllowlist(stageCtx, deps, opts, pod, log); serr != nil {
-		return fmt.Errorf("app-pass: %w", serr)
-	}
-
 	log.Logf("app-pass: stage 4 (media uploads) starting")
 	imageID, documentID, videoID, err := stage4Uploads(stageCtx, deps, deps.clock, base, authToken, &stack)
 	if err != nil {
