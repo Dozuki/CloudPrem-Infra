@@ -605,6 +605,18 @@ func idField(m map[string]interface{}, key string) (int64, bool) {
 	}
 }
 
+// appPassValuePreview renders an already-parsed JSON value for a diagnostic message.
+// The body-based preview is unavailable in helpers that receive a decoded map rather
+// than a response, and "missing field X" with no sight of the structure is what made the
+// 2026-08-15 stage-5 failure unfixable without re-running the whole hour-long proof.
+func appPassValuePreview(v interface{}, n int) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("<unrenderable %T>", v)
+	}
+	return appPassBodyPreview(b, n)
+}
+
 // appPassBodyPreview truncates body to at most n bytes for inclusion in a diagnostic
 // error message. A bounded preview of the ACTUAL response — not just its status code —
 // is what would have made the original stage-2 failure (a 422 with no visible reason)
@@ -1415,7 +1427,7 @@ func stage5CreateGuide(ctx context.Context, deps appPassDeps, base, authToken, c
 	}
 	guideID, ok := idField(res.json, "guideid")
 	if !ok {
-		return 0, fmt.Errorf("create guide response missing guideid")
+		return 0, fmt.Errorf("create guide: 201 but response has no guideid: %s", appPassBodyPreview(res.body, 500))
 	}
 	stack.push(appPassTeardownEntry{
 		kind: "guide",
@@ -1660,22 +1672,22 @@ func appPassGuideImageURL(guide map[string]interface{}) (cdnURL, guid string, er
 		}
 		data, ok := media["data"].([]interface{})
 		if !ok || len(data) == 0 {
-			return "", "", fmt.Errorf("image step media.data is missing or empty")
+			return "", "", fmt.Errorf("image step media.data is missing or empty: %s", appPassValuePreview(media, 500))
 		}
 		first, ok := data[0].(map[string]interface{})
 		if !ok {
-			return "", "", fmt.Errorf("image step media.data[0] is not an object")
+			return "", "", fmt.Errorf("image step media.data[0] is not an object: %s", appPassValuePreview(data[0], 500))
 		}
 		guid, ok = stringField(first, "guid")
 		if !ok || guid == "" {
-			return "", "", fmt.Errorf("image step media.data[0] missing guid")
+			return "", "", fmt.Errorf("image step media.data[0] missing guid: %s", appPassValuePreview(first, 500))
 		}
 		for _, key := range appPassImageSizeKeys {
 			if url, ok := stringField(first, key); ok && url != "" {
 				return url, guid, nil
 			}
 		}
-		return "", "", fmt.Errorf("image step media.data[0] has neither %s", strings.Join(appPassImageSizeKeys, " nor "))
+		return "", "", fmt.Errorf("image step media.data[0] has neither %s: %s", strings.Join(appPassImageSizeKeys, " nor "), appPassValuePreview(first, 500))
 	}
 	return "", "", fmt.Errorf("no image step found in steps[]")
 }
@@ -1789,14 +1801,14 @@ func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, ba
 		return fmt.Errorf("get guide (public check): want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 	if public, ok := boolField(res.json, "public"); !ok || !public {
-		return fmt.Errorf("get guide (public check): public flag not true")
+		return fmt.Errorf("get guide (public check): public flag not true: %s", appPassBodyPreview(res.body, 500))
 	}
 	// guideURL (the guide's own page link) is a top-level field, always absolute
 	// (GuideAPILib_2_0.php:1708 -> GuideTranslation.php:929-946 viewLink(true)) — no
 	// resolution needed.
 	pageURL, ok := stringField(res.json, "url")
 	if !ok || pageURL == "" {
-		return fmt.Errorf("get guide (public check): response missing url")
+		return fmt.Errorf("get guide (public check): response missing url: %s", appPassBodyPreview(res.body, 500))
 	}
 	imageURL, imageGUID, ierr := appPassGuideImageURL(res.json)
 	if ierr != nil {
@@ -1949,7 +1961,7 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 	}
 	wikiid, ok := idField(res.json, "wikiid")
 	if !ok {
-		return 0, fmt.Errorf("create course response missing wikiid")
+		return 0, fmt.Errorf("create course: 201 but response has no wikiid: %s", appPassBodyPreview(res.body, 500))
 	}
 	// Pushed for teardown immediately once the create+ID-extraction succeeds — same
 	// pattern as stage3/stage5 — so a getCourse verification failure right below still
