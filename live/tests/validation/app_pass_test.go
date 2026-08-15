@@ -1922,6 +1922,13 @@ func TestSeedAppPassAllowlist_ScriptCarriesItsGuarantees(t *testing.T) {
 		{". /bootstrap/helpers/db_helpers.sh", "must source db_helpers.sh for $mysqlcmd"},
 		{"$mysqlcmd -sN -D sites", "the three tables all live in the sites DB"},
 		{"NOT EXISTS", "without the guard a re-run duplicate-keys against PRIMARY KEY (siteid, document_extension)"},
+		// Both correlation predicates, asserted separately. A NOT EXISTS that is present
+		// but under-correlated is the dangerous shape: correlating on siteid alone makes
+		// the subquery true as soon as a site has any row, so a site holding a partial
+		// allowlist never receives its missing extensions and the seed looks like it
+		// worked. Testing only for the words "NOT EXISTS" cannot see that.
+		{"dea.siteid = s.siteid", "the guard must correlate on the site"},
+		{"dea.document_extension = dfi.document_extension", "the guard must ALSO correlate on the extension, or a partially seeded site is skipped"},
 		{"CROSS JOIN", "every site must be crossed with every allowed extension"},
 		{"'image','pdf','3d_model','video'", "the four MediaGroup values initializeAllowedDocumentTypes seeds"},
 		{"SELECT ROW_COUNT();", "the inserted count is read from the same session"},
