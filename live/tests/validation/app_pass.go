@@ -1175,6 +1175,13 @@ WHERE dfi.document_group IN ('image','pdf','3d_model','video')
 // prevent. So the gate is per-site coverage — the site behind opts.BaseURL must hold at
 // least as many extensions as document_file_information lists for the four media groups.
 //
+// BOTH sides of that comparison are filtered to the same four groups. An unfiltered
+// site count would be a proxy rather than the coverage statement: a site holding rows
+// for extensions outside those groups (an admin can add them from Security Settings)
+// would inflate its own count and could clear the bar while still missing media
+// extensions. Filtering both sides makes siteRows a subset count of wantExts, so
+// siteRows >= wantExts means exactly "this site holds every required extension".
+//
 // A failure here fails the pass rather than falling through to stage 4, and names which
 // of the three possible causes it is, because all three produce a similar-looking result
 // and only one of them is the one an operator would guess.
@@ -1196,7 +1203,7 @@ SELECT COUNT(*) FROM document_extension_allowed;
 %[1]s
 SELECT ROW_COUNT();
 SELECT COUNT(*) FROM document_extension_allowed;
-SELECT COUNT(*) FROM document_extension_allowed dea JOIN site_index s ON s.siteid = dea.siteid WHERE s.domain='%[2]s';
+SELECT COUNT(*) FROM document_extension_allowed dea JOIN site_index s ON s.siteid = dea.siteid JOIN document_file_information dfi ON dfi.document_extension = dea.document_extension WHERE s.domain='%[2]s' AND dfi.document_group IN ('image','pdf','3d_model','video');
 SELECT COUNT(DISTINCT document_extension) FROM document_file_information WHERE document_group IN ('image','pdf','3d_model','video');
 SQL
 `, appPassAllowlistSeedSQL, host)

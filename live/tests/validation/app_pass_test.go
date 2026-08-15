@@ -1951,6 +1951,11 @@ func TestSeedAppPassAllowlist_ScriptCarriesItsGuarantees(t *testing.T) {
 		// has none.
 		{"WHERE s.domain='127.0.0.1'", "coverage must be proven for the site under test, not globally"},
 		{"COUNT(DISTINCT document_extension) FROM document_file_information", "the expected extension count is what per-site coverage is measured against"},
+		// Both sides of the coverage comparison must be filtered to the same four groups.
+		// An unfiltered per-site count is inflated by extensions an admin added outside
+		// those groups, so a site missing real media extensions could still clear the bar.
+		{"JOIN document_file_information dfi ON dfi.document_extension = dea.document_extension", "the per-site count must be restricted to catalogue extensions"},
+		{"AND dfi.document_group IN ('image','pdf','3d_model','video')", "the per-site count must use the SAME group filter as the expected count"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(script, c.want) {
@@ -2058,16 +2063,46 @@ func TestSeedAppPassAllowlist_ExecErrorFails(t *testing.T) {
 	}
 }
 
+// The host is interpolated into a single-quoted SQL literal, so appPassHostPattern is
+// load-bearing. The case that matters is a URL that PARSES cleanly and still carries a
+// quote: url.Parse accepts "a'b.example.com" as a hostname (a single quote is a valid
+// sub-delim in reg-name), so only the regex stops it. A test whose input dies at
+// url.Parse instead would leave the regex entirely unasserted.
 func TestSeedAppPassAllowlist_BadHostFails(t *testing.T) {
+	cases := map[string]string{
+		"quote in an otherwise valid hostname": "https://a'b.example.com",
+		"unparseable":                          "https://ho st'x:1",
+		"empty host":                           "https:///guides",
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+				return seedOut(0, 80, 80, 80, 80), nil, nil
+			}}
+			deps := appPassDeps{exec: fe.runner()}
+			if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts(raw), "pod", newAppPassLogger()); err == nil {
+				t.Fatalf("want error for %s (%q): the host reaches a single-quoted SQL literal", name, raw)
+			}
+			if len(fe.calls) != 0 {
+				t.Errorf("exec calls = %d, want 0 — validation must happen before anything runs", len(fe.calls))
+			}
+		})
+	}
+}
+
+// TestSeedAppPassAllowlist_HostReachesTheSQLLiteral documents WHY the guard above exists,
+// by showing the host really is spliced into the statement unescaped.
+func TestSeedAppPassAllowlist_HostReachesTheSQLLiteral(t *testing.T) {
 	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
 		return seedOut(0, 80, 80, 80, 80), nil, nil
 	}}
 	deps := appPassDeps{exec: fe.runner()}
-	if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://ho st'x:1"), "pod", newAppPassLogger()); err == nil {
-		t.Fatal("want error: the host reaches a single-quoted SQL literal and must be validated first")
+	if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://smoke-abc.dozuki.test:443"), "pod", newAppPassLogger()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(fe.calls) != 0 {
-		t.Errorf("exec calls = %d, want 0 — validation must happen before anything runs", len(fe.calls))
+	script := fe.calls[0].argv[len(fe.calls[0].argv)-1]
+	if !strings.Contains(script, "s.domain='smoke-abc.dozuki.test'") {
+		t.Errorf("the validated host must reach the SQL literal verbatim; script was:\n%s", script)
 	}
 }
 
