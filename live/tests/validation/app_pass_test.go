@@ -646,6 +646,11 @@ const (
 )
 
 type appPassMockFlags struct {
+	// stepOrderbyOffset makes the mock echo back a DIFFERENT orderby than the one it was
+	// sent (server-side renumbering: 0-basing, clamping to the append position, shifting
+	// on insert). Nothing in the derived contract rules that out, so the harness must not
+	// depend on the requested value coming back. Default 0 = echo verbatim.
+	stepOrderbyOffset        int
 	loginStatus              int
 	registerOmitUserID       bool
 	wikiStatus               int
@@ -684,7 +689,16 @@ type appPassMock struct {
 	published  bool
 	videoPolls int
 	deleteLog  []string
+	// createdSteps records the steps this mock has actually been asked to create, so the
+	// guide it echoes back is built from real history rather than synthesized from the
+	// current request. A mock that derives its prior state from the same input the code
+	// under test derives its expectation from can only ever agree with that code, which
+	// is how the top-level-stepid fiction survived to a live run.
+	createdSteps []map[string]interface{}
 }
+
+// stepOrderbyFor returns the orderby the mock will actually store for a requested one.
+func (f appPassMockFlags) stepOrderbyFor(requested int) int { return requested + f.stepOrderbyOffset }
 
 func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 	m := &appPassMock{t: t, flags: flags}
@@ -1140,20 +1154,20 @@ func (m *appPassMock) handleAddStep(w http.ResponseWriter, r *http.Request) {
 	// (GuidesStepApiController.php:227-229 -> guideTranslationToArray). The previous mock
 	// returned a bare {"stepid": N}, a shape the app has never produced, which is why the
 	// harness passed its own tests for months and then failed live on the first run that
-	// reached stage 5. Mirror the real shape: steps[] carrying every step so far, the new
-	// one identified by its orderby.
+	// reached stage 5. Mirror the real shape: steps[] accumulated across every create this
+	// mock has served, so a lookup that only works on a single-element array cannot pass.
 	orderby, _ := body["orderby"].(float64)
-	steps := []interface{}{}
-	// Pre-existing steps come back too, so include the earlier one once we are past the
-	// first. A mock that returned only the new step would let a steps[0] lookup pass.
-	if int(orderby) > 1 {
-		steps = append(steps, map[string]interface{}{"stepid": 601, "orderby": 1, "title": "QA step 1"})
-	}
-	steps = append(steps, map[string]interface{}{
+	m.mu.Lock()
+	m.createdSteps = append(m.createdSteps, map[string]interface{}{
 		"stepid":  stepid,
-		"orderby": int(orderby),
+		"orderby": m.flags.stepOrderbyFor(int(orderby)),
 		"title":   body["title"],
 	})
+	steps := make([]interface{}, 0, len(m.createdSteps))
+	for _, st := range m.createdSteps {
+		steps = append(steps, st)
+	}
+	m.mu.Unlock()
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"guideid": 500,
 		"title":   "QA guide",
@@ -2220,10 +2234,10 @@ func stepAddServer(t *testing.T, body string) (*httptest.Server, appPassDeps) {
 	return srv, appPassDeps{client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: realAppPassClock{}}
 }
 
-// The step asked for is NOT first and NOT last, so returning steps[0] or steps[len-1]
-// yields some other step's id. That is the failure a positional lookup would produce:
-// silent, and wrong in a way nothing downstream would notice.
-func TestStage5AddStep_PicksTheStepMatchingOrderbyNotAPosition(t *testing.T) {
+// The step asked for is NOT first and NOT last, so a positional lookup returns some other
+// step's id. Preference for the orderby match is still asserted, even though a mismatch is
+// no longer fatal.
+func TestStage5AddStep_PrefersTheStepMatchingOrderbyOverAPosition(t *testing.T) {
 	body := stepGuideBody(
 		map[string]interface{}{"stepid": 111, "orderby": 1},
 		map[string]interface{}{"stepid": 222, "orderby": 2},
@@ -2242,8 +2256,7 @@ func TestStage5AddStep_PicksTheStepMatchingOrderbyNotAPosition(t *testing.T) {
 }
 
 // orderby 0 is a legal position. idField rejects <= 0 because it is for identifiers, so
-// reading orderby with it would skip the first step and fall through to "no step with
-// orderby=0" on a perfectly good response.
+// reading orderby with it would skip the first step.
 func TestStage5AddStep_OrderbyZeroIsFound(t *testing.T) {
 	body := stepGuideBody(
 		map[string]interface{}{"stepid": 900, "orderby": 0},
@@ -2258,6 +2271,28 @@ func TestStage5AddStep_OrderbyZeroIsFound(t *testing.T) {
 	}
 	if got != 900 {
 		t.Errorf("stepid = %d, want 900", got)
+	}
+}
+
+// THE POINT OF THE LENIENCY. Nothing in the derived contract proves the server persists the
+// requested orderby: it may 0-base, clamp to the append position, or shift on insert. If a
+// mismatch were fatal, a run in which the step was genuinely created would fail on an
+// unproven ordering detail, for an id no caller reads.
+func TestStage5AddStep_ServerRenumberedOrderbyStillSucceeds(t *testing.T) {
+	// Asked for orderby 2; the server stored 1 and 0 for the two steps it holds.
+	body := stepGuideBody(
+		map[string]interface{}{"stepid": 111, "orderby": 0},
+		map[string]interface{}{"stepid": 222, "orderby": 1},
+	)
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err != nil {
+		t.Fatalf("a renumbering server must not fail the stage; the id is not read by any caller. got: %v", err)
+	}
+	if got == 0 {
+		t.Error("want some step id from the returned guide")
 	}
 }
 
@@ -2276,14 +2311,9 @@ func TestStage5AddStep_RejectsBodiesItCannotTrust(t *testing.T) {
 			wantErr: "carries no steps[]",
 		},
 		{
-			name:    "no step at the requested orderby",
-			body:    stepGuideBody(map[string]interface{}{"stepid": 111, "orderby": 1}),
-			wantErr: "no step with orderby=2",
-		},
-		{
-			name:    "matching step carries no stepid",
+			name:    "steps present but none carries a stepid",
 			body:    stepGuideBody(map[string]interface{}{"orderby": 2, "title": "QA step 2"}),
-			wantErr: "orderby=2 has no stepid",
+			wantErr: "no steps[] entry carries a stepid",
 		},
 	}
 	for _, tc := range cases {
@@ -2303,5 +2333,23 @@ func TestStage5AddStep_RejectsBodiesItCannotTrust(t *testing.T) {
 				t.Errorf("error must include the response body, got: %v", err)
 			}
 		})
+	}
+}
+
+// TestRunAppPass_SurvivesServerRenumberedStepOrderby runs the WHOLE pass against a mock
+// that stores a different orderby than it was sent. This is the case the previous mock was
+// structurally unable to express: it synthesized its prior steps from the current request,
+// so it agreed with the harness no matter what the harness assumed. Recording real history
+// plus stepOrderbyOffset lets the mock disagree.
+func TestRunAppPass_SurvivesServerRenumberedStepOrderby(t *testing.T) {
+	// Server 0-bases: asked for 1 and 2, stores 0 and 1.
+	mock := newAppPassMock(t, appPassMockFlags{stepOrderbyOffset: -1})
+	defer mock.server.Close()
+
+	fe := &fakeExec{fn: pathBExecFn()}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: newFakeAppPassClock()}
+
+	if err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, newAppPassLogger(), "deadbeefdeadbeefdeadbeefdeadbeef", "salt001"); err != nil {
+		t.Fatalf("a server that renumbers step orderby must not fail the pass: %v", err)
 	}
 }
