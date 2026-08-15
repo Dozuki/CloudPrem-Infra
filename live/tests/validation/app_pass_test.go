@@ -646,6 +646,11 @@ const (
 )
 
 type appPassMockFlags struct {
+	// stepOrderbyOffset makes the mock echo back a DIFFERENT orderby than the one it was
+	// sent (server-side renumbering: 0-basing, clamping to the append position, shifting
+	// on insert). Nothing in the derived contract rules that out, so the harness must not
+	// depend on the requested value coming back. Default 0 = echo verbatim.
+	stepOrderbyOffset        int
 	loginStatus              int
 	registerOmitUserID       bool
 	wikiStatus               int
@@ -684,7 +689,16 @@ type appPassMock struct {
 	published  bool
 	videoPolls int
 	deleteLog  []string
+	// createdSteps records the steps this mock has actually been asked to create, so the
+	// guide it echoes back is built from real history rather than synthesized from the
+	// current request. A mock that derives its prior state from the same input the code
+	// under test derives its expectation from can only ever agree with that code, which
+	// is how the top-level-stepid fiction survived to a live run.
+	createdSteps []map[string]interface{}
 }
+
+// stepOrderbyFor returns the orderby the mock will actually store for a requested one.
+func (f appPassMockFlags) stepOrderbyFor(requested int) int { return requested + f.stepOrderbyOffset }
 
 func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 	m := &appPassMock{t: t, flags: flags}
@@ -1136,7 +1150,29 @@ func (m *appPassMock) handleAddStep(w http.ResponseWriter, r *http.Request) {
 	if status != http.StatusCreated {
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"stepid": stepid})
+	// The real 201 body is the WHOLE UPDATED GUIDE, not the created step
+	// (GuidesStepApiController.php:227-229 -> guideTranslationToArray). The previous mock
+	// returned a bare {"stepid": N}, a shape the app has never produced, which is why the
+	// harness passed its own tests for months and then failed live on the first run that
+	// reached stage 5. Mirror the real shape: steps[] accumulated across every create this
+	// mock has served, so a lookup that only works on a single-element array cannot pass.
+	orderby, _ := body["orderby"].(float64)
+	m.mu.Lock()
+	m.createdSteps = append(m.createdSteps, map[string]interface{}{
+		"stepid":  stepid,
+		"orderby": m.flags.stepOrderbyFor(int(orderby)),
+		"title":   body["title"],
+	})
+	steps := make([]interface{}, 0, len(m.createdSteps))
+	for _, st := range m.createdSteps {
+		steps = append(steps, st)
+	}
+	m.mu.Unlock()
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"guideid": 500,
+		"title":   "QA guide",
+		"steps":   steps,
+	})
 }
 
 // handleGetGuide mirrors the REAL guide response shape (per the WS3 integration
@@ -2166,5 +2202,214 @@ func TestRunAppPass_SeedsAllowlistBeforeAnyHTTP(t *testing.T) {
 	}
 	if !seedWasFirst {
 		t.Error("the allowlist seed ran AFTER an HTTP request; it must run before any, or the app may cache the empty list")
+	}
+}
+
+// ---------------------------------------------------------------------------------
+// stage 5 add-step: the 201 body is the WHOLE GUIDE, not the created step
+//
+// The 2026-08-15 fresh proof run - the first ever to reach stage 5 - failed with
+// "add image step response missing stepid" because the harness looked for a top-level
+// stepid that the app has never returned. GuidesStepApiController::newStep
+// (GuidesStepApiController.php:227-229) returns guideTranslationToArray, the same shape
+// as GET /guides/{guideid}. These pin the corrected contract.
+// ---------------------------------------------------------------------------------
+
+func stepGuideBody(steps ...map[string]interface{}) string {
+	entries := make([]interface{}, 0, len(steps))
+	for _, s := range steps {
+		entries = append(entries, s)
+	}
+	b, _ := json.Marshal(map[string]interface{}{"guideid": 500, "title": "QA guide", "steps": entries})
+	return string(b)
+}
+
+func stepAddServer(t *testing.T, body string) (*httptest.Server, appPassDeps) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(body))
+	}))
+	return srv, appPassDeps{client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: realAppPassClock{}}
+}
+
+// The step asked for is NOT first and NOT last, so a positional lookup returns some other
+// step's id. Preference for the orderby match is still asserted, even though a mismatch is
+// no longer fatal.
+func TestStage5AddStep_PrefersTheStepMatchingOrderbyOverAPosition(t *testing.T) {
+	body := stepGuideBody(
+		map[string]interface{}{"stepid": 111, "orderby": 1},
+		map[string]interface{}{"stepid": 222, "orderby": 2},
+		map[string]interface{}{"stepid": 333, "orderby": 3},
+	)
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 222 {
+		t.Errorf("stepid = %d, want 222 (the entry with orderby=2); 111 means steps[0], 333 means steps[len-1]", got)
+	}
+}
+
+// orderby 0 is a legal position. idField rejects <= 0 because it is for identifiers, so
+// reading orderby with it would skip the first step.
+func TestStage5AddStep_OrderbyZeroIsFound(t *testing.T) {
+	body := stepGuideBody(
+		map[string]interface{}{"stepid": 900, "orderby": 0},
+		map[string]interface{}{"stepid": 901, "orderby": 1},
+	)
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 0)
+	if err != nil {
+		t.Fatalf("orderby 0 must be findable, got: %v", err)
+	}
+	if got != 900 {
+		t.Errorf("stepid = %d, want 900", got)
+	}
+}
+
+// THE POINT OF THE LENIENCY. Nothing in the derived contract proves the server persists the
+// requested orderby: it may 0-base, clamp to the append position, or shift on insert. If a
+// mismatch were fatal, a run in which the step was genuinely created would fail on an
+// unproven ordering detail, for an id no caller reads.
+func TestStage5AddStep_ServerRenumberedOrderbyStillSucceeds(t *testing.T) {
+	// Asked for orderby 2; the server stored 1 and 0 for the two steps it holds.
+	body := stepGuideBody(
+		map[string]interface{}{"stepid": 111, "orderby": 0},
+		map[string]interface{}{"stepid": 222, "orderby": 1},
+	)
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err != nil {
+		t.Fatalf("a renumbering server must not fail the stage; the id is not read by any caller. got: %v", err)
+	}
+	if got == 0 {
+		t.Error("want some step id from the returned guide")
+	}
+}
+
+func TestStage5AddStep_RejectsBodiesItCannotTrust(t *testing.T) {
+	cases := []struct {
+		name, body, wantErr string
+	}{
+		{
+			name:    "no steps array at all (the old bare-stepid shape)",
+			body:    `{"stepid":601}`,
+			wantErr: "carries no steps[]",
+		},
+		{
+			name:    "empty steps array",
+			body:    `{"guideid":500,"steps":[]}`,
+			wantErr: "carries no steps[]",
+		},
+		{
+			name:    "steps present but none carries a stepid",
+			body:    stepGuideBody(map[string]interface{}{"orderby": 2, "title": "QA step 2"}),
+			wantErr: "no steps[] entry carries a stepid",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, deps := stepAddServer(t, tc.body)
+			defer srv.Close()
+			_, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+			if err == nil {
+				t.Fatalf("want an error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error should contain %q, got: %v", tc.wantErr, err)
+			}
+			// Every one of these is a shape surprise, so the body has to be visible or the
+			// next live failure is as undiagnosable as the one that caused this fix.
+			if !strings.Contains(err.Error(), "guideid") && !strings.Contains(err.Error(), "stepid") {
+				t.Errorf("error must include the response body, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestRunAppPass_SurvivesServerRenumberedStepOrderby runs the WHOLE pass against a mock
+// that stores a different orderby than it was sent. This is the case the previous mock was
+// structurally unable to express: it synthesized its prior steps from the current request,
+// so it agreed with the harness no matter what the harness assumed. Recording real history
+// plus stepOrderbyOffset lets the mock disagree.
+func TestRunAppPass_SurvivesServerRenumberedStepOrderby(t *testing.T) {
+	// Server 0-bases: asked for 1 and 2, stores 0 and 1.
+	mock := newAppPassMock(t, appPassMockFlags{stepOrderbyOffset: -1})
+	defer mock.server.Close()
+
+	fe := &fakeExec{fn: pathBExecFn()}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: newFakeAppPassClock()}
+
+	if err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, newAppPassLogger(), "deadbeefdeadbeefdeadbeefdeadbeef", "salt001"); err != nil {
+		t.Fatalf("a server that renumbers step orderby must not fail the pass: %v", err)
+	}
+}
+
+// A 201 describing a DIFFERENT guide must not be trusted. With the fallback, an unrelated
+// or stale guide would otherwise hand back a plausible step id and the add would look
+// successful.
+func TestStage5AddStep_RejectsAGuideThatIsNotTheOneWePostedTo(t *testing.T) {
+	body := `{"guideid":999,"title":"someone else's guide","steps":[{"stepid":777,"orderby":2}]}`
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	_, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err == nil {
+		t.Fatal("want an error: the response describes guide 999, not the 500 we posted to")
+	}
+	for _, want := range []string{"999", "500"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name both guide ids (missing %q), got: %v", want, err)
+		}
+	}
+}
+
+// An ABSENT guideid must stay tolerated. The shape is derived from source rather than
+// observed, so requiring the field would invent a failure mode on an unproven detail.
+func TestStage5AddStep_AbsentGuideidIsTolerated(t *testing.T) {
+	body := `{"steps":[{"stepid":777,"orderby":2}]}`
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err != nil {
+		t.Fatalf("an absent guideid must not fail the stage: %v", err)
+	}
+	if got != 777 {
+		t.Errorf("stepid = %d, want 777", got)
+	}
+}
+
+// Present-but-unusable is NOT the same as absent. idField reports both as "not ok", so a
+// single ok-guard would tolerate a null/0/negative/wrong-type guideid while the code
+// claimed to be strict about the field.
+func TestStage5AddStep_RejectsAMalformedGuideid(t *testing.T) {
+	for name, body := range map[string]string{
+		"null":       `{"guideid":null,"steps":[{"stepid":777,"orderby":2}]}`,
+		"zero":       `{"guideid":0,"steps":[{"stepid":777,"orderby":2}]}`,
+		"negative":   `{"guideid":-5,"steps":[{"stepid":777,"orderby":2}]}`,
+		"wrong type": `{"guideid":{"nested":1},"steps":[{"stepid":777,"orderby":2}]}`,
+		"fractional": `{"guideid":500.5,"steps":[{"stepid":777,"orderby":2}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, deps := stepAddServer(t, body)
+			defer srv.Close()
+			_, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+			if err == nil {
+				t.Fatalf("want an error: guideid is present but unusable (%s)", name)
+			}
+			if !strings.Contains(err.Error(), "present and unusable") {
+				t.Errorf("error should distinguish malformed from missing, got: %v", err)
+			}
+		})
 	}
 }
