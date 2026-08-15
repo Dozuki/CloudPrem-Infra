@@ -1495,6 +1495,14 @@ func stage5AddStep(ctx context.Context, deps appPassDeps, base, authToken string
 	//
 	// What IS worth failing on: a 201 whose guide carries no identifiable step at all,
 	// which would mean the step was not created.
+	// Cross-check the guide identity before trusting anything in the body. With the
+	// fallback below, an unrelated or stale guide would otherwise hand back a plausible
+	// step id and the add would look successful. Strict only when the field is present:
+	// the shape is derived from source, not observed, so an absent guideid should not
+	// invent a new failure mode.
+	if gid, ok := idField(res.json, "guideid"); ok && gid != guideID {
+		return 0, fmt.Errorf("add %s step: 201 but the returned guide is %d, not the %d we posted to: %s", mediaType, gid, guideID, appPassBodyPreview(res.body, 500))
+	}
 	steps, _ := res.json["steps"].([]interface{})
 	if len(steps) == 0 {
 		return 0, fmt.Errorf("add %s step: 201 but the returned guide carries no steps[]: %s", mediaType, appPassBodyPreview(res.body, 500))

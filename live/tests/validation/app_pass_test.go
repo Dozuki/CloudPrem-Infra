@@ -2353,3 +2353,38 @@ func TestRunAppPass_SurvivesServerRenumberedStepOrderby(t *testing.T) {
 		t.Fatalf("a server that renumbers step orderby must not fail the pass: %v", err)
 	}
 }
+
+// A 201 describing a DIFFERENT guide must not be trusted. With the fallback, an unrelated
+// or stale guide would otherwise hand back a plausible step id and the add would look
+// successful.
+func TestStage5AddStep_RejectsAGuideThatIsNotTheOneWePostedTo(t *testing.T) {
+	body := `{"guideid":999,"title":"someone else's guide","steps":[{"stepid":777,"orderby":2}]}`
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	_, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err == nil {
+		t.Fatal("want an error: the response describes guide 999, not the 500 we posted to")
+	}
+	for _, want := range []string{"999", "500"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name both guide ids (missing %q), got: %v", want, err)
+		}
+	}
+}
+
+// An ABSENT guideid must stay tolerated. The shape is derived from source rather than
+// observed, so requiring the field would invent a failure mode on an unproven detail.
+func TestStage5AddStep_AbsentGuideidIsTolerated(t *testing.T) {
+	body := `{"steps":[{"stepid":777,"orderby":2}]}`
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err != nil {
+		t.Fatalf("an absent guideid must not fail the stage: %v", err)
+	}
+	if got != 777 {
+		t.Errorf("stepid = %d, want 777", got)
+	}
+}
