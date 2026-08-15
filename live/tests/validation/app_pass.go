@@ -1091,9 +1091,10 @@ func appPassFetchRevisionID(ctx context.Context, deps appPassDeps, authToken, re
 // field (stage4WaitForVideoReady), and the image/document URL assertions
 // (appPassGuideImageURL, appPassGuideDocumentURL, and their size/guid/encodings
 // assumptions) have never executed against a running app, because every upload 422'd on
-// an empty allowed-extension list before reaching them. Treat those shapes as
-// unconfirmed until a run gets past the upload, and do not invent corrected contracts
-// for them from a pass that never exercised them.
+// an empty allowed-extension list before reaching them. seedAppPassAllowlist (below)
+// removes that blocker, so the first run to get through stage 4 is what finally proves
+// these shapes. Until such a run is recorded, treat them as unconfirmed, and do not
+// invent corrected contracts for them from a pass that never exercised them.
 // ---------------------------------------------------------------------------------
 
 type appPassAsset struct {
@@ -1112,6 +1113,98 @@ const (
 	appPassVideoPollInterval = 10 * time.Second
 	appPassVideoPollCeiling  = 5 * time.Minute
 )
+
+// ---------------------------------------------------------------------------------
+// FIXTURE: masks the document_extension_allowed provisioning defect
+// (David-approved 2026-08-14)
+// ---------------------------------------------------------------------------------
+//
+// A freshly provisioned CloudPrem stack has ZERO rows in document_extension_allowed for
+// every site, so the app renders an empty allowed-extension list and rejects every media
+// upload with a 422. Stage 4 cannot pass without this.
+//
+// The defect is in provisioning, not in the app: the product's only default seeder is
+// SiteManagementLib::initializeAllowedDocumentTypes(), reachable only from
+// createNewSite(), and the CloudPrem bootstrap imports a schema-only sites dump rather
+// than creating its sites through that code path, so the rows are never written. Stacks
+// whose admin has saved Manage -> Security Settings at least once have rows by accident
+// of that write; fresh ones never do.
+//
+// THIS MASKS THAT DEFECT. With the fixture in place a harness run can no longer detect
+// the missing rows, so the nightly will not catch a regression in the provisioning path.
+// That trade was made deliberately and knowingly: the alternative was leaving AppPass
+// blocked at stage 4 indefinitely. The chart-side repair that would have fixed it for
+// real is parked on helm #292, which was deferred because its rollout guard could not be
+// made to both repair the broken stacks and protect a deliberately-emptied allowlist.
+//
+// Remove this fixture when a real fix lands. Removal is safe but never urgent: once the
+// rows are provisioned properly the INSERT matches nothing and the fixture is a no-op
+// that logs "0 inserted".
+//
+// Idempotency is per (siteid, document_extension), not per stack. The NOT EXISTS guard,
+// against document_extension_allowed's own PRIMARY KEY (siteid, document_extension),
+// means an already-seeded site contributes no rows while a site that is missing them
+// still gets them. A stack-wide "skip if any rows exist" test would be wrong here: a
+// stack with one product-created subsite has rows for that subsite and none for
+// base/onprem, and would be skipped in exactly the state the fixture exists to repair.
+const appPassAllowlistSeedSQL = `INSERT INTO document_extension_allowed (siteid, document_extension)
+SELECT s.siteid, dfi.document_extension
+FROM site_index s
+CROSS JOIN document_file_information dfi
+WHERE dfi.document_group IN ('image','pdf','3d_model','video')
+  AND NOT EXISTS (SELECT 1 FROM document_extension_allowed dea
+                  WHERE dea.siteid = s.siteid
+                    AND dea.document_extension = dfi.document_extension);`
+
+// seedAppPassAllowlist runs the seed and both counts in ONE mysql session (one heredoc,
+// one $mysqlcmd invocation) because ROW_COUNT() is connection-scoped and could not
+// observe the INSERT from a separate exec — the same reason rotateAppPassAdminPassword
+// is structured this way. Emits three numbers: rows before, rows inserted, rows after.
+//
+// A failure here fails the pass rather than falling through to stage 4. Stage 4 would
+// fail anyway, with a 422 that reads as a media-contract defect instead of a missing
+// fixture, and that misattribution is the whole cost of being quiet here.
+func seedAppPassAllowlist(ctx context.Context, deps appPassDeps, opts AppPassOptions, pod string, log *appPassLogger) error {
+	script := fmt.Sprintf(`. /bootstrap/helpers/db_helpers.sh >/dev/null 2>&1 || exit 92
+set +exu
+$mysqlcmd -sN -D sites <<'SQL'
+SELECT COUNT(*) FROM document_extension_allowed;
+%s
+SELECT ROW_COUNT();
+SELECT COUNT(*) FROM document_extension_allowed;
+SQL
+`, appPassAllowlistSeedSQL)
+	argv := kubectlExecArgv(opts.Kubeconfig, opts.Namespace, pod, false, []string{"bash", "-c", script})
+	stdout, stderr, err := deps.exec(ctx, argv, nil)
+	if err != nil {
+		return fmt.Errorf("allowlist fixture: %v: %s", err, strings.TrimSpace(string(stderr)))
+	}
+	rows := appPassNonEmptyLines(string(stdout))
+	if len(rows) != 3 {
+		return fmt.Errorf("allowlist fixture: expected 3 result lines (before, inserted, after), got %d", len(rows))
+	}
+	before, err := strconv.Atoi(rows[0])
+	if err != nil {
+		return fmt.Errorf("allowlist fixture: could not parse before-count %q: %w", rows[0], err)
+	}
+	inserted, err := strconv.Atoi(rows[1])
+	if err != nil {
+		return fmt.Errorf("allowlist fixture: could not parse inserted-count %q: %w", rows[1], err)
+	}
+	after, err := strconv.Atoi(rows[2])
+	if err != nil {
+		return fmt.Errorf("allowlist fixture: could not parse after-count %q: %w", rows[2], err)
+	}
+	// after==0 means the seed matched nothing AND nothing was there to begin with, so
+	// stage 4 is still guaranteed to 422. Most likely document_file_information is itself
+	// unpopulated, which is a different provisioning problem worth naming here rather
+	// than rediscovering from a 422 one stage later.
+	if after == 0 {
+		return fmt.Errorf("allowlist fixture: 0 rows after seeding (before=%d inserted=%d) — document_file_information is likely empty; stage 4 cannot pass", before, inserted)
+	}
+	log.Logf("app-pass: allowlist FIXTURE before=%d inserted=%d after=%d (masks the provisioning defect)", before, inserted, after)
+	return nil
+}
 
 func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken string, asset appPassAsset, stack *appPassTeardownStack) (int64, error) {
 	data, err := appPassAssets.ReadFile(asset.embedPath)
@@ -1895,6 +1988,15 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	if derr := checkDeadline(deps.clock, deadline, opts.Timeout, "app-pass"); derr != nil {
 		return derr
 	}
+	// FIXTURE, not a stage: seeds document_extension_allowed so stage 4's uploads are not
+	// rejected by an empty allowed-extension list. See seedAppPassAllowlist — it masks a
+	// real provisioning defect and is meant to be deleted once that defect is fixed.
+	// Runs here rather than at stage 0 so it sits next to the stage it unblocks, and
+	// inside the deadline-checked sequence so a hung exec cannot outlive the pass ceiling.
+	if serr := seedAppPassAllowlist(stageCtx, deps, opts, pod, log); serr != nil {
+		return fmt.Errorf("app-pass: %w", serr)
+	}
+
 	log.Logf("app-pass: stage 4 (media uploads) starting")
 	imageID, documentID, videoID, err := stage4Uploads(stageCtx, deps, deps.clock, base, authToken, &stack)
 	if err != nil {

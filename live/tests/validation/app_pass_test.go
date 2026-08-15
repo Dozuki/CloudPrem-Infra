@@ -1219,6 +1219,11 @@ func pathBExecFn() func(argv []string, stdin []byte) (stdout, stderr []byte, err
 		switch {
 		case strings.Contains(joined, "get pods"):
 			return []byte("app-pod-1\n"), nil, nil
+		// MUST precede the site_index case: the allowlist fixture's INSERT also selects
+		// FROM site_index, so matching on site_index first would answer the fixture with
+		// a one-line site name and fail it on line count.
+		case strings.Contains(joined, "document_extension_allowed"):
+			return []byte("0\n80\n80\n"), nil, nil
 		case strings.Contains(joined, "site_index"):
 			return []byte("acme\n"), nil, nil
 		case strings.Contains(joined, "essentials.php"):
@@ -1847,5 +1852,155 @@ func TestAppPassUsernamePattern_RejectsHyphensAcceptsUnderscores(t *testing.T) {
 	}
 	if !appPassUsernamePattern.MatchString("qa_harness_user_deadbeef") {
 		t.Error("pattern rejected a valid underscored username")
+	}
+}
+
+// ---------------------------------------------------------------------------------
+// allowlist FIXTURE (masks the document_extension_allowed provisioning defect)
+//
+// These guard the two properties that make the fixture safe to carry: it must seed
+// per-site rather than per-stack (a stack with one seeded subsite must still repair
+// base/onprem), and it must fail loudly rather than let stage 4 report the miss as a
+// media-contract defect.
+// ---------------------------------------------------------------------------------
+
+func TestSeedAppPassAllowlist_SeedsAndReportsCounts(t *testing.T) {
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		return []byte("0\n80\n80\n"), nil, nil
+	}}
+	deps := appPassDeps{exec: fe.runner()}
+	log := newAppPassLogger()
+
+	if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:9999"), "app-pod-1", log); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fe.calls) != 1 {
+		t.Fatalf("exec calls = %d, want exactly 1 (the seed must be ONE mysql session: ROW_COUNT() is connection-scoped)", len(fe.calls))
+	}
+	if fe.calls[0].stdin != nil {
+		t.Errorf("stdin = %q, want nil", fe.calls[0].stdin)
+	}
+
+	argv := fe.calls[0].argv
+	wantPrefix := []string{"--kubeconfig", "kc", "-n", "ns", "exec", "app-pod-1", "-c", "app", "--", "bash", "-c"}
+	if len(argv) != len(wantPrefix)+1 {
+		t.Fatalf("argv = %v, want the standard exec prefix plus one script argument", argv)
+	}
+	if !argvEqual(argv[:len(wantPrefix)], wantPrefix) {
+		t.Errorf("argv prefix mismatch:\n got:  %v\n want: %v", argv[:len(wantPrefix)], wantPrefix)
+	}
+
+	var line string
+	for _, l := range log.Lines() {
+		if strings.Contains(l, "allowlist FIXTURE") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatal("no allowlist FIXTURE log line emitted")
+	}
+	for _, want := range []string{"before=0", "inserted=80", "after=80"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log line %q missing %q", line, want)
+		}
+	}
+}
+
+// The script is asserted property by property rather than as one golden string: each
+// check below names a specific way the fixture could silently stop doing its job.
+func TestSeedAppPassAllowlist_ScriptCarriesItsGuarantees(t *testing.T) {
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		return []byte("0\n80\n80\n"), nil, nil
+	}}
+	deps := appPassDeps{exec: fe.runner()}
+	if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", newAppPassLogger()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	script := fe.calls[0].argv[len(fe.calls[0].argv)-1]
+
+	checks := []struct{ want, why string }{
+		{". /bootstrap/helpers/db_helpers.sh", "must source db_helpers.sh for $mysqlcmd"},
+		{"$mysqlcmd -sN -D sites", "the three tables all live in the sites DB"},
+		{"NOT EXISTS", "without the guard a re-run duplicate-keys against PRIMARY KEY (siteid, document_extension)"},
+		{"CROSS JOIN", "every site must be crossed with every allowed extension"},
+		{"'image','pdf','3d_model','video'", "the four MediaGroup values initializeAllowedDocumentTypes seeds"},
+		{"SELECT ROW_COUNT();", "the inserted count is read from the same session"},
+	}
+	for _, c := range checks {
+		if !strings.Contains(script, c.want) {
+			t.Errorf("script missing %q: %s", c.want, c.why)
+		}
+	}
+	// Per-site, not per-stack. A stack-wide short circuit would skip base/onprem on any
+	// stack that already has a product-created subsite — the exact shape this repairs.
+	if strings.Contains(script, "COUNT(*) FROM document_extension_allowed WHERE") {
+		t.Error("script appears to gate on a per-stack count; the guard must be the per-row NOT EXISTS")
+	}
+}
+
+func TestSeedAppPassAllowlist_AlreadySeededInsertsNothing(t *testing.T) {
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		return []byte("80\n0\n80\n"), nil, nil
+	}}
+	deps := appPassDeps{exec: fe.runner()}
+	log := newAppPassLogger()
+	if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", log); err != nil {
+		t.Fatalf("a fully seeded stack must be a clean no-op, got: %v", err)
+	}
+	var found bool
+	for _, l := range log.Lines() {
+		if strings.Contains(l, "inserted=0") && strings.Contains(l, "after=80") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want a no-op line reporting inserted=0 after=80, got %v", log.Lines())
+	}
+}
+
+func TestSeedAppPassAllowlist_ZeroRowsAfterSeedingFails(t *testing.T) {
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		return []byte("0\n0\n0\n"), nil, nil
+	}}
+	deps := appPassDeps{exec: fe.runner()}
+	err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", newAppPassLogger())
+	if err == nil {
+		t.Fatal("want an error: 0 rows after seeding guarantees stage 4 will 422")
+	}
+	if !strings.Contains(err.Error(), "document_file_information") {
+		t.Errorf("error should name the likely cause, got: %v", err)
+	}
+}
+
+func TestSeedAppPassAllowlist_MalformedOutputFails(t *testing.T) {
+	for name, out := range map[string]string{
+		"too few lines":  "0\n80\n",
+		"too many lines": "0\n80\n80\n80\n",
+		"empty":          "",
+		"non-numeric":    "0\nlots\n80\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+				return []byte(out), nil, nil
+			}}
+			deps := appPassDeps{exec: fe.runner()}
+			if err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", newAppPassLogger()); err == nil {
+				t.Fatalf("want error for %s output %q", name, out)
+			}
+		})
+	}
+}
+
+func TestSeedAppPassAllowlist_ExecErrorFails(t *testing.T) {
+	fe := &fakeExec{fn: func(argv []string, stdin []byte) ([]byte, []byte, error) {
+		return nil, []byte("exit 92"), fmt.Errorf("db_helpers.sh missing")
+	}}
+	deps := appPassDeps{exec: fe.runner()}
+	err := seedAppPassAllowlist(context.Background(), deps, testAppPassOpts("https://127.0.0.1:1"), "pod", newAppPassLogger())
+	if err == nil {
+		t.Fatal("want error when the exec itself fails")
+	}
+	if !strings.Contains(err.Error(), "allowlist fixture") {
+		t.Errorf("error must attribute itself to the fixture, not read as a stage-4 defect: %v", err)
 	}
 }
