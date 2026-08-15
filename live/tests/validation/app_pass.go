@@ -1500,8 +1500,19 @@ func stage5AddStep(ctx context.Context, deps appPassDeps, base, authToken string
 	// step id and the add would look successful. Strict only when the field is present:
 	// the shape is derived from source, not observed, so an absent guideid should not
 	// invent a new failure mode.
-	if gid, ok := idField(res.json, "guideid"); ok && gid != guideID {
-		return 0, fmt.Errorf("add %s step: 201 but the returned guide is %d, not the %d we posted to: %s", mediaType, gid, guideID, appPassBodyPreview(res.body, 500))
+	//
+	// Missing and malformed are distinguished deliberately. idField reports both as "not
+	// ok", so a single `ok &&` guard would silently tolerate a present-but-unusable
+	// guideid (null, 0, negative, a nested object) while the comment claimed strictness -
+	// a comment asserting a property the code does not have.
+	if raw, present := res.json["guideid"]; present {
+		gid, ok := idField(res.json, "guideid")
+		if !ok {
+			return 0, fmt.Errorf("add %s step: 201 but guideid is present and unusable (%v): %s", mediaType, raw, appPassBodyPreview(res.body, 500))
+		}
+		if gid != guideID {
+			return 0, fmt.Errorf("add %s step: 201 but the returned guide is %d, not the %d we posted to: %s", mediaType, gid, guideID, appPassBodyPreview(res.body, 500))
+		}
 	}
 	steps, _ := res.json["steps"].([]interface{})
 	if len(steps) == 0 {

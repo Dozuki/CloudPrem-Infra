@@ -2388,3 +2388,28 @@ func TestStage5AddStep_AbsentGuideidIsTolerated(t *testing.T) {
 		t.Errorf("stepid = %d, want 777", got)
 	}
 }
+
+// Present-but-unusable is NOT the same as absent. idField reports both as "not ok", so a
+// single ok-guard would tolerate a null/0/negative/wrong-type guideid while the code
+// claimed to be strict about the field.
+func TestStage5AddStep_RejectsAMalformedGuideid(t *testing.T) {
+	for name, body := range map[string]string{
+		"null":       `{"guideid":null,"steps":[{"stepid":777,"orderby":2}]}`,
+		"zero":       `{"guideid":0,"steps":[{"stepid":777,"orderby":2}]}`,
+		"negative":   `{"guideid":-5,"steps":[{"stepid":777,"orderby":2}]}`,
+		"wrong type": `{"guideid":{"nested":1},"steps":[{"stepid":777,"orderby":2}]}`,
+		"fractional": `{"guideid":500.5,"steps":[{"stepid":777,"orderby":2}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, deps := stepAddServer(t, body)
+			defer srv.Close()
+			_, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+			if err == nil {
+				t.Fatalf("want an error: guideid is present but unusable (%s)", name)
+			}
+			if !strings.Contains(err.Error(), "present and unusable") {
+				t.Errorf("error should distinguish malformed from missing, got: %v", err)
+			}
+		})
+	}
+}
