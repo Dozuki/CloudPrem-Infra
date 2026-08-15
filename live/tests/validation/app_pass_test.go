@@ -93,8 +93,12 @@ func argvEqual(got, want []string) bool {
 	return true
 }
 
+// testAppPassOpts declares PublicDelivery, so the default test subject is a site that
+// is SUPPOSED to serve anonymous traffic and every stage-6 delivery assertion runs for
+// real. The private-config path gets its own test rather than becoming the default,
+// because a default that skips those assertions would quietly stop testing them.
 func testAppPassOpts(baseURL string) AppPassOptions {
-	return AppPassOptions{BaseURL: baseURL, Kubeconfig: "kc", Namespace: "ns", Timeout: time.Hour}
+	return AppPassOptions{BaseURL: baseURL, Kubeconfig: "kc", Namespace: "ns", Timeout: time.Hour, PublicDelivery: true}
 }
 
 // ---------------------------------------------------------------------------------
@@ -122,7 +126,7 @@ func TestRunAppPass_CeilingFailsInstantly(t *testing.T) {
 		t.Fatalf("no exec call expected once the ceiling has already passed, got argv %v", argv)
 		return nil, nil, nil
 	}}
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 	log := newAppPassLogger()
 
 	start := time.Now()
@@ -158,7 +162,7 @@ func TestStage4WaitForVideoReady_CeilingInstant(t *testing.T) {
 	defer srv.Close()
 
 	clk := newFakeAppPassClock()
-	deps := appPassDeps{client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 
 	start := time.Now()
 	err := stage4WaitForVideoReady(context.Background(), deps, clk, srv.URL, "tok", 103)
@@ -188,7 +192,7 @@ func TestStage4WaitForVideoReady_ReadyEventually(t *testing.T) {
 	defer srv.Close()
 
 	clk := newFakeAppPassClock()
-	deps := appPassDeps{client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 	if err := stage4WaitForVideoReady(context.Background(), deps, clk, srv.URL, "tok", 103); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -629,6 +633,9 @@ func TestStage0EphemeralAdmin_PathA(t *testing.T) {
 const (
 	appPassMockImageGUID    = "guid-mock-abc123"
 	appPassMockDocumentPath = "/Document/102/app_pass_probe.pdf"
+	// The session cookie the mock login issues, mirroring the real app's per-site
+	// session_<siteid> cookie. Named so the anonymity assertions can look for it.
+	appPassMockSessionCookie = "session_1"
 	// appPassMockGuideRevisionID / appPassMockWikiRevisionID are the fixed revisionid
 	// values the mock's guide/wiki GET responses report, and the exact values the
 	// publish PUT and the guide/wiki DELETE calls must carry as a ?revisionid= query
@@ -657,6 +664,7 @@ type appPassMockFlags struct {
 	guideCreateStatus        int           // non-201 from POST /api/2.0/guides
 	addStepStatus            int           // non-201 from POST /api/2.0/guides/{id}/steps
 	publishPutStatus         int           // non-200 from PUT /api/2.0/guides/{id}/public
+	anonGuideReadStatus      int           // stage 6's privacy probe: 200 = site serves anonymous reads (default), 401 = private
 	publishGetPublicFalse    bool          // GET after publish reports public=false regardless of the PUT
 	publicPageStatus         int           // non-2xx from the anonymous public guide page GET
 	imageCDNStatus           int           // non-200 from the anonymous image CDN GET
@@ -692,6 +700,14 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 			m.t.Errorf("login body missing email/password: %+v", body)
 		}
 		status := statusOr(m.flags.loginStatus, http.StatusCreated)
+		// Hand back a session cookie exactly like the real login does. Without this the
+		// mock cannot catch the bug it is here to catch: the shared client's jar would
+		// silently re-attach this cookie to every later request, so any check that only
+		// drops the Authorization header would still be authenticated. With the cookie
+		// modeled, assertAnonymous below actually bites.
+		if status == http.StatusCreated {
+			http.SetCookie(w, &http.Cookie{Name: appPassMockSessionCookie, Value: "sess-abc", Path: "/"})
+		}
 		w.WriteHeader(status)
 		if status == http.StatusCreated {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"authToken": "tok-1", "userid": 1})
@@ -739,7 +755,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		status := statusOr(m.flags.wikiStatus, http.StatusCreated)
 		w.WriteHeader(status)
 		if status == http.StatusCreated {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "title": body["title"]})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "title": body["title"], "revisionid": appPassMockWikiRevisionID})
 		} else if m.flags.echoAuthTokenInWikiError {
 			// Simulates a real failure mode: a non-2xx response that echoes request
 			// state (here, the caller's own Authorization header) back into its body,
@@ -751,8 +767,10 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		m.assertAuth(r)
 		switch r.Method {
 		case http.MethodGet:
+			// revisionid is deliberately NULL here: a live wiki CATEGORY GET returns
+			// null (VERIFIED), and only the CREATE response carries the real value.
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "revisionid": appPassMockWikiRevisionID})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"wikiid": 10, "revisionid": nil})
 		case http.MethodDelete:
 			m.assertNoRevisionIDInBody(r, "delete wiki")
 			if got := r.URL.Query().Get("revisionid"); got != fmt.Sprintf("%d", appPassMockWikiRevisionID) {
@@ -770,7 +788,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		switch {
 		case path == "/api/2.0/user/media/uploads" && r.Method == http.MethodPost:
 			m.handleUpload(w, r)
-		case strings.HasPrefix(path, "/api/2.0/user/media/video/") && r.Method == http.MethodGet:
+		case strings.HasPrefix(path, "/api/2.0/user/media/GuideVideoObject/") && r.Method == http.MethodGet:
 			m.assertAuth(r)
 			m.handleVideoStatus(w)
 		case r.Method == http.MethodDelete:
@@ -818,6 +836,15 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 	})
 	mux.HandleFunc("/api/2.0/guides/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		// Stage 6's privacy gate probes this same resource ANONYMOUSLY, so auth is
+		// asserted for every caller except that one. Keyed on the missing header
+		// rather than on a separate path because the probe deliberately reuses the
+		// guide's own API url — see the gate comment in stage6Publish.
+		if path == "/api/2.0/guides/500" && r.Method == http.MethodGet && r.Header.Get("Authorization") == "" {
+			m.assertAnonymous(r)
+			w.WriteHeader(statusOr(m.flags.anonGuideReadStatus, http.StatusOK))
+			return
+		}
 		m.assertAuth(r)
 		switch {
 		case path == "/api/2.0/guides/500/steps" && r.Method == http.MethodPost:
@@ -870,8 +897,11 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		m.recordDelete("course")
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("/api/courses/_shared/getCourse", func(w http.ResponseWriter, r *http.Request) {
-		m.assertAuth(r)
+	mux.HandleFunc("/bff-api/courses/_shared/getCourse", func(w http.ResponseWriter, r *http.Request) {
+		// Cookie, not api token: this surface ignores the token entirely. Asserting the
+		// token here would let the whole cookie-jar mechanism be deleted without a
+		// single test failing.
+		m.assertSessionCookie(r)
 		wikiid := int64(900)
 		if m.flags.getCourseWrongWikiID {
 			wikiid = 999
@@ -881,9 +911,7 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 	})
 
 	mux.HandleFunc("/Guide/QA-Harness-Guide/500", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			m.t.Errorf("public guide page must be fetched anonymously")
-		}
+		m.assertAnonymous(r)
 		status := statusOr(m.flags.publicPageStatus, http.StatusOK)
 		w.WriteHeader(status)
 		if status/100 != 2 {
@@ -896,30 +924,22 @@ func newAppPassMock(t *testing.T, flags appPassMockFlags) *appPassMock {
 		_, _ = w.Write([]byte(html))
 	})
 	mux.HandleFunc("/cdn/image/101-standard.png", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			m.t.Errorf("image CDN url must be fetched anonymously")
-		}
+		m.assertAnonymous(r)
 		w.WriteHeader(statusOr(m.flags.imageCDNStatus, http.StatusOK))
 	})
 	mux.HandleFunc("/cdn/image/101-original.png", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			m.t.Errorf("image CDN url must be fetched anonymously")
-		}
+		m.assertAnonymous(r)
 		w.WriteHeader(statusOr(m.flags.imageCDNStatus, http.StatusOK))
 	})
 	mux.HandleFunc("/cdn/video/103/encoding", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			m.t.Errorf("video encoding url must be fetched anonymously")
-		}
+		m.assertAnonymous(r)
 		w.WriteHeader(statusOr(m.flags.videoEncStatus, http.StatusOK))
 	})
 	// Registered at the RELATIVE path itself (not under /cdn/) so a request only
 	// reaches here if resolveAppPassURL actually joined base + the relative
 	// documents[].url correctly — a naive string-concat bug would 404 here.
 	mux.HandleFunc(appPassMockDocumentPath, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			m.t.Errorf("document url must be fetched WITHOUT the auth header (anonymous)")
-		}
+		m.assertAnonymous(r)
 		w.WriteHeader(statusOr(m.flags.docFetchStatus, http.StatusOK))
 	})
 
@@ -937,6 +957,33 @@ func statusOr(v, def int) int {
 func (m *appPassMock) assertAuth(r *http.Request) {
 	if got := r.Header.Get("Authorization"); got != "api tok-1" {
 		m.t.Errorf("%s %s: Authorization = %q, want \"api tok-1\"", r.Method, r.URL.Path, got)
+	}
+}
+
+// assertAnonymous fails if a request that is supposed to come from a logged-out visitor
+// carries ANY credential. Checking the Authorization header alone is not enough and was
+// the actual defect: the shared http client keeps a cookie jar, stage 1 logs in, and the
+// jar then re-attaches the session to every later request, so a "public delivery" check
+// that merely omitted the header was proving that a logged-IN user could read the guide.
+func (m *appPassMock) assertAnonymous(r *http.Request) {
+	if got := r.Header.Get("Authorization"); got != "" {
+		m.t.Errorf("%s %s: must be anonymous, got Authorization = %q", r.Method, r.URL.Path, got)
+	}
+	if c, err := r.Cookie(appPassMockSessionCookie); err == nil {
+		m.t.Errorf("%s %s: must be anonymous, but carried session cookie %s=%s (the client's jar leaked it)",
+			r.Method, r.URL.Path, c.Name, c.Value)
+	}
+}
+
+// assertSessionCookie fails unless the request carries the session cookie. The bff
+// surface is cookie-authenticated and ignores the api token (verified live: 401 with the
+// token alone, 200 with the cookie alone), so asserting the token there instead would
+// pin the wrong contract and would keep passing even if the cookie jar were removed.
+func (m *appPassMock) assertSessionCookie(r *http.Request) {
+	c, err := r.Cookie(appPassMockSessionCookie)
+	if err != nil || c.Value == "" {
+		m.t.Errorf("%s %s: bff route requires the session cookie %q, none present",
+			r.Method, r.URL.Path, appPassMockSessionCookie)
 	}
 }
 
@@ -1019,7 +1066,16 @@ func (m *appPassMock) handleMediaDelete(w http.ResponseWriter, r *http.Request, 
 		http.NotFound(w, r)
 		return
 	}
-	m.recordDelete("media:" + parts[0])
+	// The live API rejects the harness's own asset labels on this segment with a 400,
+	// so the mock only accepts the mapped API media types and translates back for the
+	// teardown-order assertions.
+	label, ok := map[string]string{"GuideImage": "image", "Document": "document", "GuideVideoObject": "video"}[parts[0]]
+	if !ok {
+		m.t.Errorf("media delete path segment = %q, want an API media type (GuideImage/Document/GuideVideoObject)", parts[0])
+		http.Error(w, `{"message":"Invalid type provided in the route."}`, http.StatusBadRequest)
+		return
+	}
+	m.recordDelete("media:" + label)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1126,7 +1182,10 @@ func (m *appPassMock) handleGetGuide(w http.ResponseWriter) {
 		steps = append(steps, map[string]interface{}{
 			"stepid": 602,
 			"media": map[string]interface{}{
-				"type": "object",
+				// READ type, deliberately not the "object" write type — the API is
+				// asymmetric here (VERIFIED live) and matching the write value on
+				// read-back finds no video step at all.
+				"type": "video",
 				"data": videoData,
 			},
 		})
@@ -1192,7 +1251,7 @@ func TestRunAppPass_HappyPath(t *testing.T) {
 
 	fe := &fakeExec{fn: pathBExecFn()}
 	clk := newFakeAppPassClock()
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 	log := newAppPassLogger()
 
 	err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt001")
@@ -1230,6 +1289,112 @@ func TestRunAppPass_HappyPath(t *testing.T) {
 	}
 }
 
+// TestRunAppPass_PrivateSiteSkipsPublicDelivery covers David's Decision 2(ii): on a site
+// that refuses anonymous reads, stage 6 must log the skip and PASS rather than fail.
+//
+// Every anonymous endpoint is wired to 500 here on purpose. A gate that logged the skip
+// line but still issued the requests would fail the pass on those 500s, so this asserts
+// the skip actually skipped rather than merely announcing itself.
+func TestRunAppPass_PrivateSiteSkipsPublicDelivery(t *testing.T) {
+	mock := newAppPassMock(t, appPassMockFlags{
+		anonGuideReadStatus: http.StatusUnauthorized,
+		publicPageStatus:    http.StatusInternalServerError,
+		imageCDNStatus:      http.StatusInternalServerError,
+		videoEncStatus:      http.StatusInternalServerError,
+		docFetchStatus:      http.StatusInternalServerError,
+	})
+	defer mock.server.Close()
+
+	fe := &fakeExec{fn: pathBExecFn()}
+	clk := newFakeAppPassClock()
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
+	log := newAppPassLogger()
+
+	opts := testAppPassOpts(mock.server.URL)
+	opts.PublicDelivery = false // the config declares this site private
+	err := runAppPass(context.Background(), opts, deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt001")
+	if err != nil {
+		t.Fatalf("private site must not fail the pass, got: %v", err)
+	}
+
+	// The skip must be visible in the log. WS5's proof definition counts this exact
+	// line as stage 6's pass on a private config, so the wording is load-bearing.
+	wantSkip := "app-pass: stage6 public-delivery SKIPPED (site private)"
+	found := false
+	for _, l := range log.Lines() {
+		if strings.Contains(l, wantSkip) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("missing the skip log line %q; got lines: %v", wantSkip, log.Lines())
+	}
+
+	// A skip is not an abort: the stage still has to report ok and the run has to go on
+	// to stage 7 and tear down.
+	for _, marker := range []string{"stage 6 (publish) ok", "stage 7 (course) ok"} {
+		hit := false
+		for _, l := range log.Lines() {
+			if strings.Contains(l, marker) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			t.Errorf("missing expected log line containing %q; got lines: %v", marker, log.Lines())
+		}
+	}
+}
+
+// TestRunAppPass_PrivacyGateAssertsBothDirections is the anti-laundering test. The
+// danger of any skip-on-condition gate is that it converts a real failure into a pass,
+// so neither declared config may be a soft spot:
+//
+//   - declared private but the site answers anonymously: it is serving content it
+//     should not be, and that must fail rather than skip
+//   - declared public but the site demands auth: that is exactly the regression an
+//     earlier revision of this gate would have misread as "private" and passed, which
+//     is why config declares and the probe only verifies
+func TestRunAppPass_PrivacyGateAssertsBothDirections(t *testing.T) {
+	cases := []struct {
+		name           string
+		publicDelivery bool
+		probeStatus    int
+		wantErr        string
+	}{
+		{"private config but anonymous read succeeds", false, http.StatusOK, "declares this site private"},
+		{"private config and guide simply missing", false, http.StatusNotFound, "declares this site private"},
+		{"public config but anonymous read is refused", true, http.StatusUnauthorized, "declares this site public"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newAppPassMock(t, appPassMockFlags{anonGuideReadStatus: tc.probeStatus})
+			defer mock.server.Close()
+
+			fe := &fakeExec{fn: pathBExecFn()}
+			clk := newFakeAppPassClock()
+			deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
+			log := newAppPassLogger()
+
+			opts := testAppPassOpts(mock.server.URL)
+			opts.PublicDelivery = tc.publicDelivery
+			err := runAppPass(context.Background(), opts, deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt001")
+			if err == nil {
+				t.Fatal("expected stage 6 to fail, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error should contain %q, got: %v", tc.wantErr, err)
+			}
+			for _, l := range log.Lines() {
+				if strings.Contains(l, "SKIPPED (site private)") {
+					t.Errorf("a failing gate must not also log the skip line; got: %v", log.Lines())
+				}
+			}
+		})
+	}
+}
+
 // TestRunAppPass_HappyPath_ImageFallsBackToOriginalSize proves appPassGuideImageURL's
 // size-key preference actually has a working fallback: with "standard" absent and only
 // "original" present, the pass must still succeed (and the relative documents[].url
@@ -1241,7 +1406,7 @@ func TestRunAppPass_HappyPath_ImageFallsBackToOriginalSize(t *testing.T) {
 
 	fe := &fakeExec{fn: pathBExecFn()}
 	clk := newFakeAppPassClock()
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 	log := newAppPassLogger()
 
 	if err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt005"); err != nil {
@@ -1299,7 +1464,7 @@ func TestRunAppPass_NegativeStages(t *testing.T) {
 
 			fe := &fakeExec{fn: pathBExecFn()}
 			clk := newFakeAppPassClock()
-			deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+			deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 			log := newAppPassLogger()
 
 			err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt002")
@@ -1322,7 +1487,7 @@ func TestRunAppPass_TeardownDrainsOnMidPassFailure(t *testing.T) {
 
 	fe := &fakeExec{fn: pathBExecFn()}
 	clk := newFakeAppPassClock()
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 	log := newAppPassLogger()
 
 	err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, "deadbeefdeadbeefdeadbeefdeadbeef", "salt003")
@@ -1371,7 +1536,7 @@ func TestRunAppPass_TeardownDrainsAfterRealCeilingExpires(t *testing.T) {
 
 	fe := &fakeExec{fn: pathBExecFn()}
 	clk := newFakeAppPassClock()
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 	log := newAppPassLogger()
 
 	opts := testAppPassOpts(mock.server.URL)
@@ -1497,7 +1662,7 @@ func TestRunAppPass_HappyPath_NoSecretInLogs(t *testing.T) {
 	secret := "deadbeefdeadbeefdeadbeefdeadbeef"
 	fe := &fakeExec{fn: pathBExecFn()}
 	clk := newFakeAppPassClock()
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk}
 	log := newAppPassLogger()
 
 	if err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, secret, "salt004"); err != nil {
@@ -1533,7 +1698,7 @@ func TestRunAppPass_Stage2PasswordIncludedInLeakScan(t *testing.T) {
 	clk := newFakeAppPassClock()
 	scanner := &appPassSecretScanner{}
 	scanner.add(mainSecret)
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk, secrets: scanner}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk, secrets: scanner}
 	log := newAppPassLogger()
 
 	if err := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, mainSecret, "salt010"); err != nil {
@@ -1580,7 +1745,7 @@ func TestRunAppPass_AuthTokenNotLeakedOnErrorEcho(t *testing.T) {
 	clk := newFakeAppPassClock()
 	scanner := &appPassSecretScanner{}
 	scanner.add(mainSecret)
-	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), clock: clk, secrets: scanner}
+	deps := appPassDeps{exec: fe.runner(), client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: clk, secrets: scanner}
 	log := newAppPassLogger()
 
 	runErr := runAppPass(context.Background(), testAppPassOpts(mock.server.URL), deps, log, mainSecret, "salt011")

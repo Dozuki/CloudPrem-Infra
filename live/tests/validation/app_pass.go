@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
@@ -48,6 +49,13 @@ type AppPassOptions struct {
 	Kubeconfig string
 	Namespace  string
 	Timeout    time.Duration
+	// PublicDelivery declares whether this harness config's site is supposed to serve
+	// logged-out traffic. It drives stage 6's public-delivery assertions and is
+	// deliberately a declared expectation rather than something stage 6 infers from the
+	// app: inferring it lets a site that regressed into requiring auth look "private"
+	// and pass. False (the zero value, and min_default's state) means stage 6 asserts
+	// that anonymous reads are refused and then skips the delivery checks.
+	PublicDelivery bool
 }
 
 // appPassTimeout is the ceiling for an entire AppPass run (all 8 stages, including the
@@ -91,10 +99,11 @@ func RunAppPass(ctx context.Context, opts AppPassOptions) error {
 	scanner := &appPassSecretScanner{}
 	scanner.add(secret)
 	deps := appPassDeps{
-		exec:    kubectlExecRunner(),
-		client:  newAppPassClient(),
-		clock:   realAppPassClock{},
-		secrets: scanner,
+		exec:       kubectlExecRunner(),
+		client:     newAppPassClient(),
+		anonClient: newAppPassAnonClient(),
+		clock:      realAppPassClock{},
+		secrets:    scanner,
 	}
 	runErr := runAppPass(ctx, opts, deps, log, secret, runsalt)
 	return finalizeAppPass(log, runErr, scanner.list()...)
@@ -164,10 +173,18 @@ func (s *appPassSecretScanner) list() []string {
 // ---------------------------------------------------------------------------------
 
 type appPassDeps struct {
-	exec    execRunner
-	client  *http.Client
-	clock   appPassClock
-	secrets *appPassSecretScanner // nil-safe; see appPassSecretScanner
+	exec   execRunner
+	client *http.Client
+	// anonClient is client's cookie-free twin, and stage 6's anonymous assertions are
+	// worthless without it. client carries a cookie jar, and stage 1 logs in, so the
+	// jar holds a live session cookie for the rest of the run. Omitting the
+	// Authorization header therefore does NOT make a request anonymous: the jar
+	// re-attaches the session automatically, and a "public delivery" check would be
+	// quietly proving that an authenticated user can read the guide. Anything meant to
+	// be anonymous must go through this client instead.
+	anonClient *http.Client
+	clock      appPassClock
+	secrets    *appPassSecretScanner // nil-safe; see appPassSecretScanner
 }
 
 // appPassClock abstracts time.Now/time.Sleep so the stage-4 video-encoding poll (5m
@@ -225,7 +242,36 @@ func kubectlExecRunner() execRunner {
 // nothing outside it — the same posture endpoints.go documents for CheckEndpoint. If
 // AppPass is ever pointed at a static or shared credential, or a stack that outlives
 // the run, this must be revisited.
+// The cookie jar is load-bearing for stage 7, not incidental. The Next.js /bff-api
+// surface is COOKIE-authenticated and ignores the "Authorization: api <token>" header
+// every other stage uses — VERIFIED live: /bff-api/courses/_shared/getCourse with the
+// api token alone returns 401 "Invalid login", and with the session cookie alone returns
+// 200. The cookie is set by the stage-1 token mint (POST /api/2.0/user/token) on the same
+// response that returns the authToken, so a jar on this client is all that is needed to
+// carry it forward; nothing has to parse or store it by hand. The cookie's name is
+// site-scoped (session_<siteid>, e.g. session_2 on min_default), which is the other
+// reason to let the jar handle it rather than matching on a hardcoded name.
+//
+// cookiejar.New(nil) never returns an error (documented), so the error is discarded
+// rather than propagated through every caller of this constructor.
 func newAppPassClient() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Jar:       jar,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	}
+}
+
+// newAppPassAnonClient is newAppPassClient with NO cookie jar, for requests that have
+// to be genuinely anonymous. Identical in every other respect (timeout, TLS, redirect
+// behavior) so a difference in outcome can only be the missing session, not a
+// difference in client configuration.
+//
+// A nil Jar makes net/http send no cookies and store none, which is the whole point:
+// dropping the Authorization header alone leaves the stage-1 session cookie attached
+// and turns an "anonymous" assertion into an authenticated one.
+func newAppPassAnonClient() *http.Client {
 	return &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
@@ -440,6 +486,22 @@ func (d appPassDeps) doJSON(ctx context.Context, method, rawURL, authToken strin
 // only surface status codes and parsed, non-secret field values in errors, never a raw
 // payload (see the secret-transport rule in RunAppPass's doc comment).
 func (d appPassDeps) doRaw(ctx context.Context, method, rawURL, authToken string, body []byte, contentType string) (*apiResult, error) {
+	return d.do(ctx, d.client, method, rawURL, authToken, body, contentType)
+}
+
+// doAnon issues a genuinely anonymous GET: no Authorization header AND no cookie jar,
+// so no stage-1 session rides along. Every "can a logged-out visitor read this" check
+// must use this rather than doRaw with an empty token — see appPassDeps.anonClient.
+func (d appPassDeps) doAnon(ctx context.Context, rawURL string) (*apiResult, error) {
+	return d.do(ctx, d.anonClient, http.MethodGet, rawURL, "", nil, "")
+}
+
+func (d appPassDeps) do(ctx context.Context, client *http.Client, method, rawURL, authToken string, body []byte, contentType string) (*apiResult, error) {
+	// A deps built without one of the two clients would otherwise nil-panic deep inside
+	// a stage, which reads as a harness crash rather than the wiring mistake it is.
+	if client == nil {
+		return nil, fmt.Errorf("appPassDeps is missing an http client (both client and anonClient must be set)")
+	}
 	var reqBody io.Reader
 	if body != nil {
 		reqBody = bytes.NewReader(body)
@@ -454,7 +516,7 @@ func (d appPassDeps) doRaw(ctx context.Context, method, rawURL, authToken string
 	if authToken != "" {
 		req.Header.Set("Authorization", "api "+authToken)
 	}
-	resp, err := d.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -959,19 +1021,23 @@ func stage3CreateWiki(ctx context.Context, deps appPassDeps, base, authToken, ru
 	if !ok || gotTitle == "" {
 		return 0, "", fmt.Errorf("create wiki response missing title")
 	}
+	// The wiki's revisionid is captured HERE, from the create response, and closed over
+	// below. It cannot be re-fetched at teardown time the way the guide's can: a wiki
+	// CATEGORY GET returns "revisionid": null (and "source_revisionid": null with it),
+	// while the CREATE response carries the real value. VERIFIED live — create returned
+	// revisionid 4, the follow-up GET returned null, DELETE without the param 422'd
+	// ("field":"revisionid","code":"missing_field"), and DELETE with the create-time 4
+	// returned 204. This is why appPassFetchRevisionID is NOT used for the wiki; it
+	// remains correct for the GUIDE, whose GET does return a non-null revisionid.
+	wikiRevisionID, ok := idField(res.json, "revisionid")
+	if !ok {
+		return 0, "", fmt.Errorf("create wiki response missing revisionid")
+	}
 	stack.push(appPassTeardownEntry{
 		kind: "wiki",
 		do: func(ctx context.Context, deps appPassDeps, base, authToken string) error {
 			wikiURL := base + "/api/2.0/wikis/CATEGORY/" + url.PathEscape(gotTitle)
-			// DELETE requires ?revisionid= as a query param (VERIFIED) — fetch the
-			// category's current revisionid immediately beforehand, the same
-			// GET-then-act pattern stage 6 already uses for the guide (see
-			// appPassFetchRevisionID).
-			revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, wikiURL)
-			if rerr != nil {
-				return fmt.Errorf("delete wiki: %w", rerr)
-			}
-			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s?revisionid=%d", wikiURL, revisionID), authToken, nil)
+			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s?revisionid=%d", wikiURL, wikiRevisionID), authToken, nil)
 			if err != nil {
 				return err
 			}
@@ -1009,14 +1075,25 @@ func appPassFetchRevisionID(ctx context.Context, deps appPassDeps, authToken, re
 // ---------------------------------------------------------------------------------
 // stage 4: media uploads
 //
-// UNVERIFIED SPOT (1 of 3, see the app-pass task brief): the live proof run failed at
-// stage 2 and never reached here, so none of the following have been hand-verified
-// against a running app and are left exactly as originally written — the raw-bytes
-// upload request shape (stage4UploadOne), the video encode-poll route
-// (stage4WaitForVideoReady), and the media URL assertions used later to verify a
-// published guide's image/video/document data (appPassGuideImageURL,
-// appPassGuideVideoURL, appPassGuideDocumentURL, and their size/guid/encodings shape
-// assumptions). Do not invent a corrected contract for any of these from this pass.
+// PARTLY VERIFIED — read this before changing anything below.
+//
+// Live-proven on a kept smoke stack, with the evidence recorded at each site:
+//   - the media TYPE vocabulary the 2.0 API expects as a path segment on
+//     /api/2.0/user/media/{type}/{id}, which is NOT the harness's own asset labels
+//     (appPassMediaAPIType, below, including the DELETE that teardown uses);
+//   - the published guide's video read type being "video" and not "object"
+//     (appPassGuideVideoURL).
+// Do NOT revert either of those to the raw asset labels. That re-introduces a live 400,
+// "Invalid type provided in the route".
+//
+// Still unverified, for one specific reason: the raw-bytes upload request/response shape
+// (stage4UploadOne's POST /api/2.0/user/media/uploads?file=), the encode-poll's isReady
+// field (stage4WaitForVideoReady), and the image/document URL assertions
+// (appPassGuideImageURL, appPassGuideDocumentURL, and their size/guid/encodings
+// assumptions) have never executed against a running app, because every upload 422'd on
+// an empty allowed-extension list before reaching them. Treat those shapes as
+// unconfirmed until a run gets past the upload, and do not invent corrected contracts
+// for them from a pass that never exercised them.
 // ---------------------------------------------------------------------------------
 
 type appPassAsset struct {
@@ -1057,7 +1134,13 @@ func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken stri
 	stack.push(appPassTeardownEntry{
 		kind: "media:" + assetType,
 		do: func(ctx context.Context, deps appPassDeps, base, authToken string) error {
-			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s/api/2.0/user/media/%s/%d", base, assetType, itemID), authToken, nil)
+			// The path segment is the API's media TYPE, not the harness's asset label —
+			// see appPassMediaAPIType. Passing assetType straight through 400s.
+			mediaType, terr := appPassMediaAPIType(assetType)
+			if terr != nil {
+				return fmt.Errorf("delete media %s/%d: %w", assetType, itemID, terr)
+			}
+			res, err := deps.doJSON(ctx, http.MethodDelete, fmt.Sprintf("%s/api/2.0/user/media/%s/%d", base, mediaType, itemID), authToken, nil)
 			if err != nil {
 				return err
 			}
@@ -1069,6 +1152,26 @@ func stage4UploadOne(ctx context.Context, deps appPassDeps, base, authToken stri
 		},
 	})
 	return id, nil
+}
+
+// appPassMediaAPIType maps the harness's own asset label to the media TYPE the 2.0 API
+// expects as a path segment on /api/2.0/user/media/{type}/{id}. The two vocabularies are
+// NOT the same, and the API rejects the harness's labels outright — VERIFIED live:
+// GET /api/2.0/user/media/video/1 and DELETE /api/2.0/user/media/image/2 both return 400
+// "Invalid type provided in the route. Type must one of: GuideImage, GuideVideoObject,
+// GuideEmbedObject, Document.", while the mapped forms return 200 and 204 respectively.
+// GuideEmbedObject is the fourth legal value and AppPass never produces one.
+func appPassMediaAPIType(assetType string) (string, error) {
+	switch assetType {
+	case "image":
+		return "GuideImage", nil
+	case "document":
+		return "Document", nil
+	case "video":
+		return "GuideVideoObject", nil
+	default:
+		return "", fmt.Errorf("no API media type for asset label %q", assetType)
+	}
 }
 
 // stage4WaitForVideoReady polls the video status route every appPassVideoPollInterval
@@ -1083,7 +1186,11 @@ func stage4WaitForVideoReady(ctx context.Context, deps appPassDeps, clk appPassC
 			return ctx.Err()
 		default:
 		}
-		res, err := deps.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/api/2.0/user/media/video/%d", base, videoID), authToken, nil)
+		videoType, terr := appPassMediaAPIType("video")
+		if terr != nil {
+			return fmt.Errorf("video status poll: %w", terr)
+		}
+		res, err := deps.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/api/2.0/user/media/%s/%d", base, videoType, videoID), authToken, nil)
 		if err != nil {
 			return fmt.Errorf("video status poll: %w", err)
 		}
@@ -1223,12 +1330,12 @@ func stage5VerifyRoundTrip(ctx context.Context, deps appPassDeps, base, authToke
 	if res.status != http.StatusOK {
 		return nil, fmt.Errorf("get guide: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
-	hasImage, hasObject := appPassGuideStepMediaTypes(res.json)
+	hasImage, hasVideo := appPassGuideStepMediaTypes(res.json)
 	if !hasImage {
 		return nil, fmt.Errorf("get guide: no image media found in steps[]")
 	}
-	if !hasObject {
-		return nil, fmt.Errorf("get guide: no object media found in steps[]")
+	if !hasVideo {
+		return nil, fmt.Errorf("get guide: no video media found in steps[]")
 	}
 	if !appPassGuideHasDocument(res.json, documentID) {
 		return nil, fmt.Errorf("get guide: documents[] does not contain documentid %d", documentID)
@@ -1236,7 +1343,18 @@ func stage5VerifyRoundTrip(ctx context.Context, deps appPassDeps, base, authToke
 	return res.json, nil
 }
 
-func appPassGuideStepMediaTypes(guide map[string]interface{}) (hasImage, hasObject bool) {
+// appPassStepVideoWriteType / appPassStepVideoReadType exist as a PAIR because the API is
+// asymmetric about a video step's media.type: it is WRITTEN as "object" and READ BACK as
+// "video". VERIFIED live — a step created with media.type "object" (201) reads back from
+// GET /api/2.0/guides/{id} as {"stepid":2,"media":{"type":"video",...}}. Matching the
+// write value on read silently finds no video step at all, which is exactly what the
+// original single "object" constant did here and in appPassGuideVideoURL.
+const (
+	appPassStepVideoWriteType = "object"
+	appPassStepVideoReadType  = "video"
+)
+
+func appPassGuideStepMediaTypes(guide map[string]interface{}) (hasImage, hasVideo bool) {
 	steps, _ := guide["steps"].([]interface{})
 	for _, s := range steps {
 		step, ok := s.(map[string]interface{})
@@ -1250,11 +1368,11 @@ func appPassGuideStepMediaTypes(guide map[string]interface{}) (hasImage, hasObje
 		switch t, _ := stringField(media, "type"); t {
 		case "image":
 			hasImage = true
-		case "object":
-			hasObject = true
+		case appPassStepVideoReadType:
+			hasVideo = true
 		}
 	}
-	return hasImage, hasObject
+	return hasImage, hasVideo
 }
 
 func appPassGuideHasDocument(guide map[string]interface{}, documentID int64) bool {
@@ -1354,7 +1472,7 @@ func appPassGuideVideoURL(guide map[string]interface{}) (string, error) {
 		if !ok {
 			continue
 		}
-		if t, _ := stringField(media, "type"); t != "object" {
+		if t, _ := stringField(media, "type"); t != appPassStepVideoReadType {
 			continue
 		}
 		data, ok := media["data"].(map[string]interface{})
@@ -1415,17 +1533,23 @@ func requireAppPassFetchScheme(rawURL string) error {
 // stage 6: publish
 // ---------------------------------------------------------------------------------
 
-func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64) error {
+func stage6Publish(ctx context.Context, deps appPassDeps, log *appPassLogger, base, authToken string, guideID int64, publicDelivery bool) error {
 	// revisionid is a QUERY PARAMETER on the publish PUT, not a JSON body field —
 	// VERIFIED against a live app: a body-borne revisionid 422'd missing_field. It
 	// comes from the guide GET response's own revisionid field.
-	guideURL := fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID)
-	revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, guideURL)
+	//
+	// apiGuideURL (the REST resource) and pageURL (the human-facing guide page the
+	// response advertises) are deliberately separate variables. They used to be one,
+	// reassigned halfway down, which made every reference below depend on where in the
+	// function you were reading — and the privacy gate has to probe the API url
+	// specifically, so the distinction is now load-bearing.
+	apiGuideURL := fmt.Sprintf("%s/api/2.0/guides/%d", base, guideID)
+	revisionID, rerr := appPassFetchRevisionID(ctx, deps, authToken, apiGuideURL)
 	if rerr != nil {
 		return fmt.Errorf("publish guide: %w", rerr)
 	}
 
-	res, err := deps.doJSON(ctx, http.MethodPut, fmt.Sprintf("%s/public?revisionid=%d", guideURL, revisionID), authToken, nil)
+	res, err := deps.doJSON(ctx, http.MethodPut, fmt.Sprintf("%s/public?revisionid=%d", apiGuideURL, revisionID), authToken, nil)
 	if err != nil {
 		return fmt.Errorf("publish guide request: %w", err)
 	}
@@ -1433,7 +1557,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("publish guide: want status 200, got %d: %s", res.status, appPassBodyPreview(res.body, 500))
 	}
 
-	res, err = deps.doJSON(ctx, http.MethodGet, guideURL, authToken, nil)
+	res, err = deps.doJSON(ctx, http.MethodGet, apiGuideURL, authToken, nil)
 	if err != nil {
 		return fmt.Errorf("get guide (public check) request: %w", err)
 	}
@@ -1446,8 +1570,8 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 	// guideURL (the guide's own page link) is a top-level field, always absolute
 	// (GuideAPILib_2_0.php:1708 -> GuideTranslation.php:929-946 viewLink(true)) — no
 	// resolution needed.
-	guideURL, ok := stringField(res.json, "url")
-	if !ok || guideURL == "" {
+	pageURL, ok := stringField(res.json, "url")
+	if !ok || pageURL == "" {
 		return fmt.Errorf("get guide (public check): response missing url")
 	}
 	imageURL, imageGUID, ierr := appPassGuideImageURL(res.json)
@@ -1471,21 +1595,73 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 	// nothing stops a corrupted or malicious response handing back a file://, data:,
 	// or other non-http(s) scheme) — refuse to dereference anything but plain
 	// http/https before fetching any of them.
-	for _, u := range []string{guideURL, imageURL, videoURL, viewURL} {
+	for _, u := range []string{pageURL, imageURL, videoURL, viewURL} {
 		if serr := requireAppPassFetchScheme(u); serr != nil {
 			return fmt.Errorf("get guide (public check): %w", serr)
 		}
 	}
 
-	// Everything below is a plain anonymous read (no Authorization header) — this is
-	// exactly the "is it actually public" question stage 6 exists to answer.
+	// THE PRIVACY GATE (David's Decision 2(ii), 2026-08-14).
 	//
-	// UNVERIFIED SPOT (2 of 3, see the app-pass task brief): the live proof run failed
-	// at stage 2 and never reached publish, so none of these anonymous/public delivery
-	// assertions (the guide page fetch, the image-guid-in-HTML check, and the CDN/video/
-	// document GETs below) have been hand-verified against a running app. Left exactly
-	// as originally written; do not invent a corrected contract here.
-	pageRes, err := deps.doRaw(ctx, http.MethodGet, guideURL, "", nil, "")
+	// Everything above this point is authenticated and runs on every config. Everything
+	// below is a genuinely anonymous read — the "is it actually public" question stage 6
+	// exists to answer. A site that refuses logged-out traffic cannot pass those
+	// assertions, and that is its configuration working rather than a defect:
+	// min_default is private and stays that way.
+	//
+	// WHAT DECIDES: the harness config, via publicDelivery, NOT the app's response. An
+	// earlier revision inferred privacy from an observed 401 and review rejected it,
+	// correctly: a public site that regressed into requiring auth also answers 401, so
+	// the run would classify a real outage as "private" and pass. Configuration is the
+	// only trustworthy source for what the site is SUPPOSED to be, so it decides, and
+	// the probe below is then an assertion about that expectation rather than the thing
+	// that forms it.
+	//
+	// Both directions are asserted, so neither config is a soft spot:
+	//   - declared private: the anonymous read MUST be 401. A 200 means the site is
+	//     serving content it should not be, which fails loudly instead of skipping.
+	//   - declared public: the anonymous read MUST be 200, and every delivery assertion
+	//     below then runs for real.
+	//
+	// The request is the API url, not pageURL: the client follows redirects, so a
+	// private site's page 302s to /Login and comes back 200 on the login page. The API
+	// route answers a bare 401. GET /api/2.0/site would have been the tidier probe but
+	// throws 405 unless the site has the mobile feature enabled
+	// (Guide/UI/api/2.0/site.php:121-124), so it says nothing about privacy here.
+	//
+	// deps.doAnon, never doRaw with an empty token: doRaw uses the jarred client that
+	// still holds stage 1's session cookie, which would make every check below an
+	// authenticated read wearing an anonymous label.
+	anonProbe, err := deps.doAnon(ctx, apiGuideURL)
+	if err != nil {
+		return fmt.Errorf("probe anonymous guide read: %w", err)
+	}
+	if !publicDelivery {
+		if anonProbe.status != http.StatusUnauthorized {
+			return fmt.Errorf("config declares this site private, so an anonymous guide read must be 401, got %d: %s",
+				anonProbe.status, appPassBodyPreview(anonProbe.body, 500))
+		}
+		log.Logf("app-pass: stage6 public-delivery SKIPPED (site private)")
+		return nil
+	}
+	if anonProbe.status != http.StatusOK {
+		return fmt.Errorf("config declares this site public, so an anonymous guide read must be 200, got %d: %s",
+			anonProbe.status, appPassBodyPreview(anonProbe.body, 500))
+	}
+
+	// SHAPES UNVERIFIED, TRANSPORT DELIBERATELY CHANGED — the two halves differ here.
+	//
+	// Unverified: the assertions below (the guide page fetch, the image-guid-in-HTML
+	// check, and the CDN/video/document GETs) have never run against a published guide on
+	// a live app, because the proof run failed earlier and never reached publish. Do not
+	// invent a corrected contract for their shapes.
+	//
+	// Changed on purpose: every one of them now goes through deps.doAnon instead of
+	// deps.doRaw with an empty auth token. Omitting the Authorization header was never
+	// enough — the shared client carries a cookie jar, so stage 1's login re-attached
+	// session_<siteid> to each of these and they were silently AUTHENTICATED reads
+	// asserting anonymous behaviour. Do not route them back through the jarred client.
+	pageRes, err := deps.doAnon(ctx, pageURL)
 	if err != nil {
 		return fmt.Errorf("get public guide page: %w", err)
 	}
@@ -1498,7 +1674,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("get public guide page: image guid not present in HTML")
 	}
 
-	imgRes, err := deps.doRaw(ctx, http.MethodGet, imageURL, "", nil, "")
+	imgRes, err := deps.doAnon(ctx, imageURL)
 	if err != nil {
 		return fmt.Errorf("get image CDN url: %w", err)
 	}
@@ -1506,7 +1682,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("get image CDN url: want status 200, got %d: %s", imgRes.status, appPassBodyPreview(imgRes.body, 500))
 	}
 
-	vidRes, err := deps.doRaw(ctx, http.MethodGet, videoURL, "", nil, "")
+	vidRes, err := deps.doAnon(ctx, videoURL)
 	if err != nil {
 		return fmt.Errorf("get video encoding url: %w", err)
 	}
@@ -1514,7 +1690,7 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 		return fmt.Errorf("get video encoding url: want status 200, got %d: %s", vidRes.status, appPassBodyPreview(vidRes.body, 500))
 	}
 
-	docRes, err := deps.doRaw(ctx, http.MethodGet, viewURL, "", nil, "")
+	docRes, err := deps.doAnon(ctx, viewURL)
 	if err != nil {
 		return fmt.Errorf("get document url (anonymous): %w", err)
 	}
@@ -1527,12 +1703,12 @@ func stage6Publish(ctx context.Context, deps appPassDeps, base, authToken string
 // ---------------------------------------------------------------------------------
 // stage 7: course
 //
-// UNVERIFIED SPOT (3 of 3, see the app-pass task brief): the live proof run failed at
-// stage 2 and never reached here. This stage only exercises the guide-CMS course APIs
-// (POST /api/2.0/courses and the getCourse ajax route) below; it does not yet call
-// through the app's separate Next.js-served course route, so that path remains
-// unverified against a live app. Left exactly as originally written; do not invent a
-// corrected contract here.
+// VERIFIED live 2026-08-13 against a kept smoke stack. This stage exercises BOTH the
+// guide-CMS course API (POST /api/2.0/courses, 201, returns wikiid + a non-null
+// revisionid) and the Next.js-served course route (POST /bff-api/courses/_shared/
+// getCourse, 200, response carries top-level wikiid/title/namespace:"COURSE"). The
+// earlier note here claiming this stage did not reach the Next.js route was wrong: it
+// always called it, just at the un-routed /api prefix, which is why it 404'd.
 // ---------------------------------------------------------------------------------
 
 func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string, guideID int64, runsalt string, stack *appPassTeardownStack) (int64, error) {
@@ -1569,7 +1745,12 @@ func stage7Course(ctx context.Context, deps appPassDeps, base, authToken string,
 		},
 	})
 
-	getRes, err := deps.doJSON(ctx, http.MethodPost, base+"/api/courses/_shared/getCourse", authToken, map[string]interface{}{"wikiid": wikiid})
+	// /bff-api, NOT /api. Next.js rewrites /bff-api/:path* -> /api/:path* internally
+	// (next.config.js), and /bff-api is the only prefix the gateway routes to the nextjs
+	// service, so the internal form 404s from outside — VERIFIED live: /api/... returned
+	// 404 (an HTML error page) and /bff-api/... returned 200. Auth here rides on the
+	// session cookie in the client's jar, not on authToken; see newAppPassClient.
+	getRes, err := deps.doJSON(ctx, http.MethodPost, base+"/bff-api/courses/_shared/getCourse", authToken, map[string]interface{}{"wikiid": wikiid})
 	if err != nil {
 		return 0, fmt.Errorf("getCourse request: %w", err)
 	}
@@ -1732,7 +1913,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "image", []int64{imageID}, 1); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
-	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, "object", videoID, 2); err != nil {
+	if _, err := stage5AddStep(stageCtx, deps, base, authToken, guideID, appPassStepVideoWriteType, videoID, 2); err != nil {
 		return fmt.Errorf("app-pass: stage 5 (guide + steps): %w", err)
 	}
 	if _, err := stage5VerifyRoundTrip(stageCtx, deps, base, authToken, guideID, documentID); err != nil {
@@ -1744,7 +1925,7 @@ func runAppPass(ctx context.Context, opts AppPassOptions, deps appPassDeps, log 
 		return derr
 	}
 	log.Logf("app-pass: stage 6 (publish) starting")
-	if err := stage6Publish(stageCtx, deps, base, authToken, guideID); err != nil {
+	if err := stage6Publish(stageCtx, deps, log, base, authToken, guideID, opts.PublicDelivery); err != nil {
 		return fmt.Errorf("app-pass: stage 6 (publish): %w", err)
 	}
 	log.Logf("app-pass: stage 6 (publish) ok guideid=%d", guideID)

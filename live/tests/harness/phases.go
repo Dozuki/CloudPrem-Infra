@@ -617,6 +617,11 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		if aerr := validation.RunAppPass(ctx, validation.AppPassOptions{
 			BaseURL: outs.DozukiURL, Kubeconfig: kc, Namespace: rm.Namespace,
 			Timeout: appPassTimeout,
+			// Declared, not detected. A config that does not say it serves logged-out
+			// traffic is treated as private, which is the safe default and is
+			// min_default's actual state. Stage 6 then asserts anonymous reads are
+			// refused rather than inferring privacy from whatever the app returned.
+			PublicDelivery: cfg.HarnessFlag("app_pass_public_delivery"),
 		}); aerr != nil {
 			ierr = fmt.Errorf("app-pass: %w", aerr)
 		}
