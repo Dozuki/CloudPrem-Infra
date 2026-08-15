@@ -552,6 +552,30 @@ func stringField(m map[string]interface{}, key string) (string, bool) {
 // requires an integral value and rejects zero/negative — a fractional value like 12.9
 // silently truncating to 12, or a bare 0, would otherwise pass extraction as if it were
 // a real, valid ID and only surface as confusion several calls later.
+// numField reads an integral JSON number that is NOT an identifier, so unlike idField it
+// accepts 0 and negatives. Used for orderby, where 0 is a legal position and idField's
+// "identifiers are positive" rule would silently reject the first step.
+func numField(m map[string]interface{}, key string) (int64, bool) {
+	if m == nil {
+		return 0, false
+	}
+	switch n := m[key].(type) {
+	case float64:
+		if n != math.Trunc(n) {
+			return 0, false
+		}
+		return int64(n), true
+	case string:
+		v, err := strconv.ParseInt(n, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return v, true
+	default:
+		return 0, false
+	}
+}
+
 func idField(m map[string]interface{}, key string) (int64, bool) {
 	if m == nil {
 		return 0, false
@@ -1445,11 +1469,39 @@ func stage5AddStep(ctx context.Context, deps appPassDeps, base, authToken string
 	if res.status != http.StatusCreated {
 		return 0, fmt.Errorf("add %s step: want status 201, got %d: %s", mediaType, res.status, appPassBodyPreview(res.body, 500))
 	}
-	stepID, ok := idField(res.json, "stepid")
-	if !ok {
-		return 0, fmt.Errorf("add %s step response missing stepid", mediaType)
+	// The 201 body is the WHOLE UPDATED GUIDE, not the step that was just created.
+	// GuidesStepApiController::newStep (iFixit/Guide/Controllers/GuidesStepApiController.php
+	// :227-229, route registered :74) ends with
+	// `return new APIResult(GuideAPILib_2_0::guideTranslationToArray($guide, false), 201)`,
+	// which is the same shape GET /guides/{guideid} returns. So there is no top-level
+	// stepid, and the original lookup for one could never have succeeded: the 2026-08-15
+	// fresh proof run failed here with exactly that.
+	//
+	// The new step is one entry in steps[], which also carries every PRE-EXISTING step, so
+	// its array position is not fixed — orderby decides placement. Match on the orderby we
+	// asked for rather than taking steps[0] or steps[len-1], both of which would silently
+	// return some other step's id as this one's.
+	steps, _ := res.json["steps"].([]interface{})
+	if len(steps) == 0 {
+		return 0, fmt.Errorf("add %s step: 201 but the returned guide carries no steps[]: %s", mediaType, appPassBodyPreview(res.body, 500))
 	}
-	return stepID, nil
+	for _, s := range steps {
+		step, ok := s.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		// numField, not idField: idField rejects <= 0 because it is for identifiers, and
+		// orderby 0 is a legal position.
+		if ob, ok := numField(step, "orderby"); !ok || ob != int64(orderby) {
+			continue
+		}
+		stepID, ok := idField(step, "stepid")
+		if !ok {
+			return 0, fmt.Errorf("add %s step: the steps[] entry with orderby=%d has no stepid: %s", mediaType, orderby, appPassBodyPreview(res.body, 500))
+		}
+		return stepID, nil
+	}
+	return 0, fmt.Errorf("add %s step: 201 but the returned guide has no step with orderby=%d: %s", mediaType, orderby, appPassBodyPreview(res.body, 500))
 }
 
 // stage5VerifyRoundTrip re-fetches the guide and requires all three of: an "image"

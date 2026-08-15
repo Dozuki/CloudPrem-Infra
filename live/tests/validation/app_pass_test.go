@@ -1136,7 +1136,29 @@ func (m *appPassMock) handleAddStep(w http.ResponseWriter, r *http.Request) {
 	if status != http.StatusCreated {
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"stepid": stepid})
+	// The real 201 body is the WHOLE UPDATED GUIDE, not the created step
+	// (GuidesStepApiController.php:227-229 -> guideTranslationToArray). The previous mock
+	// returned a bare {"stepid": N}, a shape the app has never produced, which is why the
+	// harness passed its own tests for months and then failed live on the first run that
+	// reached stage 5. Mirror the real shape: steps[] carrying every step so far, the new
+	// one identified by its orderby.
+	orderby, _ := body["orderby"].(float64)
+	steps := []interface{}{}
+	// Pre-existing steps come back too, so include the earlier one once we are past the
+	// first. A mock that returned only the new step would let a steps[0] lookup pass.
+	if int(orderby) > 1 {
+		steps = append(steps, map[string]interface{}{"stepid": 601, "orderby": 1, "title": "QA step 1"})
+	}
+	steps = append(steps, map[string]interface{}{
+		"stepid":  stepid,
+		"orderby": int(orderby),
+		"title":   body["title"],
+	})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"guideid": 500,
+		"title":   "QA guide",
+		"steps":   steps,
+	})
 }
 
 // handleGetGuide mirrors the REAL guide response shape (per the WS3 integration
@@ -2166,5 +2188,120 @@ func TestRunAppPass_SeedsAllowlistBeforeAnyHTTP(t *testing.T) {
 	}
 	if !seedWasFirst {
 		t.Error("the allowlist seed ran AFTER an HTTP request; it must run before any, or the app may cache the empty list")
+	}
+}
+
+// ---------------------------------------------------------------------------------
+// stage 5 add-step: the 201 body is the WHOLE GUIDE, not the created step
+//
+// The 2026-08-15 fresh proof run - the first ever to reach stage 5 - failed with
+// "add image step response missing stepid" because the harness looked for a top-level
+// stepid that the app has never returned. GuidesStepApiController::newStep
+// (GuidesStepApiController.php:227-229) returns guideTranslationToArray, the same shape
+// as GET /guides/{guideid}. These pin the corrected contract.
+// ---------------------------------------------------------------------------------
+
+func stepGuideBody(steps ...map[string]interface{}) string {
+	entries := make([]interface{}, 0, len(steps))
+	for _, s := range steps {
+		entries = append(entries, s)
+	}
+	b, _ := json.Marshal(map[string]interface{}{"guideid": 500, "title": "QA guide", "steps": entries})
+	return string(b)
+}
+
+func stepAddServer(t *testing.T, body string) (*httptest.Server, appPassDeps) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(body))
+	}))
+	return srv, appPassDeps{client: newAppPassClient(), anonClient: newAppPassAnonClient(), clock: realAppPassClock{}}
+}
+
+// The step asked for is NOT first and NOT last, so returning steps[0] or steps[len-1]
+// yields some other step's id. That is the failure a positional lookup would produce:
+// silent, and wrong in a way nothing downstream would notice.
+func TestStage5AddStep_PicksTheStepMatchingOrderbyNotAPosition(t *testing.T) {
+	body := stepGuideBody(
+		map[string]interface{}{"stepid": 111, "orderby": 1},
+		map[string]interface{}{"stepid": 222, "orderby": 2},
+		map[string]interface{}{"stepid": 333, "orderby": 3},
+	)
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 222 {
+		t.Errorf("stepid = %d, want 222 (the entry with orderby=2); 111 means steps[0], 333 means steps[len-1]", got)
+	}
+}
+
+// orderby 0 is a legal position. idField rejects <= 0 because it is for identifiers, so
+// reading orderby with it would skip the first step and fall through to "no step with
+// orderby=0" on a perfectly good response.
+func TestStage5AddStep_OrderbyZeroIsFound(t *testing.T) {
+	body := stepGuideBody(
+		map[string]interface{}{"stepid": 900, "orderby": 0},
+		map[string]interface{}{"stepid": 901, "orderby": 1},
+	)
+	srv, deps := stepAddServer(t, body)
+	defer srv.Close()
+
+	got, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 0)
+	if err != nil {
+		t.Fatalf("orderby 0 must be findable, got: %v", err)
+	}
+	if got != 900 {
+		t.Errorf("stepid = %d, want 900", got)
+	}
+}
+
+func TestStage5AddStep_RejectsBodiesItCannotTrust(t *testing.T) {
+	cases := []struct {
+		name, body, wantErr string
+	}{
+		{
+			name:    "no steps array at all (the old bare-stepid shape)",
+			body:    `{"stepid":601}`,
+			wantErr: "carries no steps[]",
+		},
+		{
+			name:    "empty steps array",
+			body:    `{"guideid":500,"steps":[]}`,
+			wantErr: "carries no steps[]",
+		},
+		{
+			name:    "no step at the requested orderby",
+			body:    stepGuideBody(map[string]interface{}{"stepid": 111, "orderby": 1}),
+			wantErr: "no step with orderby=2",
+		},
+		{
+			name:    "matching step carries no stepid",
+			body:    stepGuideBody(map[string]interface{}{"orderby": 2, "title": "QA step 2"}),
+			wantErr: "orderby=2 has no stepid",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, deps := stepAddServer(t, tc.body)
+			defer srv.Close()
+			_, err := stage5AddStep(context.Background(), deps, srv.URL, "tok", 500, "image", map[string]interface{}{"id": 1}, 2)
+			if err == nil {
+				t.Fatalf("want an error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error should contain %q, got: %v", tc.wantErr, err)
+			}
+			// Every one of these is a shape surprise, so the body has to be visible or the
+			// next live failure is as undiagnosable as the one that caused this fix.
+			if !strings.Contains(err.Error(), "guideid") && !strings.Contains(err.Error(), "stepid") {
+				t.Errorf("error must include the response body, got: %v", err)
+			}
+		})
 	}
 }
