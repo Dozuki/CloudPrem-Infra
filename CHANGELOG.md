@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.5.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.5.0...v9.5.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **physical:** pin eks module to 21.24.0 ([#511](https://github.com/Dozuki/CloudPrem-Infra/issues/511)) ([ddaa38b](https://github.com/Dozuki/CloudPrem-Infra/commit/ddaa38b36a4f1b60d374c8b3f4c59b750b49db6e))
+
 ## [9.5.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.4.0...v9.5.0) (2026-08-14)
 
 
