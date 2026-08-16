@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.6.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.5.1...v9.6.0) (2026-08-16)
+
+
+### Features
+
+* **logical:** add prefer_spot_app variable for app-tier spot placement ([a796aaf](https://github.com/Dozuki/CloudPrem-Infra/commit/a796aaf13f9adf1c5a51693c19af45269826c50b))
+
 ## [9.5.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.5.0...v9.5.1) (2026-08-15)
 
 
