@@ -336,6 +336,12 @@ locals {
 
     googleTranslate = { token = var.google_translate_api_token } # (was set_sensitive)
 
+    scheduling = {
+      preferSpot = {
+        app = var.prefer_spot_app
+      }
+    }
+
     deployments = { webNextjs = { env = local.app_webnextjs_env } }
   }
 

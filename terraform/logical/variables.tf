@@ -89,6 +89,12 @@ variable "enable_datadog_dpa" {
   default     = false
 }
 
+variable "prefer_spot_app" {
+  description = "Enable spot-preferred placement for the app tier (scheduling.preferSpot.app in the chart). When true, replaces hard on-demand nodeSelector with spot-preferred bounded nodeAffinity while retaining on-demand tolerations. Requires chart_version >= 2.10.12."
+  type        = bool
+  default     = false
+}
+
 variable "google_translate_api_token" {
   description = "If using machine translation, enter your google translate API token here."
   type        = string
