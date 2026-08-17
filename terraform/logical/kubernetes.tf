@@ -339,100 +339,30 @@ data "kubernetes_service_v1" "envoy_proxy_azure" {
 # This layer just passes the physical target-group ARNs as chart values (see the
 # gateway.stableProxyService.targetGroupBindings set entries below).
 
-resource "kubernetes_manifest" "nodepool_spot" {
-  count = var.cloud == "aws" ? 1 : 0
-
-  manifest = {
-    apiVersion = "karpenter.sh/v1"
-    kind       = "NodePool"
-    metadata = {
-      name = "spot"
-    }
-    spec = {
-      template = {
-        spec = merge(
-          {
-            nodeClassRef = {
-              group = "eks.amazonaws.com"
-              kind  = "NodeClass"
-              name  = "default"
-            }
-            requirements = [
-              {
-                key      = "karpenter.sh/capacity-type"
-                operator = "In"
-                # Spot preferred, on-demand as fallback. Karpenter's
-                # price-capacity-optimized allocation picks spot whenever any
-                # spot offering exists, so steady-state cost is unchanged - but
-                # when an AZ's spot pool empties (a real ICE event), pods on
-                # this pool get on-demand capacity there instead of pending
-                # until AWS restores spot to that zone. Matters most for a pod
-                # whose EBS volume pins it to the dry AZ: with spot-only this
-                # was an unbounded outage (the adversarial AZ/PVC review's top
-                # finding, and the same terminal state as the old spot-fleet
-                # stranding incidents).
-                values = ["spot", "on-demand"]
-              },
-              {
-                key      = "kubernetes.io/arch"
-                operator = "In"
-                values   = ["amd64"]
-              },
-              # Floor the hardware: without these, arch-only requirements let
-              # Karpenter buy previous-generation burstable spot - a live smoke
-              # cluster ran prometheus, alertmanager and opensearch on a
-              # c4.xlarge, with t2.medium alongside (t-class CPU credits
-              # throttle sustained load into mystery latency). Mirrors the
-              # built-in system pool's own category/generation floor.
-              {
-                key      = "eks.amazonaws.com/instance-category"
-                operator = "In"
-                values   = ["c", "m", "r"]
-              },
-              {
-                key      = "eks.amazonaws.com/instance-generation"
-                operator = "Gt"
-                values   = ["4"]
-              },
-              # Memory floor, spot pool only: requests-based bin packing can
-              # otherwise land Karpenter on a ~4GiB instance class (~3.1GiB
-              # allocatable), and one unbounded app pod on a node that small
-              # starves everything else scheduled there - including the
-              # per-node ztunnel dataplane pod (see istio.tf for the other
-              # half of this fix). eks.amazonaws.com/instance-memory is in
-              # MiB (ground-truthed against a live NodePool). Gt "6144" (6GiB)
-              # excludes 4GiB classes and admits 8GiB classes without
-              # excluding an instance that happens to report exactly 8192.
-              {
-                key      = "eks.amazonaws.com/instance-memory"
-                operator = "Gt"
-                values   = ["6144"]
-              }
-            ]
-          },
-          # Fresh-node race: pods scheduled before istio-cni is ready silently
-          # bypass the mesh (STRICT then rejects them). The taint blocks
-          # scheduling; istiod's untaint controller (taint.enabled) removes it
-          # per node once the CNI agent is ready. App pods can ONLY land on
-          # these custom pools (physical enables just the built-in system pool,
-          # which is CriticalAddonsOnly), so coverage is total.
-          local.mesh_enabled ? {
-            startupTaints = [{
-              key    = "cni.istio.io/not-ready"
-              effect = "NoSchedule"
-            }]
-          } : {}
-        )
-      }
-      disruption = {
-        consolidationPolicy = "WhenEmptyOrUnderutilized"
-        consolidateAfter    = "1m"
-      }
-      weight = 100
-    }
-  }
-}
-
+# ONE custom NodePool per env. There were two (a weight-100 "spot" pool and this
+# tainted "on-demand" pool); the split is what held every env at ~6 nodes, because
+# each pool floors independently and neither can pack into the other. Collapsing
+# them lets an env converge on its real minimum (~3, floored by the opensearch
+# zonal spread) - which is what the Datadog per-host bill actually tracks.
+#
+# The pool is still named "on-demand" and that name is LOAD-BEARING, not cosmetic:
+#   - the dozuki chart hard-codes it (`dozuki.onDemandNodeSelector` renders
+#     `karpenter.sh/nodepool: on-demand`, and `spotPreferredBoundedNodeAffinity`
+#     requires `nodepool In [spot, on-demand]`), and
+#   - flux.tf's local.app_stateful_scheduling and istio.tf's istiod pin select on it.
+# Renaming it makes those pods unschedulable, and because metadata.name is
+# immutable it would be a destroy+create that drains every node in the pool.
+# On a spot-preferred env the name is also simply historical - the pool buys spot
+# there. Retiring the name is follow-up work, after the fleet has converged.
+#
+# Two comment blocks elsewhere go stale the moment this ships and are deliberately
+# NOT edited here, because touching those files would roll the workloads they
+# configure in the same apply as the pool change: flux.tf's
+# local.app_stateful_scheduling and istio.tf's istiod pin both describe the
+# capacity-type toleration as load-bearing and the on-demand pool as tainted.
+# After this change the taint is gone, so those tolerations are inert rather than
+# required, and on a spot-preferred env the istiod pin resolves to a spot-capable
+# pool. Both are tracked in Lodestar-02z.7, the post-convergence cleanup.
 resource "kubernetes_manifest" "nodepool_on_demand" {
   count = var.cloud == "aws" ? 1 : 0
 
@@ -451,18 +381,33 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
               kind  = "NodeClass"
               name  = "default"
             }
-            requirements = [
+            requirements = concat([
               {
                 key      = "karpenter.sh/capacity-type"
                 operator = "In"
-                values   = ["on-demand"]
+                # on-demand: production. spot-preferred: spot with on-demand as
+                # FALLBACK, never hard spot-only. Karpenter's
+                # price-capacity-optimized allocation picks spot whenever any spot
+                # offering exists, so steady-state cost is the spot price - but
+                # when an AZ's spot pool empties (a real ICE event), pods get
+                # on-demand capacity in that AZ instead of pending until AWS
+                # restores spot. That matters most for a pod whose EBS volume pins
+                # it to the dry AZ: under spot-only that was an unbounded outage
+                # (the adversarial AZ/PVC review's top finding, and the same
+                # terminal state as the old spot-fleet stranding incidents).
+                values = var.capacity_profile == "spot-preferred" ? ["spot", "on-demand"] : ["on-demand"]
               },
               {
                 key      = "kubernetes.io/arch"
                 operator = "In"
                 values   = ["amd64"]
               },
-              # Same hardware floor as the spot pool (see the comment there).
+              # Floor the hardware: without these, arch-only requirements let
+              # Karpenter buy previous-generation burstable instances - a live
+              # smoke cluster ran prometheus, alertmanager and opensearch on a
+              # c4.xlarge, with t2.medium alongside (t-class CPU credits throttle
+              # sustained load into mystery latency). Mirrors the built-in system
+              # pool's own category/generation floor.
               {
                 key      = "eks.amazonaws.com/instance-category"
                 operator = "In"
@@ -494,28 +439,66 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
               # fix) are the same shape of problem, smaller: correctly sized or
               # not, they get stacked onto whatever 4GiB node has nominal room.
               #
-              # Units are mebibytes and Gt takes exactly one value, so >4096
-              # drops c*.large and makes m*.large (8GiB) the smallest node.
-              #
-              # Inert until the selector fix lands. Anything pinned by
-              # capacity-type rather than by nodepool name never reaches this
-              # pool, so this requirement had nothing to apply to; ship the two
-              # together.
+              # Units are mebibytes and Gt takes exactly one value. Gt is
+              # EXCLUSIVE, so the default 4096 drops c*.large and makes m*.large
+              # (8GiB) the smallest node - identical to the literal it replaced.
+              # The sizing model raises this per env via node_min_memory_mib
+              # (8192 admits 16GiB and up, which is what lets an env sit on three
+              # xlarge nodes instead of six large ones).
               {
                 key      = "eks.amazonaws.com/instance-memory"
                 operator = "Gt"
-                values   = ["4096"]
+                values   = [tostring(var.node_min_memory_mib)]
               }
-            ]
-            taints = [
-              {
-                key    = "eks.amazonaws.com/capacity-type"
-                value  = "on-demand"
-                effect = "NoSchedule"
-              }
-            ]
+              ],
+              # Optional vCPU floor. Karpenter's Gt is exclusive here too, but note
+              # this variable IS decremented while node_min_memory_mib above is
+              # NOT: a memory floor of 8192 renders Gt "8192" and so admits 16GiB
+              # upward, whereas node_min_vcpu of 4 renders Gt "3", i.e. at least
+              # 4 vCPU. Omitted entirely at the
+              # default of 0 so envs that have not been sized yet keep exactly
+              # today's behaviour. Paired with the memory floor it selects the
+              # node shape: >=4 vCPU and >8192 MiB admits m*.xlarge / r*.xlarge and
+              # the 2xlarge sizes, and excludes c*.xlarge (4 vCPU but only 8GiB).
+              var.node_min_vcpu > 0 ? [{
+                key      = "eks.amazonaws.com/instance-cpu"
+                operator = "Gt"
+                values   = [tostring(var.node_min_vcpu - 1)]
+              }] : []
+            )
+            # No taints. This pool was tainted
+            # eks.amazonaws.com/capacity-type=on-demand:NoSchedule so that only
+            # workloads that deliberately tolerated it landed here, with the spot
+            # pool as the default landing zone. With one pool there is no default
+            # to steer away from, so the taint would just be a toleration every
+            # pod had to carry. Removing it is what lets the two pools' workloads
+            # pack together onto one set of nodes.
+            #
+            # Taints are a static-drift field, so removing this marks every
+            # EXISTING node in the pool as drifted and Karpenter replaces them
+            # serially (budget 1, consolidateAfter 5m). That is a full node-fleet
+            # replacement per env on first apply, not a cosmetic change.
+            #
+            # Two DIFFERENT mechanisms run on that first apply and only one of
+            # them is serial - do not read the budget above as governing both:
+            #   - this pool's taint drift: serial, budget 1, 5m cadence.
+            #   - the retired spot pool: its NodePool object is DELETED, and
+            #     Karpenter cascades that to every NodeClaim the pool owns AT
+            #     ONCE. The disruption budget here is scoped to this pool and
+            #     never applied to that one. So the former spot fleet drains
+            #     concurrently (PDBs still honoured) while this pool replaces one
+            #     node at a time.
+            # Net effect per env: node count rises before it falls, because spot
+            # refugees cannot land on still-tainted nodes and Karpenter must
+            # provision new untainted ones. Roll one env at a time and check PDB
+            # coverage for the app tier first.
           },
-          # See nodepool_spot for the startupTaints rationale.
+          # Fresh-node race: pods scheduled before istio-cni is ready silently
+          # bypass the mesh (STRICT then rejects them). The taint blocks
+          # scheduling; istiod's untaint controller (taint.enabled) removes it
+          # per node once the CNI agent is ready. App pods can ONLY land on this
+          # custom pool (physical enables just the built-in system pool, which is
+          # CriticalAddonsOnly), so coverage is total.
           local.mesh_enabled ? {
             startupTaints = [{
               key    = "cni.istio.io/not-ready"
@@ -540,10 +523,10 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         # proven on helm-controller below. A node hosting one of those pods is
         # still skipped by consolidation; every other node in the pool - the
         # ones with no such pod, sitting empty or near-empty - is repacked
-        # normally. consolidateAfter=5m (not the spot pool's 1m) so a pod that's
-        # mid-reschedule doesn't trigger a repack on the churn itself; the 1m
-        # cadence on spot was part of what made the first WhenEmptyOrUnderutilized
-        # attempt on this pool noisy.
+        # normally. consolidateAfter stays 5m (the retired spot pool ran 1m) so a
+        # pod that's mid-reschedule doesn't trigger a repack on the churn itself;
+        # that 1m cadence was part of what made the first
+        # WhenEmptyOrUnderutilized attempt on this pool noisy.
         #
         # Consequence worth stating plainly: a do-not-disrupt pod's node is
         # ineligible for VOLUNTARY consolidation for as long as that pod lives
@@ -868,11 +851,6 @@ moved {
 moved {
   from = kubernetes_manifest.tgb_http
   to   = kubernetes_manifest.tgb_http[0]
-}
-
-moved {
-  from = kubernetes_manifest.nodepool_spot
-  to   = kubernetes_manifest.nodepool_spot[0]
 }
 
 moved {

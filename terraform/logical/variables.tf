@@ -478,6 +478,58 @@ variable "opensearch_min_domains" {
   }
 }
 
+variable "capacity_profile" {
+  description = "Node capacity profile for the consolidated NodePool. on-demand: nodes are on-demand only (production default). spot-preferred: Karpenter buys spot whenever any spot offering exists, falling back to on-demand on ICE - never hard spot-only, so zone-pinned EBS pods can always get capacity in their AZ."
+  type        = string
+  default     = "on-demand"
+  validation {
+    condition     = contains(["on-demand", "spot-preferred"], var.capacity_profile)
+    error_message = "capacity_profile must be on-demand or spot-preferred."
+  }
+}
+
+variable "node_min_vcpu" {
+  description = "Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. 0 = no CPU floor, requirement omitted entirely. Set per env from the sizing model so the env's workload fits its minimum node count."
+  type        = number
+  default     = 0
+  validation {
+    condition     = var.node_min_vcpu >= 0 && var.node_min_vcpu == floor(var.node_min_vcpu)
+    error_message = "node_min_vcpu must be a non-negative integer."
+  }
+  # Ceiling: a typo or an order-of-magnitude slip here applies cleanly and then
+  # fails silently - the NodePool matches no offering the sizing model ever
+  # intended, and every pod bound to it sits Pending forever while drifted nodes
+  # are replaced by nothing. 64 is far above any shape the model produces
+  # (2xlarge = 8) while still admitting the whole practical c/m/r range.
+  validation {
+    condition     = var.node_min_vcpu <= 64
+    error_message = "node_min_vcpu must be <= 64, the top of the supported sizing range."
+  }
+}
+
+variable "node_min_memory_mib" {
+  description = "Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node_min_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. Default 4096 preserves the current on-demand pool floor exactly; the sizing model raises it per env. (4096 and 6144 admit identical c/m/r gen>4 instance sets - no size falls between them - so the default changes nothing.)"
+  type        = number
+  default     = 4096
+  validation {
+    condition     = var.node_min_memory_mib >= 4096 && var.node_min_memory_mib == floor(var.node_min_memory_mib)
+    error_message = "node_min_memory_mib must be an integer >= 4096."
+  }
+  # Same silent-Pending failure mode as the vCPU ceiling above. 262144 MiB
+  # (256 GiB) is far above any shape the sizing model produces
+  # (r*.2xlarge = 65536).
+  #
+  # Note both ceilings bound their variable INDEPENDENTLY. A pair that is
+  # individually in range but jointly unsatisfiable (a high vCPU floor against a
+  # memory floor no matching shape reaches) still passes. Accepted: the values are
+  # set per env from the sizing model's table, not composed by hand, and a pair
+  # enum would need editing every time an env is resized.
+  validation {
+    condition     = var.node_min_memory_mib <= 262144
+    error_message = "node_min_memory_mib must be <= 262144, the top of the supported sizing range."
+  }
+}
+
 variable "seaweedfs_volume_size_gb" {
   description = "PVC size in GB for each SeaweedFS volume server (Azure only)."
   type        = number
