@@ -354,6 +354,15 @@ data "kubernetes_service_v1" "envoy_proxy_azure" {
 # immutable it would be a destroy+create that drains every node in the pool.
 # On a spot-preferred env the name is also simply historical - the pool buys spot
 # there. Retiring the name is follow-up work, after the fleet has converged.
+#
+# Two comment blocks elsewhere go stale the moment this ships and are deliberately
+# NOT edited here, because touching those files would roll the workloads they
+# configure in the same apply as the pool change: flux.tf's
+# local.app_stateful_scheduling and istio.tf's istiod pin both describe the
+# capacity-type toleration as load-bearing and the on-demand pool as tainted.
+# After this change the taint is gone, so those tolerations are inert rather than
+# required, and on a spot-preferred env the istiod pin resolves to a spot-capable
+# pool. Both are tracked for the post-convergence cleanup.
 resource "kubernetes_manifest" "nodepool_on_demand" {
   count = var.cloud == "aws" ? 1 : 0
 
@@ -466,6 +475,20 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
             # EXISTING node in the pool as drifted and Karpenter replaces them
             # serially (budget 1, consolidateAfter 5m). That is a full node-fleet
             # replacement per env on first apply, not a cosmetic change.
+            #
+            # Two DIFFERENT mechanisms run on that first apply and only one of
+            # them is serial - do not read the budget above as governing both:
+            #   - this pool's taint drift: serial, budget 1, 5m cadence.
+            #   - the retired spot pool: its NodePool object is DELETED, and
+            #     Karpenter cascades that to every NodeClaim the pool owns AT
+            #     ONCE. The disruption budget here is scoped to this pool and
+            #     never applied to that one. So the former spot fleet drains
+            #     concurrently (PDBs still honoured) while this pool replaces one
+            #     node at a time.
+            # Net effect per env: node count rises before it falls, because spot
+            # refugees cannot land on still-tainted nodes and Karpenter must
+            # provision new untainted ones. Roll one env at a time and check PDB
+            # coverage for the app tier first.
           },
           # Fresh-node race: pods scheduled before istio-cni is ready silently
           # bypass the mesh (STRICT then rejects them). The taint blocks

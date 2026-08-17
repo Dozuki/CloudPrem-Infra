@@ -489,22 +489,36 @@ variable "capacity_profile" {
 }
 
 variable "node_min_vcpu" {
-  description = "Minimum vCPU per node (eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1). 0 = no CPU floor (requirement omitted). Set per env from the sizing model so the env's workload fits its minimum node count."
+  description = "Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. 0 = no CPU floor, requirement omitted entirely. Set per env from the sizing model so the env's workload fits its minimum node count."
   type        = number
   default     = 0
   validation {
     condition     = var.node_min_vcpu >= 0 && var.node_min_vcpu == floor(var.node_min_vcpu)
     error_message = "node_min_vcpu must be a non-negative integer."
   }
+  # Ceiling: a typo or an order-of-magnitude slip here matches no c/m/r offering at
+  # all, and the failure mode is silent - the NodePool applies cleanly, then every
+  # pod bound to it sits Pending forever while drifted nodes are replaced by
+  # nothing. 64 is far above any shape the sizing model produces (2xlarge = 8).
+  validation {
+    condition     = var.node_min_vcpu <= 64
+    error_message = "node_min_vcpu must be <= 64; larger values match no c/m/r offering and strand every pod on this pool."
+  }
 }
 
 variable "node_min_memory_mib" {
-  description = "Minimum instance memory in MiB, exclusive (eks.amazonaws.com/instance-memory Gt). Default 4096 preserves the current on-demand pool floor exactly; the sizing model raises it per env. (4096 and 6144 admit identical c/m/r gen>4 instance sets - no size falls between them - so the default changes nothing.)"
+  description = "Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node_min_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. Default 4096 preserves the current on-demand pool floor exactly; the sizing model raises it per env. (4096 and 6144 admit identical c/m/r gen>4 instance sets - no size falls between them - so the default changes nothing.)"
   type        = number
   default     = 4096
   validation {
     condition     = var.node_min_memory_mib >= 4096 && var.node_min_memory_mib == floor(var.node_min_memory_mib)
     error_message = "node_min_memory_mib must be an integer >= 4096."
+  }
+  # Same silent-Pending failure mode as the vCPU ceiling above. 262144 MiB (256 GiB)
+  # is far above any shape the sizing model produces (r*.2xlarge = 65536).
+  validation {
+    condition     = var.node_min_memory_mib <= 262144
+    error_message = "node_min_memory_mib must be <= 262144; larger values match no c/m/r offering and strand every pod on this pool."
   }
 }
 
