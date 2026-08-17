@@ -478,6 +478,36 @@ variable "opensearch_min_domains" {
   }
 }
 
+variable "capacity_profile" {
+  description = "Node capacity profile for the consolidated NodePool. on-demand: nodes are on-demand only (production default). spot-preferred: Karpenter buys spot whenever any spot offering exists, falling back to on-demand on ICE - never hard spot-only, so zone-pinned EBS pods can always get capacity in their AZ."
+  type        = string
+  default     = "on-demand"
+  validation {
+    condition     = contains(["on-demand", "spot-preferred"], var.capacity_profile)
+    error_message = "capacity_profile must be on-demand or spot-preferred."
+  }
+}
+
+variable "node_min_vcpu" {
+  description = "Minimum vCPU per node (eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1). 0 = no CPU floor (requirement omitted). Set per env from the sizing model so the env's workload fits its minimum node count."
+  type        = number
+  default     = 0
+  validation {
+    condition     = var.node_min_vcpu >= 0 && var.node_min_vcpu == floor(var.node_min_vcpu)
+    error_message = "node_min_vcpu must be a non-negative integer."
+  }
+}
+
+variable "node_min_memory_mib" {
+  description = "Minimum instance memory in MiB, exclusive (eks.amazonaws.com/instance-memory Gt). Default 4096 preserves the current on-demand pool floor exactly; the sizing model raises it per env. (4096 and 6144 admit identical c/m/r gen>4 instance sets - no size falls between them - so the default changes nothing.)"
+  type        = number
+  default     = 4096
+  validation {
+    condition     = var.node_min_memory_mib >= 4096 && var.node_min_memory_mib == floor(var.node_min_memory_mib)
+    error_message = "node_min_memory_mib must be an integer >= 4096."
+  }
+}
+
 variable "seaweedfs_volume_size_gb" {
   description = "PVC size in GB for each SeaweedFS volume server (Azure only)."
   type        = number
