@@ -876,48 +876,16 @@ resource "aws_lambda_permission" "dms_restart_permission" {
 
 # --- DR replication health (count-gated on enable_dr) --- #
 
-# S3 CRR: pending bytes growing unboundedly means replication is failing/stuck.
+# S3 CRR monitoring:
 #
-# KNOWN NON-FUNCTIONAL: ReplicationLatency (like BytesPendingReplication and
-# OperationsPendingReplication, but unlike OperationsFailedReplication) is
-# published in the DESTINATION bucket's region, and this alarm lives in the
-# primary region, so it never sees a datapoint and notBreaching keeps it
-# silently OK. Moving it needs a DR-region notification path (the dr_paging
-# topic only exists when Aurora DR is on), so it stays here, documented,
-# until the central-metrics parity work covers cross-region signals.
-resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_latency" {
-  for_each = var.enable_dr ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}
-
-  alarm_name          = "${local.identifier}-dr-s3-replication-${each.key}"
-  alarm_description   = "S3 DR replication latency high for ${local.identifier} ${each.key} bucket"
-  namespace           = "AWS/S3"
-  metric_name         = "ReplicationLatency"
-  statistic           = "Maximum"
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = 900
-  evaluation_periods  = 3
-  period              = 300
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    SourceBucket      = each.value
-    DestinationBucket = aws_s3_bucket.dr_guide_buckets[each.key].id
-    RuleId            = "dr-${each.key}"
-  }
-
-  alarm_actions = [module.sns.topic_arn]
-  ok_actions    = [module.sns.topic_arn]
-
-  tags = local.tags
-}
-
-# Dormant from 2026-06 until the replication rules gained their metrics block
-# (dr.tf): the metric did not exist before that, so this alarm had nothing to
-# watch. OperationsFailedReplication is the one replication metric published
-# in the SOURCE region, so unlike the latency alarm above this one is in the
-# right place, and it also counts Batch Replication task failures (though not
-# a job that never runs at all - the rollout runbook's describe-job check
-# covers that).
+# dr_s3_replication_latency was retired (Lodestar-3k8.10): ReplicationLatency
+# is only published by AWS S3 when S3 Replication Time Control (RTC) is enabled
+# (which is intentionally disabled due to extra $/GB cost, dr.tf:487). Furthermore,
+# latency metrics publish in the destination region rather than the source region.
+#
+# OperationsFailedReplication is the active, functional signal: it is published in
+# the SOURCE region for all rules with replication metrics enabled, catching failed
+# replication operations and Batch Replication task failures.
 resource "aws_cloudwatch_metric_alarm" "dr_s3_replication_failed" {
   for_each = var.enable_dr ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}
 
