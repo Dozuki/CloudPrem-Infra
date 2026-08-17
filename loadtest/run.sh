@@ -34,8 +34,13 @@ POOL_JSON="$(jq -c . pool.json)"
   --from-file=journeys.js=scenarios/journeys.js --from-file=auth.js=scenarios/auth.js \
   --dry-run=client -o yaml | "${KC[@]}" apply -f -
 
-export LABEL NAMESPACE="$NS" K6_IMAGE TARGET VUS DURATION INSECURE ADMIN_EMAIL="$EMAIL" \
-  ADMIN_PASSWORD="$PASSWORD" POOL_JSON PROM_URL K6_OUT
+# credentials Secret (admin email + password)
+"${KC[@]}" create secret generic "loadtest-${LABEL}-credentials" \
+  --from-literal=admin-email="$EMAIL" \
+  --from-literal=admin-password="$PASSWORD" \
+  --dry-run=client -o yaml | "${KC[@]}" apply -f -
+
+export LABEL NAMESPACE="$NS" K6_IMAGE TARGET VUS DURATION INSECURE POOL_JSON PROM_URL K6_OUT
 "${KC[@]}" delete job "loadtest-${LABEL}" --ignore-not-found
 envsubst < k6-job.yaml | "${KC[@]}" apply -f -
 

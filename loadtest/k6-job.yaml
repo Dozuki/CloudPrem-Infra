@@ -22,8 +22,16 @@ spec:
             - { name: DURATION, value: "${DURATION}" }
             - { name: LABEL, value: "${LABEL}" }
             - { name: INSECURE, value: "${INSECURE}" }
-            - { name: ADMIN_EMAIL, value: "${ADMIN_EMAIL}" }
-            - { name: ADMIN_PASSWORD, value: "${ADMIN_PASSWORD}" }
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: loadtest-${LABEL}-credentials
+                  key: admin-email
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: loadtest-${LABEL}-credentials
+                  key: admin-password
             - { name: POOL_JSON, value: '${POOL_JSON}' }
             - { name: K6_PROMETHEUS_RW_SERVER_URL, value: "${PROM_URL}" }
             - { name: K6_OUT, value: "${K6_OUT}" }
