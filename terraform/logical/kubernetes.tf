@@ -362,7 +362,7 @@ data "kubernetes_service_v1" "envoy_proxy_azure" {
 # capacity-type toleration as load-bearing and the on-demand pool as tainted.
 # After this change the taint is gone, so those tolerations are inert rather than
 # required, and on a spot-preferred env the istiod pin resolves to a spot-capable
-# pool. Both are tracked for the post-convergence cleanup.
+# pool. Both are tracked in Lodestar-02z.7, the post-convergence cleanup.
 resource "kubernetes_manifest" "nodepool_on_demand" {
   count = var.cloud == "aws" ? 1 : 0
 
@@ -451,8 +451,11 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
                 values   = [tostring(var.node_min_memory_mib)]
               }
               ],
-              # Optional vCPU floor, same Gt-is-exclusive convention: node_min_vcpu
-              # of 4 renders Gt "3", i.e. at least 4 vCPU. Omitted entirely at the
+              # Optional vCPU floor. Karpenter's Gt is exclusive here too, but note
+              # this variable IS decremented while node_min_memory_mib above is
+              # NOT: a memory floor of 8192 renders Gt "8192" and so admits 16GiB
+              # upward, whereas node_min_vcpu of 4 renders Gt "3", i.e. at least
+              # 4 vCPU. Omitted entirely at the
               # default of 0 so envs that have not been sized yet keep exactly
               # today's behaviour. Paired with the memory floor it selects the
               # node shape: >=4 vCPU and >8192 MiB admits m*.xlarge / r*.xlarge and

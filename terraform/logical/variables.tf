@@ -496,13 +496,14 @@ variable "node_min_vcpu" {
     condition     = var.node_min_vcpu >= 0 && var.node_min_vcpu == floor(var.node_min_vcpu)
     error_message = "node_min_vcpu must be a non-negative integer."
   }
-  # Ceiling: a typo or an order-of-magnitude slip here matches no c/m/r offering at
-  # all, and the failure mode is silent - the NodePool applies cleanly, then every
-  # pod bound to it sits Pending forever while drifted nodes are replaced by
-  # nothing. 64 is far above any shape the sizing model produces (2xlarge = 8).
+  # Ceiling: a typo or an order-of-magnitude slip here applies cleanly and then
+  # fails silently - the NodePool matches no offering the sizing model ever
+  # intended, and every pod bound to it sits Pending forever while drifted nodes
+  # are replaced by nothing. 64 is far above any shape the model produces
+  # (2xlarge = 8) while still admitting the whole practical c/m/r range.
   validation {
     condition     = var.node_min_vcpu <= 64
-    error_message = "node_min_vcpu must be <= 64; larger values match no c/m/r offering and strand every pod on this pool."
+    error_message = "node_min_vcpu must be <= 64, the top of the supported sizing range."
   }
 }
 
@@ -514,11 +515,18 @@ variable "node_min_memory_mib" {
     condition     = var.node_min_memory_mib >= 4096 && var.node_min_memory_mib == floor(var.node_min_memory_mib)
     error_message = "node_min_memory_mib must be an integer >= 4096."
   }
-  # Same silent-Pending failure mode as the vCPU ceiling above. 262144 MiB (256 GiB)
-  # is far above any shape the sizing model produces (r*.2xlarge = 65536).
+  # Same silent-Pending failure mode as the vCPU ceiling above. 262144 MiB
+  # (256 GiB) is far above any shape the sizing model produces
+  # (r*.2xlarge = 65536).
+  #
+  # Note both ceilings bound their variable INDEPENDENTLY. A pair that is
+  # individually in range but jointly unsatisfiable (a high vCPU floor against a
+  # memory floor no matching shape reaches) still passes. Accepted: the values are
+  # set per env from the sizing model's table, not composed by hand, and a pair
+  # enum would need editing every time an env is resized.
   validation {
     condition     = var.node_min_memory_mib <= 262144
-    error_message = "node_min_memory_mib must be <= 262144; larger values match no c/m/r offering and strand every pod on this pool."
+    error_message = "node_min_memory_mib must be <= 262144, the top of the supported sizing range."
   }
 }
 
