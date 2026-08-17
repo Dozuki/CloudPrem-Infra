@@ -468,6 +468,16 @@ variable "opensearch_replicas" {
   }
 }
 
+variable "opensearch_min_domains" {
+  description = "Minimum number of domains (AZs) for OpenSearch topology spread constraints. Set to 3 for standard 3-AZ regions to ensure Karpenter provisions on-demand nodes in missing AZs rather than colocating pods. Set to 2 for regions with only 2 usable AZs (e.g. emea)."
+  type        = number
+  default     = 3
+  validation {
+    condition     = contains([1, 2, 3], var.opensearch_min_domains)
+    error_message = "opensearch_min_domains must be 1, 2, or 3."
+  }
+}
+
 variable "seaweedfs_volume_size_gb" {
   description = "PVC size in GB for each SeaweedFS volume server (Azure only)."
   type        = number

@@ -474,12 +474,14 @@ locals {
         # outage) and can wedge a rolling update behind a probe that cannot succeed.
         #
         # The subchart applies topologySpreadConstraints with a bare toYaml (no tpl),
-        # so these labels must be literals. 3 pods at maxSkew 1 is satisfiable at any
-        # zone count (3 zones 1+1+1, 2 zones 2+1 = skew 1, 1 zone = one domain, skew
-        # 0), so DoNotSchedule cannot strand a sub-3-AZ env Pending; it forces the
-        # spread the env can actually give.
+        # so these labels must be literals. minDomains (default 3) forces the scheduler
+        # to evaluate across all required AZ domains even when an AZ currently carries
+        # no matching on-demand node, triggering Karpenter to provision capacity rather
+        # than colocating replicas and risking quorum loss (Lodestar-cmn). Set minDomains
+        # per-env (e.g. 2 on emea) for regions with fewer than 3 usable AZs.
         topologySpreadConstraints = [{
           maxSkew           = 1
+          minDomains        = var.opensearch_min_domains
           topologyKey       = "topology.kubernetes.io/zone"
           whenUnsatisfiable = "DoNotSchedule"
           labelSelector = { matchLabels = {
