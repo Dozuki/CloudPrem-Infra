@@ -825,15 +825,14 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       #
       # What it costs, written down because it is not obvious. Retries are UNBOUNDED and the
       # release never reaches a terminal Stalled state (fluxcd/helm-controller#1551 is open to add
-      # a bound - take it when it ships). And the retry path leaves the Ready condition stale,
-      # normally Unknown rather than False; only Released=False and the per-attempt UpgradeFailed
-      # event carry the real error. So nothing may key on Ready=FALSE for this object - that
-      # state no longer occurs. Ready=UNKNOWN is the state to watch, and the app chart's
-      # FluxHelmReleaseStuck alert (gotk_resource_info ready="Unknown", for 30m) already does
-      # exactly that, which makes it the primary detector here rather than a backstop. The Slack
-      # Alert further down also forwards each attempt's UpgradeFailed event. When you see one
-      # retrying, fix the cause and leave it alone - the next interval picks the fix up on its
-      # own, no forced reconcile needed.
+      # a bound - take it when it ships). Between failed attempts, the release sits at Ready=False
+      # (reason=UpgradeFailed) for the duration of the retryInterval (15m), which the app chart's
+      # FluxHelmReleaseNotReady alert (gotk_resource_info ready="False", for 15m) catches as the
+      # primary detector. The sibling FluxHelmReleaseStuck alert (ready="Unknown", for 30m) catches
+      # in-flight reconciliations that hang without completing or failing. The Slack Alert further
+      # down also forwards each attempt's UpgradeFailed event. When you see one retrying, fix the
+      # cause and leave it alone - the next interval picks the fix up on its own, no forced
+      # reconcile needed.
       #
       # Third consequence, easy to miss: every failed attempt writes a helm revision, so at a
       # 15m interval a broken release churns through maxHistory (20, above) within hours and

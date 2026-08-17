@@ -204,10 +204,10 @@ func AwaitHelmReleaseReady(kubeconfig, namespace, name string, timeout time.Dura
 // isTerminalReason lists the helm-controller reasons that will not resolve on their own
 // once they reach the Ready condition as False. Anything else (Progressing,
 // ArtifactFailed while the source is still pulling, ...) is treated as in-flight and
-// waited out. UpgradeFailed stays in this set on purpose: it is unreachable on a release
-// running RetryOnFailure (which is why the Released check above exists), but it is still
-// how a pre-v9.2.2 baseline reports a dead upgrade, and the harness runs upgrade tests
-// from those baselines.
+// waited out. UpgradeFailed stays in this set on purpose: when an upgrade attempt fails,
+// helm-controller sets Ready=False with reason=UpgradeFailed (the steady state between
+// retries under RetryOnFailure), and the harness treats this as a test failure rather than
+// waiting out the retry loop.
 func isTerminalReason(reason string) bool {
 	switch reason {
 	case "InstallFailed", "UpgradeFailed", "TestFailed", "RollbackFailed", "UninstallFailed", "ChartPullFailed":

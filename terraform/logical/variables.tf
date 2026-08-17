@@ -643,9 +643,10 @@ variable "flux_upgrade_timeout" {
     Why an env may still want it short: on an env with no large migration to run, a crashlooping
     rollout just burns the whole window before helm gives up (dev-slim, 2026-08-07, 04:07-08:37).
     Retries are unbounded, so a short timeout tightens that loop rather than ending it. Detection
-    does not depend on this value, and this is now the PRIMARY signal rather than a backstop:
-    RetryOnFailure never sets Ready=False and never reaches Stalled, it parks at ready=Unknown
-    between attempts, which is exactly what FluxHelmReleaseStuck fires on after 30m.
+    does not depend on this value: between attempts a failed upgrade sits at Ready=False
+    (reason=UpgradeFailed), which FluxHelmReleaseNotReady catches after 15m. FluxHelmReleaseStuck
+    serves as the detector for in-flight reconciliations that hang in Ready=Unknown for 30m without
+    failing.
 
     Upgrade only. install keeps its own timeout: a fresh install always runs the full schema
     import, and install carries no remediation and no retry strategy, so a failed install stays
