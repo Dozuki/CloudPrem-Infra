@@ -60,6 +60,11 @@ type RunManifest struct {
 	// that case, see janitor.go classify().
 	AppliedCustomer string `json:"applied_customer,omitempty"`
 
+	// Residuals is the last boundary check's report (residuals.go). Kept on the
+	// manifest rather than only in the pod log because the manifest outlives the
+	// Workflow CR, and a leaked stack is usually looked at days later.
+	Residuals *ResidualReport `json:"residuals,omitempty"`
+
 	// KeepOnFailure/KeepOnFailureRecorded durably record the --keep-on-failure decision
 	// a teardown call was given (phases.go Teardown, written on every call). Argo TTLs
 	// the owning Workflow CR three days after it finishes (10-scenario.yaml

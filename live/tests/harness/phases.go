@@ -45,11 +45,27 @@ type PhaseParams struct {
 	ExecutionMode      string // "warm" or "full-spinup"
 	ExtraInputs        map[string]interface{}
 	IdentifierOverride string
+	// Tags is the resourcegroupstaggingapi client per region, used only by the
+	// residual boundary check (residuals.go). Optional: a nil map degrades the check
+	// to "incomplete", never to a silent pass. The janitor builds the same map, from
+	// the same two regions.
+	Tags map[string]TagAPI
 }
 
 // resolveIdentifier is the one place "<customer>-<env>" gets computed from a Config,
 // shared by prepareWorktree and Teardown so they can never disagree. override, when
 // non-empty, wins outright - see PhaseParams.IdentifierOverride for why.
+// residualRegions is the primary + DR pair the residual check enumerates. Residue lands
+// in either (the DR Aurora secondary and the replicated buckets live in DR), and a
+// single-region query would call a half-leaked stack clean.
+func (p PhaseParams) residualRegions() []string {
+	regions := []string{p.Region}
+	if p.Matrix != nil && p.Matrix.Defaults.DRRegion != "" {
+		regions = append(regions, p.Matrix.Defaults.DRRegion)
+	}
+	return regions
+}
+
 func resolveIdentifier(cfg Config, override string) string {
 	if override != "" {
 		return override
@@ -243,6 +259,24 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	rm.AppliedSide = string(side)
 	if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
 		return serr
+	}
+	// Residual boundary check (residuals.go). An apply that was killed mid-flight
+	// leaves resources AWS has and terraform does not, and nothing downstream can see
+	// them: teardown destroys state, the janitor reasons from state, and the orphan
+	// blocks both while naming nothing. This is the first boundary where the two views
+	// can be compared, so compare them and fail here rather than two days later inside
+	// a teardown retry loop.
+	//
+	// Failing the run does NOT pin the stack: keep-on-failure is a separate, explicit
+	// choice, and the residuals keep the deleteAfter they were tagged with, so the
+	// generic purge backstop still collects them. Detection must not trade a leak for
+	// a stack left standing on purpose.
+	if rep := p.checkResiduals(ctx, tg, "provision", rm.AppliedCustomer, p.residualRegions(), nil); !rep.Clean() {
+		p.recordResiduals(ctx, cfg, rm, rep)
+		step("PROVISION residual check: %s", rep.Summary())
+		if len(rep.Residuals) > 0 {
+			return fmt.Errorf("provision left %d resource(s) outside terraform state; see the manifest residual report:\n%s", len(rep.Residuals), rep.Summary())
+		}
 	}
 
 	rp := RunParams{Matrix: p.Matrix, Namespace: namespace, Profile: p.Profile}
@@ -715,7 +749,14 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	}
 	step("TEARDOWN: destroy against %s", ref)
 	if derr := tg.Destroy(); derr != nil {
-		return fmt.Errorf("destroy: %w", derr)
+		// The whole point of Lodestar-1xm.36.2: a destroy that fails must say WHAT
+		// blocked it. smoke1bc2 re-emitted "retries exhausted" for two days while the
+		// answer - an EKS cluster and an Aurora writer that no state address covered -
+		// was one tag query away. Report first, then fail with the identities attached.
+		rep := p.checkResiduals(ctx, tg, "teardown", rm.AppliedCustomer, p.residualRegions(), derr)
+		p.recordResiduals(ctx, cfg, rm, rep)
+		step("TEARDOWN residual check: %s", rep.Summary())
+		return fmt.Errorf("destroy: %w\nblocking residuals (%s):\n%s", derr, rep.DestroyErr, rep.Summary())
 	}
 	// The CloudWatch agent creates /aws/containerinsights/<cluster>/* lazily at
 	// runtime, so they are in no Terraform state and every run re-leaks the same four
@@ -737,6 +778,17 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	// to whatever credentials happen to be active in the shell.
 	if rerr := reclaimOutOfStateResourcesForRegion(ctx, p.Profile, p.Region, identifier); rerr != nil {
 		step("out-of-state resource reclaim failed (non-fatal): %v", rerr)
+	}
+	// Runs AFTER both sweeps above, so what they legitimately clean up is already gone
+	// and does not read as residue. A destroy that returned zero while leaving tagged
+	// resources standing is the exact shape of the smoke1bc2 leak, and it is the last
+	// moment anything is still looking at this stack.
+	if rep := p.checkResiduals(ctx, tg, "teardown", rm.AppliedCustomer, p.residualRegions(), nil); !rep.Clean() {
+		p.recordResiduals(ctx, cfg, rm, rep)
+		step("TEARDOWN residual check: %s", rep.Summary())
+		if len(rep.Residuals) > 0 {
+			return fmt.Errorf("destroy reported success but left %d tagged resource(s) behind; see the manifest residual report:\n%s", len(rep.Residuals), rep.Summary())
+		}
 	}
 	return nil
 }
