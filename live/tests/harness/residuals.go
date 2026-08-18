@@ -243,17 +243,28 @@ var primaryARNFields = map[string][]string{
 // Enforcing on those would fail a healthy nightly the first time a backup window opened
 // mid-provision.
 var serviceCreatedTypes = map[string]bool{
-	"rds:snapshot":                      true,
-	"rds:cluster-snapshot":              true,
-	"ec2:snapshot":                      true,
-	"ec2:volume":                        true,
-	"ec2:network-interface":             true,
-	"ec2:image":                         true,
-	"ec2:instance":                      true, // EKS Auto Mode nodes; the cluster owns their lifecycle
-	"elasticloadbalancing:loadbalancer": true, // created by the in-cluster LB controller
-	"elasticloadbalancing:targetgroup":  true,
-	"logs:log-group":                    true, // the CloudWatch agent creates these lazily
+	"rds:snapshot":          true,
+	"rds:cluster-snapshot":  true,
+	"ec2:snapshot":          true,
+	"ec2:image":             true,
+	"ec2:instance":          true, // EKS Auto Mode nodes; the cluster owns their lifecycle
+	"ec2:network-interface": true, // attached by EKS/ELB/RDS to resources terraform does own
 }
+
+// This map and terraformManagedTypes must stay DISJOINT, and TestResidualTypeMapsAreDisjoint
+// enforces it. An overlap is unresolvable from the AWS type alone: whichever branch
+// classifyResidual checked first would silently decide the other case, and the direction
+// that lost would be invisible. Three types were removed from this list for exactly that
+// reason, each because the tag query cannot actually see its service-created variant:
+//
+//	ec2:volume       the EBS CSI StorageClass propagates only deleteAfter
+//	                 (terraform/logical/kubernetes.tf), and the query requires Customer AND
+//	                 deleteAfter, so a CSI volume never surfaces. A volume that does surface
+//	                 is terraform's.
+//	logs:log-group   the CloudWatch agent's container-insights groups carry no harness tags
+//	                 at all (see the sweep in Teardown), so they cannot surface either.
+//	elasticloadbalancing:*  controller-created load balancers are tagged by the controller,
+//	                 not by the terraform provider's default_tags.
 
 // terraformManagedTypes is the set of AWS types CloudPrem's own terraform creates,
 // derived from tfTypeToAWSType so the two can never drift. It is the audited
@@ -572,14 +583,16 @@ func (p PhaseParams) checkResiduals(ctx context.Context, tg TGOptions, phase, cu
 			rep.Incomplete = append(rep.Incomplete, fmt.Sprintf("tag query: %v", err))
 			break
 		}
-		// A provision that cannot show its own state has nothing to diff against, and
-		// every tagged resource would read as a residual. A TEARDOWN that cannot is
-		// the opposite: an empty state is exactly what a successful destroy leaves, so
-		// it is the correct baseline and anything still tagged really is an orphan.
-		// Getting this backwards made the post-teardown check unable to fail at all,
-		// which is the one moment it exists for.
-		if shown == 0 && phase != "teardown" {
-			rep.Incomplete = append(rep.Incomplete, "terragrunt show -json returned nothing for any module; the tag reconcile has no state to diff against")
+		// shown counts modules whose state was READ, not modules that had resources.
+		// The distinction is the whole point: `terragrunt show -json` SUCCEEDS against
+		// an emptied state and returns a document with no values, so a successful
+		// destroy still produces shown >= 1 and an empty index - which is the correct
+		// baseline, and is what lets the post-teardown check fail on a survivor at all.
+		// shown == 0 means every read errored (broken worktree, backend, credentials),
+		// and a failed read must never be mistaken for an empty stack: that reads every
+		// tagged resource as an orphan.
+		if shown == 0 {
+			rep.Incomplete = append(rep.Incomplete, "terragrunt show -json failed for every module; the tag reconcile has no state to diff against")
 			break
 		}
 		rep.Residuals = append(rep.Residuals, reconcileTagged(tagged.arns, idx)...)

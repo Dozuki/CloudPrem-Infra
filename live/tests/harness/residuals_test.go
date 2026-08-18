@@ -318,35 +318,73 @@ func TestResidualReportRoundTripsThroughTheManifest(t *testing.T) {
 	}
 }
 
-// After a SUCCESSFUL destroy, state is gone - so `terragrunt show -json` returns
-// nothing, and that emptiness is the CORRECT baseline: anything still carrying the
-// run's tags really is an orphan. Treating "no state" as "cannot judge" made the
-// post-teardown check structurally incapable of failing, at the one moment it exists
-// for. Provision is the opposite: state missing there means the check has nothing to
-// diff against and must say so.
-func TestTeardownTreatsEmptyStateAsTheBaselineButProvisionDoesNot(t *testing.T) {
+// The post-teardown check has to be able to FAIL, which is the one thing the first
+// version could not do. `terragrunt show -json` succeeds against an emptied state and
+// returns a document with no values, so a successful destroy yields a readable-but-empty
+// index and every surviving tagged resource is an orphan.
+func TestReconcileAgainstAnEmptyButReadableStateFindsSurvivors(t *testing.T) {
+	idx := newStateIndex()
+	if err := indexState([]byte(`{"format_version":"1.0","values":{"root_module":{}}}`), idx); err != nil {
+		t.Fatalf("an emptied state must parse: %v", err)
+	}
+	orphan := "arn:aws:eks:us-east-1:076248559428:cluster/smoke1bc2-bi"
+	got := reconcileTagged([]string{orphan}, idx)
+	if len(got) != 1 || !got[0].Blocking {
+		t.Fatalf("a survivor of a successful destroy must block, got %+v", got)
+	}
+}
+
+// The inverse, and the trap: a state read that FAILED is not an empty stack. Conflating
+// them makes bad credentials or a missing worktree report every tagged resource as an
+// orphan. checkResiduals must report incomplete and claim nothing, on either phase.
+func TestUnreadableStateIsIncompleteNotEmpty(t *testing.T) {
 	orphan := "arn:aws:eks:us-east-1:076248559428:cluster/smoke1bc2-bi"
 	p := PhaseParams{
 		Region: "us-east-1", Matrix: &Matrix{},
 		Tags: map[string]TagAPI{"us-east-1": &residualTagAPI{arns: []string{orphan}}},
 	}
-	// WorkingDir has no terragrunt tree, so both ShowJSON calls fail and shown == 0.
+	// No terragrunt tree here, so every ShowJSON errors: a failed read, not empty state.
 	tg := TGOptions{WorkingDir: t.TempDir()}
+	for _, phase := range []string{"provision", "teardown"} {
+		rep := p.checkResiduals(context.Background(), tg, phase, "smoke1bc2", []string{"us-east-1"}, nil)
+		if len(rep.Residuals) != 0 {
+			t.Errorf("%s: an unreadable state claimed residuals: %+v", phase, rep.Residuals)
+		}
+		if len(rep.Incomplete) == 0 {
+			t.Errorf("%s: an unreadable state must report the check incomplete", phase)
+		}
+		if rep.Clean() {
+			t.Errorf("%s: an incomplete check is never clean", phase)
+		}
+	}
+}
 
-	td := p.checkResiduals(context.Background(), tg, "teardown", "smoke1bc2", []string{"us-east-1"}, nil)
-	if len(td.Blocking()) != 1 {
-		t.Fatalf("teardown with empty state must report the surviving EKS cluster as blocking, got %+v (incomplete: %v)", td.Residuals, td.Incomplete)
+// serviceCreatedTypes and terraformManagedTypes must never overlap. An overlap is
+// unresolvable from the AWS type alone - whichever branch classifyResidual reached first
+// would silently decide the other case - and the direction that lost would be invisible.
+// A real orphaned load balancer reported as "service-created" is exactly that silence.
+func TestResidualTypeMapsAreDisjoint(t *testing.T) {
+	if len(serviceCreatedTypes) == 0 || len(terraformManagedTypes) == 0 {
+		t.Fatal("one of the maps is empty; this guard would pass vacuously")
 	}
-	if td.Blocking()[0].ARN != orphan {
-		t.Errorf("blocking residual = %q, want %q", td.Blocking()[0].ARN, orphan)
+	for awsType := range serviceCreatedTypes {
+		if terraformManagedTypes[awsType] {
+			t.Errorf("%q is in BOTH serviceCreatedTypes and terraformManagedTypes; classifyResidual would silently exempt a terraform-owned orphan of this type", awsType)
+		}
 	}
-
-	pv := p.checkResiduals(context.Background(), tg, "provision", "smoke1bc2", []string{"us-east-1"}, nil)
-	if len(pv.Residuals) != 0 {
-		t.Errorf("provision with no readable state must not claim residuals, got %+v", pv.Residuals)
-	}
-	if len(pv.Incomplete) == 0 {
-		t.Error("provision with no readable state must report the check as incomplete")
+	// The same guard for the lag list, with a deliberate allowlist. Both entries are
+	// terraform-managed AND known to linger in the tagging index after deletion
+	// (janitor.go:971-1014 measured it: 5 of 23 tagged security groups were already
+	// InvalidGroup.NotFound, and pod identity associations outlive their clusters in the
+	// index). Neither can hold a stack up on its own - AWS refuses to delete a VPC while
+	// a non-default security group survives, so a real one can never outlive its VPC -
+	// which is why exempting them costs nothing and enforcing on them would turn index
+	// lag into failed teardowns. Anything else landing here is an oversight.
+	lagExempt := map[string]bool{"ec2:security-group": true, "eks:podidentityassociation": true}
+	for awsType := range insufficientAloneTypes {
+		if terraformManagedTypes[awsType] && !lagExempt[awsType] {
+			t.Errorf("%q is terraform-managed but listed as a tagging-index-lag type; add it to this test's allowlist with a reason or stop exempting it", awsType)
+		}
 	}
 }
 
