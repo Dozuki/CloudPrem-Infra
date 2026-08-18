@@ -2,6 +2,20 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.6.0...v9.7.0) (2026-08-17)
+
+
+### Features
+
+* **logical:** add opensearch_min_domains variable for AZ spread enforcement ([8f7a656](https://github.com/Dozuki/CloudPrem-Infra/commit/8f7a6561112ddf6a87053be05360bd951f8a82f5))
+* **logical:** collapse the two NodePools into one with a capacity_profile knob ([5a1f9bd](https://github.com/Dozuki/CloudPrem-Infra/commit/5a1f9bd2d88c1f9dc1b71860d29ccb0163d86c51))
+
+
+### Bug Fixes
+
+* **loadtest:** read admin creds from secretKeyRef in k6 job ([dbe3c7f](https://github.com/Dozuki/CloudPrem-Infra/commit/dbe3c7f7024b078d49aa62bcfe41dfbc2036dfb0))
+* **monitoring:** retire non-functional dr_s3_replication_latency alarm ([eed7674](https://github.com/Dozuki/CloudPrem-Infra/commit/eed76743f6cec2b0e3e69b7a09b521c3f5ee0543))
+
 ## [9.6.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.5.1...v9.6.0) (2026-08-16)
 
 
