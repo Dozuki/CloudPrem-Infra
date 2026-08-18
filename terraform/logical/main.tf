@@ -81,7 +81,7 @@ terraform {
     # Pinned EXACT (third-party supply chain) and scoped to the EG CRDs only.
     kubectl = {
       source  = "alekc/kubectl"
-      version = "2.1.5"
+      version = "2.4.1"
     }
   }
 }
