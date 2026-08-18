@@ -229,7 +229,18 @@ fi
 if [ "${1:-}" = teardown ]; then
   _tdref_run=""; _tdref_cfg=""; _tdref_bucket=""; _tdref_region=""; _tdref_profile=""
   _prev=""
+  # Both spellings. Go's flag package accepts --flag=value as readily as --flag value,
+  # and a scan that only understood the second would silently find nothing, skip the
+  # resolution and fall back to master - which is the exact silent-wrong-ref failure
+  # this block exists to remove.
   for _arg in "$@"; do
+    case "${_arg}" in
+      --run-id=*)       _tdref_run="${_arg#*=}" ;;
+      --config=*)       _tdref_cfg="${_arg#*=}" ;;
+      --state-bucket=*) _tdref_bucket="${_arg#*=}" ;;
+      --region=*)       _tdref_region="${_arg#*=}" ;;
+      --profile=*)      _tdref_profile="${_arg#*=}" ;;
+    esac
     case "${_prev}" in
       --run-id) _tdref_run="${_arg}" ;;
       --config) _tdref_cfg="${_arg}" ;;
