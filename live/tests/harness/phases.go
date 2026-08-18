@@ -274,8 +274,8 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	if rep := p.checkResiduals(ctx, tg, "provision", rm.AppliedCustomer, p.residualRegions(), nil); !rep.Clean() {
 		p.recordResiduals(ctx, cfg, rm, rep)
 		step("PROVISION residual check: %s", rep.Summary())
-		if len(rep.Residuals) > 0 {
-			return fmt.Errorf("provision left %d resource(s) outside terraform state; see the manifest residual report:\n%s", len(rep.Residuals), rep.Summary())
+		if blocking := rep.Blocking(); len(blocking) > 0 {
+			return fmt.Errorf("provision left %d resource(s) outside terraform state; see the manifest residual report:\n%s", len(blocking), rep.Summary())
 		}
 	}
 
@@ -786,8 +786,8 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	if rep := p.checkResiduals(ctx, tg, "teardown", rm.AppliedCustomer, p.residualRegions(), nil); !rep.Clean() {
 		p.recordResiduals(ctx, cfg, rm, rep)
 		step("TEARDOWN residual check: %s", rep.Summary())
-		if len(rep.Residuals) > 0 {
-			return fmt.Errorf("destroy reported success but left %d tagged resource(s) behind; see the manifest residual report:\n%s", len(rep.Residuals), rep.Summary())
+		if blocking := rep.Blocking(); len(blocking) > 0 {
+			return fmt.Errorf("destroy reported success but left %d tagged resource(s) behind; see the manifest residual report:\n%s", len(blocking), rep.Summary())
 		}
 	}
 	return nil

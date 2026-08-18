@@ -21,25 +21,27 @@ const smoke1bc2ShowJSON = `{
   "values": {
     "root_module": {
       "resources": [
-        {"address": "aws_db_parameter_group.default", "values": {"id": "smoke1bc2-bi-8f7895f13c1ac08cde23864b70", "arn": "arn:aws:rds:us-east-1:076248559428:pg:smoke1bc2-bi-8f7895f13c1ac08cde23864b70"}}
+        {"address": "aws_db_parameter_group.default", "type": "aws_db_parameter_group", "values": {"id": "smoke1bc2-bi-8f7895f13c1ac08cde23864b70", "arn": "arn:aws:rds:us-east-1:076248559428:pg:smoke1bc2-bi-8f7895f13c1ac08cde23864b70"}}
       ],
       "child_modules": [
         {
           "address": "module.aurora[0]",
           "resources": [
-            {"address": "module.aurora[0].aws_rds_cluster_instance.this[\"reader\"]", "values": {"id": "smoke1bc2-bi-reader", "arn": "arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-reader"}}
+            {"address": "module.aurora[0].aws_rds_cluster.this[0]", "type": "aws_rds_cluster", "values": {"id": "smoke1bc2-bi", "cluster_identifier": "smoke1bc2-bi", "arn": "arn:aws:rds:us-east-1:076248559428:cluster:smoke1bc2-bi"}},
+            {"address": "module.aurora[0].aws_rds_cluster_instance.this[\"reader\"]", "type": "aws_rds_cluster_instance", "values": {"id": "smoke1bc2-bi-reader", "arn": "arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-reader"}}
           ]
         },
         {
           "address": "module.eks_cluster",
           "resources": [
-            {"address": "module.eks_cluster.aws_security_group.cluster[0]", "values": {"id": "sg-04f8b0552e36bda84", "arn": "arn:aws:ec2:us-east-1:076248559428:security-group/sg-04f8b0552e36bda84"}}
+            {"address": "module.eks_cluster.aws_security_group.cluster[0]", "type": "aws_security_group", "values": {"id": "sg-04f8b0552e36bda84", "arn": "arn:aws:ec2:us-east-1:076248559428:security-group/sg-04f8b0552e36bda84"}},
+            {"address": "module.eks_cluster.aws_eks_pod_identity_association.this[\"ebs-csi\"]", "type": "aws_eks_pod_identity_association", "values": {"id": "a-9lk2m", "association_arn": "arn:aws:eks:us-east-1:076248559428:podidentityassociation/smoke1bc2-bi/a-9lk2m"}}
           ],
           "child_modules": [
             {
               "address": "module.eks_cluster.module.kms",
               "resources": [
-                {"address": "module.eks_cluster.module.kms.aws_kms_key.this[0]", "values": {"id": "9aa2aea3-2dc3-4560-a16f-3730a5e98190"}}
+                {"address": "module.eks_cluster.module.kms.aws_kms_key.this[0]", "type": "aws_kms_key", "values": {"id": "9aa2aea3-2dc3-4560-a16f-3730a5e98190", "arn": "arn:aws:kms:us-east-1:076248559428:key/9aa2aea3-2dc3-4560-a16f-3730a5e98190"}}
               ]
             }
           ]
@@ -49,75 +51,139 @@ const smoke1bc2ShowJSON = `{
   }
 }`
 
-func TestPhysicalIDsFromShowWalksNestedModules(t *testing.T) {
-	ids, err := physicalIDsFromShow([]byte(smoke1bc2ShowJSON))
-	if err != nil {
-		t.Fatalf("physicalIDsFromShow: %v", err)
+// indexFixture builds the state index the tests below diff against.
+func indexFixture(t *testing.T) *stateIndex {
+	t.Helper()
+	idx := newStateIndex()
+	if err := indexState([]byte(smoke1bc2ShowJSON), idx); err != nil {
+		t.Fatalf("indexState: %v", err)
 	}
+	return idx
+}
+
+func TestIndexStateWalksNestedModulesAndKeepsTypes(t *testing.T) {
+	idx := indexFixture(t)
 	for _, want := range []string{
-		"smoke1bc2-bi-reader",
 		"arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-reader",
-		"sg-04f8b0552e36bda84",
-		"9aa2aea3-2dc3-4560-a16f-3730a5e98190", // two module levels deep
+		"arn:aws:kms:us-east-1:076248559428:key/9aa2aea3-2dc3-4560-a16f-3730a5e98190", // two module levels deep
 	} {
-		if _, ok := ids[want]; !ok {
-			t.Errorf("physicalIDsFromShow did not collect %q; a missed id makes a tracked resource look like a residual", want)
+		if _, ok := idx.arns[want]; !ok {
+			t.Errorf("indexState did not collect ARN %q", want)
 		}
 	}
-	if _, ok := ids["smoke1bc2-bi-writer"]; ok {
-		t.Fatal("fixture is wrong: the writer must NOT be in state, that is the whole defect")
+	if _, ok := idx.byType["rds:db"]["smoke1bc2-bi-reader"]; !ok {
+		t.Error("rds:db reader not indexed under its own type")
+	}
+	if _, ok := idx.byType["rds:cluster"]["smoke1bc2-bi"]; !ok {
+		t.Error("rds:cluster not indexed under its own type")
+	}
+	// The cluster's bare id must NOT leak into another service's bucket - that leak is
+	// exactly what hid the EKS orphan.
+	if _, ok := idx.byType["eks:cluster"]["smoke1bc2-bi"]; ok {
+		t.Error("the RDS cluster id leaked into the eks:cluster bucket")
 	}
 }
 
 // An empty state is a real answer (terraform owns nothing), not a parse error.
-func TestPhysicalIDsFromShowHandlesEmptyState(t *testing.T) {
-	ids, err := physicalIDsFromShow([]byte(`{"format_version":"1.0"}`))
-	if err != nil {
+func TestIndexStateHandlesEmptyState(t *testing.T) {
+	idx := newStateIndex()
+	if err := indexState([]byte(`{"format_version":"1.0"}`), idx); err != nil {
 		t.Fatalf("empty state should parse, got %v", err)
 	}
-	if len(ids) != 0 {
-		t.Errorf("empty state yielded %d ids, want 0", len(ids))
+	if len(idx.arns) != 0 || len(idx.byType) != 0 {
+		t.Errorf("empty state yielded a non-empty index: %+v", idx)
 	}
 }
 
-// The core of Lodestar-1xm.36.1: the out-of-state Aurora writer and EKS cluster must
-// surface, and everything terraform does track must not.
+// The regression that matters most. CloudPrem names the Aurora cluster and the EKS
+// cluster identically (both are local.identifier), so a bare-id match that ignores the
+// AWS service declared the out-of-state EKS cluster "accounted for" by the in-state RDS
+// cluster - and the check missed the exact orphan it was written to catch.
+func TestReconcileTaggedDoesNotLetOneServiceAccountForAnother(t *testing.T) {
+	idx := indexFixture(t)
+	got := reconcileTagged([]string{"arn:aws:eks:us-east-1:076248559428:cluster/smoke1bc2-bi"}, idx)
+	if len(got) != 1 {
+		t.Fatalf("the out-of-state EKS cluster was accounted for by the same-named RDS cluster: %+v", got)
+	}
+	if got[0].Type != "eks:cluster" {
+		t.Errorf("residual type = %q, want eks:cluster", got[0].Type)
+	}
+}
+
+// The core of Lodestar-1xm.36.1: the out-of-state Aurora writer must surface, and
+// everything terraform does track must not.
 func TestReconcileTaggedFindsTheSmoke1bc2Orphans(t *testing.T) {
-	ids, err := physicalIDsFromShow([]byte(smoke1bc2ShowJSON))
-	if err != nil {
-		t.Fatalf("physicalIDsFromShow: %v", err)
-	}
+	idx := indexFixture(t)
 	live := []string{
-		"arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-writer",  // orphan
-		"arn:aws:eks:us-east-1:076248559428:cluster/smoke1bc2-bi",    // orphan
-		"arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-reader",  // tracked (by arn)
-		"arn:aws:ec2:us-east-1:076248559428:security-group/sg-04f8b0552e36bda84", // tracked (by bare id)
+		"arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-writer",                     // orphan
+		"arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-reader",                     // tracked (by arn)
+		"arn:aws:ec2:us-east-1:076248559428:security-group/sg-04f8b0552e36bda84",        // tracked (by bare id)
 		"arn:aws:rds:us-east-1:076248559428:pg:smoke1bc2-bi-8f7895f13c1ac08cde23864b70", // tracked
+		"arn:aws:rds:us-east-1:076248559428:cluster:smoke1bc2-bi",                       // tracked
 	}
-	got := reconcileTagged(live, ids)
-	if len(got) != 2 {
-		t.Fatalf("reconcileTagged found %d residuals, want 2:\n%+v", len(got), got)
+	got := reconcileTagged(live, idx)
+	if len(got) != 1 {
+		t.Fatalf("reconcileTagged found %d residuals, want 1:\n%+v", len(got), got)
 	}
-	// Sorted, so this order is stable.
-	if got[0].ARN != "arn:aws:eks:us-east-1:076248559428:cluster/smoke1bc2-bi" || got[0].Type != "eks:cluster" {
-		t.Errorf("first residual = %+v, want the eks:cluster orphan", got[0])
+	if got[0].ARN != "arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-writer" || got[0].Type != "rds:db" {
+		t.Errorf("residual = %+v, want the rds:db writer orphan", got[0])
 	}
-	if got[1].ARN != "arn:aws:rds:us-east-1:076248559428:db:smoke1bc2-bi-writer" || got[1].Type != "rds:db" {
-		t.Errorf("second residual = %+v, want the rds:db writer orphan", got[1])
+	if !got[0].Blocking {
+		t.Errorf("the writer orphan must be blocking, got why=%q", got[0].Why)
 	}
-	for _, r := range got {
-		if r.Source != "tag-reconcile" {
-			t.Errorf("residual %q has source %q, want tag-reconcile", r.ARN, r.Source)
-		}
+	if got[0].Source != "tag-reconcile" {
+		t.Errorf("residual source = %q, want tag-reconcile", got[0].Source)
 	}
 }
 
-// A security group is matched through its bare id, not its ARN. Getting this wrong is
-// how an address-vs-ARN comparison reports every resource in the stack as a residual.
+// The provider stores a pod identity association's own ARN as association_arn and its id
+// as the bare association id, while the live ARN's resource part is
+// "<cluster>/<association-id>". CloudPrem creates six of them, so getting this wrong
+// meant six residuals on every single provision.
+func TestReconcileTaggedMatchesPodIdentityAssociationARN(t *testing.T) {
+	idx := indexFixture(t)
+	live := "arn:aws:eks:us-east-1:076248559428:podidentityassociation/smoke1bc2-bi/a-9lk2m"
+	if got := reconcileTagged([]string{live}, idx); len(got) != 0 {
+		t.Errorf("state-owned pod identity association reported as a residual: %+v", got)
+	}
+}
+
+// A security group is matched through its bare id, not its ARN.
 func TestReconcileTaggedMatchesOnBareIDNotJustARN(t *testing.T) {
-	ids := map[string]struct{}{"vpc-006f0b30e5c537ad7": {}}
-	if got := reconcileTagged([]string{"arn:aws:ec2:us-east-1:076248559428:vpc/vpc-006f0b30e5c537ad7"}, ids); len(got) != 0 {
+	idx := newStateIndex()
+	idx.add("ec2:vpc", "vpc-006f0b30e5c537ad7")
+	if got := reconcileTagged([]string{"arn:aws:ec2:us-east-1:076248559428:vpc/vpc-006f0b30e5c537ad7"}, idx); len(got) != 0 {
 		t.Errorf("vpc tracked by bare id still reported as a residual: %+v", got)
+	}
+}
+
+// Three classes of hit are reported but must never fail a run. Enforcing on any of them
+// turns a healthy nightly red: automated RDS snapshots inherit the run's tags because
+// every cluster here sets copy_tags_to_snapshot, the tagging index keeps returning
+// deleted security groups, and a type CloudPrem's terraform never creates says nothing
+// about terraform having lost anything.
+func TestClassifyResidualDoesNotEnforceOnUnownedTypes(t *testing.T) {
+	idx := indexFixture(t)
+	cases := []struct {
+		name, arn, wantWhy string
+	}{
+		{"automated rds snapshot", "arn:aws:rds:us-east-1:1:cluster-snapshot:rds:smoke1bc2-bi-2026-08-18", "service-created"},
+		{"stale tagging-index security group", "arn:aws:ec2:us-east-1:1:security-group/sg-deadbeef", "tagging index"},
+		{"type cloudprem terraform never creates", "arn:aws:ecr:us-east-1:1:repository/smoke1bc2-app", "unclassified"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := reconcileTagged([]string{c.arn}, idx)
+			if len(got) != 1 {
+				t.Fatalf("expected the hit to be REPORTED, got %+v", got)
+			}
+			if got[0].Blocking {
+				t.Errorf("%s must not fail the run", c.name)
+			}
+			if !strings.Contains(got[0].Why, c.wantWhy) {
+				t.Errorf("why = %q, want it to mention %q", got[0].Why, c.wantWhy)
+			}
+		})
 	}
 }
 
@@ -179,8 +245,8 @@ func TestReportCleanRequiresACompleteCheck(t *testing.T) {
 
 func TestSummaryNamesEveryResidual(t *testing.T) {
 	rep := &ResidualReport{Phase: "teardown", Residuals: []Residual{
-		{Source: "tag-reconcile", ARN: "arn:aws:eks:us-east-1:1:cluster/smoke1bc2-bi", Type: "eks:cluster"},
-		{Source: "state-remnant", Address: "module.vpc[0].aws_subnet.private[0]", Type: "aws_subnet"},
+		{Source: "tag-reconcile", ARN: "arn:aws:eks:us-east-1:1:cluster/smoke1bc2-bi", Type: "eks:cluster", Blocking: true},
+		{Source: "state-remnant", Address: "module.vpc[0].aws_subnet.private[0]", Type: "aws_subnet", Blocking: true},
 	}}
 	s := rep.Summary()
 	for _, want := range []string{"2 residual(s) after teardown", "eks:cluster", "smoke1bc2-bi", "module.vpc[0].aws_subnet.private[0]"} {
@@ -225,7 +291,7 @@ func TestCheckResidualsReportsIncompleteRatherThanGuessing(t *testing.T) {
 func TestResidualReportRoundTripsThroughTheManifest(t *testing.T) {
 	rm := &RunManifest{ConfigName: "bi_ha", Residuals: &ResidualReport{
 		Phase: "teardown", CheckedAt: "2026-08-18T23:00:00Z", DestroyErr: "DependencyViolation",
-		Residuals: []Residual{{Source: "tag-reconcile", ARN: "arn:aws:eks:us-east-1:1:cluster/smoke1bc2-bi", Type: "eks:cluster"}},
+		Residuals: []Residual{{Source: "tag-reconcile", ARN: "arn:aws:eks:us-east-1:1:cluster/smoke1bc2-bi", Type: "eks:cluster", Blocking: true}},
 	}}
 	b, err := json.Marshal(rm)
 	if err != nil {
@@ -249,5 +315,55 @@ func TestResidualReportRoundTripsThroughTheManifest(t *testing.T) {
 	b2, _ := json.Marshal(&RunManifest{ConfigName: "bi_ha"})
 	if strings.Contains(string(b2), "residuals") {
 		t.Errorf("a manifest with no residual report should not serialize the key: %s", b2)
+	}
+}
+
+// After a SUCCESSFUL destroy, state is gone - so `terragrunt show -json` returns
+// nothing, and that emptiness is the CORRECT baseline: anything still carrying the
+// run's tags really is an orphan. Treating "no state" as "cannot judge" made the
+// post-teardown check structurally incapable of failing, at the one moment it exists
+// for. Provision is the opposite: state missing there means the check has nothing to
+// diff against and must say so.
+func TestTeardownTreatsEmptyStateAsTheBaselineButProvisionDoesNot(t *testing.T) {
+	orphan := "arn:aws:eks:us-east-1:076248559428:cluster/smoke1bc2-bi"
+	p := PhaseParams{
+		Region: "us-east-1", Matrix: &Matrix{},
+		Tags: map[string]TagAPI{"us-east-1": &residualTagAPI{arns: []string{orphan}}},
+	}
+	// WorkingDir has no terragrunt tree, so both ShowJSON calls fail and shown == 0.
+	tg := TGOptions{WorkingDir: t.TempDir()}
+
+	td := p.checkResiduals(context.Background(), tg, "teardown", "smoke1bc2", []string{"us-east-1"}, nil)
+	if len(td.Blocking()) != 1 {
+		t.Fatalf("teardown with empty state must report the surviving EKS cluster as blocking, got %+v (incomplete: %v)", td.Residuals, td.Incomplete)
+	}
+	if td.Blocking()[0].ARN != orphan {
+		t.Errorf("blocking residual = %q, want %q", td.Blocking()[0].ARN, orphan)
+	}
+
+	pv := p.checkResiduals(context.Background(), tg, "provision", "smoke1bc2", []string{"us-east-1"}, nil)
+	if len(pv.Residuals) != 0 {
+		t.Errorf("provision with no readable state must not claim residuals, got %+v", pv.Residuals)
+	}
+	if len(pv.Incomplete) == 0 {
+		t.Error("provision with no readable state must report the check as incomplete")
+	}
+}
+
+// Blocking() is what the phases enforce on, so an informational-only report must not
+// fail anything while still being visible.
+func TestBlockingSeparatesEnforcementFromReporting(t *testing.T) {
+	rep := &ResidualReport{Residuals: []Residual{
+		{ARN: "a", Type: "rds:snapshot", Blocking: false, Why: "service-created type"},
+		{ARN: "b", Type: "eks:cluster", Blocking: true},
+	}}
+	if got := rep.Blocking(); len(got) != 1 || got[0].ARN != "b" {
+		t.Errorf("Blocking() = %+v, want only the eks:cluster hit", got)
+	}
+	if rep.Clean() {
+		t.Error("a report with any residual is not clean, blocking or not")
+	}
+	if (&ResidualReport{Residuals: []Residual{{ARN: "a", Blocking: false}}}).Blocking() != nil {
+		t.Error("an informational-only report must have nothing to enforce on")
 	}
 }

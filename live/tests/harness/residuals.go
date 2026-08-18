@@ -60,14 +60,22 @@ type Residual struct {
 	// Type is "<service>:<resourceType>" for an ARN, or the terraform resource type
 	// for an address.
 	Type string `json:"type"`
+	// Blocking separates "terraform lost this" from "this is here for some other
+	// reason". Only a blocking residual fails a run - see classifyResidual for the
+	// three reasons a hit is reported but not enforced.
+	Blocking bool `json:"blocking"`
+	// Why records the classification reason for a non-blocking hit, so the report
+	// explains itself instead of leaving a reader to guess why a named resource did
+	// not fail anything.
+	Why string `json:"why,omitempty"`
 }
 
 // ResidualReport is one boundary check. It lands in the run manifest, which outlives
 // the Workflow CR (Argo TTLs a failed one after three days), so the identities survive
 // the pod, the workflow and the retry that produced them.
 type ResidualReport struct {
-	Phase      string     `json:"phase"`                 // "provision" or "teardown"
-	CheckedAt  string     `json:"checked_at"`            // RFC3339 UTC
+	Phase      string     `json:"phase"`                   // "provision" or "teardown"
+	CheckedAt  string     `json:"checked_at"`              // RFC3339 UTC
 	DestroyErr string     `json:"destroy_error,omitempty"` // error class, when a destroy failed
 	Residuals  []Residual `json:"residuals,omitempty"`
 	// Incomplete records that a signal could not be gathered (no tagging client, a
@@ -75,6 +83,20 @@ type ResidualReport struct {
 	// identical to a clean one, and this file exists because a clean-looking report on
 	// a leaking stack is the expensive failure.
 	Incomplete []string `json:"incomplete,omitempty"`
+}
+
+// Blocking returns the residuals that should fail the run.
+func (r *ResidualReport) Blocking() []Residual {
+	if r == nil {
+		return nil
+	}
+	var out []Residual
+	for _, res := range r.Residuals {
+		if res.Blocking {
+			out = append(out, res)
+		}
+	}
+	return out
 }
 
 // Clean reports whether the check found nothing AND gathered everything it meant to.
@@ -89,13 +111,17 @@ func (r *ResidualReport) Summary() string {
 		return "no residual check ran"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d residual(s) after %s", len(r.Residuals), r.Phase)
+	fmt.Fprintf(&b, "%d residual(s) after %s (%d blocking)", len(r.Residuals), r.Phase, len(r.Blocking()))
 	for _, res := range r.Residuals {
 		id := res.ARN
 		if id == "" {
 			id = res.Address
 		}
-		fmt.Fprintf(&b, "\n  - [%s] %s %s", res.Source, res.Type, id)
+		mark := "blocking"
+		if !res.Blocking {
+			mark = "informational: " + res.Why
+		}
+		fmt.Fprintf(&b, "\n  - [%s] %s %s (%s)", res.Source, res.Type, id, mark)
 	}
 	for _, inc := range r.Incomplete {
 		fmt.Fprintf(&b, "\n  - [incomplete] %s", inc)
@@ -103,32 +129,197 @@ func (r *ResidualReport) Summary() string {
 	return b.String()
 }
 
-// physicalIDsFromShow collects every physical identifier `terragrunt show -json`
-// records, so a live ARN can be matched against what terraform believes it owns.
+// stateIndex is what terraform state accounts for, indexed two ways.
 //
-// Matching physical ids, never addresses: an address (module.aurora[0].aws_rds_cluster
-// _instance.this["writer"]) and an ARN describe the same resource in two vocabularies
-// that share no substring, so comparing them would report every single resource as a
-// residual. id and arn are the two attributes terraform stores in AWS's vocabulary.
-func physicalIDsFromShow(b []byte) (map[string]struct{}, error) {
+// The two-index split is the fix for a defect that made the first version of this
+// check miss the very orphan it was written for. A flat pool of bare ids matched a
+// live ARN by its trailing segment alone, and CloudPrem names the Aurora cluster and
+// the EKS cluster identically (both are local.identifier, "smoke1bc2-bi"). So state's
+// aws_rds_cluster.id accounted for the out-of-state EKS cluster's ARN tail, and the
+// leak reported clean. AWS ids are unique only within a service; ARNs are unique
+// globally. Index accordingly.
+type stateIndex struct {
+	arns   map[string]struct{}            // full ARNs: safe to match globally
+	byType map[string]map[string]struct{} // "<service>:<type>" -> bare ids
+	// types is every AWS type this state was ABLE to speak for. A live ARN of a type
+	// absent here cannot be judged - state says nothing about that type at all - and
+	// is reported unclassified rather than as a leak.
+	types map[string]struct{}
+}
+
+func newStateIndex() *stateIndex {
+	return &stateIndex{
+		arns:   map[string]struct{}{},
+		byType: map[string]map[string]struct{}{},
+		types:  map[string]struct{}{},
+	}
+}
+
+func (s *stateIndex) add(awsType, id string) {
+	if awsType == "" || id == "" {
+		return
+	}
+	if _, ok := s.byType[awsType]; !ok {
+		s.byType[awsType] = map[string]struct{}{}
+	}
+	s.byType[awsType][id] = struct{}{}
+	s.types[awsType] = struct{}{}
+}
+
+// tfTypeToAWSType maps a terraform resource type to the "<service>:<resourceType>"
+// arnResourceType derives from that resource's ARN. Only types the CloudPrem physical
+// and logical layers actually create need an entry: an unmapped type simply means a
+// live ARN of that shape is reported unclassified instead of blocking, which is the
+// safe direction. Grepped from terraform/physical and terraform/logical.
+var tfTypeToAWSType = map[string]string{
+	"aws_eks_cluster":                   "eks:cluster",
+	"aws_eks_node_group":                "eks:nodegroup",
+	"aws_eks_addon":                     "eks:addon",
+	"aws_eks_pod_identity_association":  "eks:podidentityassociation",
+	"aws_rds_cluster":                   "rds:cluster",
+	"aws_rds_cluster_instance":          "rds:db",
+	"aws_db_instance":                   "rds:db",
+	"aws_db_parameter_group":            "rds:pg",
+	"aws_rds_cluster_parameter_group":   "rds:cluster-pg",
+	"aws_db_subnet_group":               "rds:subgrp",
+	"aws_rds_global_cluster":            "rds:global-cluster",
+	"aws_vpc":                           "ec2:vpc",
+	"aws_subnet":                        "ec2:subnet",
+	"aws_security_group":                "ec2:security-group",
+	"aws_route_table":                   "ec2:route-table",
+	"aws_network_acl":                   "ec2:network-acl",
+	"aws_internet_gateway":              "ec2:internet-gateway",
+	"aws_nat_gateway":                   "ec2:natgateway",
+	"aws_eip":                           "ec2:elastic-ip",
+	"aws_vpc_endpoint":                  "ec2:vpc-endpoint",
+	"aws_ebs_volume":                    "ec2:volume",
+	"aws_kms_key":                       "kms:key",
+	"aws_kms_replica_key":               "kms:key",
+	"aws_kms_external_key":              "kms:key",
+	"aws_s3_bucket":                     "s3",
+	"aws_iam_role":                      "iam:role",
+	"aws_iam_policy":                    "iam:policy",
+	"aws_cloudwatch_log_group":          "logs:log-group",
+	"aws_lb":                            "elasticloadbalancing:loadbalancer",
+	"aws_lb_target_group":               "elasticloadbalancing:targetgroup",
+	"aws_dms_replication_instance":      "dms:rep",
+	"aws_dms_endpoint":                  "dms:endpoint",
+	"aws_dms_replication_task":          "dms:task",
+	"aws_dms_replication_subnet_group":  "dms:subgrp",
+	"aws_dms_certificate":               "dms:cert",
+	"aws_msk_cluster":                   "kafka:cluster",
+	"aws_secretsmanager_secret":         "secretsmanager:secret",
+	"aws_elasticache_replication_group": "elasticache:replicationgroup",
+	"aws_efs_file_system":               "elasticfilesystem:file-system",
+	"aws_opensearch_domain":             "es:domain",
+	"aws_sqs_queue":                     "sqs",
+	"aws_sns_topic":                     "sns",
+}
+
+// primaryARNFields names the attribute holding a resource's OWN ARN, for the types
+// where the provider does not call it "arn". Kept as a strict allowlist rather than
+// harvesting every *_arn attribute: role_arn, kms_key_arn and friends identify
+// DEPENDENCIES, and indexing those would mark an unrelated live resource as accounted
+// for - the same class of false negative the type split above fixes.
+//
+// aws_eks_pod_identity_association is the one that matters today: the provider stores
+// association_arn and sets id to the bare association id, while the live ARN's resource
+// part is "<cluster>/<association-id>". CloudPrem creates six of them (five in
+// terraform/physical/eks.tf, one in terraform/logical/flux.tf), so without this every
+// provision would report six residuals that terraform demonstrably owns.
+var primaryARNFields = map[string][]string{
+	"aws_eks_pod_identity_association": {"association_arn"},
+	"aws_rds_cluster":                  {"arn", "cluster_identifier"},
+	"aws_msk_cluster":                  {"arn", "arn_kafka"},
+}
+
+// serviceCreatedTypes are types AWS itself creates from a terraform-managed parent and
+// tags by propagation, so "not in state" is their NORMAL condition, not a leak.
+//
+// Snapshots are the concrete case: every RDS cluster and instance in this repo sets
+// copy_tags_to_snapshot = true (terraform/physical/{rds.tf:203,aurora.tf:192,
+// dr_aurora.tf:163,bi.tf:551}), so each automated backup carries the run's Customer and
+// deleteAfter and appears in the tagging index while belonging to no terraform address.
+// Enforcing on those would fail a healthy nightly the first time a backup window opened
+// mid-provision.
+var serviceCreatedTypes = map[string]bool{
+	"rds:snapshot":                      true,
+	"rds:cluster-snapshot":              true,
+	"ec2:snapshot":                      true,
+	"ec2:volume":                        true,
+	"ec2:network-interface":             true,
+	"ec2:image":                         true,
+	"ec2:instance":                      true, // EKS Auto Mode nodes; the cluster owns their lifecycle
+	"elasticloadbalancing:loadbalancer": true, // created by the in-cluster LB controller
+	"elasticloadbalancing:targetgroup":  true,
+	"logs:log-group":                    true, // the CloudWatch agent creates these lazily
+}
+
+// terraformManagedTypes is the set of AWS types CloudPrem's own terraform creates,
+// derived from tfTypeToAWSType so the two can never drift. It is the audited
+// "terraform is supposed to own this" list, and it is what enforcement keys on.
+//
+// Deliberately NOT "did this run's state happen to contain one". That was the first
+// version's rule and it is empty exactly when it matters: after a successful destroy
+// there is no state left, so every surviving orphan would classify as unjudgeable and
+// nothing could ever fail. Whether terraform OWNS a type is a property of the code, not
+// of one run's state at one moment.
+var terraformManagedTypes = func() map[string]bool {
+	m := map[string]bool{}
+	for _, awsType := range tfTypeToAWSType {
+		m[awsType] = true
+	}
+	return m
+}()
+
+// classifyResidual decides whether a hit fails the run. Three reasons it does not:
+//
+//	service-created  AWS makes and tags these from a terraform-managed parent, so "not
+//	                 in state" is their normal condition. Every RDS cluster here sets
+//	                 copy_tags_to_snapshot, so automated backups carry the run's tags.
+//	index-lag        the Resource Groups Tagging API is known to keep returning these
+//	                 after deletion (janitor.go's insufficientAloneTypes, measured: 5 of
+//	                 23 tagged security groups were already InvalidGroup.NotFound).
+//	unmanaged        CloudPrem's terraform never creates this type, so its presence
+//	                 says nothing about terraform having lost anything.
+//
+// Order matters: service-created and index-lag are checked FIRST, because several of
+// those types (ec2:volume, ec2:security-group) are also terraform-managed elsewhere in
+// the stack and would otherwise be enforced on.
+func classifyResidual(awsType string) (blocking bool, why string) {
+	switch {
+	case serviceCreatedTypes[awsType]:
+		return false, "service-created type; AWS makes and tags these from a managed parent"
+	case insufficientAloneTypes[awsType]:
+		return false, "type is known to linger in the tagging index after deletion"
+	case terraformManagedTypes[awsType]:
+		return true, ""
+	}
+	return false, "unclassified: CloudPrem terraform does not manage this resource type"
+}
+
+// indexState reads `terragrunt show -json` into a type-aware index. It walks
+// child_modules recursively and keys every resource by its terraform type, which the
+// first version of this code discarded.
+func indexState(b []byte, idx *stateIndex) error {
 	var doc struct {
 		Values struct {
 			RootModule json.RawMessage `json:"root_module"`
 		} `json:"values"`
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
-		return nil, fmt.Errorf("parse show -json: %w", err)
+		return fmt.Errorf("parse show -json: %w", err)
 	}
-	ids := map[string]struct{}{}
 	if len(doc.Values.RootModule) == 0 {
-		// An empty state shows no root_module at all. That is a real answer (nothing is
-		// owned), not a parse failure - every live tagged resource is then a residual.
-		return ids, nil
+		// An empty state shows no root_module. That is a real answer (terraform owns
+		// nothing), not a parse failure.
+		return nil
 	}
 	var walk func(raw json.RawMessage) error
 	walk = func(raw json.RawMessage) error {
 		var mod struct {
 			Resources []struct {
+				Type   string                 `json:"type"`
 				Values map[string]interface{} `json:"values"`
 			} `json:"resources"`
 			ChildModules []json.RawMessage `json:"child_modules"`
@@ -137,21 +328,28 @@ func physicalIDsFromShow(b []byte) (map[string]struct{}, error) {
 			return err
 		}
 		for _, r := range mod.Resources {
-			for _, key := range []string{"id", "arn"} {
-				if s, ok := r.Values[key].(string); ok && s != "" {
-					ids[s] = struct{}{}
+			awsType := tfTypeToAWSType[r.Type]
+			fields := append([]string{"arn"}, primaryARNFields[r.Type]...)
+			for _, key := range fields {
+				if s, ok := r.Values[key].(string); ok && strings.HasPrefix(s, "arn:") {
+					idx.arns[s] = struct{}{}
+					// An ARN also teaches the index this type exists, even when the
+					// terraform type is unmapped - the ARN itself names the AWS type.
+					if _, t := arnResourceType(s); t != "" {
+						idx.types[t] = struct{}{}
+						idx.add(t, arnResourceID(s))
+					}
 				}
 			}
-			// A few resources carry a list rather than a scalar (aws_subnets.ids,
-			// module outputs replayed as arns). Cheap to include; a false "accounted
-			// for" is far less costly than a false residual, which fails a run.
-			for _, key := range []string{"ids", "arns"} {
-				if l, ok := r.Values[key].([]interface{}); ok {
-					for _, v := range l {
-						if s, ok := v.(string); ok && s != "" {
-							ids[s] = struct{}{}
-						}
-					}
+			if awsType == "" {
+				continue
+			}
+			// The type is known: record its bare id under that type, and record that
+			// state can speak for the type even when this resource has no usable id.
+			idx.types[awsType] = struct{}{}
+			for _, key := range []string{"id", "identifier", "cluster_identifier", "name", "bucket"} {
+				if s, ok := r.Values[key].(string); ok && s != "" && !strings.HasPrefix(s, "arn:") {
+					idx.add(awsType, s)
 				}
 			}
 		}
@@ -163,19 +361,52 @@ func physicalIDsFromShow(b []byte) (map[string]struct{}, error) {
 		return nil
 	}
 	if err := walk(doc.Values.RootModule); err != nil {
-		return nil, fmt.Errorf("walk show -json modules: %w", err)
+		return fmt.Errorf("walk show -json modules: %w", err)
 	}
-	return ids, nil
+	return nil
 }
 
-// arnIsAccountedFor reports whether state knows about this ARN, by the ARN itself or by
-// the bare id terraform more often stores (vpc-0..., sg-0..., smoke1bc2-bi-writer).
-func arnIsAccountedFor(arn string, ids map[string]struct{}) bool {
-	if _, ok := ids[arn]; ok {
+// arnIsAccountedFor reports whether state knows about this ARN. Full-ARN match first
+// (globally unique), then a bare-id match restricted to the ARN's OWN AWS type.
+func arnIsAccountedFor(arn string, idx *stateIndex) bool {
+	if idx == nil {
+		return false
+	}
+	if _, ok := idx.arns[arn]; ok {
 		return true
 	}
-	if tail := arnResourceID(arn); tail != "" {
-		if _, ok := ids[tail]; ok {
+	_, awsType := arnResourceType(arn)
+	if awsType == "" {
+		return false
+	}
+	ids, ok := idx.byType[awsType]
+	if !ok {
+		return false
+	}
+	tail := arnResourceID(arn)
+	if tail == "" {
+		// S3 and the other "resource part names the resource directly" ARNs, where
+		// arnResourceID has no separator to split on.
+		if parts := strings.SplitN(arn, ":", 6); len(parts) == 6 {
+			tail = parts[5]
+		}
+	}
+	if tail == "" {
+		return false
+	}
+	if _, ok := ids[tail]; ok {
+		return true
+	}
+	// Log-group ARNs come back from the tagging API with a trailing ":*" that the
+	// terraform id does not carry.
+	if trimmed := strings.TrimSuffix(tail, ":*"); trimmed != tail {
+		if _, ok := ids[trimmed]; ok {
+			return true
+		}
+	}
+	// IAM ids drop the path: arn .../role/service-role/name has id "name".
+	if i := strings.LastIndex(tail, "/"); i >= 0 {
+		if _, ok := ids[tail[i+1:]]; ok {
 			return true
 		}
 	}
@@ -184,11 +415,11 @@ func arnIsAccountedFor(arn string, ids map[string]struct{}) bool {
 
 // reconcileTagged diffs the live tagged ARNs against what state accounts for. Sorted so
 // the report is stable across runs and diffable between retries.
-func reconcileTagged(arns []string, ids map[string]struct{}) []Residual {
+func reconcileTagged(arns []string, idx *stateIndex) []Residual {
 	var out []Residual
 	seen := map[string]bool{}
 	for _, arn := range arns {
-		if arn == "" || seen[arn] || arnIsAccountedFor(arn, ids) {
+		if arn == "" || seen[arn] || arnIsAccountedFor(arn, idx) {
 			continue
 		}
 		seen[arn] = true
@@ -196,7 +427,8 @@ func reconcileTagged(arns []string, ids map[string]struct{}) []Residual {
 		if resourceType == "" {
 			resourceType = "unknown"
 		}
-		out = append(out, Residual{Source: "tag-reconcile", ARN: arn, Type: resourceType})
+		blocking, why := classifyResidual(resourceType)
+		out = append(out, Residual{Source: "tag-reconcile", ARN: arn, Type: resourceType, Blocking: blocking, Why: why})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ARN < out[j].ARN })
 	return out
@@ -303,24 +535,18 @@ func (p PhaseParams) checkResiduals(ctx context.Context, tg TGOptions, phase, cu
 	}
 
 	// Signal 1: what does state account for.
-	ids := map[string]struct{}{}
+	idx := newStateIndex()
 	shown := 0
 	for _, mod := range residualModules {
 		out, err := tg.ShowJSON(mod)
 		if err != nil {
-			// Expected on a clean teardown (state gone). Only worth recording as
-			// incomplete when we got nothing at all from any module, handled below.
 			continue
 		}
-		modIDs, perr := physicalIDsFromShow(out)
-		if perr != nil {
+		if perr := indexState(out, idx); perr != nil {
 			rep.Incomplete = append(rep.Incomplete, fmt.Sprintf("%s: %v", mod, perr))
 			continue
 		}
 		shown++
-		for id := range modIDs {
-			ids[id] = struct{}{}
-		}
 	}
 
 	// Signal 2: what survived a failed destroy, in terraform's own terms.
@@ -344,16 +570,19 @@ func (p PhaseParams) checkResiduals(ctx context.Context, tg TGOptions, phase, cu
 		tagged, err := countTaggedDetailed(ctx, p.Tags, regions, customer)
 		if err != nil {
 			rep.Incomplete = append(rep.Incomplete, fmt.Sprintf("tag query: %v", err))
-		} else {
-			if shown == 0 && destroyErr == nil && len(tagged.arns) > 0 {
-				// No state to compare against and a successful phase: every tagged
-				// resource would look like a residual. Say so rather than emit a
-				// report that is technically true and useless.
-				rep.Incomplete = append(rep.Incomplete, "terragrunt show -json returned nothing for any module; the tag reconcile has no state to diff against")
-			} else {
-				rep.Residuals = append(rep.Residuals, reconcileTagged(tagged.arns, ids)...)
-			}
+			break
 		}
+		// A provision that cannot show its own state has nothing to diff against, and
+		// every tagged resource would read as a residual. A TEARDOWN that cannot is
+		// the opposite: an empty state is exactly what a successful destroy leaves, so
+		// it is the correct baseline and anything still tagged really is an orphan.
+		// Getting this backwards made the post-teardown check unable to fail at all,
+		// which is the one moment it exists for.
+		if shown == 0 && phase != "teardown" {
+			rep.Incomplete = append(rep.Incomplete, "terragrunt show -json returned nothing for any module; the tag reconcile has no state to diff against")
+			break
+		}
+		rep.Residuals = append(rep.Residuals, reconcileTagged(tagged.arns, idx)...)
 	}
 	return rep
 }
