@@ -103,3 +103,23 @@ func TestAddWorktreeFetchesPostMergePRHeadSHA(t *testing.T) {
 		t.Errorf("reuse created a second worktree: %s vs %s", wt2.Dir, wt.Dir)
 	}
 }
+
+func TestTeardownRepoRef(t *testing.T) {
+	cases := []struct {
+		name string
+		rm   *RunManifest
+		want string
+	}{
+		{"applied ref wins", &RunManifest{AppliedRef: "v9.6.0", ToRef: "v9.7.0"}, "v9.6.0"},
+		{"falls back to to_ref when the apply never completed", &RunManifest{AppliedRef: "", ToRef: "4ef6221"}, "4ef6221"},
+		{"no opinion when the manifest records neither", &RunManifest{}, ""},
+		{"nil manifest", nil, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := TeardownRepoRef(c.rm); got != c.want {
+				t.Errorf("TeardownRepoRef = %q, want %q", got, c.want)
+			}
+		})
+	}
+}

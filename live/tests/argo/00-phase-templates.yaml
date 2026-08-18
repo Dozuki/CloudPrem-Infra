@@ -86,7 +86,11 @@ spec:
           - name: extra-args
             value: ''
           - name: repo-ref
-            value: master
+            # 'auto' = the caller has no opinion. Only teardown can act on it (it asks the
+            # run manifest for the ref the stack was built at); every other phase resolves
+            # it to master, which is what this literally said before. See
+            # docker-entrypoint.sh's teardown ref resolution.
+            value: auto
           # Phases have very different shapes: provision builds a cluster, validate polls
           # assertions. A single deadline would either strangle provision or let validate
           # hang for an hour.

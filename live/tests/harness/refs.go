@@ -189,3 +189,28 @@ func run(dir, name string, args ...string) error {
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
+
+// TeardownRepoRef returns the ref a teardown should resolve its configuration against:
+// the manifest's AppliedRef, the ref whose code matches the deployed state.
+//
+// Why this exists as a default rather than a runbook line (Lodestar-1xm.36.5): a
+// teardown re-resolves the matrix config, the env path and the identifier against
+// whatever ref the pod checked out, and the caller had to remember to pass the run's
+// frozen ref. Forgetting it is silent - a same-named config at a different ref resolves
+// to plausible-looking, wrong targets, and the destroy then reports success against a
+// stack it never touched. The manifest already records the right answer.
+//
+// Falls back to ToRef exactly as teardownRefAndSide does, for the case this run hit:
+// a provision killed mid-apply never reaches its `rm.AppliedRef = applyRef` write, so
+// AppliedRef is empty on precisely the runs whose teardown matters most. Returns ""
+// when the manifest records neither, which the caller must read as "no opinion, keep
+// whatever ref you already have" rather than as a ref.
+func TeardownRepoRef(rm *RunManifest) string {
+	if rm == nil {
+		return ""
+	}
+	if rm.AppliedRef != "" {
+		return rm.AppliedRef
+	}
+	return rm.ToRef
+}

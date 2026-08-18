@@ -77,20 +77,30 @@ which is precisely when teardown matters. And because teardown reads the manifes
 cleanup is not tied to the process that created the stack: this pod, a retry, or the Phase 4
 janitor can all clean up a given run. That is the structural fix for the trap in `run.sh`.
 
-**Tearing down a config that is not on master REQUIRES `-p repo-ref=<the run's SHA>`.** The
-manifest in S3 records the config by NAME, not its contents, so teardown re-resolves that name
-out of `matrix.yaml` at whatever ref the teardown pod checks out. Default that to master and a
-config which only ever existed on a branch is simply not there, so teardown fails and the stack
-leaks.
+**Teardown resolves its own ref from the run manifest.** The manifest in S3 records the config
+by NAME, not its contents, so teardown re-resolves that name out of `matrix.yaml` at whatever ref
+the teardown pod checks out. Getting that wrong used to be silent: a config which only ever
+existed on a branch is simply not there at master, so teardown failed and the stack leaked - and
+a same-named config that DOES exist at both refs resolved to different targets, so the destroy
+reported success against a stack it never touched.
+
+Every entry point now defaults `repo-ref` to `auto`. On the teardown phase the entrypoint asks
+`harness teardown-ref` for the manifest's `AppliedRef` (or `ToRef`, for a provision killed before
+it recorded one) and checks that out. So the plain form is enough:
+
+    argo submit --from workflowtemplate/harness-scenario --entrypoint teardown \
+      -p config=<name> -p run-id=<run-id>
+
+Passing `-p repo-ref=<sha>` still works and still wins, and the pod logs a `DEVIATION:` line
+when the pinned ref disagrees with the manifest. Resolution is best-effort by design: an
+unreadable manifest leaves the checkout where it was rather than blocking the destroy.
 
 **The janitor is NOT a safety net for this case.** It resolves `ConfigName` against its own
 checked-out matrix too, so a missing config lands the stack in `needs-review` (`janitor.go`,
 `StateNeedsReview` - "we could not establish the facts; never acted on"). It is reported and
 never swept, and the reaper cannot rebuild the inputs without the config either. A branch-only
-stack whose branch is gone needs a human. Pass the frozen SHA the run was submitted at:
-
-    argo submit --from workflowtemplate/harness-scenario \
-      -p config=<name> -p scenario=teardown -p repo-ref=<the run's SHA>
+stack whose branch is gone needs a human, and `auto` cannot save it either - the manifest names
+a ref that no longer exists.
 
 Two corollaries. Do not delete the branch until its teardowns have Succeeded, because the clone
 fetches the ref. And re-resolving from the matrix means the file is live: editing a config after

@@ -91,7 +91,10 @@ spec:
         value: 'auto:latest'
       # Which ref the harness itself runs FROM, as opposed to the refs under test.
       - name: repo-ref
-        value: master
+        # 'auto' lets a teardown resolve the ref from its own run manifest instead of
+        # relying on the submitter to remember the frozen ref (Lodestar-1xm.36.5). An
+        # explicit value still wins and is logged as a deviation.
+        value: auto
       - name: keep-on-failure
         value: 'false'
       # Set by the PR trigger; empty on cron/manual runs, which skips the commit-status
