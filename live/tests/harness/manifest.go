@@ -126,7 +126,13 @@ func teardownRefAndSide(rm *RunManifest) (string, Side, error) {
 	// the code that created whatever is now live), and ToRef is the last resort for a
 	// manifest that predates both fields.
 	ref, sideStr := rm.AppliedRef, rm.AppliedSide
-	if ref == "" {
+	// An apply that STARTED and did not finish is the most recent thing to have touched
+	// this infrastructure, so it wins over the last apply that completed. A completed
+	// apply leaves ApplyingRef == AppliedRef (both writes name the same ref), so this
+	// only fires when an apply is genuinely unfinished - a target upgrade killed after a
+	// successful baseline provision would otherwise resolve to the BASELINE and repeat
+	// the same wrong-code destroy in the opposite direction.
+	if rm.ApplyingRef != "" && rm.ApplyingRef != rm.AppliedRef {
 		ref, sideStr = rm.ApplyingRef, rm.ApplyingSide
 	}
 	if ref == "" {

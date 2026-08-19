@@ -238,24 +238,25 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 		applyRef = fromRef
 		side = SideBaseline
 	}
-	// Record the ref this apply is about to run with BEFORE running it. From the first
-	// Create* call onward the live infrastructure corresponds to THIS ref whether or not
-	// the apply ever returns, and a run killed mid-apply is exactly the run whose
-	// teardown has orphans to clean up. Written to the manifest (the durable half) for
-	// the same reason prepareWorktreeSide has always written its applied-worktree marker
-	// pre-apply. See RunManifest.ApplyingRef for why this is not just an early
-	// AppliedRef write.
-	rm.ApplyingRef = applyRef
-	rm.ApplyingSide = string(side)
-	if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
-		return fmt.Errorf("record the ref being applied: %w", serr)
-	}
-
 	wt, tg, _, err := p.prepareWorktreeSide(applyRef, initSub, cfg, rm.DeleteAfter, side)
 	if err != nil {
 		return err
 	}
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
+
+	// Record the ref this apply is about to run with, after the worktree is ready and
+	// immediately before anything can touch AWS. From the first Create* call onward the
+	// live infrastructure corresponds to THIS ref whether or not the apply ever returns,
+	// and a run killed mid-apply is exactly the run whose teardown has orphans to clean
+	// up. Deliberately not written any earlier than this: a ref whose worktree cannot
+	// even be prepared has created nothing, and recording it would point every later
+	// teardown at a preparation that fails the same way. See RunManifest.ApplyingRef for
+	// why this is not simply an early AppliedRef write.
+	rm.ApplyingRef = applyRef
+	rm.ApplyingSide = string(side)
+	if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
+		return fmt.Errorf("record the ref being applied: %w", serr)
+	}
 
 	if p.ExecutionMode == "warm" {
 		step("PROVISION (warm mode): reusing warm physical stack, applying logical layer: %s", applyRef)
