@@ -287,3 +287,42 @@ func TestJanitorExitCode(t *testing.T) {
 		}
 	}
 }
+
+// teardown-ref is the entrypoint's source of truth for which ref a teardown checks out
+// (Lodestar-1xm.36.5). Every failure path must exit 0 printing nothing, because the
+// entrypoint reads "no output" as "keep the ref you already have" - a teardown must
+// never be blocked from running because a manifest could not be read.
+func TestDispatchTeardownRefRequiresRunAndConfig(t *testing.T) {
+	var b bytes.Buffer
+	if code := dispatch([]string{"teardown-ref", "--run-id", "run1"}, strings.NewReader(""), io.Discard, &b); code == 0 {
+		t.Error("teardown-ref without --config should be a usage error")
+	}
+}
+
+func TestDispatchTeardownRefWithoutBucketIsSilentSuccess(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := dispatch([]string{"teardown-ref", "--run-id", "run1", "--config", "min_default"}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 so the entrypoint falls back rather than failing the teardown", code)
+	}
+	if out.String() != "" {
+		t.Errorf("stdout = %q, want empty (no ref to offer)", out.String())
+	}
+	if !strings.Contains(errb.String(), "state-bucket") {
+		t.Errorf("stderr should explain the degraded path, got %q", errb.String())
+	}
+}
+
+// teardown-ref must resolve before the matrix loads: the checkout the matrix would be
+// read from is the thing being corrected. Passing a matrix path that does not exist
+// proves it never touches one.
+func TestDispatchTeardownRefDoesNotLoadTheMatrix(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := dispatch([]string{
+		"teardown-ref", "--run-id", "run1", "--config", "min_default",
+		"--matrix", "/nonexistent/matrix.yaml",
+	}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0; a missing matrix must not matter to teardown-ref", code)
+	}
+}

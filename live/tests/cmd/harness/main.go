@@ -20,7 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
-const usage = `usage: harness <provision|upgrade|validate|teardown|evidence|janitor|reaper-worker|reaper-drain-cancelled> [flags]
+const usage = `usage: harness <provision|upgrade|validate|teardown|teardown-ref|evidence|janitor|reaper-worker|reaper-drain-cancelled> [flags]
   common: --run-id --config --repo-dir --account-id --profile --region --matrix --state-bucket [--mem-store]
   provision: --scenario <upgrade|fresh> --from-ref --to-ref --namespace
   teardown:  --keep-on-failure --failed
@@ -64,19 +64,19 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		runID    = fs.String("run-id", "", "base run id")
-		cfgName  = fs.String("config", "", "matrix config name")
-		repoDir  = fs.String("repo-dir", ".", "repo root")
-		acct     = fs.String("account-id", "", "DDVtest account id")
-		profile  = fs.String("profile", "", "AWS profile (empty in-cluster)")
-		region   = fs.String("region", "us-east-1", "region")
-		matrix   = fs.String("matrix", "live/tests/matrix.yaml", "matrix path")
-		bucket   = fs.String("state-bucket", "", "harness state bucket")
-		memStore = fs.Bool("mem-store", false, "use in-memory manifest store (dry-run/test)")
-		scenario = fs.String("scenario", "upgrade", "provision: upgrade|fresh")
-		fromRef  = fs.String("from-ref", "", "provision: baseline ref")
-		toRef    = fs.String("to-ref", "", "provision: target ref")
-		ns       = fs.String("namespace", "dozuki", "app namespace")
+		runID         = fs.String("run-id", "", "base run id")
+		cfgName       = fs.String("config", "", "matrix config name")
+		repoDir       = fs.String("repo-dir", ".", "repo root")
+		acct          = fs.String("account-id", "", "DDVtest account id")
+		profile       = fs.String("profile", "", "AWS profile (empty in-cluster)")
+		region        = fs.String("region", "us-east-1", "region")
+		matrix        = fs.String("matrix", "live/tests/matrix.yaml", "matrix path")
+		bucket        = fs.String("state-bucket", "", "harness state bucket")
+		memStore      = fs.Bool("mem-store", false, "use in-memory manifest store (dry-run/test)")
+		scenario      = fs.String("scenario", "upgrade", "provision: upgrade|fresh")
+		fromRef       = fs.String("from-ref", "", "provision: baseline ref")
+		toRef         = fs.String("to-ref", "", "provision: target ref")
+		ns            = fs.String("namespace", "dozuki", "app namespace")
 		keepFail      = fs.Bool("keep-on-failure", false, "teardown: keep stack if failed")
 		failed        = fs.Bool("failed", false, "teardown: mark run failed (full diagnostics)")
 		executionMode = fs.String("execution-mode", "full-spinup", "execution mode: warm|full-spinup")
@@ -87,7 +87,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	switch sub {
-	case "provision", "upgrade", "validate", "teardown":
+	case "provision", "upgrade", "validate", "teardown", "teardown-ref":
 	default:
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -98,6 +98,38 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	ctx := context.Background()
+
+	// teardown-ref answers one question - "which ref does this run's teardown belong
+	// to?" - and answers it BEFORE the matrix is loaded, because the whole point is
+	// that the checkout the matrix would come from is the thing about to be corrected.
+	// Printing nothing on exit 0 is a real answer ("no opinion"); the entrypoint keeps
+	// the ref it already has. Anything that fails here is also silent-plus-exit-0 for
+	// the same reason: a teardown must not be blocked from running at all because the
+	// manifest was unreadable, it should just fall back to the caller's ref.
+	if sub == "teardown-ref" {
+		if *bucket == "" {
+			fmt.Fprintln(stderr, "teardown-ref: --state-bucket required")
+			return 0
+		}
+		awsCfg, cerr := loadAWS(ctx, *profile, *region)
+		if cerr != nil {
+			fmt.Fprintf(stderr, "teardown-ref: aws config: %v\n", cerr)
+			return 0
+		}
+		rm, ok, lerr := harness.NewS3Store(s3.NewFromConfig(awsCfg), *bucket).Load(ctx, *runID+"-"+*cfgName+"/")
+		if lerr != nil {
+			fmt.Fprintf(stderr, "teardown-ref: load manifest: %v\n", lerr)
+			return 0
+		}
+		if !ok {
+			fmt.Fprintf(stderr, "teardown-ref: no manifest for %s-%s/\n", *runID, *cfgName)
+			return 0
+		}
+		if ref := harness.TeardownRepoRef(rm); ref != "" {
+			fmt.Fprintln(stdout, ref)
+		}
+		return 0
+	}
 	m, err := harness.LoadMatrix(*matrix)
 	if err != nil {
 		fmt.Fprintf(stderr, "load matrix: %v\n", err)

@@ -53,7 +53,20 @@ esac
 # incremental fetch instead of a clone. In Argo that is a workflow-scoped volume.
 # ---------------------------------------------------------------------------
 REPO_DIR="${HARNESS_REPO_DIR:-/workspace/repo}"
-REPO_REF="${HARNESS_REPO_REF:-master}"
+# "auto" is the default every Argo entry point now passes, and it means "the caller has
+# no opinion". Only teardown can act on that (it has a run manifest to ask); every other
+# phase resolves it to master exactly as before. An explicit value is an override and is
+# reported as a deviation below rather than silently obeyed, because forgetting the
+# frozen ref on a teardown is invisible: the config re-resolves at whatever ref is
+# checked out and the destroy then targets a plausible-looking wrong stack.
+HARNESS_REPO_REF="${HARNESS_REPO_REF:-auto}"
+if [ "${HARNESS_REPO_REF}" = auto ]; then
+  REPO_REF=master
+  REPO_REF_IS_AUTO=1
+else
+  REPO_REF="${HARNESS_REPO_REF}"
+  REPO_REF_IS_AUTO=0
+fi
 
 if [ -d "${REPO_DIR}/.git" ]; then
   log "repo present at ${REPO_DIR}; fetching"
@@ -195,6 +208,71 @@ EOF
   # Exported AFTER vault login (above) on purpose: Vault AWS-auth must see the pod's
   # own identity, and this line is what would break that if it moved earlier.
   export AWS_PROFILE="${_profile}"
+fi
+
+# ---------------------------------------------------------------------------
+# Teardown ref resolution (Lodestar-1xm.36.5).
+#
+# A teardown re-resolves the matrix config, the env path and the identifier against
+# whatever ref this pod checked out - so tearing a run down from master when it was
+# built at a frozen ref resolves a same-named config to different targets, and the
+# destroy reports success against a stack it never touched. The run manifest already
+# records the right ref (AppliedRef, or ToRef when a provision died before recording
+# one), so ask it instead of relying on the submitter to remember.
+#
+# Runs here, after the AWS profile exists, because the manifest lives in S3. Everything
+# about it is best-effort: `harness teardown-ref` exits 0 and prints nothing when it
+# cannot answer, and a failed re-checkout leaves the original checkout in place. A
+# teardown that runs against the wrong ref is bad; a teardown that refuses to run at all
+# is worse.
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = teardown ]; then
+  _tdref_run=""; _tdref_cfg=""; _tdref_bucket=""; _tdref_region=""; _tdref_profile=""
+  _prev=""
+  # Both spellings. Go's flag package accepts --flag=value as readily as --flag value,
+  # and a scan that only understood the second would silently find nothing, skip the
+  # resolution and fall back to master - which is the exact silent-wrong-ref failure
+  # this block exists to remove.
+  for _arg in "$@"; do
+    case "${_arg}" in
+      --run-id=*)       _tdref_run="${_arg#*=}" ;;
+      --config=*)       _tdref_cfg="${_arg#*=}" ;;
+      --state-bucket=*) _tdref_bucket="${_arg#*=}" ;;
+      --region=*)       _tdref_region="${_arg#*=}" ;;
+      --profile=*)      _tdref_profile="${_arg#*=}" ;;
+    esac
+    case "${_prev}" in
+      --run-id) _tdref_run="${_arg}" ;;
+      --config) _tdref_cfg="${_arg}" ;;
+      --state-bucket) _tdref_bucket="${_arg}" ;;
+      --region) _tdref_region="${_arg}" ;;
+      --profile) _tdref_profile="${_arg}" ;;
+    esac
+    _prev="${_arg}"
+  done
+  _manifest_ref=""
+  if [ -n "${_tdref_run}" ] && [ -n "${_tdref_cfg}" ] && [ -n "${_tdref_bucket}" ]; then
+    _manifest_ref="$(harness teardown-ref \
+      --run-id "${_tdref_run}" --config "${_tdref_cfg}" \
+      --state-bucket "${_tdref_bucket}" \
+      ${_tdref_region:+--region "${_tdref_region}"} \
+      ${_tdref_profile:+--profile "${_tdref_profile}"} || true)"
+    _manifest_ref="$(printf '%s' "${_manifest_ref}" | tr -d '[:space:]')"
+  fi
+  if [ -z "${_manifest_ref}" ]; then
+    log "teardown ref: manifest has no recorded ref; staying on ${REPO_REF}"
+  elif [ "${REPO_REF_IS_AUTO}" = 1 ]; then
+    if [ "${_manifest_ref}" != "$(git -C "${REPO_DIR}" rev-parse HEAD)" ]; then
+      log "teardown ref: resolving to the manifest's recorded ref ${_manifest_ref} (was ${REPO_REF})"
+      git -C "${REPO_DIR}" checkout --quiet --detach "origin/${_manifest_ref}" 2>/dev/null \
+        || git -C "${REPO_DIR}" checkout --quiet --detach "${_manifest_ref}" 2>/dev/null \
+        || log "WARNING: teardown ref: could not check out ${_manifest_ref}; staying on ${REPO_REF}"
+      cd "${REPO_DIR}"
+      log "repo at $(git -C "${REPO_DIR}" rev-parse --short HEAD) (${_manifest_ref})"
+    fi
+  elif [ "${_manifest_ref}" != "${REPO_REF}" ]; then
+    log "DEVIATION: teardown ref: caller pinned repo-ref=${REPO_REF} but the manifest records ${_manifest_ref}; honoring the caller"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
