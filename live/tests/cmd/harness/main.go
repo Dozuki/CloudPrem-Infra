@@ -163,6 +163,26 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		ExecutionMode: mode,
 	}
 
+	// Tagging clients for the residual boundary check (harness/residuals.go). Built
+	// only when there is a real store, because --mem-store is the dry-run/test path and
+	// has no business calling AWS. Both regions, primary and DR, for the same reason
+	// the janitor wires both: residue lands in either and a one-region query calls a
+	// half-leaked stack clean. Best-effort - a client that cannot be built downgrades
+	// the check to "incomplete" rather than failing the phase.
+	if !*memStore {
+		drRegion := m.Defaults.DRRegion
+		if awsCfg, cerr := loadAWS(ctx, *profile, *region); cerr == nil {
+			p.Tags = map[string]harness.TagAPI{*region: resourcegroupstaggingapi.NewFromConfig(awsCfg)}
+			if drRegion != "" && drRegion != *region {
+				if drCfg, derr := loadAWS(ctx, *profile, drRegion); derr == nil {
+					p.Tags[drRegion] = resourcegroupstaggingapi.NewFromConfig(drCfg)
+				}
+			}
+		} else {
+			fmt.Fprintf(stderr, "warning: no tagging client (%v); the residual check will report as incomplete\n", cerr)
+		}
+	}
+
 	var perr error
 	switch sub {
 	case "provision":
