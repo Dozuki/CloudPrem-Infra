@@ -24,7 +24,7 @@ data:
   # Pinned by DIGEST, not tag. The ECR repo allows mutable tags so `latest` can move, and
   # a moving tag must never swap the runtime under a workflow already running. The
   # "Harness image" workflow prints the digest to paste here on every publish.
-  image: '069174876992.dkr.ecr.us-east-1.amazonaws.com/mpc-test-harness@sha256:a6d773946d802de857e6081e240960c9a78b4c8edd2c566b27e767b5e8ab2029'
+  image: '069174876992.dkr.ecr.us-east-1.amazonaws.com/mpc-test-harness@sha256:bcf5e58d38a416af465bf61b79f72676c0818d350bbcab4acaba8936df773cf9'
   ddvtest_account_id: '076248559428'
   # Already exists (infra-tf modules/cloudprem-test-harness). Its trust policy needs the
   # Argo workflow role added before any of this can assume it.
