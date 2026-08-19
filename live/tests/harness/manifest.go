@@ -30,7 +30,24 @@ type RunManifest struct {
 	// must use teardownRefAndSide (or reimplement its fallback) rather than reading
 	// this field raw. Must be "" (predates the field), "baseline", or "target" -
 	// teardownRefAndSide rejects any other value rather than silently converting it.
-	AppliedSide  string `json:"applied_side,omitempty"`
+	AppliedSide string `json:"applied_side,omitempty"`
+
+	// ApplyingRef/ApplyingSide record the ref an apply is ABOUT to run with, written
+	// before the apply starts and left in place after it. AppliedRef is only written
+	// once an apply RETURNS, which leaves a killed apply with no record at all - and a
+	// killed apply is precisely when there is orphaned infrastructure to destroy.
+	// harness-bi-ha-hftj2 died that way (superseded mid-apply, SIGTERM at
+	// 2026-08-17T01:34:29Z): applied_ref stayed "", so both teardownRefAndSide and
+	// TeardownRepoRef fell through to ToRef and the teardown ran the TARGET's code
+	// against a stack the BASELINE had built (bd Lodestar-1xm.36).
+	//
+	// Deliberately a SEPARATE field rather than writing AppliedRef early:
+	// validatePreconditions treats "AppliedRef == ToRef" as proof the target apply
+	// SUCCEEDED, and an early write would turn that guard into "an upgrade was
+	// attempted", letting Validate render the target side against a half-applied stack.
+	// The two facts are different and the manifest now keeps both.
+	ApplyingRef  string `json:"applying_ref,omitempty"`
+	ApplyingSide string `json:"applying_side,omitempty"`
 	BaselineRev  int    `json:"baseline_rev"` // helm revision before upgrade (0 until set)
 	Namespace    string `json:"namespace"`
 	AccountID    string `json:"account_id"`
@@ -104,14 +121,21 @@ type RunManifest struct {
 // manifest fails teardown with a clear error instead of prepareWorktreeSide (or
 // something further downstream) misbehaving on an unrecognized Side value.
 func teardownRefAndSide(rm *RunManifest) (string, Side, error) {
-	ref := rm.AppliedRef
+	// ApplyingRef sits between AppliedRef and the ToRef fallback: a completed apply is
+	// the best answer, an apply that STARTED and was killed is the next best (it names
+	// the code that created whatever is now live), and ToRef is the last resort for a
+	// manifest that predates both fields.
+	ref, sideStr := rm.AppliedRef, rm.AppliedSide
 	if ref == "" {
-		ref = rm.ToRef
+		ref, sideStr = rm.ApplyingRef, rm.ApplyingSide
 	}
-	if rm.AppliedSide != "" {
-		side := Side(rm.AppliedSide)
+	if ref == "" {
+		ref, sideStr = rm.ToRef, rm.AppliedSide
+	}
+	if sideStr != "" {
+		side := Side(sideStr)
 		if side != SideBaseline && side != SideTarget {
-			return "", "", fmt.Errorf("manifest has malformed applied_side %q (want %q or %q)", rm.AppliedSide, SideBaseline, SideTarget)
+			return "", "", fmt.Errorf("manifest has malformed applied side %q (want %q or %q)", sideStr, SideBaseline, SideTarget)
 		}
 		return ref, side, nil
 	}

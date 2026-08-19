@@ -212,5 +212,13 @@ func TeardownRepoRef(rm *RunManifest) string {
 	if rm.AppliedRef != "" {
 		return rm.AppliedRef
 	}
+	// An apply that started and was killed still names the code that built whatever is
+	// live; ToRef is only right when nothing was ever applied. Without this, the run
+	// this whole resolution exists for (harness-bi-ha-hftj2, SIGTERMed mid-apply with
+	// applied_ref still "") would still resolve to the TARGET ref and destroy a
+	// baseline-built stack with target code.
+	if rm.ApplyingRef != "" {
+		return rm.ApplyingRef
+	}
 	return rm.ToRef
 }
