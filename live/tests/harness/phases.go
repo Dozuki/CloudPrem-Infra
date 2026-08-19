@@ -244,6 +244,20 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	}
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
 
+	// Record the ref this apply is about to run with, after the worktree is ready and
+	// immediately before anything can touch AWS. From the first Create* call onward the
+	// live infrastructure corresponds to THIS ref whether or not the apply ever returns,
+	// and a run killed mid-apply is exactly the run whose teardown has orphans to clean
+	// up. Deliberately not written any earlier than this: a ref whose worktree cannot
+	// even be prepared has created nothing, and recording it would point every later
+	// teardown at a preparation that fails the same way. See RunManifest.ApplyingRef for
+	// why this is not simply an early AppliedRef write.
+	rm.ApplyingRef = applyRef
+	rm.ApplyingSide = string(side)
+	if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
+		return fmt.Errorf("record the ref being applied: %w", serr)
+	}
+
 	if p.ExecutionMode == "warm" {
 		step("PROVISION (warm mode): reusing warm physical stack, applying logical layer: %s", applyRef)
 		if aerr := tg.ApplyLogical(); aerr != nil {
@@ -478,6 +492,14 @@ func (p PhaseParams) Upgrade(ctx context.Context) (err error) {
 		return err
 	}
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
+
+	// Pre-apply, same reasoning as Provision: once the target apply starts, target code
+	// is what a teardown has to destroy with, killed or not.
+	rm.ApplyingRef = rm.ToRef
+	rm.ApplyingSide = string(SideTarget)
+	if serr := p.Store.Save(ctx, p.statePrefix(cfg), rm); serr != nil {
+		return fmt.Errorf("record the ref being applied: %w", serr)
+	}
 
 	if p.ExecutionMode == "warm" {
 		step("UPGRADE (warm mode): applying target logical layer: %s", rm.ToRef)

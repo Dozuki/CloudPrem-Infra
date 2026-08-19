@@ -209,6 +209,14 @@ func TeardownRepoRef(rm *RunManifest) string {
 	if rm == nil {
 		return ""
 	}
+	// Same precedence as teardownRefAndSide, and for the same reason: an unfinished
+	// apply (ApplyingRef set and not equal to the last completed one) is the most
+	// recent code to have touched the stack. Without it, the run this whole resolution
+	// exists for - harness-bi-ha-hftj2, SIGTERMed mid-apply with applied_ref still "" -
+	// still resolves to the TARGET ref and destroys a baseline-built stack.
+	if rm.applyUnfinished() {
+		return rm.ApplyingRef
+	}
 	if rm.AppliedRef != "" {
 		return rm.AppliedRef
 	}
