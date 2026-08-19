@@ -149,3 +149,24 @@ func TestApplyingRefIsWrittenBetweenWorktreePrepAndApply(t *testing.T) {
 		t.Fatalf("checked %d phases, want both Provision and Upgrade", checked)
 	}
 }
+
+// FromRef == ToRef is a real configuration (a docs-only bump, or a flavor flip applied
+// in place). A mid-upgrade kill there leaves the refs equal and only the SIDES differ,
+// so a ref-only comparison would resolve the run to the stale baseline side and render
+// the wrong version-override map at destroy.
+func TestSameRefUpgradeKilledMidApplyResolvesToTheTargetSide(t *testing.T) {
+	rm := &RunManifest{Scenario: "upgrade", ConfigName: "min_default", FromRef: "v9.7.0", ToRef: "v9.7.0"}
+	rm.AppliedRef, rm.AppliedSide = "v9.7.0", string(SideBaseline) // provision finished
+	rm.ApplyingRef, rm.ApplyingSide = "v9.7.0", string(SideTarget) // upgrade started, killed
+
+	if !rm.applyUnfinished() {
+		t.Fatal("applyUnfinished = false for a same-ref upgrade killed mid-apply; the refs are equal, only the sides differ")
+	}
+	ref, side, err := teardownRefAndSide(rm)
+	if err != nil {
+		t.Fatalf("teardownRefAndSide: %v", err)
+	}
+	if ref != "v9.7.0" || side != SideTarget {
+		t.Errorf("teardown resolved (%s, %s), want (v9.7.0, target)", ref, side)
+	}
+}

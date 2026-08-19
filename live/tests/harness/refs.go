@@ -214,7 +214,7 @@ func TeardownRepoRef(rm *RunManifest) string {
 	// recent code to have touched the stack. Without it, the run this whole resolution
 	// exists for - harness-bi-ha-hftj2, SIGTERMed mid-apply with applied_ref still "" -
 	// still resolves to the TARGET ref and destroys a baseline-built stack.
-	if rm.ApplyingRef != "" && rm.ApplyingRef != rm.AppliedRef {
+	if rm.applyUnfinished() {
 		return rm.ApplyingRef
 	}
 	if rm.AppliedRef != "" {

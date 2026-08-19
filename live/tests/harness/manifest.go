@@ -94,6 +94,23 @@ type RunManifest struct {
 	KeepOnFailureRecorded bool `json:"keep_on_failure_recorded,omitempty"`
 }
 
+// applyUnfinished reports whether an apply started and never recorded its completion,
+// which makes it the most recent thing to have touched the infrastructure - so its
+// (ref, side) outranks the last apply that DID finish. A completed apply writes the
+// applying pair and the applied pair with the same values, so this is false in the
+// steady state.
+//
+// The comparison is on the PAIR, not the ref alone: FromRef == ToRef is a real
+// configuration (a docs-only bump, or a flavor flip applied in place with no version
+// bump), and a mid-upgrade kill there leaves the refs equal while the sides differ.
+// Comparing refs alone would resolve that run to the stale BASELINE side.
+func (rm *RunManifest) applyUnfinished() bool {
+	if rm == nil || rm.ApplyingRef == "" {
+		return false
+	}
+	return rm.ApplyingRef != rm.AppliedRef || rm.ApplyingSide != rm.AppliedSide
+}
+
 // teardownRefAndSide resolves the ref whose code matches deployed state (AppliedRef,
 // falling back to ToRef for a manifest that never recorded a successful apply) and the
 // Side that ref represents, for Teardown's prepareWorktreeSide call. AppliedSide wins
@@ -126,13 +143,7 @@ func teardownRefAndSide(rm *RunManifest) (string, Side, error) {
 	// the code that created whatever is now live), and ToRef is the last resort for a
 	// manifest that predates both fields.
 	ref, sideStr := rm.AppliedRef, rm.AppliedSide
-	// An apply that STARTED and did not finish is the most recent thing to have touched
-	// this infrastructure, so it wins over the last apply that completed. A completed
-	// apply leaves ApplyingRef == AppliedRef (both writes name the same ref), so this
-	// only fires when an apply is genuinely unfinished - a target upgrade killed after a
-	// successful baseline provision would otherwise resolve to the BASELINE and repeat
-	// the same wrong-code destroy in the opposite direction.
-	if rm.ApplyingRef != "" && rm.ApplyingRef != rm.AppliedRef {
+	if rm.applyUnfinished() {
 		ref, sideStr = rm.ApplyingRef, rm.ApplyingSide
 	}
 	if ref == "" {
