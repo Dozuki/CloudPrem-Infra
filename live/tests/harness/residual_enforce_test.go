@@ -1,6 +1,9 @@
 package harness
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 // TestResidualEnforceDefaultsToTrue covers HARNESS_RESIDUAL_ENFORCE's whole contract:
 // absent, empty, or unparseable must all keep today's behavior (enforce), because a
@@ -26,8 +29,14 @@ func TestResidualEnforceDefaultsToTrue(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// Set then unset, rather than trusting ambient absence: if the var
+			// ever leaks into the test process env, the "unset" case would
+			// silently stop testing the fail-safe default it exists to protect.
+			t.Setenv("HARNESS_RESIDUAL_ENFORCE", "sentinel")
 			if c.set {
 				t.Setenv("HARNESS_RESIDUAL_ENFORCE", c.env)
+			} else {
+				os.Unsetenv("HARNESS_RESIDUAL_ENFORCE")
 			}
 			if got := residualEnforce(); got != c.want {
 				t.Errorf("residualEnforce() with env=%q set=%v = %v, want %v", c.env, c.set, got, c.want)
@@ -91,6 +100,8 @@ func TestResidualEnforceEnvVarDrivesTheProvisionCallSiteDecision(t *testing.T) {
 	})
 
 	t.Run("HARNESS_RESIDUAL_ENFORCE unset still fails a blocking provision finding", func(t *testing.T) {
+		t.Setenv("HARNESS_RESIDUAL_ENFORCE", "sentinel")
+		os.Unsetenv("HARNESS_RESIDUAL_ENFORCE")
 		if !residualBlocks(blockingReport, residualEnforce()) {
 			t.Error("provision residual check must still fail closed with no env var set")
 		}
