@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -61,13 +62,18 @@ type S3RepoRef struct {
 }
 
 type Node struct {
-	ID          string      `json:"id"`
-	Type        string      `json:"type"`
-	Phase       string      `json:"phase"`
-	DisplayName string      `json:"displayName"`
-	Message     string      `json:"message"`
-	FinishedAt  string      `json:"finishedAt"`
-	Outputs     NodeOutputs `json:"outputs"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Phase       string `json:"phase"`
+	DisplayName string `json:"displayName"`
+	Message     string `json:"message"`
+	StartedAt   string `json:"startedAt"`
+	FinishedAt  string `json:"finishedAt"`
+	// Children lists the IDs of this node's child nodes - for a Retry node, one
+	// entry per attempt's Pod node. Used by retriedAwayPodIDs to find a Pod node's
+	// parent Retry node and check whether it ultimately succeeded.
+	Children []string    `json:"children,omitempty"`
+	Outputs  NodeOutputs `json:"outputs"`
 }
 
 type NodeOutputs struct {
@@ -94,17 +100,31 @@ func artifactKey(n Node) string {
 	return ""
 }
 
-// failedPodNodes returns a child's failed Pod nodes, sorted by FinishedAt then
-// DisplayName for determinism. When capped at maxNodes (0 = unlimited), it keeps the
-// LATEST maxNodes by FinishedAt, not the earliest - the most recent failures are the
-// ones relevant to why the run is currently red; an early failure that later ones
-// piled on top of is the least useful one to spend the node budget on.
+// failedPodNodes returns a child's failed Pod nodes (Type == "Pod", Phase == Failed
+// or Error), sorted EARLIEST first by FinishedAt - a retried step lands one failed
+// Pod node per attempt, all carrying the same underlying error, and keeping the
+// earliest one means the originating failure (and its failed_phase/log_uri) survives
+// the retries instead of being pushed out by them.
+//
+// Ties (FinishedAt has only second granularity, so two nodes finishing in the same
+// second are common) break on StartedAt: a node that STARTED earlier reflects an
+// earlier point in the workflow's own execution order, which is a real signal.
+// DisplayName is the last resort, only when neither timestamp distinguishes the two
+// nodes at all - it carries no timing information, so it exists purely to keep the
+// result deterministic, not because it means anything about which node came first.
 //
 // Filtering on Type == "Pod" is what excludes the duplicate Retry node Argo also
 // marks Failed for the same phase - Retry nodes carry no artifact of their own, and
 // including them would double every bullet. Steps/StepGroup nodes are excluded the
 // same way.
-func failedPodNodes(wf Workflow, maxNodes int) []Node {
+//
+// Unfiltered beyond Type/Phase and uncapped: this is the base list both Build's
+// evidence selection and childBase's Detail text filter down from - Build's own
+// evidence candidates go through evidenceCandidateNodes (below), which excludes both
+// a masked-by-retry node and a no-artifact node, while childBase's Detail (evidence.go
+// ~:743) applies only the retry mask, deliberately keeping a no-artifact node so an
+// evicted/OOM-killed failure with no log still shows its Argo node Message.
+func failedPodNodes(wf Workflow) []Node {
 	var nodes []Node
 	for _, n := range wf.Status.Nodes {
 		if n.Type != "Pod" {
@@ -116,15 +136,150 @@ func failedPodNodes(wf Workflow, maxNodes int) []Node {
 		nodes = append(nodes, n)
 	}
 	sort.Slice(nodes, func(i, j int) bool {
-		if nodes[i].FinishedAt != nodes[j].FinishedAt {
-			return nodes[i].FinishedAt < nodes[j].FinishedAt
+		ti, iOK := parseTimestamp(nodes[i].FinishedAt)
+		tj, jOK := parseTimestamp(nodes[j].FinishedAt)
+		// A node with a parseable timestamp always sorts before one without - an
+		// empty or unparseable FinishedAt used to sort FIRST as the smallest raw
+		// string, which could pick a node missing that field as "the earliest"
+		// and have it wrongly drive failed_phase/log_uri.
+		if iOK != jOK {
+			return iOK
+		}
+		if iOK && jOK && !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		si, siOK := parseTimestamp(nodes[i].StartedAt)
+		sj, sjOK := parseTimestamp(nodes[j].StartedAt)
+		if siOK != sjOK {
+			return siOK
+		}
+		if siOK && sjOK && !si.Equal(sj) {
+			return si.Before(sj)
 		}
 		return nodes[i].DisplayName < nodes[j].DisplayName
 	})
-	if maxNodes > 0 && len(nodes) > maxNodes {
-		nodes = nodes[len(nodes)-maxNodes:]
-	}
 	return nodes
+}
+
+// parseTimestamp parses a Node timestamp field (StartedAt or FinishedAt - both
+// RFC3339, as Argo/Kubernetes emits timestamps) and reports whether it parsed. Empty
+// or malformed values report false so failedPodNodes can sort them last instead of
+// treating them as the earliest.
+func parseTimestamp(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// retriedAwayPodIDs returns the set of node IDs descending from a Retry node that
+// ultimately Succeeded. The harness retryStrategy is OnError with limit 2 (see
+// live/tests/argo/00-phase-templates.yaml), so a Pod node can be Failed while the
+// step it belongs to succeeded on a later attempt - Argo groups the attempts under a
+// Retry node whose own Phase reflects the FINAL outcome, listing each attempt's Pod
+// node ID in Children. A Pod node masked this way never explains why the workflow
+// failed and must not drive failed_phase/log_uri or spend an evidence slot.
+//
+// Masking is TRANSITIVE, not one hop: the teardown path is two levels of retry (see
+// live/tests/argo/10-scenario.yaml's own retryStrategy wrapping the Step that calls
+// harness-phase's OnError retry), so a Pod's direct parent can be a Failed inner
+// Retry node while an OUTER Retry node further up ultimately Succeeded - and the
+// outer Retry's Children are Steps node IDs, not Pod IDs, so a one-hop check off
+// Retry nodes alone never reaches it. This walks Children from every Succeeded Retry
+// node down through Steps/StepGroup/DAG/Retry containment and masks every Pod
+// reached, so a Pod is masked as long as ANY ancestor Retry ultimately Succeeded,
+// regardless of how many non-Pod nodes sit in between or what an intermediate Retry's
+// own Phase was. A Retry ancestor that is Running, Failed, or Errored contributes no
+// masking on its own - only walks rooted at a Succeeded Retry node populate the set,
+// so a Pod with no Succeeded Retry ancestor anywhere in its chain is never masked.
+//
+// The walk STOPS at Pod nodes and never follows a Pod's own Children. Argo's Children
+// field is overloaded: for Retry/Steps/StepGroup/DAG nodes it means containment (the
+// attempts of a retry, the steps within a group), but a Pod's Children point FORWARD
+// to whatever the workflow runs next after that step, not deeper into the same
+// attempt - real data confirms this: a Succeeded provision Pod's own Children lead to
+// the next StepGroup, which leads to an entirely separate upgrade Retry down the line.
+// Continuing to walk past a Pod would treat that unrelated downstream step as part of
+// the provision attempt and mask its real failure. Every OTHER node type stops
+// recursing only when it runs out of Children or hits a Pod, since those represent a
+// single attempt's own containment rather than a forward link.
+//
+// visited is scoped per walk root (one Succeeded Retry node) rather than shared
+// across roots, so two Succeeded Retry nodes whose subtrees happen to overlap don't
+// interfere with each other's cycle guard; masked itself is a set, so revisiting an
+// already-masked node from a second root is a harmless no-op. visited also guards
+// against a node ID appearing under more than one parent (or a genuine cycle) within
+// a single root's walk, where it would otherwise recurse forever.
+func retriedAwayPodIDs(nodes map[string]Node) map[string]bool {
+	masked := make(map[string]bool)
+	for _, n := range nodes {
+		if n.Type != "Retry" || n.Phase != "Succeeded" {
+			continue
+		}
+		visited := make(map[string]bool)
+		var walk func(id string)
+		walk = func(id string) {
+			if visited[id] {
+				return
+			}
+			visited[id] = true
+			node, ok := nodes[id]
+			if !ok {
+				return
+			}
+			masked[id] = true
+			if node.Type == "Pod" {
+				return
+			}
+			for _, childID := range node.Children {
+				walk(childID)
+			}
+		}
+		for _, childID := range n.Children {
+			walk(childID)
+		}
+	}
+	return masked
+}
+
+// evidenceCandidateNodes returns wf's failed Pod nodes eligible to drive its
+// evidence - failedPodNodes' earliest-first list, minus two classes of node that
+// would otherwise cost an evidence slot for nothing, or worse, silently become "the"
+// reported failure:
+//
+//   - a Pod node retriedAwayPodIDs reports as masked by a later, successful attempt
+//     of the same step
+//   - a Pod node with no archived log artifact (main-logs) - an evicted or
+//     OOM-killed attempt has no log to show
+//
+// Also returns the retry mask itself (retriedAwayPodIDs(wf.Status.Nodes)) so callers
+// that need ONLY the retry exclusion, not the no-artifact one, can reuse it instead of
+// recomputing retriedAwayPodIDs a second time: childBase's Detail text (which must
+// skip a retried-away node but keep a no-artifact one) and Build's failed-Pod fallback
+// (which must skip a retried-away node even when every evidence candidate got
+// filtered out).
+//
+// Deliberately uncapped: Build fetches every surviving candidate and dedups on
+// (step, excerpt) while filling its maxNodes display budget, since capping the
+// candidate set before dedup is exactly the bug this exists to avoid - duplicate
+// retries collapsed by dedup never reclaimed the slots they used to occupy.
+func evidenceCandidateNodes(wf Workflow) ([]Node, map[string]bool) {
+	masked := retriedAwayPodIDs(wf.Status.Nodes)
+	var nodes []Node
+	for _, n := range failedPodNodes(wf) {
+		if masked[n.ID] {
+			continue
+		}
+		if artifactKey(n) == "" {
+			continue
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, masked
 }
 
 // ---- fetching the log tail ----
@@ -303,8 +458,13 @@ func findErrLine(lines []string, exclude string) string {
 // failed: destroy: exit status 1" - a "thin" verdict), the real explanation is the
 // tofu/terragrunt error underneath, so errLine wins instead.
 func ExtractError(log string) string {
-	lines := normalizeAndWindow(log)
+	return extractErrorFromLines(normalizeAndWindow(log))
+}
 
+// extractErrorFromLines is ExtractError's body, split out so callers that already
+// have a normalized/windowed line slice (Build's phase extraction, below) can reuse
+// it without re-normalizing the same log twice.
+func extractErrorFromLines(lines []string) string {
 	verdict := ""
 	for _, l := range lines {
 		if verdictRE.MatchString(l) {
@@ -322,6 +482,63 @@ func ExtractError(log string) string {
 		return verdict
 	}
 	return errLine
+}
+
+// verdictPhase scans normalized/windowed log lines for the phase word off the last
+// "<phase> failed: ..." verdict line - the same line extractErrorFromLines' own
+// verdict scan finds - and returns "" if the window carries none.
+func verdictPhase(lines []string) string {
+	phase := ""
+	for _, l := range lines {
+		if m := verdictRE.FindStringSubmatch(l); m != nil {
+			phase = m[1]
+		}
+	}
+	return phase
+}
+
+// displayPhaseRE captures the leading alphabetic step name off a Pod node's
+// DisplayName ("upgrade(0)" -> "upgrade", "destroy(0)" -> "destroy"). That step
+// name is a lookup key into canonicalPhaseByStep, not the phase word itself - the
+// two diverge for the teardown step (see below).
+var displayPhaseRE = regexp.MustCompile(`^[a-zA-Z]+`)
+
+// canonicalPhaseByStep maps a known Argo step name to the canonical phase word the
+// harness's own verdict lines use (verdictRE's "provision|upgrade|validate|
+// teardown"). The Argo step in live/tests/argo/10-scenario.yaml is named "destroy",
+// but the harness verdict phase for that same step is "teardown" - keep both
+// mapped to "teardown" here rather than "fixing" this back to a bare regex
+// extraction, which would render the un-promised phase word "destroy" on the card.
+// A step name with no entry (an unrecognized DisplayName) maps to "", same as no
+// match at all - the relay omits failed_phase when it's empty, which beats
+// rendering an arbitrary or nonsense word.
+var canonicalPhaseByStep = map[string]string{
+	"gate":      "gate",
+	"provision": "provision",
+	"upgrade":   "upgrade",
+	"validate":  "validate",
+	"destroy":   "teardown",
+	"teardown":  "teardown",
+}
+
+// phaseFromDisplayName is the failed_phase fallback for when a node's log carries no
+// "<phase> failed: ..." verdict line to source the phase word from instead (the
+// fetch itself failed, the log has no verdict line, or the window scrolled past it).
+func phaseFromDisplayName(displayName string) string {
+	step := displayPhaseRE.FindString(displayName)
+	return canonicalPhaseByStep[step]
+}
+
+// retryIndexSuffixRE strips the "(N)" retry index Argo appends to a Pod node's
+// DisplayName ("upgrade(0)", "upgrade(1)") so repeated attempts of the same step
+// normalize to the same key.
+var retryIndexSuffixRE = regexp.MustCompile(`\(\d+\)$`)
+
+// normalizeStepName strips a DisplayName's retry index, used as (half of) the
+// per-child excerpt dedup key so retries of the SAME step collapse while two
+// DIFFERENT steps never do, even when their excerpts happen to render identically.
+func normalizeStepName(displayName string) string {
+	return retryIndexSuffixRE.ReplaceAllString(displayName, "")
 }
 
 // lastErrorLine is ExtractError's errLine step alone, capped to 400 runes. It exists
@@ -436,8 +653,13 @@ const (
 	// old caps. 20-matrix.yaml's jq slice on log_excerpt must stay in sync with
 	// maxChildExcerptRunes (the "relay's existing per-child slice" this comment
 	// refers to).
-	maxLineExcerptRunes     = 300 // per extracted line, before the "; " join
-	maxChildExcerptRunes    = 460 // per child, after the join - matches the relay's existing per-child slice
+	maxLineExcerptRunes  = 300 // per extracted line, before the "; " join
+	maxChildExcerptRunes = 460 // per child, after the join - matches the relay's existing per-child slice
+	// defaultMaxNodesPerChild bounds the number of DISTINCT (post-dedup) excerpt
+	// bullets shown per child, not the number of nodes fetched - Build fetches
+	// every surviving candidate node regardless of this cap (see
+	// evidenceCandidateNodes) so a duplicate retry can be recognized and its slot
+	// reclaimed for a genuinely distinct diagnostic instead of being wasted.
 	defaultMaxNodesPerChild = 3
 	defaultWorkers          = 4
 	defaultPerObjectTimeout = 5 * time.Second
@@ -446,18 +668,38 @@ const (
 
 // ChildEvidence is one child workflow's row in the CHILD_JSON array post-status
 // builds. Field order/tags match the existing jq output (name, config, phase, msg,
-// detail) plus the new log_excerpt key.
+// detail, log_excerpt) plus three new keys carrying the failing phase and links to
+// where the failure lives:
+//
+//   - FailedPhase: the harness phase word (provision/upgrade/validate/teardown, or a
+//     DisplayName-derived fallback) of the EARLIEST surviving evidence candidate
+//     (see evidenceCandidateNodes) - masked-by-retry and no-artifact nodes are
+//     filtered out before "earliest" is chosen.
+//   - ArgoURL: the Argo UI deep link for the workflow, or "" when ARGO_UI_BASE is
+//     unset - callers omit the link in that case rather than showing a broken one.
+//   - LogURI: the s3://bucket/key of the archived log that LogExcerpt's first bullet
+//     actually came from (falling back to the earliest candidate's key when no
+//     bullet was produced at all), so the link always points at a log that contains
+//     the quoted text.
 type ChildEvidence struct {
-	Name       string `json:"name"`
-	Config     string `json:"config"`
-	Phase      string `json:"phase"`
-	Msg        string `json:"msg"`
-	Detail     string `json:"detail"`
-	LogExcerpt string `json:"log_excerpt"`
+	Name        string `json:"name"`
+	Config      string `json:"config"`
+	Phase       string `json:"phase"`
+	Msg         string `json:"msg"`
+	Detail      string `json:"detail"`
+	LogExcerpt  string `json:"log_excerpt"`
+	FailedPhase string `json:"failed_phase"`
+	ArgoURL     string `json:"argo_url"`
+	LogURI      string `json:"log_uri"`
 }
 
-// BuildOptions bounds Build's S3 fan-out. Zero values take the defaults below.
+// BuildOptions bounds Build's work. Zero values take the defaults below.
 type BuildOptions struct {
+	// MaxNodesPerChild caps the number of DISTINCT (post-dedup) log excerpt bullets
+	// shown per child. It does NOT bound the S3 fan-out - Build fetches every
+	// evidence candidate node regardless (see evidenceCandidateNodes), so a
+	// duplicate retry can be recognized and dedup can reclaim its slot for a
+	// genuinely distinct diagnostic.
 	MaxNodesPerChild int
 	Workers          int
 	PerObjectTimeout time.Duration
@@ -480,10 +722,37 @@ func (o BuildOptions) withDefaults() BuildOptions {
 	return o
 }
 
-// childBase builds a child's {name, config, phase, msg, detail} exactly as the jq
-// expression it replaces did - detail is unchanged in meaning and in how it is
-// computed, uncapped, so an un-bumped renderer sees identical text.
-func childBase(wf Workflow) ChildEvidence {
+// argoWorkflowURL builds the Argo UI deep link for a workflow name from the
+// ARGO_UI_BASE env var, or "" when that var is unset/empty - the orchestrator wires
+// up the real hostname later; until then (and in any environment that never sets it)
+// this deliberately omits the link rather than hardcoding a guess.
+func argoWorkflowURL(name string) string {
+	base := strings.TrimRight(os.Getenv("ARGO_UI_BASE"), "/")
+	if base == "" {
+		return ""
+	}
+	return base + "/workflows/argo/" + name
+}
+
+// s3URI formats a bucket/key pair as an s3:// URI, or "" if either is empty.
+func s3URI(bucket, key string) string {
+	if bucket == "" || key == "" {
+		return ""
+	}
+	return "s3://" + bucket + "/" + key
+}
+
+// childBase builds a child's {name, config, phase, msg, detail}, uncapped like the jq
+// expression it replaces. Detail applies the RETRY MASK only (masked, the same set
+// evidenceCandidateNodes computes via retriedAwayPodIDs and returns to its caller) -
+// not evidenceCandidateNodes' full filtered node list, whose no-artifact exclusion
+// exists purely to bound the S3 fetch budget, a cost Detail never spends. Applying
+// that exclusion here too would blank Detail for an evicted/OOM-killed-only failure
+// (no log to fetch, but the Argo node Message is still real and free), where the
+// text used to read e.g. "upgrade(0): Pod was evicted". Skipping a retried-away node
+// is still deliberate, and still required: Detail must never lead with a failure the
+// rest of the card has already excluded because it retried away clean.
+func childBase(wf Workflow, masked map[string]bool) ChildEvidence {
 	config := wf.Metadata.Labels["harness/config"]
 	if config == "" {
 		config = "-"
@@ -493,7 +762,10 @@ func childBase(wf Workflow) ChildEvidence {
 		phase = "-"
 	}
 	var parts []string
-	for _, n := range failedPodNodes(wf, 0) {
+	for _, n := range failedPodNodes(wf) {
+		if masked[n.ID] {
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%s: %s", n.DisplayName, n.Message))
 	}
 	return ChildEvidence{
@@ -519,19 +791,72 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 
 	children := make([]ChildEvidence, len(list.Items))
 	perChildNodes := make([][]Node, len(list.Items))
+	// phases and logURIs seed the failed_phase/log_uri fallback from data that
+	// needs no S3 fetch (the DisplayName, and the bucket/key already on the
+	// Workflow), so both fields stand even when the earliest node's log never
+	// comes back. A worker overwrites phases[i] below if the fetched log carries
+	// an actual verdict line.
+	phases := make([]string, len(list.Items))
+	logURIs := make([]string, len(list.Items))
 	for i, wf := range list.Items {
-		children[i] = childBase(wf)
-		perChildNodes[i] = failedPodNodes(wf, opts.MaxNodesPerChild)
+		nodes, masked := evidenceCandidateNodes(wf)
+		children[i] = childBase(wf, masked)
+		children[i].ArgoURL = argoWorkflowURL(wf.Metadata.Name)
+		perChildNodes[i] = nodes
+		if len(perChildNodes[i]) > 0 {
+			earliest := perChildNodes[i][0]
+			phases[i] = phaseFromDisplayName(earliest.DisplayName)
+			bucket := wf.Status.ArtifactRepositoryRef.ArtifactRepository.S3.Bucket
+			logURIs[i] = s3URI(bucket, artifactKey(earliest))
+		} else if wf.Status.Phase == "Failed" || wf.Status.Phase == "Error" {
+			// Every failed Pod node was filtered out of the evidence candidates
+			// (masked-by-retry, no artifact, or both), so there is no candidate to
+			// fetch and log_uri has nothing real to point at. The phase word
+			// itself needs no fetch, so seed it from the earliest failed Pod the
+			// retry mask does NOT cover - guarded to run only when the workflow
+			// itself ended Failed/Error (a child that ultimately Succeeded has
+			// nothing to report here, even if an early attempt failed), and still
+			// respecting the mask, so a Pod under a Succeeded Retry never names
+			// the phase for a child whose step actually succeeded. If every
+			// failed Pod is masked, phases[i] is left empty, same as log_uri,
+			// rather than naming a step that succeeded.
+			for _, n := range failedPodNodes(wf) {
+				if masked[n.ID] {
+					continue
+				}
+				phases[i] = phaseFromDisplayName(n.DisplayName)
+				break
+			}
+		}
 	}
 
 	type job struct {
 		childIdx, nodeIdx    int
 		bucket, key, display string
 	}
+	// Jobs are dispatched nodeIdx-major (every child's node 0 first, then every
+	// child's node 1, and so on) rather than child-major. All jobs share one
+	// OverallBudget on one channel, and dedup fill is deliberately uncapped per
+	// child (see evidenceCandidateNodes), so a child-major order lets one child
+	// holding many retried/failed attempts exhaust the whole budget before a
+	// LATER child's node 0 is ever dispatched - starving that child's evidence
+	// entirely. nodeIdx-major spreads the same exhaustion evenly: when the budget
+	// runs out, it is always the LATEST candidates across all children that get
+	// dropped, never a whole child.
 	var jobs []job
-	for i, wf := range list.Items {
-		bucket := wf.Status.ArtifactRepositoryRef.ArtifactRepository.S3.Bucket
-		for ni, n := range perChildNodes[i] {
+	maxNodes := 0
+	for _, nodes := range perChildNodes {
+		if len(nodes) > maxNodes {
+			maxNodes = len(nodes)
+		}
+	}
+	for ni := 0; ni < maxNodes; ni++ {
+		for i, wf := range list.Items {
+			if ni >= len(perChildNodes[i]) {
+				continue
+			}
+			n := perChildNodes[i][ni]
+			bucket := wf.Status.ArtifactRepositoryRef.ArtifactRepository.S3.Bucket
 			key := artifactKey(n)
 			if bucket == "" || key == "" {
 				continue
@@ -540,13 +865,34 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 		}
 	}
 
-	// results[childIdx][nodeIdx] holds "displayName: excerpt", or "" on a miss.
+	// nodeResult keeps a fetched node's excerpt separate from its display name so
+	// the final join can dedup on (normalized step, excerpt) - a retried step's
+	// nodes carry different DisplayNames ("upgrade(0)" vs "upgrade(1)") for the
+	// identical underlying error, and those must collapse. Deduping on excerpt
+	// alone would ALSO collapse two genuinely different steps whose excerpts
+	// happen to render identically (after secret-scrubbing, or because both got
+	// cut at the same point by the 460-rune truncation), silently dropping a
+	// distinct failure - exactly the signal loss this evidence path exists to fix.
+	// bucket/key ride along so the join can point log_uri at the SAME node its
+	// chosen excerpt came from, instead of always the earliest candidate's. phase
+	// rides along the same way, for the same reason: failed_phase must come from
+	// the SAME node as the reported excerpt, not be pinned to node 0's fallback
+	// while log_uri already moved on to a later node.
+	type nodeResult struct {
+		display, excerpt, bucket, key, phase string
+	}
+
+	// results[childIdx][nodeIdx] holds a node's result, zero-value on a miss.
 	// Each job owns a disjoint slot, so workers write without a lock, and the
 	// final join walks nodeIdx order - deterministic regardless of which worker
-	// finishes first.
-	results := make([][]string, len(list.Items))
+	// finishes first, and regardless of the nodeIdx-major dispatch order jobs are
+	// sent in above. Node index 0 is always the earliest surviving evidence
+	// candidate (evidenceCandidateNodes keeps the earliest first, uncapped); the
+	// join below may still pick a later index's phase/log_uri when node 0's own
+	// fetch failed or yielded nothing usable.
+	results := make([][]nodeResult, len(list.Items))
 	for i := range results {
-		results[i] = make([]string, len(perChildNodes[i]))
+		results[i] = make([]nodeResult, len(perChildNodes[i]))
 	}
 
 	workers := opts.Workers
@@ -570,12 +916,21 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 				if err != nil {
 					continue
 				}
-				errText := ExtractError(tail)
+				lines := normalizeAndWindow(tail)
+				errText := extractErrorFromLines(lines)
 				if errText == "" {
 					continue
 				}
+				// verdictPhase and extractErrorFromLines both key off the same
+				// "<phase> failed: ..." verdict line, so whenever verdictPhase
+				// finds one, errText above is guaranteed non-empty too - phase
+				// and excerpt are only ever recorded together, per node.
+				phase := verdictPhase(lines)
+				if phase == "" {
+					phase = phaseFromDisplayName(j.display)
+				}
 				excerpt := truncateRunes(Scrub(errText), maxLineExcerptRunes)
-				results[j.childIdx][j.nodeIdx] = j.display + ": " + excerpt
+				results[j.childIdx][j.nodeIdx] = nodeResult{display: j.display, excerpt: excerpt, bucket: j.bucket, key: j.key, phase: phase}
 			}
 		}()
 	}
@@ -593,15 +948,46 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 
 	for i, parts := range results {
 		var nonEmpty []string
+		seen := make(map[string]bool, len(parts))
 		for _, p := range parts {
-			if p != "" {
-				nonEmpty = append(nonEmpty, p)
+			if p.excerpt == "" {
+				continue
+			}
+			key := normalizeStepName(p.display) + "\x00" + p.excerpt
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if len(nonEmpty) == 0 {
+				// The first surviving, non-deduped entry is the excerpt a reader
+				// actually sees first - point log_uri AND failed_phase at ITS
+				// node, rather than the earliest candidate's, so the link always
+				// resolves to a log that contains the quoted text and the phase
+				// always names the step that log actually came from, even when
+				// the earliest candidate's own fetch failed or yielded nothing
+				// usable.
+				logURIs[i] = s3URI(p.bucket, p.key)
+				phases[i] = p.phase
+			}
+			nonEmpty = append(nonEmpty, p.display+": "+p.excerpt)
+			// Cap the DISPLAYED bullets at maxNodes distinct entries here, not the
+			// candidate set fetched above - capping the candidates first (the old
+			// behavior) let dedup collapse duplicate retries without ever
+			// reclaiming their slots, silently dropping a distinct diagnostic that
+			// never even got fetched.
+			if opts.MaxNodesPerChild > 0 && len(nonEmpty) >= opts.MaxNodesPerChild {
+				break
 			}
 		}
 		if len(nonEmpty) == 0 {
 			continue
 		}
 		children[i].LogExcerpt = truncateRunes(strings.Join(nonEmpty, "; "), maxChildExcerptRunes)
+	}
+
+	for i := range children {
+		children[i].FailedPhase = phases[i]
+		children[i].LogURI = logURIs[i]
 	}
 	return children
 }
