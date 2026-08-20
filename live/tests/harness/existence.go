@@ -13,15 +13,29 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/databasemigrationservice"
 	dmstypes "github.com/aws/aws-sdk-go-v2/service/databasemigrationservice/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
+	efstypes "github.com/aws/aws-sdk-go-v2/service/efs/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/elasticache"
+	ecachetypes "github.com/aws/aws-sdk-go-v2/service/elasticache/types"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go-v2/service/kafka"
+	kafkatypes "github.com/aws/aws-sdk-go-v2/service/kafka/types"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/aws/aws-sdk-go-v2/service/opensearch"
+	opensearchtypes "github.com/aws/aws-sdk-go-v2/service/opensearch/types"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/aws/smithy-go"
@@ -65,15 +79,22 @@ type existenceVerifier func(ctx context.Context, clients *verifierAPISet, arn st
 // or a live account - see existence_test.go's fakeVerifierAPI, which satisfies all of
 // them from one struct of function fields.
 type verifierAPISet struct {
-	EKS  EKSExistenceAPI
-	RDS  RDSExistenceAPI
-	EC2  EC2ExistenceAPI
-	IAM  IAMExistenceAPI
-	S3   S3ExistenceAPI
-	Logs LogsExistenceAPI
-	DMS  DMSExistenceAPI
-	SM   SecretsManagerExistenceAPI
-	SQS  SQSExistenceAPI
+	EKS         EKSExistenceAPI
+	RDS         RDSExistenceAPI
+	EC2         EC2ExistenceAPI
+	IAM         IAMExistenceAPI
+	S3          S3ExistenceAPI
+	Logs        LogsExistenceAPI
+	DMS         DMSExistenceAPI
+	SM          SecretsManagerExistenceAPI
+	SQS         SQSExistenceAPI
+	KMS         KMSExistenceAPI
+	ELBV2       ELBV2ExistenceAPI
+	Kafka       KafkaExistenceAPI
+	ElastiCache ElastiCacheExistenceAPI
+	EFS         EFSExistenceAPI
+	OpenSearch  OpenSearchExistenceAPI
+	SNS         SNSExistenceAPI
 }
 
 type EKSExistenceAPI interface {
@@ -133,6 +154,35 @@ type SQSExistenceAPI interface {
 	GetQueueUrl(context.Context, *sqs.GetQueueUrlInput, ...func(*sqs.Options)) (*sqs.GetQueueUrlOutput, error)
 }
 
+type KMSExistenceAPI interface {
+	DescribeKey(context.Context, *kms.DescribeKeyInput, ...func(*kms.Options)) (*kms.DescribeKeyOutput, error)
+}
+
+type ELBV2ExistenceAPI interface {
+	DescribeLoadBalancers(context.Context, *elasticloadbalancingv2.DescribeLoadBalancersInput, ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error)
+	DescribeTargetGroups(context.Context, *elasticloadbalancingv2.DescribeTargetGroupsInput, ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error)
+}
+
+type KafkaExistenceAPI interface {
+	DescribeCluster(context.Context, *kafka.DescribeClusterInput, ...func(*kafka.Options)) (*kafka.DescribeClusterOutput, error)
+}
+
+type ElastiCacheExistenceAPI interface {
+	DescribeReplicationGroups(context.Context, *elasticache.DescribeReplicationGroupsInput, ...func(*elasticache.Options)) (*elasticache.DescribeReplicationGroupsOutput, error)
+}
+
+type EFSExistenceAPI interface {
+	DescribeFileSystems(context.Context, *efs.DescribeFileSystemsInput, ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error)
+}
+
+type OpenSearchExistenceAPI interface {
+	DescribeDomain(context.Context, *opensearch.DescribeDomainInput, ...func(*opensearch.Options)) (*opensearch.DescribeDomainOutput, error)
+}
+
+type SNSExistenceAPI interface {
+	GetTopicAttributes(context.Context, *sns.GetTopicAttributesInput, ...func(*sns.Options)) (*sns.GetTopicAttributesOutput, error)
+}
+
 // existenceVerifiers is the registry: one entry per AWS type classifyResidual can mark
 // Blocking (terraformManagedTypes minus insufficientAloneTypes).
 // TestEveryBlockingTypeHasAnExistenceVerifier enforces that this map never falls behind
@@ -159,7 +209,7 @@ var existenceVerifiers = map[string]existenceVerifier{
 	"ec2:vpc-endpoint":     verifyEC2VPCEndpoint,
 	"ec2:volume":           verifyEC2Volume,
 
-	"kms:key": unimplementedVerifier("kms"),
+	"kms:key": verifyKMSKey,
 
 	"s3": verifyS3Bucket,
 
@@ -168,8 +218,8 @@ var existenceVerifiers = map[string]existenceVerifier{
 
 	"logs:log-group": verifyLogGroup,
 
-	"elasticloadbalancing:loadbalancer": unimplementedVerifier("elasticloadbalancingv2"),
-	"elasticloadbalancing:targetgroup":  unimplementedVerifier("elasticloadbalancingv2"),
+	"elasticloadbalancing:loadbalancer": verifyELBV2LoadBalancer,
+	"elasticloadbalancing:targetgroup":  verifyELBV2TargetGroup,
 
 	"dms:rep":                verifyDMSReplicationInstance,
 	"dms:endpoint":           verifyDMSEndpoint,
@@ -178,33 +228,16 @@ var existenceVerifiers = map[string]existenceVerifier{
 	"dms:cert":               verifyDMSCertificate,
 	"dms:replication-config": verifyDMSReplicationConfig,
 
-	"kafka:cluster": unimplementedVerifier("kafka"),
+	"kafka:cluster": verifyKafkaCluster,
 
 	"secretsmanager:secret": verifySecretsManagerSecret,
 
-	"elasticache:replicationgroup":  unimplementedVerifier("elasticache"),
-	"elasticfilesystem:file-system": unimplementedVerifier("efs"),
-	"es:domain":                     unimplementedVerifier("opensearchservice"),
+	"elasticache:replicationgroup":  verifyElastiCacheReplicationGroup,
+	"elasticfilesystem:file-system": verifyEFSFileSystem,
+	"es:domain":                     verifyOpenSearchDomain,
 
 	"sqs": verifySQSQueue,
-	"sns": unimplementedVerifier("sns"),
-}
-
-// unimplementedVerifier documents a REAL gap rather than papering over it. pkg names
-// the AWS SDK service package (github.com/aws/aws-sdk-go-v2/service/<pkg>) this type's
-// existence check needs, which live/tests/go.mod does not vendor today (kms, elbv2,
-// kafka, elasticache, efs, opensearchservice and sns are all absent - checked against
-// go.mod directly). Adding one means editing go.mod/go.sum, which sits outside
-// live/tests/harness/ and this change's scope. Registering it here as an honest
-// "cannot verify" - rather than leaving the type out of existenceVerifiers entirely -
-// keeps TestEveryBlockingTypeHasAnExistenceVerifier meaningful (a real gap is still
-// visible, in the Incomplete note, instead of masquerading as untested) and keeps a
-// residual of one of these types from ever being silently enforced on with no probe.
-// Follow-up: vendor the package and replace the entry with a real Describe call.
-func unimplementedVerifier(pkg string) existenceVerifier {
-	return func(_ context.Context, _ *verifierAPISet, _ string) (existenceState, string) {
-		return existenceError, fmt.Sprintf("no existence probe wired for this type (needs github.com/aws/aws-sdk-go-v2/service/%s in go.mod)", pkg)
-	}
+	"sns": verifySNSTopic,
 }
 
 // --- ARN parsing helpers -----------------------------------------------------------
@@ -1132,6 +1165,223 @@ func verifySQSQueue(ctx context.Context, c *verifierAPISet, arnStr string) (exis
 	return existenceError, err.Error()
 }
 
+// --- KMS ------------------------------------------------------------------------
+
+// verifyKMSKey passes the ARN straight through as KeyId: DescribeKey's documented
+// contract accepts a key ID, key ARN, alias name, or alias ARN interchangeably, so no
+// extraction is needed the way the bare-identifier RDS/DMS calls need arnResourceID.
+//
+// A key already scheduled for deletion still answers DescribeKey with a normal 200 and
+// KeyState == PendingDeletion (deletion is a 7-30 day waiting window, the same shape
+// Secrets Manager's DeletedDate caveat has - see verifySecretsManagerSecret). Reading
+// that as Exists would false-positive a correct destroy for the length of the window.
+func verifyKMSKey(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	var out *kms.DescribeKeyOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.KMS.DescribeKey(ctx, &kms.DescribeKeyInput{KeyId: aws.String(arnStr)})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *kmstypes.NotFoundException
+		if errors.As(err, &nf) {
+			return existenceNotFound, "NotFoundException"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil || out.KeyMetadata == nil {
+		return existenceError, "no key metadata in response despite no error (anomalous SDK response)"
+	}
+	switch out.KeyMetadata.KeyState {
+	case kmstypes.KeyStatePendingDeletion, kmstypes.KeyStatePendingReplicaDeletion:
+		return existenceNotFound, "scheduled for deletion"
+	}
+	return existenceExists, ""
+}
+
+// --- ELBv2 ----------------------------------------------------------------------
+//
+// Both calls filter by the resource's own ARN, and per the SDK's deserializer (verified
+// against the vendored package, not assumed) a non-matching ARN raises the modeled
+// NotFound fault rather than an empty 200 - but these are still filtered-list calls by
+// shape, so an empty success is treated as the same SDK-response anomaly the EC2/DMS
+// filtered calls apply, not a legitimate NotFound.
+
+func verifyELBV2LoadBalancer(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	var out *elasticloadbalancingv2.DescribeLoadBalancersOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.ELBV2.DescribeLoadBalancers(ctx, &elasticloadbalancingv2.DescribeLoadBalancersInput{LoadBalancerArns: []string{arnStr}})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *elbv2types.LoadBalancerNotFoundException
+		if errors.As(err, &nf) {
+			return existenceNotFound, "LoadBalancerNotFoundException"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil || len(out.LoadBalancers) == 0 {
+		return existenceError, "no load balancer in response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
+func verifyELBV2TargetGroup(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	var out *elasticloadbalancingv2.DescribeTargetGroupsOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.ELBV2.DescribeTargetGroups(ctx, &elasticloadbalancingv2.DescribeTargetGroupsInput{TargetGroupArns: []string{arnStr}})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *elbv2types.TargetGroupNotFoundException
+		if errors.As(err, &nf) {
+			return existenceNotFound, "TargetGroupNotFoundException"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil || len(out.TargetGroups) == 0 {
+		return existenceError, "no target group in response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
+// --- Kafka (MSK) ------------------------------------------------------------------
+
+// verifyKafkaCluster passes the ARN straight through as ClusterArn - DescribeCluster
+// addresses a cluster by its full ARN, not a bare name, so no extraction is needed.
+func verifyKafkaCluster(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	var out *kafka.DescribeClusterOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.Kafka.DescribeCluster(ctx, &kafka.DescribeClusterInput{ClusterArn: aws.String(arnStr)})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *kafkatypes.NotFoundException
+		if errors.As(err, &nf) {
+			return existenceNotFound, "NotFoundException"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil || out.ClusterInfo == nil {
+		return existenceError, "no cluster info in response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
+// --- ElastiCache --------------------------------------------------------------------
+
+func verifyElastiCacheReplicationGroup(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	id := arnResourceID(arnStr)
+	if id == "" {
+		return existenceError, "could not extract replication group id from arn"
+	}
+	var out *elasticache.DescribeReplicationGroupsOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.ElastiCache.DescribeReplicationGroups(ctx, &elasticache.DescribeReplicationGroupsInput{ReplicationGroupId: aws.String(id)})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *ecachetypes.ReplicationGroupNotFoundFault
+		if errors.As(err, &nf) {
+			return existenceNotFound, "ReplicationGroupNotFoundFault"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil || len(out.ReplicationGroups) == 0 {
+		return existenceError, "no replication group in response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
+// --- EFS ------------------------------------------------------------------------
+
+func verifyEFSFileSystem(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	id := arnResourceID(arnStr)
+	if id == "" {
+		return existenceError, "could not extract file system id from arn"
+	}
+	var out *efs.DescribeFileSystemsOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.EFS.DescribeFileSystems(ctx, &efs.DescribeFileSystemsInput{FileSystemId: aws.String(id)})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *efstypes.FileSystemNotFound
+		if errors.As(err, &nf) {
+			return existenceNotFound, "FileSystemNotFound"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil || len(out.FileSystems) == 0 {
+		return existenceError, "no file system in response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
+// --- OpenSearch (es:domain) ---------------------------------------------------------
+
+func verifyOpenSearchDomain(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	name := arnResourceID(arnStr)
+	if name == "" {
+		return existenceError, "could not extract domain name from arn"
+	}
+	var out *opensearch.DescribeDomainOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.OpenSearch.DescribeDomain(ctx, &opensearch.DescribeDomainInput{DomainName: aws.String(name)})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *opensearchtypes.ResourceNotFoundException
+		if errors.As(err, &nf) {
+			return existenceNotFound, "ResourceNotFoundException"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil || out.DomainStatus == nil {
+		return existenceError, "no domain status in response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
+// --- SNS ------------------------------------------------------------------------
+
+// verifySNSTopic passes the ARN straight through as TopicArn - an SNS topic ARN IS its
+// own identifier, the same shape SQS and S3 already use (arnResourceType falls back to
+// the bare service name "sns" for it, with no "service:resource-type" split).
+func verifySNSTopic(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
+	var out *sns.GetTopicAttributesOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.SNS.GetTopicAttributes(ctx, &sns.GetTopicAttributesInput{TopicArn: aws.String(arnStr)})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		var nf *snstypes.NotFoundException
+		if errors.As(err, &nf) {
+			return existenceNotFound, "NotFoundException"
+		}
+		return existenceError, err.Error()
+	}
+	if out == nil {
+		return existenceError, "empty response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
 // --- orchestration ----------------------------------------------------------------
 
 // regionClientFactory returns the verifierAPISet for one region, building and caching
@@ -1170,15 +1420,22 @@ func newRegionClientFactory(ctx context.Context, profile string) regionClientFac
 			return nil, err
 		}
 		cs := &verifierAPISet{
-			EKS:  eks.NewFromConfig(cfg),
-			RDS:  rds.NewFromConfig(cfg),
-			EC2:  ec2.NewFromConfig(cfg),
-			IAM:  iam.NewFromConfig(cfg),
-			S3:   s3.NewFromConfig(cfg),
-			Logs: cloudwatchlogs.NewFromConfig(cfg),
-			DMS:  databasemigrationservice.NewFromConfig(cfg),
-			SM:   secretsmanager.NewFromConfig(cfg),
-			SQS:  sqs.NewFromConfig(cfg),
+			EKS:         eks.NewFromConfig(cfg),
+			RDS:         rds.NewFromConfig(cfg),
+			EC2:         ec2.NewFromConfig(cfg),
+			IAM:         iam.NewFromConfig(cfg),
+			S3:          s3.NewFromConfig(cfg),
+			Logs:        cloudwatchlogs.NewFromConfig(cfg),
+			DMS:         databasemigrationservice.NewFromConfig(cfg),
+			SM:          secretsmanager.NewFromConfig(cfg),
+			SQS:         sqs.NewFromConfig(cfg),
+			KMS:         kms.NewFromConfig(cfg),
+			ELBV2:       elasticloadbalancingv2.NewFromConfig(cfg),
+			Kafka:       kafka.NewFromConfig(cfg),
+			ElastiCache: elasticache.NewFromConfig(cfg),
+			EFS:         efs.NewFromConfig(cfg),
+			OpenSearch:  opensearch.NewFromConfig(cfg),
+			SNS:         sns.NewFromConfig(cfg),
 		}
 		cache[region] = cs
 		return cs, nil
