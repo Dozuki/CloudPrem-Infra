@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.8.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.7.0...v9.8.0) (2026-08-20)
+
+
+### Features
+
+* **mimir:** default central metrics on, partition-aware ([#526](https://github.com/Dozuki/CloudPrem-Infra/issues/526)) ([adf623d](https://github.com/Dozuki/CloudPrem-Infra/commit/adf623df1bda7be9acbcffb538770e76395fa6aa))
+
 ## [9.7.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.6.0...v9.7.0) (2026-08-17)
 
 
