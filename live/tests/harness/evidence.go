@@ -253,11 +253,18 @@ func retriedAwayPodIDs(nodes map[string]Node) map[string]bool {
 //   - a Pod node with no archived log artifact (main-logs) - an evicted or
 //     OOM-killed attempt has no log to show
 //
+// Also returns the retry mask itself (retriedAwayPodIDs(wf.Status.Nodes)) so callers
+// that need ONLY the retry exclusion, not the no-artifact one, can reuse it instead of
+// recomputing retriedAwayPodIDs a second time: childBase's Detail text (which must
+// skip a retried-away node but keep a no-artifact one) and Build's failed-Pod fallback
+// (which must skip a retried-away node even when every evidence candidate got
+// filtered out).
+//
 // Deliberately uncapped: Build fetches every surviving candidate and dedups on
 // (step, excerpt) while filling its maxNodes display budget, since capping the
 // candidate set before dedup is exactly the bug this exists to avoid - duplicate
 // retries collapsed by dedup never reclaimed the slots they used to occupy.
-func evidenceCandidateNodes(wf Workflow) []Node {
+func evidenceCandidateNodes(wf Workflow) ([]Node, map[string]bool) {
 	masked := retriedAwayPodIDs(wf.Status.Nodes)
 	var nodes []Node
 	for _, n := range failedPodNodes(wf) {
@@ -269,7 +276,7 @@ func evidenceCandidateNodes(wf Workflow) []Node {
 		}
 		nodes = append(nodes, n)
 	}
-	return nodes
+	return nodes, masked
 }
 
 // ---- fetching the log tail ----
@@ -733,14 +740,16 @@ func s3URI(bucket, key string) string {
 }
 
 // childBase builds a child's {name, config, phase, msg, detail}, uncapped like the jq
-// expression it replaces. Detail is built from evidenceCandidateNodes, the same
-// filtered set Build's own evidence selection uses, not the raw failedPodNodes list -
-// otherwise Detail (the fallback text the renderer falls back to when log_excerpt is
-// empty; see 20-matrix.yaml ~:325) could lead with a Pod node that retried away
-// clean, while failed_phase correctly names the real failing step. Keeping this in
-// sync with evidenceCandidateNodes' filtering is deliberate: Detail must never show a
-// failure the rest of the card has already excluded.
-func childBase(wf Workflow) ChildEvidence {
+// expression it replaces. Detail applies the RETRY MASK only (masked, the same set
+// evidenceCandidateNodes computes via retriedAwayPodIDs and returns to its caller) -
+// not evidenceCandidateNodes' full filtered node list, whose no-artifact exclusion
+// exists purely to bound the S3 fetch budget, a cost Detail never spends. Applying
+// that exclusion here too would blank Detail for an evicted/OOM-killed-only failure
+// (no log to fetch, but the Argo node Message is still real and free), where the
+// text used to read e.g. "upgrade(0): Pod was evicted". Skipping a retried-away node
+// is still deliberate, and still required: Detail must never lead with a failure the
+// rest of the card has already excluded because it retried away clean.
+func childBase(wf Workflow, masked map[string]bool) ChildEvidence {
 	config := wf.Metadata.Labels["harness/config"]
 	if config == "" {
 		config = "-"
@@ -750,7 +759,10 @@ func childBase(wf Workflow) ChildEvidence {
 		phase = "-"
 	}
 	var parts []string
-	for _, n := range evidenceCandidateNodes(wf) {
+	for _, n := range failedPodNodes(wf) {
+		if masked[n.ID] {
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%s: %s", n.DisplayName, n.Message))
 	}
 	return ChildEvidence{
@@ -784,21 +796,34 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 	phases := make([]string, len(list.Items))
 	logURIs := make([]string, len(list.Items))
 	for i, wf := range list.Items {
-		children[i] = childBase(wf)
+		nodes, masked := evidenceCandidateNodes(wf)
+		children[i] = childBase(wf, masked)
 		children[i].ArgoURL = argoWorkflowURL(wf.Metadata.Name)
-		perChildNodes[i] = evidenceCandidateNodes(wf)
+		perChildNodes[i] = nodes
 		if len(perChildNodes[i]) > 0 {
 			earliest := perChildNodes[i][0]
 			phases[i] = phaseFromDisplayName(earliest.DisplayName)
 			bucket := wf.Status.ArtifactRepositoryRef.ArtifactRepository.S3.Bucket
 			logURIs[i] = s3URI(bucket, artifactKey(earliest))
-		} else if unfiltered := failedPodNodes(wf); len(unfiltered) > 0 {
-			// Every failed Pod node was filtered out (masked-by-retry, no
-			// artifact, or both), so there is no candidate to fetch and log_uri
-			// has nothing real to point at - but the phase word itself needs no
-			// fetch, so seed it from the earliest UNFILTERED failure instead of
-			// leaving the card without a failed_phase at all.
-			phases[i] = phaseFromDisplayName(unfiltered[0].DisplayName)
+		} else if wf.Status.Phase == "Failed" || wf.Status.Phase == "Error" {
+			// Every failed Pod node was filtered out of the evidence candidates
+			// (masked-by-retry, no artifact, or both), so there is no candidate to
+			// fetch and log_uri has nothing real to point at. The phase word
+			// itself needs no fetch, so seed it from the earliest failed Pod the
+			// retry mask does NOT cover - guarded to run only when the workflow
+			// itself ended Failed/Error (a child that ultimately Succeeded has
+			// nothing to report here, even if an early attempt failed), and still
+			// respecting the mask, so a Pod under a Succeeded Retry never names
+			// the phase for a child whose step actually succeeded. If every
+			// failed Pod is masked, phases[i] is left empty, same as log_uri,
+			// rather than naming a step that succeeded.
+			for _, n := range failedPodNodes(wf) {
+				if masked[n.ID] {
+					continue
+				}
+				phases[i] = phaseFromDisplayName(n.DisplayName)
+				break
+			}
 		}
 	}
 

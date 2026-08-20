@@ -497,6 +497,78 @@ func TestBuildFailedPhaseFallsBackToDisplayName(t *testing.T) {
 	}
 }
 
+// TestBuildFallbackAppliesRetryMaskWhenAllCandidatesFiltered covers FIX 1: the
+// all-candidates-filtered fallback in Build used to call the RAW failedPodNodes(wf)
+// and take index 0 unconditionally, so neither the retry mask nor a workflow-phase
+// guard applied. provision(0) fails first and has no artifact (filtered from
+// evidence candidates either way), but its Retry node ultimately Succeeded - masked,
+// and must not drive failed_phase even though it is earliest. upgrade(0)/upgrade(1)
+// also have no artifact, under a Retry that itself Failed - unmasked, and the real
+// failure the fallback must report.
+func TestBuildFallbackAppliesRetryMaskWhenAllCandidatesFiltered(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-fallbackmask-abcde", Labels: map[string]string{"harness/config": "fallbackmask"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"retry-provision": {ID: "retry-provision", Type: "Retry", Phase: "Succeeded", DisplayName: "provision", Children: []string{"provision0"}},
+				"provision0": {
+					ID: "provision0", Type: "Pod", Phase: "Failed", DisplayName: "provision(0)", FinishedAt: "2026-08-04T00:00:01Z",
+				},
+				"retry-upgrade": {ID: "retry-upgrade", Type: "Retry", Phase: "Failed", DisplayName: "upgrade", Children: []string{"upgrade0", "upgrade1"}},
+				"upgrade0": {
+					ID: "upgrade0", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: "2026-08-04T00:00:02Z",
+				},
+				"upgrade1": {
+					ID: "upgrade1", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(1)", FinishedAt: "2026-08-04T00:00:03Z",
+				},
+			},
+		},
+	}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, &stubFetcher{logs: map[string]string{}}, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	c := children[0]
+	if c.FailedPhase != "upgrade" {
+		t.Errorf("FailedPhase = %q, want %q (masked provision(0) must not drive the fallback even though it is earliest)", c.FailedPhase, "upgrade")
+	}
+}
+
+// TestBuildFallbackLeavesPhaseEmptyWhenChildSucceeded covers the other half of FIX 1:
+// the fallback must run only when the workflow's own phase is Failed/Error. A child
+// that ultimately Succeeded, with only a retried-away failed Pod, must report no
+// failed_phase at all - naming provision(0) here would describe a step that
+// succeeded.
+func TestBuildFallbackLeavesPhaseEmptyWhenChildSucceeded(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-fallbacksucceeded-abcde", Labels: map[string]string{"harness/config": "fallbacksucceeded"}},
+		Status: WorkflowStatus{
+			Phase:                 "Succeeded",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"retry-provision": {ID: "retry-provision", Type: "Retry", Phase: "Succeeded", DisplayName: "provision", Children: []string{"provision0"}},
+				"provision0": {
+					ID: "provision0", Type: "Pod", Phase: "Failed", DisplayName: "provision(0)", FinishedAt: "2026-08-04T00:00:01Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "provision0/main.log"}}}},
+				},
+			},
+		},
+	}
+	logs := map[string]string{
+		"b/provision0/main.log": "Error: this must never be read: the node retried away and the child succeeded\n",
+	}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, &stubFetcher{logs: logs}, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	c := children[0]
+	if c.FailedPhase != "" {
+		t.Errorf("FailedPhase = %q, want empty (child ultimately Succeeded, the masked provision(0) must not name a phase)", c.FailedPhase)
+	}
+}
+
 // TestPhaseFromDisplayNameMapsDestroyToTeardown covers the Argo-step-name-to-
 // harness-phase-word mapping: the Argo step is "destroy" but the harness verdict
 // phase for that step is "teardown", and an unrecognized step must map to "" rather
@@ -1092,8 +1164,7 @@ func TestBuildFailedPhaseMatchesLogURINodeWhenNodeZeroFetchFails(t *testing.T) {
 // Detail (the fallback text the renderer falls back to when log_excerpt is empty) used
 // to build from the UNFILTERED failedPodNodes list, so it could headline a Pod node
 // that evidenceCandidateNodes correctly excluded as retried-away, while failed_phase
-// named the real failing step. Detail must be built from the same filtered candidate
-// set.
+// named the real failing step. Detail must apply the same retry mask.
 func TestChildBaseDetailDoesNotLeadWithRetriedAwayNode(t *testing.T) {
 	wf := Workflow{
 		Metadata: WorkflowMetadata{Name: "harness-detailmask-abcde", Labels: map[string]string{"harness/config": "detailmask"}},
@@ -1116,11 +1187,39 @@ func TestChildBaseDetailDoesNotLeadWithRetriedAwayNode(t *testing.T) {
 			},
 		},
 	}
-	c := childBase(wf)
+	_, masked := evidenceCandidateNodes(wf)
+	c := childBase(wf, masked)
 	if strings.Contains(c.Detail, "upgrade(0)") {
 		t.Errorf("Detail = %q, want it to NOT lead with the retried-away upgrade(0) node", c.Detail)
 	}
 	if !strings.Contains(c.Detail, "validate(0)") {
 		t.Errorf("Detail = %q, want it to contain the real validate(0) failure", c.Detail)
+	}
+}
+
+// TestChildBaseDetailKeepsNoArtifactNode covers FIX 2: childBase's Detail must apply
+// ONLY the retry mask, not evidenceCandidateNodes' full filtered node list (which also
+// drops nodes with no main-logs artifact to bound the S3 fetch budget - a cost Detail
+// never spends). An evicted/OOM-killed Pod node has no artifact at all, so under the
+// old (post-refactor) behavior Detail went empty for exactly this case, where master
+// used to render e.g. "upgrade(0): Pod was evicted".
+func TestChildBaseDetailKeepsNoArtifactNode(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-evictdetail-abcde", Labels: map[string]string{"harness/config": "evictdetail"}},
+		Status: WorkflowStatus{
+			Phase: "Failed",
+			Nodes: map[string]Node{
+				// No main-logs artifact at all - an evicted/OOM-killed attempt.
+				"upgrade0": {
+					ID: "upgrade0", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: "2026-08-04T00:00:01Z",
+					Message: "Pod was evicted",
+				},
+			},
+		},
+	}
+	_, masked := evidenceCandidateNodes(wf)
+	c := childBase(wf, masked)
+	if !strings.Contains(c.Detail, "Pod was evicted") {
+		t.Errorf("Detail = %q, want it to carry the evicted node's Message even though it has no artifact", c.Detail)
 	}
 }
