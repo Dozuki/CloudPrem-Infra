@@ -118,8 +118,17 @@ func failedPodNodes(wf Workflow, maxNodes int) []Node {
 		nodes = append(nodes, n)
 	}
 	sort.Slice(nodes, func(i, j int) bool {
-		if nodes[i].FinishedAt != nodes[j].FinishedAt {
-			return nodes[i].FinishedAt < nodes[j].FinishedAt
+		ti, iOK := parseFinishedAt(nodes[i].FinishedAt)
+		tj, jOK := parseFinishedAt(nodes[j].FinishedAt)
+		// A node with a parseable timestamp always sorts before one without - an
+		// empty or unparseable FinishedAt used to sort FIRST as the smallest raw
+		// string, which could pick a node missing that field as "the earliest"
+		// and have it wrongly drive failed_phase/log_uri.
+		if iOK != jOK {
+			return iOK
+		}
+		if iOK && jOK && !ti.Equal(tj) {
+			return ti.Before(tj)
 		}
 		return nodes[i].DisplayName < nodes[j].DisplayName
 	})
@@ -127,6 +136,20 @@ func failedPodNodes(wf Workflow, maxNodes int) []Node {
 		nodes = nodes[:maxNodes]
 	}
 	return nodes
+}
+
+// parseFinishedAt parses a Node's FinishedAt (RFC3339, as Argo/Kubernetes emits
+// timestamps) and reports whether it parsed. Empty or malformed values report false
+// so failedPodNodes can sort them last instead of treating them as the earliest.
+func parseFinishedAt(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // ---- fetching the log tail ----
@@ -344,15 +367,48 @@ func verdictPhase(lines []string) string {
 	return phase
 }
 
-// displayPhaseRE captures the leading alphabetic phase word off a Pod node's
-// DisplayName ("upgrade(0)" -> "upgrade", "destroy(0)" -> "destroy").
+// displayPhaseRE captures the leading alphabetic step name off a Pod node's
+// DisplayName ("upgrade(0)" -> "upgrade", "destroy(0)" -> "destroy"). That step
+// name is a lookup key into canonicalPhaseByStep, not the phase word itself - the
+// two diverge for the teardown step (see below).
 var displayPhaseRE = regexp.MustCompile(`^[a-zA-Z]+`)
+
+// canonicalPhaseByStep maps a known Argo step name to the canonical phase word the
+// harness's own verdict lines use (verdictRE's "provision|upgrade|validate|
+// teardown"). The Argo step in live/tests/argo/10-scenario.yaml is named "destroy",
+// but the harness verdict phase for that same step is "teardown" - keep both
+// mapped to "teardown" here rather than "fixing" this back to a bare regex
+// extraction, which would render the un-promised phase word "destroy" on the card.
+// A step name with no entry (an unrecognized DisplayName) maps to "", same as no
+// match at all - the relay omits failed_phase when it's empty, which beats
+// rendering an arbitrary or nonsense word.
+var canonicalPhaseByStep = map[string]string{
+	"gate":      "gate",
+	"provision": "provision",
+	"upgrade":   "upgrade",
+	"validate":  "validate",
+	"destroy":   "teardown",
+	"teardown":  "teardown",
+}
 
 // phaseFromDisplayName is the failed_phase fallback for when a node's log carries no
 // "<phase> failed: ..." verdict line to source the phase word from instead (the
 // fetch itself failed, the log has no verdict line, or the window scrolled past it).
 func phaseFromDisplayName(displayName string) string {
-	return displayPhaseRE.FindString(displayName)
+	step := displayPhaseRE.FindString(displayName)
+	return canonicalPhaseByStep[step]
+}
+
+// retryIndexSuffixRE strips the "(N)" retry index Argo appends to a Pod node's
+// DisplayName ("upgrade(0)", "upgrade(1)") so repeated attempts of the same step
+// normalize to the same key.
+var retryIndexSuffixRE = regexp.MustCompile(`\(\d+\)$`)
+
+// normalizeStepName strips a DisplayName's retry index, used as (half of) the
+// per-child excerpt dedup key so retries of the SAME step collapse while two
+// DIFFERENT steps never do, even when their excerpts happen to render identically.
+func normalizeStepName(displayName string) string {
+	return retryIndexSuffixRE.ReplaceAllString(displayName, "")
 }
 
 // lastErrorLine is ExtractError's errLine step alone, capped to 400 runes. It exists
@@ -618,9 +674,13 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 	}
 
 	// nodeResult keeps a fetched node's excerpt separate from its display name so
-	// the final join can dedup on excerpt text alone - a retried step's nodes
-	// carry different DisplayNames ("upgrade(0)" vs "upgrade(1)") for the
-	// identical underlying error.
+	// the final join can dedup on (normalized step, excerpt) - a retried step's
+	// nodes carry different DisplayNames ("upgrade(0)" vs "upgrade(1)") for the
+	// identical underlying error, and those must collapse. Deduping on excerpt
+	// alone would ALSO collapse two genuinely different steps whose excerpts
+	// happen to render identically (after secret-scrubbing, or because both got
+	// cut at the same point by the 460-rune truncation), silently dropping a
+	// distinct failure - exactly the signal loss this evidence path exists to fix.
 	type nodeResult struct {
 		display, excerpt string
 	}
@@ -688,10 +748,14 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 		var nonEmpty []string
 		seen := make(map[string]bool, len(parts))
 		for _, p := range parts {
-			if p.excerpt == "" || seen[p.excerpt] {
+			if p.excerpt == "" {
 				continue
 			}
-			seen[p.excerpt] = true
+			key := normalizeStepName(p.display) + "\x00" + p.excerpt
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			nonEmpty = append(nonEmpty, p.display+": "+p.excerpt)
 		}
 		if len(nonEmpty) == 0 {

@@ -497,6 +497,99 @@ func TestBuildFailedPhaseFallsBackToDisplayName(t *testing.T) {
 	}
 }
 
+// TestPhaseFromDisplayNameMapsDestroyToTeardown covers the Argo-step-name-to-
+// harness-phase-word mapping: the Argo step is "destroy" but the harness verdict
+// phase for that step is "teardown", and an unrecognized step must map to "" rather
+// than rendering an arbitrary word the card never promises.
+func TestPhaseFromDisplayNameMapsDestroyToTeardown(t *testing.T) {
+	cases := []struct {
+		displayName, want string
+	}{
+		{"destroy(0)", "teardown"},
+		{"teardown(0)", "teardown"},
+		{"upgrade(0)", "upgrade"},
+		{"provision(1)", "provision"},
+		{"validate(0)", "validate"},
+		{"gate", "gate"},
+		{"somethingUnexpected(0)", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := phaseFromDisplayName(c.displayName); got != c.want {
+			t.Errorf("phaseFromDisplayName(%q) = %q, want %q", c.displayName, got, c.want)
+		}
+	}
+}
+
+// TestBuildDedupKeysOnStepAndExcerpt covers the two halves of the dedup key: two
+// DIFFERENT steps whose excerpts happen to render identically (e.g. after
+// truncation) must both survive as distinct bullets, while repeated attempts of the
+// SAME step with an identical excerpt must still collapse to one.
+func TestBuildDedupKeysOnStepAndExcerpt(t *testing.T) {
+	mkNode := func(id, displayName, finishedAt string) Node {
+		return Node{
+			ID: id, Type: "Pod", Phase: "Failed", DisplayName: displayName, FinishedAt: finishedAt,
+			Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: id + "/main.log"}}}},
+		}
+	}
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-dedup-abcde", Labels: map[string]string{"harness/config": "dedup"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				// Two attempts of the SAME step, identical excerpt: must collapse.
+				"0": mkNode("0", "upgrade(0)", "2026-08-04T00:00:01Z"),
+				"1": mkNode("1", "upgrade(1)", "2026-08-04T00:00:02Z"),
+				// A DIFFERENT step with the identical excerpt text: must survive.
+				"2": mkNode("2", "validate(0)", "2026-08-04T00:00:03Z"),
+			},
+		},
+	}
+	logs := map[string]string{
+		"b/0/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+		"b/1/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+		"b/2/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{MaxNodesPerChild: 0})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	got := children[0].LogExcerpt
+	if n := strings.Count(got, "context deadline exceeded"); n != 2 {
+		t.Errorf("LogExcerpt = %q, want 2 occurrences (upgrade retries collapsed, validate distinct), got %d", got, n)
+	}
+	if !strings.Contains(got, "validate(0)") {
+		t.Errorf("LogExcerpt = %q, want the distinct validate(0) step to survive dedup", got)
+	}
+}
+
+// TestFailedPodNodesSkipsEmptyFinishedAtForEarliest covers the ordering fix: a
+// failed node with an EMPTY FinishedAt must not be treated as the earliest just
+// because an empty string sorts before any real timestamp. It has to sort AFTER
+// every node with a real timestamp.
+func TestFailedPodNodesSkipsEmptyFinishedAtForEarliest(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-noFinishedAt-abcde", Labels: map[string]string{"harness/config": "noFinishedAt"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"missing": {ID: "missing", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: ""},
+				"real":    {ID: "real", Type: "Pod", Phase: "Failed", DisplayName: "validate(0)", FinishedAt: "2026-08-04T00:00:01Z"},
+			},
+		},
+	}
+	nodes := failedPodNodes(wf, 0)
+	if len(nodes) != 2 {
+		t.Fatalf("got %d nodes, want 2", len(nodes))
+	}
+	if nodes[0].ID != "real" {
+		t.Errorf("nodes[0].ID = %q, want %q (the node with a real FinishedAt, not the one with an empty FinishedAt)", nodes[0].ID, "real")
+	}
+}
+
 // TestBuildArgoURLRespectsARGOUIBASE covers both ends of the ARGO_UI_BASE contract:
 // unset means omit the link entirely, set means build the deep link off it.
 func TestBuildArgoURLRespectsARGOUIBASE(t *testing.T) {
@@ -504,6 +597,13 @@ func TestBuildArgoURLRespectsARGOUIBASE(t *testing.T) {
 	stub := &stubFetcher{logs: map[string]string{}}
 
 	t.Run("unset", func(t *testing.T) {
+		// Force ARGO_UI_BASE into a known state rather than relying on its
+		// ambient absence: t.Setenv registers a value (and its restore on
+		// cleanup), then os.Unsetenv removes it for this subtest's duration so
+		// the "unset" case holds even if ARGO_UI_BASE leaks into the test
+		// process env.
+		t.Setenv("ARGO_UI_BASE", "https://leaked.example")
+		os.Unsetenv("ARGO_UI_BASE")
 		children := Build(context.Background(), list, stub, BuildOptions{})
 		for _, c := range children {
 			if c.ArgoURL != "" {
@@ -525,6 +625,13 @@ func TestBuildArgoURLRespectsARGOUIBASE(t *testing.T) {
 }
 
 func TestBuildOutputIsDeterministic(t *testing.T) {
+	// children.golden.json bakes in argo_url:"" for every child, which only
+	// holds with ARGO_UI_BASE unset - force that explicitly (see the "unset"
+	// case of TestBuildArgoURLRespectsARGOUIBASE) rather than relying on its
+	// ambient absence.
+	t.Setenv("ARGO_UI_BASE", "https://leaked.example")
+	os.Unsetenv("ARGO_UI_BASE")
+
 	list := loadWorkflowList(t, "workflows-list.json")
 	logs := map[string]string{
 		"dozuki-argo-artifacts-000000000000/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log": readTestdata(t, "min-default-upgrade.log"),
