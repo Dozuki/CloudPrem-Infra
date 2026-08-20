@@ -317,6 +317,24 @@ func TestVerifyIAMRoleAndPolicy(t *testing.T) {
 	}
 }
 
+// DescribeDBClusterParameterGroups' deserializer maps the wire code
+// "DBParameterGroupNotFound" to *rdstypes.DBParameterGroupNotFoundFault, not the
+// cluster-flavored fault type the API name suggests. Before the fix this probe only
+// matched *rdstypes.DBClusterParameterGroupNotFoundFault, which the SDK never actually
+// returns from this call, so it could never reach a definite NotFound.
+func TestVerifyRDSClusterParameterGroupPlainFaultIsNotFound(t *testing.T) {
+	api := &fakeVerifierAPI{describeDBClusterParameterGroups: func(*rds.DescribeDBClusterParameterGroupsInput) (*rds.DescribeDBClusterParameterGroupsOutput, error) {
+		return nil, &rdstypes.DBParameterGroupNotFoundFault{Message: aws.String("gone")}
+	}}
+	state, note := verifyRDSClusterParameterGroup(context.Background(), api.apiSet(), "arn:aws:rds:us-east-1:1:cluster-pg:custx-pg14")
+	if state != existenceNotFound {
+		t.Fatalf("state = %v, want existenceNotFound (note=%q)", state, note)
+	}
+	if note != "DBParameterGroupNotFoundFault" {
+		t.Errorf("note = %q, want DBParameterGroupNotFoundFault", note)
+	}
+}
+
 func TestVerifyS3BucketNotFoundCodes(t *testing.T) {
 	for _, code := range []string{"NotFound", "NoSuchBucket"} {
 		api := &fakeVerifierAPI{headBucket: func(*s3.HeadBucketInput) (*s3.HeadBucketOutput, error) {
@@ -326,6 +344,38 @@ func TestVerifyS3BucketNotFoundCodes(t *testing.T) {
 		if state != existenceNotFound {
 			t.Errorf("code %s: state = %v, want existenceNotFound", code, state)
 		}
+	}
+}
+
+// An S3 ARN carries no region, so a DR-region bucket gets HeadBucket'd against the
+// primary region and answers with a bare HTTP redirect (301/307/308, no body). s3shared
+// derives a smithy error code from http.StatusText for that shape, matching neither
+// "NotFound" nor "NoSuchBucket". Before the fix that fell through to existenceError and
+// the residual was demoted as unconfirmed; the redirect is actually proof the bucket
+// exists, so the residual must stay Blocking.
+func TestVerifyS3BucketRedirectMeansExists(t *testing.T) {
+	for _, code := range []string{"MovedPermanently", "PermanentRedirect", "TemporaryRedirect"} {
+		api := &fakeVerifierAPI{headBucket: func(*s3.HeadBucketInput) (*s3.HeadBucketOutput, error) {
+			return nil, &smithy.GenericAPIError{Code: code, Message: "redirect"}
+		}}
+		state, note := verifyS3Bucket(context.Background(), api.apiSet(), "arn:aws:s3:::custx-dr-uploads")
+		if state != existenceExists {
+			t.Errorf("code %s: state = %v, want existenceExists (note=%q)", code, state, note)
+		}
+	}
+
+	// End to end: a DR-region bucket residual must stay Blocking, not get silently
+	// demoted the way every DR S3 orphan was before this fix.
+	api := &fakeVerifierAPI{headBucket: func(*s3.HeadBucketInput) (*s3.HeadBucketOutput, error) {
+		return nil, &smithy.GenericAPIError{Code: "MovedPermanently", Message: "redirect"}
+	}}
+	rep := &ResidualReport{Residuals: []Residual{
+		{Source: "tag-reconcile", ARN: "arn:aws:s3:::custx-dr-uploads", Type: "s3", Blocking: true},
+	}}
+	clientsFor := func(string) (*verifierAPISet, error) { return api.apiSet(), nil }
+	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", clientsFor)
+	if !rep.Residuals[0].Blocking {
+		t.Fatalf("DR-region S3 residual was demoted (Why=%q); want it to stay Blocking", rep.Residuals[0].Why)
 	}
 }
 
@@ -1057,6 +1107,41 @@ func TestVerifyRDSClusterResourceIDFilterNilResponseIsErrorNotNotFound(t *testin
 	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", clientsFor)
 	if rep.Residuals[0].Blocking {
 		t.Fatal("a nil-response probe must fail open (Blocking demoted)")
+	}
+	if len(rep.Incomplete) != 1 {
+		t.Fatalf("expected exactly one Incomplete note, got %+v", rep.Incomplete)
+	}
+}
+
+// A regional resource type whose ARN happens to carry an empty region field (malformed
+// or an unexpected shape) must never fall back to the caller's default region - that
+// fallback is reserved for the region-less allowlist (iam, s3, rds:global-cluster).
+// Before the fix, ANY empty-region ARN hit the fallback, so a wrong-region probe could
+// have reported "confirmed gone" for a type that was never actually checked in its own
+// region. This pins that the probe never even runs (clientsFor is never called) and the
+// residual fails open with an Incomplete note, not a definite NotFound.
+func TestVerifyResidualExistenceWithEmptyRegionNonRegionLessTypeFailsOpen(t *testing.T) {
+	arn := "arn:aws:rds::1:cluster:custx-something" // empty region field, rds:cluster is regional
+	api := &fakeVerifierAPI{describeDBClusters: func(*rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		return &rds.DescribeDBClustersOutput{DBClusters: []rdstypes.DBCluster{{DBClusterIdentifier: aws.String("custx-something")}}}, nil
+	}}
+	rep := &ResidualReport{Residuals: []Residual{
+		{Source: "tag-reconcile", ARN: arn, Type: "rds:cluster", Blocking: true},
+	}}
+	var clientsForCalled bool
+	clientsFor := func(region string) (*verifierAPISet, error) {
+		clientsForCalled = true
+		return api.apiSet(), nil
+	}
+	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", clientsFor)
+	if clientsForCalled {
+		t.Fatal("clientsFor was called - the defaultRegion fallback must not fire for a non-region-less type with an empty ARN region")
+	}
+	if rep.Residuals[0].Blocking {
+		t.Fatal("residual must fail open (Blocking demoted), not stay Blocking off a probe that never ran")
+	}
+	if strings.Contains(rep.Residuals[0].Why, "confirmed the resource is gone") {
+		t.Fatalf("Why = %q, must not report a definite NotFound", rep.Residuals[0].Why)
 	}
 	if len(rep.Incomplete) != 1 {
 		t.Fatalf("expected exactly one Incomplete note, got %+v", rep.Incomplete)

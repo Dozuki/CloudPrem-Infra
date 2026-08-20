@@ -56,8 +56,8 @@ const (
 )
 
 // existenceVerifier probes one live resource. clients is already scoped to the ARN's own
-// region (or the caller's default region, for the one region-less type - see
-// verifyResidualExistenceWith). arn is the residual's exact live ARN.
+// region (or the caller's default region, for the region-less types - see the allowlist
+// in verifyResidualExistenceWith). arn is the residual's exact live ARN.
 type existenceVerifier func(ctx context.Context, clients *verifierAPISet, arn string) (existenceState, string)
 
 // verifierAPISet is the minimal per-region AWS surface the registered verifiers need.
@@ -603,9 +603,18 @@ func verifyRDSClusterParameterGroup(ctx context.Context, c *verifierAPISet, arnS
 	if err == nil {
 		return existenceExists, ""
 	}
+	// The DescribeDBClusterParameterGroups deserializer maps the wire error code
+	// "DBParameterGroupNotFound" to *rdstypes.DBParameterGroupNotFoundFault, not the
+	// cluster-flavored fault type its name would suggest - RDS reuses the plain
+	// parameter-group fault here. Match both so this probe can actually reach a
+	// definite NotFound instead of always failing open.
 	var nf *rdstypes.DBClusterParameterGroupNotFoundFault
 	if errors.As(err, &nf) {
 		return existenceNotFound, "DBClusterParameterGroupNotFoundFault"
+	}
+	var pgnf *rdstypes.DBParameterGroupNotFoundFault
+	if errors.As(err, &pgnf) {
+		return existenceNotFound, "DBParameterGroupNotFoundFault"
 	}
 	return existenceError, err.Error()
 }
@@ -629,7 +638,8 @@ func verifyRDSSubnetGroup(ctx context.Context, c *verifierAPISet, arnStr string)
 	return existenceError, err.Error()
 }
 
-// verifyRDSGlobalCluster is the one region-less type: a global cluster ARN
+// verifyRDSGlobalCluster is one of the region-less types (alongside iam and s3 - see
+// the allowlist in verifyResidualExistenceWith): a global cluster ARN
 // ("arn:aws:rds::account:global-cluster:id") carries no region field, so
 // verifyResidualExistenceWith falls back to the caller's default (primary) region to
 // build the client - the API itself is a global-scoped read regardless of which
@@ -842,6 +852,20 @@ func verifyS3Bucket(ctx context.Context, c *verifierAPISet, arnStr string) (exis
 	var ae smithy.APIError
 	if errors.As(err, &ae) && (ae.ErrorCode() == "NotFound" || ae.ErrorCode() == "NoSuchBucket") {
 		return existenceNotFound, ae.ErrorCode()
+	}
+	// An S3 ARN carries no region, so a DR-region bucket gets probed with a client
+	// built against the primary region (see the defaultRegion fallback in
+	// verifyResidualExistenceWith). HeadBucket against the wrong region answers with a
+	// bare HTTP redirect and no body, which s3shared turns into a smithy code derived
+	// from http.StatusText - "MovedPermanently", "PermanentRedirect", or
+	// "TemporaryRedirect" depending on the exact response. That is not "gone"; it is
+	// proof the bucket exists somewhere else, so treat it as a confirmed Exists rather
+	// than falling through to existenceError and silently demoting a real DR orphan.
+	if errors.As(err, &ae) {
+		switch ae.ErrorCode() {
+		case "MovedPermanently", "PermanentRedirect", "TemporaryRedirect":
+			return existenceExists, ae.ErrorCode()
+		}
 	}
 	return existenceError, err.Error()
 }
@@ -1169,6 +1193,27 @@ func (p PhaseParams) verifyResidualExistence(ctx context.Context, rep *ResidualR
 	verifyResidualExistenceWith(ctx, rep, p.Region, newVerifierClients(ctx, p.Profile))
 }
 
+// regionLessAWSTypes is the allowlist of awsType values (the "service:resource-type"
+// or bare service string arnResourceType returns) whose ARN genuinely carries no
+// region, so verifyResidualExistenceWith's defaultRegion fallback is safe to apply to
+// them. IAM is checked separately by service ("iam:role", "iam:policy", ... are all
+// account-scoped with no region field regardless of resource type), so this map only
+// needs the two non-IAM exceptions.
+//
+//   - "s3": a bucket ARN is region-less but NOT region-agnostic - the bucket still
+//     lives in exactly one region, and HeadBucket against the wrong one answers with a
+//     redirect rather than a 404. See verifyS3Bucket's redirect handling.
+//   - "rds:global-cluster": a genuinely global-scoped read, answered the same
+//     regardless of which region's endpoint serves it.
+//
+// Any other type with an empty ARN region is regional data with a malformed or
+// unexpected ARN, not evidence it is safe to probe from the primary region - treating
+// it as such is exactly the mistake that silently demoted every DR-region S3 orphan.
+var regionLessAWSTypes = map[string]bool{
+	"s3":                 true,
+	"rds:global-cluster": true,
+}
+
 // verifyResidualExistenceWith mutates rep in place: any Blocking, ARN-bearing residual
 // whose probe returns NotFound or Error is demoted, and every Error outcome (including
 // "no verifier registered", which production can reach even though the completeness
@@ -1176,10 +1221,11 @@ func (p PhaseParams) verifyResidualExistence(ctx context.Context, rep *ResidualR
 // probe gap is never invisible in the report the way the false positives it replaces
 // were.
 //
-// defaultRegion is used only when a residual's own ARN carries no region (rds:global-
-// cluster is the one type here that has none) - never as a substitute for a real
-// region an ARN does carry, which is exactly the mistake that would silently NotFound
-// every DR-region orphan.
+// defaultRegion is used only when a residual's own ARN carries no region AND its type
+// is on the regionLessAWSTypes allowlist (iam, s3, rds:global-cluster) - never as a
+// substitute for a real region an ARN does carry, and never for a regional type whose
+// ARN happens to be missing one, which is exactly the mistake that would silently
+// NotFound every DR-region orphan.
 func verifyResidualExistenceWith(ctx context.Context, rep *ResidualReport, defaultRegion string, clientsFor regionClientFactory) {
 	if rep == nil {
 		return
@@ -1192,7 +1238,7 @@ func verifyResidualExistenceWith(ctx context.Context, rep *ResidualReport, defau
 			// an ARN, and an already-non-blocking hit needs no further check.
 			continue
 		}
-		_, awsType := arnResourceType(res.ARN)
+		service, awsType := arnResourceType(res.ARN)
 		verifier, ok := existenceVerifiers[awsType]
 		if !ok {
 			rep.Incomplete = append(rep.Incomplete, fmt.Sprintf("no existence verifier registered for %s (%s)", awsType, res.ARN))
@@ -1202,6 +1248,12 @@ func verifyResidualExistenceWith(ctx context.Context, rep *ResidualReport, defau
 		}
 		region := arnRegion(res.ARN)
 		if region == "" {
+			if service != "iam" && !regionLessAWSTypes[awsType] {
+				rep.Incomplete = append(rep.Incomplete, fmt.Sprintf("existence probe for %s %s: ARN carries no region and %s is not a region-less type; refusing to guess the primary region", awsType, res.ARN, awsType))
+				res.Blocking = false
+				res.Why = "existence probe could not run (malformed ARN region); see Incomplete"
+				continue
+			}
 			region = defaultRegion
 		}
 		clients, err := clientsFor(region)
