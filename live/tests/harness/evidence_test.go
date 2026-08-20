@@ -282,9 +282,10 @@ func TestBuildCapsAtThreeNodesPerChild(t *testing.T) {
 			t.Errorf("Retry node was fetched: %v", got)
 		}
 	}
-	// The cap must keep the LATEST 3 by FinishedAt (c, d, e), not the earliest (a,
-	// b, c) - the most recent failures are the ones relevant to a currently-red run.
-	for _, want := range []string{"c/main.log", "d/main.log", "e/main.log"} {
+	// The cap must keep the EARLIEST 3 by FinishedAt (a, b, c), not the latest (c,
+	// d, e) - the originating failure is what explains why the run is red, and it
+	// must survive however many later nodes pile on top of it.
+	for _, want := range []string{"a/main.log", "b/main.log", "c/main.log"} {
 		found := false
 		for _, r := range got {
 			if strings.Contains(r, want) {
@@ -293,15 +294,59 @@ func TestBuildCapsAtThreeNodesPerChild(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("requested %v, want it to include the latest node %q", got, want)
+			t.Errorf("requested %v, want it to include the earliest node %q", got, want)
 		}
 	}
-	for _, notWant := range []string{"a/main.log", "b/main.log"} {
+	for _, notWant := range []string{"d/main.log", "e/main.log"} {
 		for _, r := range got {
 			if strings.Contains(r, notWant) {
-				t.Errorf("requested %v, want the earliest nodes dropped in favor of the latest", got)
+				t.Errorf("requested %v, want the later nodes dropped in favor of the earliest", got)
 			}
 		}
+	}
+}
+
+// TestBuildKeepsFirstFailureAcrossRetries covers a run where the last node to fail
+// is not the one that explains the run: three attempts of the same retried step, the
+// first genuinely different from the later two (which look identical to each
+// other - the retry re-hit the same error). The earliest attempt's error must be the
+// one that survives into LogExcerpt, and the identical text on attempts 2 and 3 must
+// collapse into a single bullet rather than repeating.
+func TestBuildKeepsFirstFailureAcrossRetries(t *testing.T) {
+	mkNode := func(id, finishedAt string) Node {
+		return Node{
+			ID: id, Type: "Pod", Phase: "Failed", DisplayName: "upgrade(" + id + ")", FinishedAt: finishedAt,
+			Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: id + "/main.log"}}}},
+		}
+	}
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-retry-abcde", Labels: map[string]string{"harness/config": "retry"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"0": mkNode("0", "2026-08-04T00:00:01Z"),
+				"1": mkNode("1", "2026-08-04T00:00:02Z"),
+				"2": mkNode("2", "2026-08-04T00:00:03Z"),
+			},
+		},
+	}
+	logs := map[string]string{
+		"b/0/main.log": "Error: worktree add 8f347c78: exit status 128\n",
+		"b/1/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+		"b/2/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	got := children[0].LogExcerpt
+	if !strings.Contains(got, "worktree add 8f347c78") {
+		t.Errorf("LogExcerpt = %q, want the first (earliest) attempt's error to survive", got)
+	}
+	if n := strings.Count(got, "context deadline exceeded"); n != 1 {
+		t.Errorf("LogExcerpt = %q, want the identical retry excerpt deduped to 1 occurrence, got %d", got, n)
 	}
 }
 
@@ -392,6 +437,91 @@ func TestBuildDMSDiagnosticSurvivesTruncation(t *testing.T) {
 			t.Errorf("bi_ha LogExcerpt = %q, want it to contain %q (the DMS diagnostic must survive both the per-line and per-child truncation)", biHa.LogExcerpt, want)
 		}
 	}
+}
+
+// TestBuildExtractsFailedPhaseFromVerdictLine covers the primary source for
+// failed_phase: a "<phase> failed: ..." verdict line in the earliest failed node's
+// log. workflows-list.json's bi_ha child has upgrade(0) (2026-08-04T01:06:53Z) as
+// its earliest failed node, ahead of destroy(0) (01:30:24Z) - failed_phase must come
+// from upgrade's own log, not destroy's, and log_uri must point at upgrade's key.
+func TestBuildExtractsFailedPhaseFromVerdictLine(t *testing.T) {
+	list := loadWorkflowList(t, "workflows-list.json")
+	logs := map[string]string{
+		"dozuki-argo-artifacts-000000000000/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log": readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log":             readTestdata(t, "min-default-upgrade.log"),
+		"dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-945485330/main.log":              readTestdata(t, "bi-ha-destroy-tail.log"),
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), list, stub, BuildOptions{})
+
+	var biHa *ChildEvidence
+	for i := range children {
+		if children[i].Config == "bi_ha" {
+			biHa = &children[i]
+		}
+	}
+	if biHa == nil {
+		t.Fatal("no bi_ha child in Build() output")
+	}
+	if biHa.FailedPhase != "upgrade" {
+		t.Errorf("bi_ha FailedPhase = %q, want %q (from upgrade(0)'s own verdict line, not destroy(0)'s)", biHa.FailedPhase, "upgrade")
+	}
+	wantURI := "s3://dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log"
+	if biHa.LogURI != wantURI {
+		t.Errorf("bi_ha LogURI = %q, want %q", biHa.LogURI, wantURI)
+	}
+}
+
+// TestBuildFailedPhaseFallsBackToDisplayName covers the fallback: when the earliest
+// node's log carries no "<phase> failed: ..." verdict line (fetch fails here, but a
+// verdict-free log hits the same branch), failed_phase comes from the node's
+// DisplayName instead. log_uri must still be populated from the known bucket/key
+// even though the fetch itself failed.
+func TestBuildFailedPhaseFallsBackToDisplayName(t *testing.T) {
+	list := loadWorkflowList(t, "workflows-list.json")
+	stub := &stubFetcher{fn: func(ctx context.Context, bucket, key string) (string, error) {
+		return "", errors.New("s3: access denied")
+	}}
+	children := Build(context.Background(), list, stub, BuildOptions{})
+
+	for _, c := range children {
+		if c.Config != "bi_ha" && c.Config != "min_default" {
+			continue
+		}
+		if c.FailedPhase != "upgrade" {
+			t.Errorf("child %q: FailedPhase = %q, want %q (DisplayName fallback off %q)", c.Name, c.FailedPhase, "upgrade", "upgrade(0)")
+		}
+		if c.LogURI == "" {
+			t.Errorf("child %q: LogURI is empty, want it populated from the workflow's known bucket/key even though the fetch failed", c.Name)
+		}
+	}
+}
+
+// TestBuildArgoURLRespectsARGOUIBASE covers both ends of the ARGO_UI_BASE contract:
+// unset means omit the link entirely, set means build the deep link off it.
+func TestBuildArgoURLRespectsARGOUIBASE(t *testing.T) {
+	list := loadWorkflowList(t, "workflows-list.json")
+	stub := &stubFetcher{logs: map[string]string{}}
+
+	t.Run("unset", func(t *testing.T) {
+		children := Build(context.Background(), list, stub, BuildOptions{})
+		for _, c := range children {
+			if c.ArgoURL != "" {
+				t.Errorf("child %q: ArgoURL = %q, want \"\" when ARGO_UI_BASE is unset", c.Name, c.ArgoURL)
+			}
+		}
+	})
+
+	t.Run("set", func(t *testing.T) {
+		t.Setenv("ARGO_UI_BASE", "https://argo.example.internal/")
+		children := Build(context.Background(), list, stub, BuildOptions{})
+		for _, c := range children {
+			want := "https://argo.example.internal/workflows/argo/" + c.Name
+			if c.ArgoURL != want {
+				t.Errorf("child %q: ArgoURL = %q, want %q", c.Name, c.ArgoURL, want)
+			}
+		}
+	})
 }
 
 func TestBuildOutputIsDeterministic(t *testing.T) {

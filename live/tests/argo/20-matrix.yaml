@@ -359,7 +359,10 @@ spec:
                 duration_seconds: $dur, trigger: $trigger, pr_url: $prurl,
                 children: (map({config: .config, phase: .phase,
                                 detail: (if .detail != "" then .detail else .msg end | .[0:400]),
-                                log_excerpt: (.log_excerpt // "" | .[0:460])}))
+                                log_excerpt: (.log_excerpt // "" | .[0:460]),
+                                failed_phase: (.failed_phase // ""),
+                                argo_url: (.argo_url // ""),
+                                log_uri: (.log_uri // "")}))
               }')
             if [ -n "$RELAY_URL" ] && [ -n "$RELAY_TOKEN" ] && \
                printf '%s' "$RELAY_PAYLOAD" | curl -sf -X POST \
@@ -369,9 +372,15 @@ spec:
               echo "verdict posted via relay"
             elif [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
               echo "relay unavailable; falling back to a plain post"
+              # The plain post has no room for a per-child card, so it carries just
+              # the phase word off the first child that has one - still tells a
+              # human "upgrade" or "teardown" without them opening the workflow.
+              FAILED_PHASE=$(printf '%s' "$CHILD_JSON" | jq -r '[.[] | select((.failed_phase // "") != "") | .failed_phase][0] // empty')
+              TEXT="${EMOJI} ${DESC}"
+              [ -n "$FAILED_PHASE" ] && TEXT="${TEXT} (failed phase: ${FAILED_PHASE})"
               curl -sf -X POST -H 'Content-type: application/json; charset=utf-8' \
                 -H "Authorization: Bearer ${SLACK_TOKEN}" \
-                --data "{\"channel\":\"${SLACK_CHANNEL}\",\"text\":\"${EMOJI} ${DESC}\"}" \
+                --data "$(jq -n --arg channel "$SLACK_CHANNEL" --arg text "$TEXT" '{channel: $channel, text: $text}')" \
                 https://slack.com/api/chat.postMessage >/dev/null || echo "slack post failed"
             fi
             exit 0

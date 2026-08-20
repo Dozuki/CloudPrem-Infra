@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -96,9 +97,10 @@ func artifactKey(n Node) string {
 
 // failedPodNodes returns a child's failed Pod nodes, sorted by FinishedAt then
 // DisplayName for determinism. When capped at maxNodes (0 = unlimited), it keeps the
-// LATEST maxNodes by FinishedAt, not the earliest - the most recent failures are the
-// ones relevant to why the run is currently red; an early failure that later ones
-// piled on top of is the least useful one to spend the node budget on.
+// EARLIEST maxNodes by FinishedAt, not the latest - a retried step lands one failed
+// Pod node per attempt, all carrying the same underlying error, and keeping the
+// earliest one means the originating failure (and its failed_phase/log_uri) survives
+// the retries instead of being pushed out by them.
 //
 // Filtering on Type == "Pod" is what excludes the duplicate Retry node Argo also
 // marks Failed for the same phase - Retry nodes carry no artifact of their own, and
@@ -122,7 +124,7 @@ func failedPodNodes(wf Workflow, maxNodes int) []Node {
 		return nodes[i].DisplayName < nodes[j].DisplayName
 	})
 	if maxNodes > 0 && len(nodes) > maxNodes {
-		nodes = nodes[len(nodes)-maxNodes:]
+		nodes = nodes[:maxNodes]
 	}
 	return nodes
 }
@@ -303,8 +305,13 @@ func findErrLine(lines []string, exclude string) string {
 // failed: destroy: exit status 1" - a "thin" verdict), the real explanation is the
 // tofu/terragrunt error underneath, so errLine wins instead.
 func ExtractError(log string) string {
-	lines := normalizeAndWindow(log)
+	return extractErrorFromLines(normalizeAndWindow(log))
+}
 
+// extractErrorFromLines is ExtractError's body, split out so callers that already
+// have a normalized/windowed line slice (Build's phase extraction, below) can reuse
+// it without re-normalizing the same log twice.
+func extractErrorFromLines(lines []string) string {
 	verdict := ""
 	for _, l := range lines {
 		if verdictRE.MatchString(l) {
@@ -322,6 +329,30 @@ func ExtractError(log string) string {
 		return verdict
 	}
 	return errLine
+}
+
+// verdictPhase scans normalized/windowed log lines for the phase word off the last
+// "<phase> failed: ..." verdict line - the same line extractErrorFromLines' own
+// verdict scan finds - and returns "" if the window carries none.
+func verdictPhase(lines []string) string {
+	phase := ""
+	for _, l := range lines {
+		if m := verdictRE.FindStringSubmatch(l); m != nil {
+			phase = m[1]
+		}
+	}
+	return phase
+}
+
+// displayPhaseRE captures the leading alphabetic phase word off a Pod node's
+// DisplayName ("upgrade(0)" -> "upgrade", "destroy(0)" -> "destroy").
+var displayPhaseRE = regexp.MustCompile(`^[a-zA-Z]+`)
+
+// phaseFromDisplayName is the failed_phase fallback for when a node's log carries no
+// "<phase> failed: ..." verdict line to source the phase word from instead (the
+// fetch itself failed, the log has no verdict line, or the window scrolled past it).
+func phaseFromDisplayName(displayName string) string {
+	return displayPhaseRE.FindString(displayName)
 }
 
 // lastErrorLine is ExtractError's errLine step alone, capped to 400 runes. It exists
@@ -446,14 +477,26 @@ const (
 
 // ChildEvidence is one child workflow's row in the CHILD_JSON array post-status
 // builds. Field order/tags match the existing jq output (name, config, phase, msg,
-// detail) plus the new log_excerpt key.
+// detail, log_excerpt) plus three new keys carrying the failing phase and links to
+// where the failure lives:
+//
+//   - FailedPhase: the harness phase word (provision/upgrade/validate/teardown, or a
+//     DisplayName-derived fallback) of the EARLIEST failed Pod node - the node
+//     failedPodNodes now keeps first under retries.
+//   - ArgoURL: the Argo UI deep link for the workflow, or "" when ARGO_UI_BASE is
+//     unset - callers omit the link in that case rather than showing a broken one.
+//   - LogURI: the s3://bucket/key of that same earliest node's archived log, or ""
+//     when the node has no artifact.
 type ChildEvidence struct {
-	Name       string `json:"name"`
-	Config     string `json:"config"`
-	Phase      string `json:"phase"`
-	Msg        string `json:"msg"`
-	Detail     string `json:"detail"`
-	LogExcerpt string `json:"log_excerpt"`
+	Name        string `json:"name"`
+	Config      string `json:"config"`
+	Phase       string `json:"phase"`
+	Msg         string `json:"msg"`
+	Detail      string `json:"detail"`
+	LogExcerpt  string `json:"log_excerpt"`
+	FailedPhase string `json:"failed_phase"`
+	ArgoURL     string `json:"argo_url"`
+	LogURI      string `json:"log_uri"`
 }
 
 // BuildOptions bounds Build's S3 fan-out. Zero values take the defaults below.
@@ -478,6 +521,26 @@ func (o BuildOptions) withDefaults() BuildOptions {
 		o.OverallBudget = defaultOverallBudget
 	}
 	return o
+}
+
+// argoWorkflowURL builds the Argo UI deep link for a workflow name from the
+// ARGO_UI_BASE env var, or "" when that var is unset/empty - the orchestrator wires
+// up the real hostname later; until then (and in any environment that never sets it)
+// this deliberately omits the link rather than hardcoding a guess.
+func argoWorkflowURL(name string) string {
+	base := strings.TrimRight(os.Getenv("ARGO_UI_BASE"), "/")
+	if base == "" {
+		return ""
+	}
+	return base + "/workflows/argo/" + name
+}
+
+// s3URI formats a bucket/key pair as an s3:// URI, or "" if either is empty.
+func s3URI(bucket, key string) string {
+	if bucket == "" || key == "" {
+		return ""
+	}
+	return "s3://" + bucket + "/" + key
 }
 
 // childBase builds a child's {name, config, phase, msg, detail} exactly as the jq
@@ -519,9 +582,23 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 
 	children := make([]ChildEvidence, len(list.Items))
 	perChildNodes := make([][]Node, len(list.Items))
+	// phases and logURIs seed the failed_phase/log_uri fallback from data that
+	// needs no S3 fetch (the DisplayName, and the bucket/key already on the
+	// Workflow), so both fields stand even when the earliest node's log never
+	// comes back. A worker overwrites phases[i] below if the fetched log carries
+	// an actual verdict line.
+	phases := make([]string, len(list.Items))
+	logURIs := make([]string, len(list.Items))
 	for i, wf := range list.Items {
 		children[i] = childBase(wf)
+		children[i].ArgoURL = argoWorkflowURL(wf.Metadata.Name)
 		perChildNodes[i] = failedPodNodes(wf, opts.MaxNodesPerChild)
+		if len(perChildNodes[i]) > 0 {
+			earliest := perChildNodes[i][0]
+			phases[i] = phaseFromDisplayName(earliest.DisplayName)
+			bucket := wf.Status.ArtifactRepositoryRef.ArtifactRepository.S3.Bucket
+			logURIs[i] = s3URI(bucket, artifactKey(earliest))
+		}
 	}
 
 	type job struct {
@@ -540,13 +617,23 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 		}
 	}
 
-	// results[childIdx][nodeIdx] holds "displayName: excerpt", or "" on a miss.
+	// nodeResult keeps a fetched node's excerpt separate from its display name so
+	// the final join can dedup on excerpt text alone - a retried step's nodes
+	// carry different DisplayNames ("upgrade(0)" vs "upgrade(1)") for the
+	// identical underlying error.
+	type nodeResult struct {
+		display, excerpt string
+	}
+
+	// results[childIdx][nodeIdx] holds a node's result, zero-value on a miss.
 	// Each job owns a disjoint slot, so workers write without a lock, and the
 	// final join walks nodeIdx order - deterministic regardless of which worker
-	// finishes first.
-	results := make([][]string, len(list.Items))
+	// finishes first. Node index 0 is always the earliest failed node
+	// (failedPodNodes keeps the earliest under a cap), which is also the only
+	// index any worker writes phases[childIdx] from.
+	results := make([][]nodeResult, len(list.Items))
 	for i := range results {
-		results[i] = make([]string, len(perChildNodes[i]))
+		results[i] = make([]nodeResult, len(perChildNodes[i]))
 	}
 
 	workers := opts.Workers
@@ -570,12 +657,18 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 				if err != nil {
 					continue
 				}
-				errText := ExtractError(tail)
+				lines := normalizeAndWindow(tail)
+				if j.nodeIdx == 0 {
+					if phase := verdictPhase(lines); phase != "" {
+						phases[j.childIdx] = phase
+					}
+				}
+				errText := extractErrorFromLines(lines)
 				if errText == "" {
 					continue
 				}
 				excerpt := truncateRunes(Scrub(errText), maxLineExcerptRunes)
-				results[j.childIdx][j.nodeIdx] = j.display + ": " + excerpt
+				results[j.childIdx][j.nodeIdx] = nodeResult{display: j.display, excerpt: excerpt}
 			}
 		}()
 	}
@@ -593,15 +686,23 @@ func Build(ctx context.Context, list WorkflowList, fetcher LogTail, opts BuildOp
 
 	for i, parts := range results {
 		var nonEmpty []string
+		seen := make(map[string]bool, len(parts))
 		for _, p := range parts {
-			if p != "" {
-				nonEmpty = append(nonEmpty, p)
+			if p.excerpt == "" || seen[p.excerpt] {
+				continue
 			}
+			seen[p.excerpt] = true
+			nonEmpty = append(nonEmpty, p.display+": "+p.excerpt)
 		}
 		if len(nonEmpty) == 0 {
 			continue
 		}
 		children[i].LogExcerpt = truncateRunes(strings.Join(nonEmpty, "; "), maxChildExcerptRunes)
+	}
+
+	for i := range children {
+		children[i].FailedPhase = phases[i]
+		children[i].LogURI = logURIs[i]
 	}
 	return children
 }

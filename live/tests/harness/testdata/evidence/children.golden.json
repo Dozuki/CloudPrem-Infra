@@ -5,7 +5,10 @@
     "phase": "Failed",
     "msg": "child 'harness-bi-ha-8dps9-3308889610' failed",
     "detail": "upgrade(0): main: Error (exit code 1); destroy(0): main: Error (exit code 1)",
-    "log_excerpt": "upgrade(0): upgrade failed: worktree add 8f347c78fb11039a9737c30e956fa16e5f57cd78 (8f347c78fb11039a9737c30e956fa16e5f57cd78): exit status 128; destroy(0): Error: stopping DMS Serverless Replication (arn:aws:dms:us-east-1:000000000000:replication-config:REPLICATIONCONFIGID): InvalidResourceStateFault: Replication for Replication Config, '2NVGVK6QFZEZZNCFFNKECQNLJI' is in 'provisioning_capacity' state and cannot be stopped."
+    "log_excerpt": "upgrade(0): upgrade failed: worktree add 8f347c78fb11039a9737c30e956fa16e5f57cd78 (8f347c78fb11039a9737c30e956fa16e5f57cd78): exit status 128; destroy(0): Error: stopping DMS Serverless Replication (arn:aws:dms:us-east-1:000000000000:replication-config:REPLICATIONCONFIGID): InvalidResourceStateFault: Replication for Replication Config, '2NVGVK6QFZEZZNCFFNKECQNLJI' is in 'provisioning_capacity' state and cannot be stopped.",
+    "failed_phase": "upgrade",
+    "argo_url": "",
+    "log_uri": "s3://dozuki-argo-artifacts-000000000000/harness-bi-ha-8dps9/harness-bi-ha-8dps9-run-3742410289/main.log"
   },
   {
     "name": "harness-min-default-mdgxp",
@@ -13,6 +16,9 @@
     "phase": "Failed",
     "msg": "child 'harness-min-default-mdgxp-1377804381' failed",
     "detail": "upgrade(0): main: Error (exit code 1)",
-    "log_excerpt": "upgrade(0): upgrade failed: worktree add 8f347c78fb11039a9737c30e956fa16e5f57cd78 (8f347c78fb11039a9737c30e956fa16e5f57cd78): exit status 128"
+    "log_excerpt": "upgrade(0): upgrade failed: worktree add 8f347c78fb11039a9737c30e956fa16e5f57cd78 (8f347c78fb11039a9737c30e956fa16e5f57cd78): exit status 128",
+    "failed_phase": "upgrade",
+    "argo_url": "",
+    "log_uri": "s3://dozuki-argo-artifacts-000000000000/harness-min-default-mdgxp/harness-min-default-mdgxp-run-1651265260/main.log"
   }
 ]
