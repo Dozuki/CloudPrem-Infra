@@ -14,15 +14,29 @@ import (
 	dmstypes "github.com/aws/aws-sdk-go-v2/service/databasemigrationservice/types"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
+	efstypes "github.com/aws/aws-sdk-go-v2/service/efs/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/elasticache"
+	ecachetypes "github.com/aws/aws-sdk-go-v2/service/elasticache/types"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go-v2/service/kafka"
+	kafkatypes "github.com/aws/aws-sdk-go-v2/service/kafka/types"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/aws/aws-sdk-go-v2/service/opensearch"
+	opensearchtypes "github.com/aws/aws-sdk-go-v2/service/opensearch/types"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
+	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/aws/smithy-go"
@@ -72,6 +86,21 @@ type fakeVerifierAPI struct {
 	describeSecret func(*secretsmanager.DescribeSecretInput) (*secretsmanager.DescribeSecretOutput, error)
 
 	getQueueUrl func(*sqs.GetQueueUrlInput) (*sqs.GetQueueUrlOutput, error)
+
+	describeKey func(*kms.DescribeKeyInput) (*kms.DescribeKeyOutput, error)
+
+	describeLoadBalancers func(*elasticloadbalancingv2.DescribeLoadBalancersInput) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error)
+	describeTargetGroups  func(*elasticloadbalancingv2.DescribeTargetGroupsInput) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error)
+
+	describeKafkaCluster func(*kafka.DescribeClusterInput) (*kafka.DescribeClusterOutput, error)
+
+	describeReplicationGroups func(*elasticache.DescribeReplicationGroupsInput) (*elasticache.DescribeReplicationGroupsOutput, error)
+
+	describeFileSystems func(*efs.DescribeFileSystemsInput) (*efs.DescribeFileSystemsOutput, error)
+
+	describeDomain func(*opensearch.DescribeDomainInput) (*opensearch.DescribeDomainOutput, error)
+
+	getTopicAttributes func(*sns.GetTopicAttributesInput) (*sns.GetTopicAttributesOutput, error)
 }
 
 func (f *fakeVerifierAPI) DescribeCluster(_ context.Context, in *eks.DescribeClusterInput, _ ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) {
@@ -173,8 +202,51 @@ func (f *fakeVerifierAPI) GetQueueUrl(_ context.Context, in *sqs.GetQueueUrlInpu
 	return f.getQueueUrl(in)
 }
 
+func (f *fakeVerifierAPI) DescribeKey(_ context.Context, in *kms.DescribeKeyInput, _ ...func(*kms.Options)) (*kms.DescribeKeyOutput, error) {
+	return f.describeKey(in)
+}
+
+func (f *fakeVerifierAPI) DescribeLoadBalancers(_ context.Context, in *elasticloadbalancingv2.DescribeLoadBalancersInput, _ ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error) {
+	return f.describeLoadBalancers(in)
+}
+func (f *fakeVerifierAPI) DescribeTargetGroups(_ context.Context, in *elasticloadbalancingv2.DescribeTargetGroupsInput, _ ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error) {
+	return f.describeTargetGroups(in)
+}
+
+// fakeKafkaAPI is split out from fakeVerifierAPI because KafkaExistenceAPI's
+// DescribeCluster and EKSExistenceAPI's DescribeCluster share a method name with
+// different signatures (kafka.DescribeClusterInput vs eks.DescribeClusterInput) - one
+// concrete type cannot implement both, so Kafka gets its own tiny fake satisfying only
+// KafkaExistenceAPI.
+type fakeKafkaAPI struct {
+	describeCluster func(*kafka.DescribeClusterInput) (*kafka.DescribeClusterOutput, error)
+}
+
+func (f *fakeKafkaAPI) DescribeCluster(_ context.Context, in *kafka.DescribeClusterInput, _ ...func(*kafka.Options)) (*kafka.DescribeClusterOutput, error) {
+	return f.describeCluster(in)
+}
+
+func (f *fakeVerifierAPI) DescribeReplicationGroups(_ context.Context, in *elasticache.DescribeReplicationGroupsInput, _ ...func(*elasticache.Options)) (*elasticache.DescribeReplicationGroupsOutput, error) {
+	return f.describeReplicationGroups(in)
+}
+
+func (f *fakeVerifierAPI) DescribeFileSystems(_ context.Context, in *efs.DescribeFileSystemsInput, _ ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error) {
+	return f.describeFileSystems(in)
+}
+
+func (f *fakeVerifierAPI) DescribeDomain(_ context.Context, in *opensearch.DescribeDomainInput, _ ...func(*opensearch.Options)) (*opensearch.DescribeDomainOutput, error) {
+	return f.describeDomain(in)
+}
+
+func (f *fakeVerifierAPI) GetTopicAttributes(_ context.Context, in *sns.GetTopicAttributesInput, _ ...func(*sns.Options)) (*sns.GetTopicAttributesOutput, error) {
+	return f.getTopicAttributes(in)
+}
+
 func (f *fakeVerifierAPI) apiSet() *verifierAPISet {
-	return &verifierAPISet{EKS: f, RDS: f, EC2: f, IAM: f, S3: f, Logs: f, DMS: f, SM: f, SQS: f}
+	return &verifierAPISet{
+		EKS: f, RDS: f, EC2: f, IAM: f, S3: f, Logs: f, DMS: f, SM: f, SQS: f,
+		KMS: f, ELBV2: f, Kafka: &fakeKafkaAPI{describeCluster: f.describeKafkaCluster}, ElastiCache: f, EFS: f, OpenSearch: f, SNS: f,
+	}
 }
 
 // Completeness guard for Class C, mirroring TestEveryManagedTypeExposesAnARN for Class
@@ -192,6 +264,65 @@ func TestEveryBlockingTypeHasAnExistenceVerifier(t *testing.T) {
 		if _, ok := existenceVerifiers[awsType]; !ok {
 			t.Errorf("%q can be classified Blocking by classifyResidual but has no entry in existenceVerifiers - register a real verifier, or unimplementedVerifier(\"<sdk-pkg>\") as an honest placeholder, so this type's residuals always get a probe outcome", awsType)
 		}
+	}
+}
+
+// Every other test in this file calls verify<Type> directly, never through the
+// existenceVerifiers map - so a map-literal mistake (the wrong function assigned to a
+// key, or two keys accidentally pointing at the same function) would compile and pass
+// every existing test. This drives one NotFound case per newly-vendored type through
+// the actual registry lookup, so a wiring mistake fails here instead of shipping silent.
+func TestNewlyVendoredTypesAreWiredToTheCorrectVerifierInTheRegistry(t *testing.T) {
+	notFoundAPI := &fakeVerifierAPI{
+		describeKey: func(*kms.DescribeKeyInput) (*kms.DescribeKeyOutput, error) {
+			return nil, &kmstypes.NotFoundException{}
+		},
+		describeLoadBalancers: func(*elasticloadbalancingv2.DescribeLoadBalancersInput) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error) {
+			return nil, &elbv2types.LoadBalancerNotFoundException{}
+		},
+		describeTargetGroups: func(*elasticloadbalancingv2.DescribeTargetGroupsInput) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error) {
+			return nil, &elbv2types.TargetGroupNotFoundException{}
+		},
+		describeKafkaCluster: func(*kafka.DescribeClusterInput) (*kafka.DescribeClusterOutput, error) {
+			return nil, &kafkatypes.NotFoundException{}
+		},
+		describeReplicationGroups: func(*elasticache.DescribeReplicationGroupsInput) (*elasticache.DescribeReplicationGroupsOutput, error) {
+			return nil, &ecachetypes.ReplicationGroupNotFoundFault{}
+		},
+		describeFileSystems: func(*efs.DescribeFileSystemsInput) (*efs.DescribeFileSystemsOutput, error) {
+			return nil, &efstypes.FileSystemNotFound{}
+		},
+		describeDomain: func(*opensearch.DescribeDomainInput) (*opensearch.DescribeDomainOutput, error) {
+			return nil, &opensearchtypes.ResourceNotFoundException{}
+		},
+		getTopicAttributes: func(*sns.GetTopicAttributesInput) (*sns.GetTopicAttributesOutput, error) {
+			return nil, &snstypes.NotFoundException{}
+		},
+	}
+	cases := []struct {
+		awsType string
+		arn     string
+	}{
+		{"kms:key", "arn:aws:kms:us-east-1:1:key/abc-123"},
+		{"elasticloadbalancing:loadbalancer", "arn:aws:elasticloadbalancing:us-east-1:1:loadbalancer/app/custx/abc"},
+		{"elasticloadbalancing:targetgroup", "arn:aws:elasticloadbalancing:us-east-1:1:targetgroup/custx/abc"},
+		{"kafka:cluster", "arn:aws:kafka:us-east-1:1:cluster/custx/abc"},
+		{"elasticache:replicationgroup", "arn:aws:elasticache:us-east-1:1:replicationgroup:custx"},
+		{"elasticfilesystem:file-system", "arn:aws:elasticfilesystem:us-east-1:1:file-system/fs-abc123"},
+		{"es:domain", "arn:aws:es:us-east-1:1:domain/custx"},
+		{"sns", "arn:aws:sns:us-east-1:1:custx"},
+	}
+	for _, c := range cases {
+		t.Run(c.awsType, func(t *testing.T) {
+			verifier, ok := existenceVerifiers[c.awsType]
+			if !ok {
+				t.Fatalf("%q has no entry in existenceVerifiers", c.awsType)
+			}
+			state, note := verifier(context.Background(), notFoundAPI.apiSet(), c.arn)
+			if state != existenceNotFound {
+				t.Errorf("existenceVerifiers[%q] via the registry = %v (%q), want existenceNotFound - wrong function wired to this key?", c.awsType, state, note)
+			}
+		})
 	}
 }
 
@@ -538,16 +669,265 @@ func TestVerifySQSQueueDoesNotExist(t *testing.T) {
 	}
 }
 
-// A type with no SDK client vendored today (go.mod lacks kms, elbv2, kafka, elasticache,
-// efs, opensearchservice, sns) must still fail OPEN with a clear, actionable note rather
-// than either panicking or silently deciding Exists/NotFound with no probe at all.
-func TestUnimplementedVerifierFailsOpenWithAnActionableNote(t *testing.T) {
-	state, note := existenceVerifiers["kms:key"](context.Background(), &verifierAPISet{}, "arn:aws:kms:us-east-1:1:key/abc")
-	if state != existenceError {
-		t.Fatalf("state = %v, want existenceError", state)
+// --- KMS ------------------------------------------------------------------------
+
+func TestVerifyKMSKeyThreeValuedOutcomes(t *testing.T) {
+	cases := []struct {
+		name    string
+		out     *kms.DescribeKeyOutput
+		err     error
+		want    existenceState
+		wantErr string
+	}{
+		{"exists", &kms.DescribeKeyOutput{KeyMetadata: &kmstypes.KeyMetadata{KeyState: kmstypes.KeyStateEnabled}}, nil, existenceExists, ""},
+		{"not found", nil, &kmstypes.NotFoundException{Message: aws.String("gone")}, existenceNotFound, "NotFoundException"},
+		{"access denied", nil, &smithy.GenericAPIError{Code: "AccessDeniedException", Message: "no"}, existenceError, "AccessDeniedException"},
+		{"nil response is error not exists", &kms.DescribeKeyOutput{}, nil, existenceError, "anomalous"},
 	}
-	if !strings.Contains(note, "aws-sdk-go-v2/service/kms") {
-		t.Errorf("note = %q, want it to name the missing SDK package so the gap is actionable", note)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{describeKey: func(*kms.DescribeKeyInput) (*kms.DescribeKeyOutput, error) {
+				return c.out, c.err
+			}}
+			state, note := verifyKMSKey(context.Background(), api.apiSet(), "arn:aws:kms:us-east-1:1:key/abc-123")
+			if state != c.want {
+				t.Errorf("state = %v, want %v (note=%q)", state, c.want, note)
+			}
+			if c.wantErr != "" && !strings.Contains(note, c.wantErr) {
+				t.Errorf("note = %q, want it to mention %q", note, c.wantErr)
+			}
+		})
+	}
+}
+
+// A key already scheduled for deletion still answers with a normal 200, KeyState ==
+// PendingDeletion - the same false-positive risk verifySecretsManagerSecret's
+// DeletedDate check guards against.
+func TestVerifyKMSKeyPendingDeletionIsGone(t *testing.T) {
+	api := &fakeVerifierAPI{describeKey: func(*kms.DescribeKeyInput) (*kms.DescribeKeyOutput, error) {
+		return &kms.DescribeKeyOutput{KeyMetadata: &kmstypes.KeyMetadata{KeyState: kmstypes.KeyStatePendingDeletion}}, nil
+	}}
+	state, note := verifyKMSKey(context.Background(), api.apiSet(), "arn:aws:kms:us-east-1:1:key/abc-123")
+	if state != existenceNotFound {
+		t.Fatalf("state = %v, want existenceNotFound for a key pending deletion (note=%q)", state, note)
+	}
+}
+
+// A multi-region replica key winds down through PendingReplicaDeletion, not
+// PendingDeletion - a separate KeyState value from the primary-key deletion path
+// above. Missing this one would classify a departing replica key as Exists (Blocking),
+// the exact kind of narrow-miss false positive this whole probe registry exists to
+// stop.
+func TestVerifyKMSKeyPendingReplicaDeletionIsGone(t *testing.T) {
+	api := &fakeVerifierAPI{describeKey: func(*kms.DescribeKeyInput) (*kms.DescribeKeyOutput, error) {
+		return &kms.DescribeKeyOutput{KeyMetadata: &kmstypes.KeyMetadata{KeyState: kmstypes.KeyStatePendingReplicaDeletion}}, nil
+	}}
+	state, note := verifyKMSKey(context.Background(), api.apiSet(), "arn:aws:kms:us-east-1:1:key/abc-123")
+	if state != existenceNotFound {
+		t.Fatalf("state = %v, want existenceNotFound for a replica key pending deletion (note=%q)", state, note)
+	}
+}
+
+// --- ELBv2 ----------------------------------------------------------------------
+
+func TestVerifyELBV2LoadBalancerThreeValuedOutcomes(t *testing.T) {
+	cases := []struct {
+		name string
+		out  *elasticloadbalancingv2.DescribeLoadBalancersOutput
+		err  error
+		want existenceState
+	}{
+		{"exists", &elasticloadbalancingv2.DescribeLoadBalancersOutput{LoadBalancers: []elbv2types.LoadBalancer{{}}}, nil, existenceExists},
+		{"not found", nil, &elbv2types.LoadBalancerNotFoundException{Message: aws.String("gone")}, existenceNotFound},
+		{"nil response is error not exists", &elasticloadbalancingv2.DescribeLoadBalancersOutput{}, nil, existenceError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{describeLoadBalancers: func(in *elasticloadbalancingv2.DescribeLoadBalancersInput) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error) {
+				if len(in.LoadBalancerArns) != 1 {
+					t.Fatalf("expected exactly one LoadBalancerArns entry, got %+v", in.LoadBalancerArns)
+				}
+				return c.out, c.err
+			}}
+			state, _ := verifyELBV2LoadBalancer(context.Background(), api.apiSet(), "arn:aws:elasticloadbalancing:us-east-1:1:loadbalancer/app/custx-bi/abc")
+			if state != c.want {
+				t.Errorf("state = %v, want %v", state, c.want)
+			}
+		})
+	}
+}
+
+func TestVerifyELBV2TargetGroupThreeValuedOutcomes(t *testing.T) {
+	cases := []struct {
+		name string
+		out  *elasticloadbalancingv2.DescribeTargetGroupsOutput
+		err  error
+		want existenceState
+	}{
+		{"exists", &elasticloadbalancingv2.DescribeTargetGroupsOutput{TargetGroups: []elbv2types.TargetGroup{{}}}, nil, existenceExists},
+		{"not found", nil, &elbv2types.TargetGroupNotFoundException{Message: aws.String("gone")}, existenceNotFound},
+		{"nil response is error not exists", &elasticloadbalancingv2.DescribeTargetGroupsOutput{}, nil, existenceError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{describeTargetGroups: func(in *elasticloadbalancingv2.DescribeTargetGroupsInput) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error) {
+				if len(in.TargetGroupArns) != 1 {
+					t.Fatalf("expected exactly one TargetGroupArns entry, got %+v", in.TargetGroupArns)
+				}
+				return c.out, c.err
+			}}
+			state, _ := verifyELBV2TargetGroup(context.Background(), api.apiSet(), "arn:aws:elasticloadbalancing:us-east-1:1:targetgroup/custx-bi/abc")
+			if state != c.want {
+				t.Errorf("state = %v, want %v", state, c.want)
+			}
+		})
+	}
+}
+
+// --- Kafka (MSK) ------------------------------------------------------------------
+
+func TestVerifyKafkaClusterThreeValuedOutcomes(t *testing.T) {
+	target := "arn:aws:kafka:us-east-1:1:cluster/custx-bi/abc-uuid"
+	cases := []struct {
+		name string
+		out  *kafka.DescribeClusterOutput
+		err  error
+		want existenceState
+	}{
+		{"exists", &kafka.DescribeClusterOutput{ClusterInfo: &kafkatypes.ClusterInfo{}}, nil, existenceExists},
+		{"not found", nil, &kafkatypes.NotFoundException{Message: aws.String("gone")}, existenceNotFound},
+		{"nil response is error not exists", &kafka.DescribeClusterOutput{}, nil, existenceError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{describeKafkaCluster: func(in *kafka.DescribeClusterInput) (*kafka.DescribeClusterOutput, error) {
+				if aws.ToString(in.ClusterArn) != target {
+					t.Fatalf("ClusterArn = %q, want %q", aws.ToString(in.ClusterArn), target)
+				}
+				return c.out, c.err
+			}}
+			state, _ := verifyKafkaCluster(context.Background(), api.apiSet(), target)
+			if state != c.want {
+				t.Errorf("state = %v, want %v", state, c.want)
+			}
+		})
+	}
+}
+
+// --- ElastiCache --------------------------------------------------------------------
+
+func TestVerifyElastiCacheReplicationGroupThreeValuedOutcomes(t *testing.T) {
+	cases := []struct {
+		name string
+		out  *elasticache.DescribeReplicationGroupsOutput
+		err  error
+		want existenceState
+	}{
+		{"exists", &elasticache.DescribeReplicationGroupsOutput{ReplicationGroups: []ecachetypes.ReplicationGroup{{}}}, nil, existenceExists},
+		{"not found", nil, &ecachetypes.ReplicationGroupNotFoundFault{Message: aws.String("gone")}, existenceNotFound},
+		{"nil response is error not exists", &elasticache.DescribeReplicationGroupsOutput{}, nil, existenceError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{describeReplicationGroups: func(in *elasticache.DescribeReplicationGroupsInput) (*elasticache.DescribeReplicationGroupsOutput, error) {
+				if aws.ToString(in.ReplicationGroupId) != "custx-bi-rg" {
+					t.Fatalf("ReplicationGroupId = %q, want custx-bi-rg", aws.ToString(in.ReplicationGroupId))
+				}
+				return c.out, c.err
+			}}
+			state, _ := verifyElastiCacheReplicationGroup(context.Background(), api.apiSet(), "arn:aws:elasticache:us-east-1:1:replicationgroup:custx-bi-rg")
+			if state != c.want {
+				t.Errorf("state = %v, want %v", state, c.want)
+			}
+		})
+	}
+}
+
+// --- EFS ------------------------------------------------------------------------
+
+func TestVerifyEFSFileSystemThreeValuedOutcomes(t *testing.T) {
+	cases := []struct {
+		name string
+		out  *efs.DescribeFileSystemsOutput
+		err  error
+		want existenceState
+	}{
+		{"exists", &efs.DescribeFileSystemsOutput{FileSystems: []efstypes.FileSystemDescription{{}}}, nil, existenceExists},
+		{"not found", nil, &efstypes.FileSystemNotFound{Message: aws.String("gone")}, existenceNotFound},
+		{"nil response is error not exists", &efs.DescribeFileSystemsOutput{}, nil, existenceError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{describeFileSystems: func(in *efs.DescribeFileSystemsInput) (*efs.DescribeFileSystemsOutput, error) {
+				if aws.ToString(in.FileSystemId) != "fs-0abc123" {
+					t.Fatalf("FileSystemId = %q, want fs-0abc123", aws.ToString(in.FileSystemId))
+				}
+				return c.out, c.err
+			}}
+			state, _ := verifyEFSFileSystem(context.Background(), api.apiSet(), "arn:aws:elasticfilesystem:us-east-1:1:file-system/fs-0abc123")
+			if state != c.want {
+				t.Errorf("state = %v, want %v", state, c.want)
+			}
+		})
+	}
+}
+
+// --- OpenSearch (es:domain) ---------------------------------------------------------
+
+func TestVerifyOpenSearchDomainThreeValuedOutcomes(t *testing.T) {
+	cases := []struct {
+		name string
+		out  *opensearch.DescribeDomainOutput
+		err  error
+		want existenceState
+	}{
+		{"exists", &opensearch.DescribeDomainOutput{DomainStatus: &opensearchtypes.DomainStatus{}}, nil, existenceExists},
+		{"not found", nil, &opensearchtypes.ResourceNotFoundException{Message: aws.String("gone")}, existenceNotFound},
+		{"nil response is error not exists", &opensearch.DescribeDomainOutput{}, nil, existenceError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{describeDomain: func(in *opensearch.DescribeDomainInput) (*opensearch.DescribeDomainOutput, error) {
+				if aws.ToString(in.DomainName) != "custx-bi-search" {
+					t.Fatalf("DomainName = %q, want custx-bi-search", aws.ToString(in.DomainName))
+				}
+				return c.out, c.err
+			}}
+			state, _ := verifyOpenSearchDomain(context.Background(), api.apiSet(), "arn:aws:es:us-east-1:1:domain/custx-bi-search")
+			if state != c.want {
+				t.Errorf("state = %v, want %v", state, c.want)
+			}
+		})
+	}
+}
+
+// --- SNS ------------------------------------------------------------------------
+
+func TestVerifySNSTopicThreeValuedOutcomes(t *testing.T) {
+	target := "arn:aws:sns:us-east-1:1:custx-bi-topic"
+	cases := []struct {
+		name string
+		out  *sns.GetTopicAttributesOutput
+		err  error
+		want existenceState
+	}{
+		{"exists", &sns.GetTopicAttributesOutput{Attributes: map[string]string{"TopicArn": target}}, nil, existenceExists},
+		{"not found", nil, &snstypes.NotFoundException{Message: aws.String("gone")}, existenceNotFound},
+		{"nil response is error not exists", nil, nil, existenceError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{getTopicAttributes: func(in *sns.GetTopicAttributesInput) (*sns.GetTopicAttributesOutput, error) {
+				if aws.ToString(in.TopicArn) != target {
+					t.Fatalf("TopicArn = %q, want %q", aws.ToString(in.TopicArn), target)
+				}
+				return c.out, c.err
+			}}
+			state, _ := verifySNSTopic(context.Background(), api.apiSet(), target)
+			if state != c.want {
+				t.Errorf("state = %v, want %v", state, c.want)
+			}
+		})
 	}
 }
 
