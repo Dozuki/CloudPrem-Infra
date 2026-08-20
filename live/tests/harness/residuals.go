@@ -232,8 +232,16 @@ var tfTypeToAWSType = map[string]string{
 // attribute in the aws provider schema (verified against 6.61.0) - each names its ARN
 // attribute differently, which is exactly why they were invisible to indexState before
 // this fix. aws_dms_replication_config is the one DMS type that DOES carry a plain
-// `arn` and needs no entry here; see TestEveryManagedTypeExposesAnARN for the
-// completeness guard that would have caught this gap.
+// `arn` and needs no entry here.
+//
+// TestEveryManagedTypeExposesAnARN guards the NEXT type that lands in tfTypeToAWSType
+// without an ARN. Be precise about what that does and does not cover: it iterates
+// tfTypeToAWSType, so it is structurally blind to a type MISSING from that map, which
+// is exactly how aws_dms_replication_config stayed invisible until it was found by
+// reading terraform/physical/bi.tf against the map by hand. The guard would NOT have
+// caught it. Nothing here checks the map against the terraform actually applied, so
+// adding a new resource type to terraform/ and forgetting this map is still a silent
+// gap that no test will fail on.
 var primaryARNFields = map[string][]string{
 	"aws_eks_pod_identity_association": {"association_arn"},
 	"aws_rds_cluster":                  {"arn", "cluster_identifier"},
