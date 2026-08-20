@@ -207,6 +207,7 @@ var tfTypeToAWSType = map[string]string{
 	"aws_dms_replication_task":          "dms:task",
 	"aws_dms_replication_subnet_group":  "dms:subgrp",
 	"aws_dms_certificate":               "dms:cert",
+	"aws_dms_replication_config":        "dms:replication-config",
 	"aws_msk_cluster":                   "kafka:cluster",
 	"aws_secretsmanager_secret":         "secretsmanager:secret",
 	"aws_elasticache_replication_group": "elasticache:replicationgroup",
@@ -227,10 +228,21 @@ var tfTypeToAWSType = map[string]string{
 // part is "<cluster>/<association-id>". CloudPrem creates six of them (five in
 // terraform/physical/eks.tf, one in terraform/logical/flux.tf), so without this every
 // provision would report six residuals that terraform demonstrably owns.
+// Class B adds the five aws_dms_* entries below. None of the five exposes a plain `arn`
+// attribute in the aws provider schema (verified against 6.61.0) - each names its ARN
+// attribute differently, which is exactly why they were invisible to indexState before
+// this fix. aws_dms_replication_config is the one DMS type that DOES carry a plain
+// `arn` and needs no entry here; see TestEveryManagedTypeExposesAnARN for the
+// completeness guard that would have caught this gap.
 var primaryARNFields = map[string][]string{
 	"aws_eks_pod_identity_association": {"association_arn"},
 	"aws_rds_cluster":                  {"arn", "cluster_identifier"},
 	"aws_msk_cluster":                  {"arn", "arn_kafka"},
+	"aws_dms_replication_instance":     {"replication_instance_arn"},
+	"aws_dms_endpoint":                 {"endpoint_arn"},
+	"aws_dms_replication_task":         {"replication_task_arn"},
+	"aws_dms_replication_subnet_group": {"replication_subnet_group_arn"},
+	"aws_dms_certificate":              {"certificate_arn"},
 }
 
 // serviceCreatedTypes are types AWS itself creates from a terraform-managed parent and
@@ -363,6 +375,18 @@ func indexState(b []byte, idx *stateIndex) error {
 					idx.add(awsType, s)
 				}
 			}
+			// Class A: the Resource Groups Tagging API also returns an Aurora cluster
+			// under a SECOND ARN whose tail is the LOWERCASED DbClusterResourceId.
+			// `describe` and terraform's own id both use the cluster identifier, never
+			// the resource id, so without this the tagging-API variant matches nothing
+			// in the index and every healthy Aurora cluster reports itself as its own
+			// orphan. Indexed lowercased here; arnIsAccountedFor retries the bare-id
+			// lookup lowercased too, scoped to rds:cluster only.
+			if r.Type == "aws_rds_cluster" {
+				if s, ok := r.Values["cluster_resource_id"].(string); ok && s != "" {
+					idx.add("rds:cluster", strings.ToLower(s))
+				}
+			}
 		}
 		for _, child := range mod.ChildModules {
 			if err := walk(child); err != nil {
@@ -407,6 +431,14 @@ func arnIsAccountedFor(arn string, idx *stateIndex) bool {
 	}
 	if _, ok := ids[tail]; ok {
 		return true
+	}
+	// Class A: Aurora's dual-ARN case. Scoped to rds:cluster only - the rest of the
+	// index stays case-sensitive on purpose, since case-insensitivity anywhere else
+	// would just as easily make a genuinely different resource read as accounted for.
+	if awsType == "rds:cluster" {
+		if _, ok := ids[strings.ToLower(tail)]; ok {
+			return true
+		}
 	}
 	// Log-group ARNs come back from the tagging API with a trailing ":*" that the
 	// terraform id does not carry.
@@ -530,6 +562,16 @@ func (o TGOptions) StateList(module string) ([]string, error) {
 
 // residualModules is the layer order a check walks. logical first so its addresses read
 // before physical's in the report, matching the destroy order.
+//
+// DR coverage: every DR-region resource (the DR Aurora secondary, DR subnets/security
+// groups, the DR replica set) is created by the "physical" module, which is already
+// walked here - there is no separate DR module to add. Two objects are NOT covered by
+// either signal, and cannot be, because neither is terraform-managed or tag-enumerable:
+// the S3 Control Batch Replication job started by null_resource.dr_replication_job_init
+// (a one-shot API call with no persistent AWS resource of its own to tag or state), and
+// retained replicated automated backups from aws_db_instance_automated_backups_replication
+// (AWS keeps its own retention on these independent of the source instance's lifecycle).
+// Both are accepted gaps, not oversights.
 var residualModules = []string{"logical", "physical"}
 
 // checkResiduals builds the boundary report. customer is the SALTED customer value the
@@ -548,13 +590,27 @@ func (p PhaseParams) checkResiduals(ctx context.Context, tg TGOptions, phase, cu
 	// Signal 1: what does state account for.
 	idx := newStateIndex()
 	shown := 0
+	// partialIndex tracks the defect a silent `continue` used to hide: ShowJSON
+	// FAILING (broken worktree, backend, credentials) is not the same as "this
+	// module's state is empty" - indexState already returns a clean nil error for an
+	// absent/emptied state (see its own comment), so an error here means the read
+	// never happened at all. In a two-module walk, one failed module still lets shown
+	// reach >= 1 from the other, so the old code sailed past the shown == 0 guard
+	// below with a HALF index and reported every resource the failed module alone
+	// would have accounted for as an orphan. Recording it AND demoting every
+	// tag-reconcile finding this run produces (below) is the fix; state-remnant
+	// findings are untouched because that signal never reads idx at all.
+	partialIndex := false
 	for _, mod := range residualModules {
 		out, err := tg.ShowJSON(mod)
 		if err != nil {
+			rep.Incomplete = append(rep.Incomplete, fmt.Sprintf("%s: show -json failed: %v", mod, err))
+			partialIndex = true
 			continue
 		}
 		if perr := indexState(out, idx); perr != nil {
 			rep.Incomplete = append(rep.Incomplete, fmt.Sprintf("%s: %v", mod, perr))
+			partialIndex = true
 			continue
 		}
 		shown++
@@ -595,8 +651,27 @@ func (p PhaseParams) checkResiduals(ctx context.Context, tg TGOptions, phase, cu
 			rep.Incomplete = append(rep.Incomplete, "terragrunt show -json failed for every module; the tag reconcile has no state to diff against")
 			break
 		}
-		rep.Residuals = append(rep.Residuals, reconcileTagged(tagged.arns, idx)...)
+		reconciled := reconcileTagged(tagged.arns, idx)
+		if partialIndex {
+			// Fail open, loudly: a half index must never fail a run. Every hit this
+			// pass would otherwise have blocked on is demoted, because a module that
+			// never got read might have been the one that owned it.
+			for i := range reconciled {
+				if reconciled[i].Blocking {
+					reconciled[i].Blocking = false
+					reconciled[i].Why = "state index is partial (a module's show -json failed); cannot confirm this is a real orphan"
+				}
+			}
+		}
+		rep.Residuals = append(rep.Residuals, reconciled...)
 	}
+
+	// Signal 4: of what Signal 3 marked Blocking, confirm the target is still actually
+	// there. classifyResidual only knows the TYPE; it cannot tell a genuine orphan from
+	// stale Resource Groups Tagging API residue for a type outside insufficientAloneTypes
+	// (see existence.go). Only a tag-reconcile hit carries an ARN to probe; state-remnant
+	// hits are left untouched.
+	p.verifyResidualExistence(ctx, rep)
 	return rep
 }
 

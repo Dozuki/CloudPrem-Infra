@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -403,5 +406,225 @@ func TestBlockingSeparatesEnforcementFromReporting(t *testing.T) {
 	}
 	if (&ResidualReport{Residuals: []Residual{{ARN: "a", Blocking: false}}}).Blocking() != nil {
 		t.Error("an informational-only report must have nothing to enforce on")
+	}
+}
+
+// Class A: the Resource Groups Tagging API returns a live Aurora cluster under a SECOND
+// ARN whose tail is the lowercased DbClusterResourceId, not the cluster identifier every
+// other signal (state, describe, terraform's own id) uses. Both forms of the same
+// cluster must reconcile clean, and the fix must not have widened case-insensitivity to
+// any OTHER type.
+func TestIndexStateAccountsForAuroraDualARN(t *testing.T) {
+	showJSON := `{
+	  "format_version": "1.0",
+	  "values": {
+	    "root_module": {
+	      "resources": [
+	        {"address": "module.aurora[0].aws_rds_cluster.this[0]", "type": "aws_rds_cluster", "values": {
+	          "id": "custx-bi", "cluster_identifier": "custx-bi",
+	          "arn": "arn:aws:rds:us-east-1:1:cluster:custx-bi",
+	          "cluster_resource_id": "cluster-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	        }},
+	        {"address": "module.eks_cluster.aws_security_group.cluster[0]", "type": "aws_security_group", "values": {"id": "sg-ABCDEF"}}
+	      ]
+	    }
+	  }
+	}`
+	idx := newStateIndex()
+	if err := indexState([]byte(showJSON), idx); err != nil {
+		t.Fatalf("indexState: %v", err)
+	}
+	// The tagging API's secondary ARN for the SAME cluster: same account/region, but
+	// the resource-id tail, lowercased. This is AWS's own observed behavior, not a
+	// test artifact.
+	dualARN := "arn:aws:rds:us-east-1:1:cluster:cluster-abcdefghijklmnopqrstuvwxyz"
+	if got := reconcileTagged([]string{dualARN}, idx); len(got) != 0 {
+		t.Fatalf("the dual (resource-id-form) ARN for an in-state Aurora cluster reported as a residual: %+v", got)
+	}
+	// The primary identifier-form ARN must still match - Class A must not have broken
+	// the pre-existing, more common path.
+	if got := reconcileTagged([]string{"arn:aws:rds:us-east-1:1:cluster:custx-bi"}, idx); len(got) != 0 {
+		t.Fatalf("the primary identifier-form ARN regressed: %+v", got)
+	}
+	// The case-insensitive retry is scoped to rds:cluster ONLY: a security group id
+	// that differs only by case must NOT match, or a real drift elsewhere in the index
+	// would silently start passing.
+	if got := reconcileTagged([]string{"arn:aws:ec2:us-east-1:1:security-group/sg-abcdef"}, idx); len(got) != 1 {
+		t.Fatalf("case-insensitivity leaked into ec2:security-group, which must stay case-sensitive: %+v", got)
+	}
+}
+
+// Class B: all five aws_dms_* types that have no plain `arn` attribute, plus the
+// aws_dms_replication_config gap named in the brief (used in terraform/physical/bi.tf,
+// previously absent from tfTypeToAWSType entirely).
+func TestReconcileTaggedMatchesDMSShapes(t *testing.T) {
+	showJSON := `{
+	  "format_version": "1.0",
+	  "values": {
+	    "root_module": {
+	      "resources": [
+	        {"address": "aws_dms_replication_instance.this", "type": "aws_dms_replication_instance", "values": {"id": "custx-bi-repl", "replication_instance_arn": "arn:aws:dms:us-east-1:1:rep:ABCDEF123"}},
+	        {"address": "aws_dms_endpoint.source", "type": "aws_dms_endpoint", "values": {"id": "custx-bi-src", "endpoint_arn": "arn:aws:dms:us-east-1:1:endpoint:GHIJKL456"}},
+	        {"address": "aws_dms_replication_task.this", "type": "aws_dms_replication_task", "values": {"id": "custx-bi-task", "replication_task_arn": "arn:aws:dms:us-east-1:1:task:MNOPQR789"}},
+	        {"address": "aws_dms_replication_subnet_group.this", "type": "aws_dms_replication_subnet_group", "values": {"id": "custx-bi-subgrp", "replication_subnet_group_arn": "arn:aws:dms:us-east-1:1:subgrp:custx-bi-subgrp"}},
+	        {"address": "aws_dms_certificate.this", "type": "aws_dms_certificate", "values": {"id": "custx-bi-cert", "certificate_arn": "arn:aws:dms:us-east-1:1:cert:STUVWX012"}},
+	        {"address": "aws_dms_replication_config.this", "type": "aws_dms_replication_config", "values": {"id": "custx-bi-cfg", "arn": "arn:aws:dms:us-east-1:1:replication-config:YZABCD345"}}
+	      ]
+	    }
+	  }
+	}`
+	idx := newStateIndex()
+	if err := indexState([]byte(showJSON), idx); err != nil {
+		t.Fatalf("indexState: %v", err)
+	}
+	live := []string{
+		"arn:aws:dms:us-east-1:1:rep:ABCDEF123",
+		"arn:aws:dms:us-east-1:1:endpoint:GHIJKL456",
+		"arn:aws:dms:us-east-1:1:task:MNOPQR789",
+		"arn:aws:dms:us-east-1:1:subgrp:custx-bi-subgrp",
+		"arn:aws:dms:us-east-1:1:cert:STUVWX012",
+		"arn:aws:dms:us-east-1:1:replication-config:YZABCD345",
+	}
+	if got := reconcileTagged(live, idx); len(got) != 0 {
+		t.Fatalf("terraform-owned DMS resources reported as residuals: %+v", got)
+	}
+	// An orphaned replication-config must classify Blocking, not unclassified - this is
+	// the missing-tfTypeToAWSType-entry gap the brief names explicitly.
+	orphan := "arn:aws:dms:us-east-1:1:replication-config:ORPHAN999"
+	got := reconcileTagged([]string{orphan}, idx)
+	if len(got) != 1 || !got[0].Blocking || got[0].Type != "dms:replication-config" {
+		t.Fatalf("an orphaned dms replication-config did not classify as a blocking dms:replication-config residual: %+v", got)
+	}
+}
+
+// Class B completeness guard: a terraform type with neither a plain provider `arn`
+// attribute nor a primaryARNFields override is invisible to indexState's ARN harvest -
+// a live orphan of that type would misreport as unclassified rather than blocking. This
+// is what would have caught the DMS gap before it shipped.
+//
+// typesWithPlainARNAttribute is a reviewed table, not a live schema query: regenerate it
+// by running `terraform providers schema -json` against the aws provider version pinned
+// in terraform/physical (verified here against 6.61.0) and checking
+// `.provider_schemas["registry.terraform.io/hashicorp/aws"].resource_schemas["<type>"].block.attributes.arn`
+// for each type in tfTypeToAWSType.
+var typesWithPlainARNAttribute = map[string]bool{
+	"aws_eks_cluster":                   true,
+	"aws_eks_node_group":                true,
+	"aws_eks_addon":                     true,
+	"aws_rds_cluster":                   true, // also has a primaryARNFields override (Class A)
+	"aws_rds_cluster_instance":          true,
+	"aws_db_instance":                   true,
+	"aws_db_parameter_group":            true,
+	"aws_rds_cluster_parameter_group":   true,
+	"aws_db_subnet_group":               true,
+	"aws_rds_global_cluster":            true,
+	"aws_vpc":                           true,
+	"aws_subnet":                        true,
+	"aws_security_group":                true,
+	"aws_route_table":                   true,
+	"aws_network_acl":                   true,
+	"aws_internet_gateway":              true,
+	"aws_nat_gateway":                   true,
+	"aws_eip":                           true,
+	"aws_vpc_endpoint":                  true,
+	"aws_ebs_volume":                    true,
+	"aws_kms_key":                       true,
+	"aws_kms_replica_key":               true,
+	"aws_kms_external_key":              true,
+	"aws_s3_bucket":                     true,
+	"aws_iam_role":                      true,
+	"aws_iam_policy":                    true,
+	"aws_cloudwatch_log_group":          true,
+	"aws_lb":                            true,
+	"aws_lb_target_group":               true,
+	"aws_msk_cluster":                   true, // also has a primaryARNFields override
+	"aws_secretsmanager_secret":         true,
+	"aws_elasticache_replication_group": true,
+	"aws_efs_file_system":               true,
+	"aws_opensearch_domain":             true,
+	"aws_sqs_queue":                     true,
+	"aws_sns_topic":                     true,
+	"aws_dms_replication_config":        true, // the one DMS type WITH a plain arn
+	// aws_eks_pod_identity_association and the five other aws_dms_* types have NO
+	// plain arn attribute - every one of them is covered by a primaryARNFields entry
+	// instead, checked below.
+}
+
+func TestEveryManagedTypeExposesAnARN(t *testing.T) {
+	for tfType := range tfTypeToAWSType {
+		_, hasOverride := primaryARNFields[tfType]
+		if !typesWithPlainARNAttribute[tfType] && !hasOverride {
+			t.Errorf("%q has neither a plain `arn` attribute (add it to typesWithPlainARNAttribute after checking the provider schema) nor a primaryARNFields override - indexState cannot see this type's ARN at all, and a live orphan of it will misreport as unclassified instead of blocking. Regenerate the schema table with: terraform providers schema -json", tfType)
+		}
+	}
+}
+
+// Class D (the silent-continue defect): a `terragrunt show -json` failure for ONE
+// module out of two must not produce a HALF index that reports every resource the
+// unread module alone would have accounted for as an orphan. checkResiduals must demote
+// every tag-reconcile finding to non-blocking and name the failure in Incomplete, never
+// silently `continue`.
+//
+// Exercised end-to-end through checkResiduals (not just indexState) by putting a fake
+// `terragrunt` on PATH: one module directory succeeds with an empty-but-readable state,
+// the other exits non-zero. This is the same shape ShowJSON actually sees in
+// production (a real subprocess, not a mock), without needing a real terragrunt tree.
+func TestCheckResidualsPartialIndexDemotesTagReconcileFindings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake terragrunt below is a #!/bin/sh script")
+	}
+	workDir := t.TempDir()
+	for _, mod := range residualModules {
+		if err := os.MkdirAll(filepath.Join(workDir, mod), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", mod, err)
+		}
+	}
+	binDir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		`case "$PWD" in
+  */physical) echo '{"format_version":"1.0","values":{"root_module":{}}}' ; exit 0 ;;
+  */logical) exit 1 ;;
+  *) exit 1 ;;
+esac
+`
+	fakeTG := filepath.Join(binDir, "terragrunt")
+	if err := os.WriteFile(fakeTG, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake terragrunt: %v", err)
+	}
+	oldPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", oldPath) })
+	os.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath)
+
+	orphan := "arn:aws:eks:us-east-1:1:cluster/custx-bi"
+	p := PhaseParams{
+		Region: "us-east-1", Matrix: &Matrix{},
+		Tags: map[string]TagAPI{"us-east-1": &residualTagAPI{arns: []string{orphan}}},
+	}
+	tg := TGOptions{WorkingDir: workDir}
+	rep := p.checkResiduals(context.Background(), tg, "teardown", "custx", []string{"us-east-1"}, nil)
+
+	foundIncompletePhysicalLogical := false
+	for _, inc := range rep.Incomplete {
+		if strings.Contains(inc, "logical") {
+			foundIncompletePhysicalLogical = true
+		}
+	}
+	if !foundIncompletePhysicalLogical {
+		t.Errorf("the failed logical module's show -json error was not recorded in Incomplete: %+v", rep.Incomplete)
+	}
+	if len(rep.Blocking()) != 0 {
+		t.Fatalf("a partial index (one of two modules unread) must never let a tag-reconcile finding stay Blocking: %+v", rep.Residuals)
+	}
+	found := false
+	for _, res := range rep.Residuals {
+		if res.ARN == orphan {
+			found = true
+			if !strings.Contains(res.Why, "partial") {
+				t.Errorf("demoted finding's Why does not explain the partial index: %q", res.Why)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the orphan must still be REPORTED (non-blocking), not dropped: %+v", rep.Residuals)
 	}
 }
