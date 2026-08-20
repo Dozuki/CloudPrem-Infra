@@ -118,9 +118,12 @@ func artifactKey(n Node) string {
 // including them would double every bullet. Steps/StepGroup nodes are excluded the
 // same way.
 //
-// Unfiltered beyond Type/Phase and uncapped: this is the base list evidenceCandidateNodes
-// (below) filters down for both Build's evidence selection and childBase's Detail
-// text, so a masked-by-retry or no-artifact node never leads either one.
+// Unfiltered beyond Type/Phase and uncapped: this is the base list both Build's
+// evidence selection and childBase's Detail text filter down from - Build's own
+// evidence candidates go through evidenceCandidateNodes (below), which excludes both
+// a masked-by-retry node and a no-artifact node, while childBase's Detail (evidence.go
+// ~:743) applies only the retry mask, deliberately keeping a no-artifact node so an
+// evicted/OOM-killed failure with no log still shows its Argo node Message.
 func failedPodNodes(wf Workflow) []Node {
 	var nodes []Node
 	for _, n := range wf.Status.Nodes {

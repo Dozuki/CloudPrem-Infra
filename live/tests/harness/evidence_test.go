@@ -537,10 +537,13 @@ func TestBuildFallbackAppliesRetryMaskWhenAllCandidatesFiltered(t *testing.T) {
 }
 
 // TestBuildFallbackLeavesPhaseEmptyWhenChildSucceeded covers the other half of FIX 1:
-// the fallback must run only when the workflow's own phase is Failed/Error. A child
-// that ultimately Succeeded, with only a retried-away failed Pod, must report no
-// failed_phase at all - naming provision(0) here would describe a step that
-// succeeded.
+// the fallback must run only when the workflow's own phase is Failed/Error. The
+// isolation here is deliberately on the phase guard alone - provision(0) carries NO
+// Succeeded Retry ancestor (so the retry mask does not touch it) and NO main-logs
+// artifact (so it still reaches the fallback), leaving the phase guard as the ONLY
+// thing that can stop it from being selected. A retried-away node would also pass
+// this test with the guard deleted, which is exactly what made the previous version
+// of this test not isolate the regression.
 func TestBuildFallbackLeavesPhaseEmptyWhenChildSucceeded(t *testing.T) {
 	wf := Workflow{
 		Metadata: WorkflowMetadata{Name: "harness-fallbacksucceeded-abcde", Labels: map[string]string{"harness/config": "fallbacksucceeded"}},
@@ -548,24 +551,24 @@ func TestBuildFallbackLeavesPhaseEmptyWhenChildSucceeded(t *testing.T) {
 			Phase:                 "Succeeded",
 			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
 			Nodes: map[string]Node{
-				"retry-provision": {ID: "retry-provision", Type: "Retry", Phase: "Succeeded", DisplayName: "provision", Children: []string{"provision0"}},
+				// No Retry ancestor at all, so retriedAwayPodIDs never masks this
+				// node - unmasked. No main-logs artifact, so it is filtered out of
+				// evidenceCandidateNodes and the fallback is reached. The child's
+				// own phase is Succeeded, so only the phase guard can prevent
+				// selection.
 				"provision0": {
 					ID: "provision0", Type: "Pod", Phase: "Failed", DisplayName: "provision(0)", FinishedAt: "2026-08-04T00:00:01Z",
-					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "provision0/main.log"}}}},
 				},
 			},
 		},
 	}
-	logs := map[string]string{
-		"b/provision0/main.log": "Error: this must never be read: the node retried away and the child succeeded\n",
-	}
-	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, &stubFetcher{logs: logs}, BuildOptions{})
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, &stubFetcher{logs: map[string]string{}}, BuildOptions{})
 	if len(children) != 1 {
 		t.Fatalf("got %d children, want 1", len(children))
 	}
 	c := children[0]
 	if c.FailedPhase != "" {
-		t.Errorf("FailedPhase = %q, want empty (child ultimately Succeeded, the masked provision(0) must not name a phase)", c.FailedPhase)
+		t.Errorf("FailedPhase = %q, want empty (child ultimately Succeeded, an unmasked no-artifact failure must not name a phase)", c.FailedPhase)
 	}
 }
 
