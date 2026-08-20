@@ -303,6 +303,19 @@ def _alarm_evidence(trigger):
     return f'{prefix}{metric} {operator} {threshold} · {window}'
 
 
+def _alarm_severity(alarm_name):
+    """Derive Slack severity from the fleet's alarm-name suffix convention.
+
+    No-suffix defaults to critical on purpose: only the NLB healthy-hosts pair
+    carries a tier suffix today, and silently downgrading any other alarm is
+    worse than the noisy page it replaces. Matches on the name only, never the
+    description text.
+    """
+    if (alarm_name or '').lower().endswith('-warning'):
+        return COLOR_WARNING, '🟠 WARNING', False, 'Review'
+    return COLOR_CRITICAL, '🔴 CRITICAL', True, 'Investigate now'
+
+
 def cloudwatch_card(message_json, identifier, region, account_id, account_alias,
                     started_at=None):
     """Return a Slack incident card and state metadata for a CloudWatch event."""
@@ -321,17 +334,18 @@ def cloudwatch_card(message_json, identifier, region, account_id, account_alias,
         actions.append(_button('Runbook', runbook, 'open_runbook'))
 
     if state == 'ALARM':
+        color, header_prefix, mention, footer_verb = _alarm_severity(alarm_name)
         payload = _card(
-            COLOR_CRITICAL,
-            f'🔴 CRITICAL · CloudWatch · {identifier}',
+            color,
+            f'{header_prefix} · CloudWatch · {identifier}',
             description,
             'IMPACT', reason,
             [_field('SERVICE', namespace), _field('REGION', region),
              _field('RESOURCE', resource),
              _field('STARTED', _slack_relative(started_at or changed_at))],
             'EVIDENCE', _alarm_evidence(trigger), actions,
-            f'Active · Investigate now · {alarm_name} · {account_alias} ({account_id})',
-            mention=True,
+            f'Active · {footer_verb} · {alarm_name} · {account_alias} ({account_id})',
+            mention=mention,
         )
     elif state == 'OK':
         duration = _format_duration(started_at, changed_at) if started_at else 'Unknown'

@@ -203,11 +203,11 @@ SERVERLESS_CASES = [
 ]
 
 
-def alarm_fixture(state="ALARM"):
+def alarm_fixture(state="ALARM", alarm_name="acme-prod-api-5xx"):
     return {
-        "AlarmName": "acme-prod-api-5xx",
+        "AlarmName": alarm_name,
         "AlarmDescription": "Checkout API error rate is elevated. https://runbooks.example/api-5xx",
-        "AlarmArn": "arn:aws:cloudwatch:us-east-1:111:alarm:acme-prod-api-5xx",
+        "AlarmArn": f"arn:aws:cloudwatch:us-east-1:111:alarm:{alarm_name}",
         "OldStateValue": "OK" if state == "ALARM" else "ALARM",
         "NewStateValue": state,
         "NewStateReason": ("Threshold Crossed: 8 datapoints were above 5"
@@ -1319,6 +1319,56 @@ def renderer_checks():
         ("resolved header", "✅ RESOLVED · CloudWatch · acme-prod" in resolved_text),
         ("resolved outcome", all(x in resolved_text for x in ("OUTCOME", "DURATION", "8m"))),
         ("resolved does not page", "<!channel>" not in resolved_text),
+    ])
+
+    # -warning suffix: amber, no @channel. The description text already says "not
+    # yet a full outage" - only the presentation layer was wrong before this fix.
+    warning, _ = sns_to_slack.cloudwatch_card(
+        alarm_fixture(alarm_name="acme-prod-nlb-healthy-hosts-warning"),
+        "acme-prod", "us-east-1", "111", "prod")
+    warning_text = str(warning)
+    checks.extend([
+        ("warning rail", warning["attachments"][0]["color"] == sns_to_slack.COLOR_WARNING),
+        ("warning header", "🟠 WARNING · CloudWatch · acme-prod" in warning_text),
+        ("warning does not page", "<!channel>" not in warning_text),
+        ("warning footer says review", "Active · Review ·" in warning_text),
+    ])
+
+    # -critical suffix: unchanged from the pre-tiering behaviour.
+    critical, _ = sns_to_slack.cloudwatch_card(
+        alarm_fixture(alarm_name="acme-prod-nlb-healthy-hosts-critical"),
+        "acme-prod", "us-east-1", "111", "prod")
+    critical_text = str(critical)
+    checks.extend([
+        ("critical-suffix rail", critical["attachments"][0]["color"] == sns_to_slack.COLOR_CRITICAL),
+        ("critical-suffix header", "🔴 CRITICAL · CloudWatch · acme-prod" in critical_text),
+        ("critical-suffix pages channel", "<!channel>" in critical_text),
+    ])
+
+    # No suffix defaults to critical - the one unacceptable outcome of this change
+    # would be silently downgrading an alarm outside the NLB healthy-hosts pair.
+    unsuffixed, _ = sns_to_slack.cloudwatch_card(
+        alarm_fixture(alarm_name="acme-prod-rds-cpu-usage"),
+        "acme-prod", "us-east-1", "111", "prod")
+    unsuffixed_text = str(unsuffixed)
+    checks.extend([
+        ("unsuffixed rail", unsuffixed["attachments"][0]["color"] == sns_to_slack.COLOR_CRITICAL),
+        ("unsuffixed header", "🔴 CRITICAL · CloudWatch · acme-prod" in unsuffixed_text),
+        ("unsuffixed pages channel", "<!channel>" in unsuffixed_text),
+    ])
+
+    # RESOLVED path for a -warning alarm is untouched: still green, still no mention.
+    warning_resolved, _ = sns_to_slack.cloudwatch_card(
+        alarm_fixture("OK", alarm_name="acme-prod-nlb-healthy-hosts-warning"),
+        "acme-prod", "us-east-1", "111", "prod",
+        started_at="2026-08-01T12:00:00.000+0000")
+    warning_resolved_text = str(warning_resolved)
+    checks.extend([
+        ("warning-alarm resolve rail",
+         warning_resolved["attachments"][0]["color"] == sns_to_slack.COLOR_RESOLVED),
+        ("warning-alarm resolve header",
+         "✅ RESOLVED · CloudWatch · acme-prod" in warning_resolved_text),
+        ("warning-alarm resolve does not page", "<!channel>" not in warning_resolved_text),
     ])
 
     dms_event = {"detail-type": "DMS Replication State Change",
