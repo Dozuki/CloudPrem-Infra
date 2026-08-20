@@ -64,3 +64,13 @@ spec:
           value: min_default
         - name: run-id
           value: harness-warm-pool
+        # Bypasses 10-scenario.yaml's workflow.parameters.residual-enforce binding since
+        # this cron submits harness-phase directly, so it needs its own binding to the
+        # same ConfigMap key or it silently falls back to the `run` template's 'true'
+        # default and keeps enforcing after the rollout flag flips to 'false'.
+        - name: residual-enforce
+          valueFrom:
+            configMapKeyRef:
+              name: harness-config
+              key: residual_enforce
+            default: 'true'
