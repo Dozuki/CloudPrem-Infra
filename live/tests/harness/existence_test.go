@@ -1082,6 +1082,40 @@ func TestVerifyRDSClusterResourceIDFilterNoMatchWithConfirmingFallbackIsNotFound
 	}
 }
 
+// TestVerifyRDSClusterRealProductionOutageARN pins the exact ARN shape that was
+// causing the live false-positive: a blocking residual observed on a running harness
+// job,
+//
+//	arn:aws:rds:us-east-1:076248559428:cluster:cluster-vcmmhmjp26uk3ie76rwwvnh2xu
+//
+// Production confirms the tagging API's tail arrives LOWERCASE (26 lowercase chars
+// after "cluster-"), so finding 1's case-insensitive detection is defensive here (the
+// old lowercase-only pattern already matched this real shape) - the actual bug is
+// finding 2: the lowercase tail was sent to db-cluster-resource-id verbatim, a value
+// AWS's DbClusterResourceId never stores, so the filter could never match a live
+// cluster. This asserts the filter is canonicalized to uppercase for this exact ARN.
+func TestVerifyRDSClusterRealProductionOutageARN(t *testing.T) {
+	const outageARN = "arn:aws:rds:us-east-1:076248559428:cluster:cluster-vcmmhmjp26uk3ie76rwwvnh2xu"
+	var gotFilters []rdstypes.Filter
+	api := &fakeVerifierAPI{describeDBClusters: func(in *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		gotFilters = in.Filters
+		if len(in.Filters) == 1 {
+			return &rds.DescribeDBClustersOutput{DBClusters: []rdstypes.DBCluster{{DBClusterIdentifier: aws.String("prod-cluster")}}}, nil
+		}
+		return &rds.DescribeDBClustersOutput{}, nil
+	}}
+	state, note := verifyRDSCluster(context.Background(), api.apiSet(), outageARN)
+	if len(gotFilters) != 1 || aws.ToString(gotFilters[0].Name) != "db-cluster-resource-id" {
+		t.Fatalf("expected a single db-cluster-resource-id filter, got %+v", gotFilters)
+	}
+	if want := "cluster-VCMMHMJP26UK3IE76RWWVNH2XU"; len(gotFilters[0].Values) != 1 || gotFilters[0].Values[0] != want {
+		t.Fatalf("filter value = %+v, want [%q] - the lowercase tagging-API tail must be canonicalized to AWS's actual wire case", gotFilters[0].Values, want)
+	}
+	if state != existenceExists {
+		t.Fatalf("state = %v, want existenceExists - this ARN belongs to a live cluster in production (note=%q)", state, note)
+	}
+}
+
 func TestVerifyRDSClusterOrdinaryIdentifierUnaffectedByResourceIDBranch(t *testing.T) {
 	api := &fakeVerifierAPI{describeDBClusters: func(in *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
 		if aws.ToString(in.DBClusterIdentifier) != "custx-bi-writer" {
