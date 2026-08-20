@@ -357,6 +357,48 @@ func TestVerifyLogGroupPrefixSemantics(t *testing.T) {
 	}
 }
 
+// --- Round 2 finding 4: verifyLogGroup only ever read the first DescribeLogGroups
+// page. A prefix catching more than one page of siblings would then report a log group
+// on page 2 as a definite NotFound, when the scan never actually looked at it. Fails
+// against the pre-fix code, which built the input with no NextToken and returned
+// existenceNotFound as soon as page 1 had no exact match, never issuing a second call.
+// Confirmed by hand: reverting verifyLogGroup to drop the NextToken plumbing and return
+// on the first page reproduces this failure (the mock's second closure - which the
+// pre-fix call never invokes - would go uncalled and the exact match would be missed).
+func TestVerifyLogGroupMatchOnSecondPageIsNotReportedGone(t *testing.T) {
+	var calls int
+	api := &fakeVerifierAPI{describeLogGroups: func(in *cloudwatchlogs.DescribeLogGroupsInput) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
+		calls++
+		switch calls {
+		case 1:
+			if in.NextToken != nil {
+				t.Errorf("first call NextToken = %q, want nil", aws.ToString(in.NextToken))
+			}
+			return &cloudwatchlogs.DescribeLogGroupsOutput{
+				LogGroups: []cwltypes.LogGroup{{LogGroupName: aws.String("/custx-bi/app-extra")}},
+				NextToken: aws.String("page-2"),
+			}, nil
+		case 2:
+			if aws.ToString(in.NextToken) != "page-2" {
+				t.Errorf("second call NextToken = %q, want page-2", aws.ToString(in.NextToken))
+			}
+			return &cloudwatchlogs.DescribeLogGroupsOutput{
+				LogGroups: []cwltypes.LogGroup{{LogGroupName: aws.String("/custx-bi/app")}},
+			}, nil
+		default:
+			t.Fatalf("unexpected call %d", calls)
+			return nil, nil
+		}
+	}}
+	state, note := verifyLogGroup(context.Background(), api.apiSet(), "arn:aws:logs:us-east-1:1:log-group:/custx-bi/app:*")
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (must read the second page)", calls)
+	}
+	if state != existenceExists {
+		t.Fatalf("state = %v, want existenceExists - the exact match on page 2 must not be missed (note=%q)", state, note)
+	}
+}
+
 func TestVerifyDMSEndpointFiltersByARN(t *testing.T) {
 	target := "arn:aws:dms:us-east-1:1:endpoint:custx-bi-src"
 	api := &fakeVerifierAPI{describeEndpoints: func(in *databasemigrationservice.DescribeEndpointsInput) (*databasemigrationservice.DescribeEndpointsOutput, error) {
@@ -858,7 +900,56 @@ func TestLooksLikeDBClusterResourceIDDiscriminatesFromUserIdentifiers(t *testing
 	}
 }
 
-func TestVerifyRDSClusterUsesResourceIDFilterForClassASecondaryARN(t *testing.T) {
+// --- Round 2 (findings 1-3): the discriminator missed the real (uppercase) wire shape
+// of DbClusterResourceId entirely, and even once it matches, the filter call itself
+// mixed up which case to hand AWS and folded an anomalous nil response into the same
+// branch as a legitimate empty one. Each test below fails against the code as it stood
+// before this round: reverting looksLikeDBClusterResourceID to match the raw (not
+// lower-cased) id reproduces the finding-1 failure; reverting
+// verifyRDSClusterByResourceID to send `id` verbatim instead of strings.ToUpper(id), or
+// to return the filter's own state directly instead of falling back through
+// verifyRDSClusterByIdentifier, reproduces the finding-2 failures; reverting
+// rdsClusterByResourceIDFilter to check len(out.DBClusters) before out == nil
+// reproduces the finding-3 failure. Confirmed by hand for each test below.
+
+func TestLooksLikeDBClusterResourceIDMatchesUppercaseWireShape(t *testing.T) {
+	// The real DbClusterResourceId shape as the tagging API actually returns it - see
+	// the package comment on dbClusterResourceIDPattern. Fails-before-fix: with the
+	// pre-round-2 pattern (matched against the raw, not lower-cased, id) this returned
+	// false, since the pattern only recognized the all-lowercase shape.
+	if !looksLikeDBClusterResourceID("cluster-CO3QCVN73C42V4NVZBEDVLXPZU") {
+		t.Fatal("looksLikeDBClusterResourceID(uppercase wire shape) = false, want true")
+	}
+}
+
+func TestVerifyRDSClusterUppercaseResourceIDIsDetectedAndProbedViaFilter(t *testing.T) {
+	resourceIDARN := "arn:aws:rds:us-east-1:1:cluster:cluster-CO3QCVN73C42V4NVZBEDVLXPZU"
+	var gotFilters []rdstypes.Filter
+	var gotIdentifier *string
+	api := &fakeVerifierAPI{describeDBClusters: func(in *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		gotFilters = in.Filters
+		gotIdentifier = in.DBClusterIdentifier
+		return &rds.DescribeDBClustersOutput{DBClusters: []rdstypes.DBCluster{{DBClusterIdentifier: aws.String("custx-bi")}}}, nil
+	}}
+	// Fails-before-fix: with the lowercase-only discriminator, this ARN's tail never
+	// looks like a resource id, so it falls through to the DBClusterIdentifier branch
+	// (gotIdentifier would be set, gotFilters empty) - exactly the original bug.
+	state, note := verifyRDSCluster(context.Background(), api.apiSet(), resourceIDARN)
+	if gotIdentifier != nil {
+		t.Errorf("DBClusterIdentifier = %q, want it left unset - an uppercase resource-id must still route through the filter, never DBClusterIdentifier", aws.ToString(gotIdentifier))
+	}
+	if len(gotFilters) != 1 || aws.ToString(gotFilters[0].Name) != "db-cluster-resource-id" || len(gotFilters[0].Values) != 1 || gotFilters[0].Values[0] != "cluster-CO3QCVN73C42V4NVZBEDVLXPZU" {
+		t.Fatalf("expected a single db-cluster-resource-id filter carrying the uppercase tail, got %+v", gotFilters)
+	}
+	if state != existenceExists {
+		t.Fatalf("state = %v, want existenceExists for a filter match (note=%q)", state, note)
+	}
+}
+
+func TestVerifyRDSClusterLowercaseResourceIDStillWorks(t *testing.T) {
+	// No regression: a lowercase tail (the shape residuals.go's own index normalizes
+	// to) must still be detected and probed via the filter, uppercased on the wire per
+	// finding 2.
 	resourceIDARN := "arn:aws:rds:us-east-1:1:cluster:cluster-co3qcvn73c42v4nvzbedvlxpzu"
 	var gotFilters []rdstypes.Filter
 	var gotIdentifier *string
@@ -871,22 +962,123 @@ func TestVerifyRDSClusterUsesResourceIDFilterForClassASecondaryARN(t *testing.T)
 	if gotIdentifier != nil {
 		t.Errorf("DBClusterIdentifier = %q, want it left unset - a resource-id must never be passed there (it always 404s)", aws.ToString(gotIdentifier))
 	}
-	if len(gotFilters) != 1 || aws.ToString(gotFilters[0].Name) != "db-cluster-resource-id" || len(gotFilters[0].Values) != 1 || gotFilters[0].Values[0] != "cluster-co3qcvn73c42v4nvzbedvlxpzu" {
-		t.Fatalf("expected a single db-cluster-resource-id filter for the resource-id tail, got %+v", gotFilters)
+	// Fails-before-fix: the pre-round-2 code sent the filter value verbatim
+	// ("cluster-co3qcvn73c42v4nvzbedvlxpzu"); this asserts it is uppercased to the
+	// case AWS actually stores DbClusterResourceId in.
+	if len(gotFilters) != 1 || aws.ToString(gotFilters[0].Name) != "db-cluster-resource-id" || len(gotFilters[0].Values) != 1 || gotFilters[0].Values[0] != "cluster-CO3QCVN73C42V4NVZBEDVLXPZU" {
+		t.Fatalf("expected a single db-cluster-resource-id filter carrying the uppercased tail, got %+v", gotFilters)
 	}
 	if state != existenceExists {
 		t.Fatalf("state = %v, want existenceExists for a filter match (note=%q)", state, note)
 	}
 }
 
-func TestVerifyRDSClusterResourceIDFilterNoMatchIsLegitimateNotFound(t *testing.T) {
+func TestVerifyRDSClusterResourceIDFilterEmptyForALiveClusterFallsBackAndDoesNotConfirmGone(t *testing.T) {
+	// The filter has undocumented match semantics, so an empty result for a cluster
+	// that IS live must not be trusted on its own: the fallback through
+	// DBClusterIdentifier must run, and - because that fallback always 404s for a
+	// genuine resource-id shape (see verifyRDSClusterByIdentifier's doc) - the overall
+	// answer must land on existenceError, never a definite existenceNotFound.
+	resourceIDARN := "arn:aws:rds:us-east-1:1:cluster:cluster-co3qcvn73c42v4nvzbedvlxpzu"
+	var filterCalls, identifierCalls int
+	api := &fakeVerifierAPI{describeDBClusters: func(in *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		if len(in.Filters) == 1 {
+			filterCalls++
+			return &rds.DescribeDBClustersOutput{}, nil // empty despite the cluster being live
+		}
+		identifierCalls++
+		return nil, &rdstypes.DBClusterNotFoundFault{Message: aws.String("gone")} // documented behavior for a resource-id-shaped identifier
+	}}
+	// Fails-before-fix: the pre-round-2 code returned existenceNotFound directly off
+	// the empty filter result, with no fallback call at all.
+	state, note := verifyRDSCluster(context.Background(), api.apiSet(), resourceIDARN)
+	if filterCalls != 1 || identifierCalls != 1 {
+		t.Fatalf("filterCalls=%d identifierCalls=%d, want exactly one of each (fallback must run)", filterCalls, identifierCalls)
+	}
+	if state == existenceNotFound {
+		t.Fatalf("state = existenceNotFound, want anything but a definite NotFound off an unconfirmed empty filter result (note=%q)", note)
+	}
+	if state != existenceError {
+		t.Fatalf("state = %v, want existenceError", state)
+	}
+}
+
+func TestVerifyRDSClusterUserIdentifierMatchingResourceIDShapeStillResolves(t *testing.T) {
+	// A legal user-chosen cluster identifier can satisfy the resource-id pattern
+	// (leading letter, alphanumeric, no trailing/double hyphen, right length). The
+	// filter will never match it (it isn't a real DbClusterResourceId), but the
+	// fallback through DBClusterIdentifier must find it, since it IS the real
+	// identifier - resolving both directions with the same retry.
+	arn := "arn:aws:rds:us-east-1:1:cluster:cluster-abcdefghijklmnopqrstuvwxyz"
+	var filterCalls, identifierCalls int
+	api := &fakeVerifierAPI{describeDBClusters: func(in *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		if len(in.Filters) == 1 {
+			filterCalls++
+			return &rds.DescribeDBClustersOutput{}, nil // no cluster has this as its resource id
+		}
+		identifierCalls++
+		if aws.ToString(in.DBClusterIdentifier) != "cluster-abcdefghijklmnopqrstuvwxyz" {
+			t.Errorf("DBClusterIdentifier = %q, want cluster-abcdefghijklmnopqrstuvwxyz", aws.ToString(in.DBClusterIdentifier))
+		}
+		return &rds.DescribeDBClustersOutput{DBClusters: []rdstypes.DBCluster{{DBClusterIdentifier: in.DBClusterIdentifier}}}, nil
+	}}
+	state, note := verifyRDSCluster(context.Background(), api.apiSet(), arn)
+	if filterCalls != 1 || identifierCalls != 1 {
+		t.Fatalf("filterCalls=%d identifierCalls=%d, want exactly one of each", filterCalls, identifierCalls)
+	}
+	if state != existenceExists {
+		t.Fatalf("state = %v, want existenceExists - the fallback must resolve a real user identifier that happens to match the resource-id shape (note=%q)", state, note)
+	}
+}
+
+func TestVerifyRDSClusterResourceIDFilterNilResponseIsErrorNotNotFound(t *testing.T) {
+	// Finding 3: a NIL out with err == nil on the byResourceID path must be checked
+	// BEFORE the empty-slice check, and must return existenceError (with an Incomplete
+	// note at the ResidualReport level), never a definite NotFound.
 	resourceIDARN := "arn:aws:rds:us-east-1:1:cluster:cluster-co3qcvn73c42v4nvzbedvlxpzu"
 	api := &fakeVerifierAPI{describeDBClusters: func(*rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
-		return &rds.DescribeDBClustersOutput{}, nil // genuine empty filtered result
+		return nil, nil // anomalous: never legitimately happens on a healthy filtered-list call
+	}}
+	// Fails-before-fix: the pre-round-2 code folded `out == nil` into the same
+	// `out == nil || len(out.DBClusters) == 0` branch as a genuine empty list and
+	// returned existenceNotFound for both.
+	state, note := rdsClusterByResourceIDFilter(context.Background(), api.apiSet(), "CLUSTER-CO3QCVN73C42V4NVZBEDVLXPZU")
+	if state != existenceError {
+		t.Fatalf("state = %v, want existenceError for a nil response with no error (note=%q)", state, note)
+	}
+
+	// And end to end through verifyResidualExistenceWith: a nil response must land an
+	// Incomplete note and fail the residual open (not-Blocking demoted for the RIGHT
+	// reason - "could not confirm", not "confirmed gone").
+	rep := &ResidualReport{Residuals: []Residual{
+		{Source: "tag-reconcile", ARN: resourceIDARN, Type: "rds:cluster", Blocking: true},
+	}}
+	clientsFor := func(string) (*verifierAPISet, error) { return api.apiSet(), nil }
+	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", clientsFor)
+	if rep.Residuals[0].Blocking {
+		t.Fatal("a nil-response probe must fail open (Blocking demoted)")
+	}
+	if len(rep.Incomplete) != 1 {
+		t.Fatalf("expected exactly one Incomplete note, got %+v", rep.Incomplete)
+	}
+}
+
+func TestVerifyRDSClusterResourceIDFilterNoMatchWithConfirmingFallbackIsNotFound(t *testing.T) {
+	// The one shape that DOES still resolve to a definite NotFound off this path: the
+	// filter comes back empty AND the fallback genuinely 404s - which is what always
+	// happens for a real orphaned resource-id (see verifyRDSClusterByIdentifier's own
+	// doc), so this call alone can never distinguish "genuinely gone" from "filter
+	// missed it" - per finding 2 it now reports existenceError (fail open), covered
+	// above by TestVerifyRDSClusterResourceIDFilterEmptyForALiveClusterFallsBackAndDoes
+	// NotConfirmGone. This test only pins down that the fallback error path (as
+	// opposed to a fallback existenceExists) never leaks through as existenceExists.
+	resourceIDARN := "arn:aws:rds:us-east-1:1:cluster:cluster-co3qcvn73c42v4nvzbedvlxpzu"
+	api := &fakeVerifierAPI{describeDBClusters: func(*rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		return &rds.DescribeDBClustersOutput{}, nil // both filter and fallback see this
 	}}
 	state, note := verifyRDSCluster(context.Background(), api.apiSet(), resourceIDARN)
-	if state != existenceNotFound {
-		t.Fatalf("state = %v, want existenceNotFound - a non-nil empty filtered list IS a legitimate no-match for this call shape (note=%q)", state, note)
+	if state == existenceExists {
+		t.Fatalf("state = existenceExists, want anything but existenceExists off two empty responses (note=%q)", note)
 	}
 }
 

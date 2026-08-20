@@ -390,17 +390,47 @@ func classifyEKSNotFound(err error) (existenceState, string) {
 
 // dbClusterResourceIDPattern recognizes Class A's secondary Aurora ARN tail
 // (residuals.go): the Resource Groups Tagging API returns Aurora clusters under a
-// SECOND ARN whose resource id is the cluster's DbClusterResourceId, lower-cased by
-// residuals.go on index - AWS's own fixed internal format, "cluster-" followed by
-// exactly 26 alphanumeric characters with no further hyphens. A user-chosen
-// DBClusterIdentifier is never this exact shape (AWS cluster identifiers commonly
-// contain hyphens throughout, e.g. "custx-bi-writer"), so this is a safe, explicit
-// discriminator rather than a guess - verified against a live DbClusterResourceId
-// value ("cluster-CO3QCVN73C42V4NVZBEDVLXPZU" pre-lowercase).
+// SECOND ARN whose resource id is the cluster's DbClusterResourceId - AWS's own fixed
+// internal format, "cluster-" followed by exactly 26 alphanumeric characters with no
+// further hyphens. A user-chosen DBClusterIdentifier is never this exact shape (AWS
+// cluster identifiers commonly contain hyphens throughout, e.g. "custx-bi-writer"), so
+// this is a safe, explicit discriminator rather than a guess.
+//
+// Written lowercase and matched case-insensitively (looksLikeDBClusterResourceID lowers
+// the input before testing, without mutating the caller's copy): the real
+// DbClusterResourceId is UPPERCASE on the wire ("cluster-CO3QCVN73C42V4NVZBEDVLXPZU"),
+// residuals.go's state index lower-cases its OWN copy for a consistent lookup key, but
+// nothing upstream of this call guarantees what case the ARN this probe receives
+// carries. A lowercase-only pattern against an uppercase tail misses the discriminator
+// entirely, falls through to the DBClusterIdentifier branch below, which always raises
+// DBClusterNotFoundFault for a resource-id-shaped value - silently restoring the exact
+// bug this file exists to fix, just for the untested case.
 var dbClusterResourceIDPattern = regexp.MustCompile(`^cluster-[0-9a-z]{26}$`)
 
 func looksLikeDBClusterResourceID(id string) bool {
-	return dbClusterResourceIDPattern.MatchString(id)
+	return dbClusterResourceIDPattern.MatchString(strings.ToLower(id))
+}
+
+// dbClusterResourceIDLength is "cluster-" plus the fixed 26-character suffix
+// dbClusterResourceIDPattern requires - guaranteed by looksLikeDBClusterResourceID
+// having already matched before this is ever called.
+const dbClusterResourceIDLength = len("cluster-") + 26
+
+// canonicalDBClusterResourceID returns id in the case AWS actually stores
+// DbClusterResourceId in: a lowercase "cluster-" literal followed by an uppercase
+// 26-character suffix (verified against a live value, "cluster-CO3QCVN73C42V4NVZBEDVLXPZU").
+// The caller (verifyRDSClusterByResourceID) must only reach this after
+// looksLikeDBClusterResourceID has already confirmed id matches that shape
+// case-insensitively; canonicalDBClusterResourceID does not re-validate it, it only
+// re-cases it, so a plain strings.ToUpper(id) would be wrong here - that would also
+// uppercase the "cluster-" literal, which is never capitalized on the wire.
+func canonicalDBClusterResourceID(id string) string {
+	if len(id) != dbClusterResourceIDLength {
+		// Defensive only: looksLikeDBClusterResourceID's length check already rules
+		// this out for every real caller.
+		return strings.ToUpper(id)
+	}
+	return "cluster-" + strings.ToUpper(id[len("cluster-"):])
 }
 
 // verifyRDSCluster has to pick between two different DescribeDBClusters query shapes
@@ -427,17 +457,20 @@ func verifyRDSCluster(ctx context.Context, c *verifierAPISet, arnStr string) (ex
 	if id == "" {
 		return existenceError, "could not extract cluster identifier from arn"
 	}
-	byResourceID := looksLikeDBClusterResourceID(id)
-	input := &rds.DescribeDBClustersInput{}
-	if byResourceID {
-		input.Filters = []rdstypes.Filter{{Name: aws.String("db-cluster-resource-id"), Values: []string{id}}}
-	} else {
-		input.DBClusterIdentifier = aws.String(id)
+	if looksLikeDBClusterResourceID(id) {
+		return verifyRDSClusterByResourceID(ctx, c, id)
 	}
+	return verifyRDSClusterByIdentifier(ctx, c, id)
+}
+
+// verifyRDSClusterByIdentifier is the get-by-identifier call: a missing identifier
+// always raises DBClusterNotFoundFault, so an empty success on this path never happens
+// on a healthy call and is an anomaly, not a legitimate absence.
+func verifyRDSClusterByIdentifier(ctx context.Context, c *verifierAPISet, id string) (existenceState, string) {
 	var out *rds.DescribeDBClustersOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		o, e := c.RDS.DescribeDBClusters(ctx, input)
+		o, e := c.RDS.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(id)})
 		out, err = o, e
 		return e
 	})
@@ -449,15 +482,73 @@ func verifyRDSCluster(ctx context.Context, c *verifierAPISet, arnStr string) (ex
 		return existenceError, err.Error()
 	}
 	if out == nil || len(out.DBClusters) == 0 {
-		if byResourceID {
-			// A genuine filtered-list "no match" - see the comment above.
-			return existenceNotFound, "no db cluster matched this db-cluster-resource-id filter"
-		}
-		// DBClusterIdentifier is a get-by-identifier call: a missing identifier
-		// always raises DBClusterNotFoundFault (handled above), so an empty
-		// success here never happens on a healthy call and is an anomaly, not a
-		// legitimate absence.
 		return existenceError, "no db cluster in response despite no error (anomalous SDK response)"
+	}
+	return existenceExists, ""
+}
+
+// verifyRDSClusterByResourceID handles Class A's secondary ARN. Two things this call
+// cannot take on faith, both hardened here:
+//
+//   - Case. DbClusterResourceId's documented shape is fixed-case uppercase, but
+//     nothing upstream of this call guarantees the ARN tail it was handed carries
+//     that case (residuals.go's state index lower-cases its own lookup copy; this ARN
+//     is not that copy). Hand AWS the value in the case it actually stores rather
+//     than trusting the caller's case verbatim.
+//   - The filter's match semantics. Nothing in this diff has a doc reference proving
+//     db-cluster-resource-id matches case-insensitively (or at all, in every
+//     partition). So an empty filter result alone is not proof of absence: retry once
+//     via DBClusterIdentifier before concluding anything. That retry is also exactly
+//     what resolves the opposite edge - a legal user-chosen cluster identifier that
+//     happens to satisfy the resource-id shape (e.g. "cluster-abcdefghijklmnopqrstuvwxyz")
+//     will never match the resource-id filter (it isn't one), but IS a real
+//     DBClusterIdentifier, so the fallback finds it.
+//
+// If the fallback doesn't come back existenceExists, this returns existenceError, never
+// existenceNotFound: a resource-id-shaped identifier passed through DBClusterIdentifier
+// always raises DBClusterNotFoundFault regardless of whether the cluster is live (see
+// verifyRDSClusterByIdentifier's own doc), so a NotFound from the fallback is exactly as
+// uninformative here as the filter's own empty result - neither path has demonstrated
+// match semantics strong enough to justify a definite "confirmed gone".
+func verifyRDSClusterByResourceID(ctx context.Context, c *verifierAPISet, id string) (existenceState, string) {
+	filterState, filterNote := rdsClusterByResourceIDFilter(ctx, c, canonicalDBClusterResourceID(id))
+	if filterState != existenceNotFound {
+		return filterState, filterNote
+	}
+	idState, idNote := verifyRDSClusterByIdentifier(ctx, c, id)
+	if idState == existenceExists {
+		return existenceExists, ""
+	}
+	return existenceError, fmt.Sprintf(
+		"db-cluster-resource-id filter found no match (%s); DBClusterIdentifier fallback did not confirm existence either (%s) - filter match semantics are unconfirmed, so this is not treated as a definite NotFound",
+		filterNote, idNote,
+	)
+}
+
+func rdsClusterByResourceIDFilter(ctx context.Context, c *verifierAPISet, filterValue string) (existenceState, string) {
+	var out *rds.DescribeDBClustersOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.RDS.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{
+			Filters: []rdstypes.Filter{{Name: aws.String("db-cluster-resource-id"), Values: []string{filterValue}}},
+		})
+		out, err = o, e
+		return e
+	})
+	if err != nil {
+		return existenceError, err.Error()
+	}
+	// A NIL output with err == nil is an anomalous SDK response, not the documented
+	// empty-list shape of "no match" for a filtered-list call - checked FIRST and
+	// separately from the empty-slice case, the same anomaly-vs-legitimate-empty split
+	// verifyLogGroup already applies. Collapsing the two would let a genuinely live
+	// cluster read as confirmed-gone off a response this call never actually got.
+	if out == nil {
+		return existenceError, "empty response despite no error (anomalous SDK response)"
+	}
+	if len(out.DBClusters) == 0 {
+		// A genuine filtered-list "no match" - see the function comment above.
+		return existenceNotFound, "no db cluster matched this db-cluster-resource-id filter"
 	}
 	return existenceExists, ""
 }
@@ -757,42 +848,59 @@ func verifyS3Bucket(ctx context.Context, c *verifierAPISet, arnStr string) (exis
 
 // --- CloudWatch Logs --------------------------------------------------------------
 
+// maxLogGroupPages bounds the prefix scan (same rule maxIAMListPages and
+// maxDMSReplicationConfigPages already apply for the identical reason): a page cap so a
+// paginator that never converges reads as "probe failed" rather than hanging the phase.
+const maxLogGroupPages = 50
+
 // verifyLogGroup: there is no per-name Describe for a log group, only a prefix list, so
 // this treats a genuinely EMPTY page (non-nil, zero LogGroups - the documented shape of
 // "nothing matched this prefix") as NotFound, and requires an EXACT name match among
-// what the prefix returns - the prefix can legitimately catch other log groups that
-// merely start with the same string. A NIL output with err == nil is a different thing
-// entirely: DescribeLogGroups never legitimately returns that on success, so it is an
-// anomalous SDK response, not evidence the log group is gone, and gets existenceError
-// instead - collapsing the two would silently confirm-gone a log group this call never
-// actually queried.
+// what the prefix returns across EVERY page - the prefix can legitimately catch other
+// log groups that merely start with the same string, and can legitimately span more
+// than one page of them. Reading only the first page and calling a miss there
+// "confirmed gone" would misreport a real log group sitting on page 2 behind enough
+// same-prefix siblings; every other paginating probe in this file degrades to
+// existenceError rather than a definite NotFound when it cannot converge, and this call
+// now matches that pattern. A NIL output with err == nil is a different thing entirely:
+// DescribeLogGroups never legitimately returns that on success, so it is an anomalous
+// SDK response, not evidence the log group is gone, and gets existenceError instead -
+// collapsing the two would silently confirm-gone a log group this call never actually
+// queried.
 func verifyLogGroup(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	name := strings.TrimSuffix(arnResourceID(arnStr), ":*")
 	if name == "" {
 		return existenceError, "could not extract log group name from arn"
 	}
-	var out *cloudwatchlogs.DescribeLogGroupsOutput
-	var err error
-	_ = callWithOneRetry(ctx, func() error {
-		o, e := c.Logs.DescribeLogGroups(ctx, &cloudwatchlogs.DescribeLogGroupsInput{LogGroupNamePrefix: aws.String(name)})
-		out, err = o, e
-		return e
-	})
-	if err != nil {
-		return existenceError, err.Error()
-	}
-	if out == nil {
-		return existenceError, "empty response despite no error (anomalous SDK response)"
-	}
-	if len(out.LogGroups) == 0 {
-		return existenceNotFound, "empty page for this prefix"
-	}
-	for _, lg := range out.LogGroups {
-		if aws.ToString(lg.LogGroupName) == name {
-			return existenceExists, ""
+	var nextToken *string
+	for page := 0; page < maxLogGroupPages; page++ {
+		var out *cloudwatchlogs.DescribeLogGroupsOutput
+		var err error
+		_ = callWithOneRetry(ctx, func() error {
+			o, e := c.Logs.DescribeLogGroups(ctx, &cloudwatchlogs.DescribeLogGroupsInput{
+				LogGroupNamePrefix: aws.String(name),
+				NextToken:          nextToken,
+			})
+			out, err = o, e
+			return e
+		})
+		if err != nil {
+			return existenceError, err.Error()
 		}
+		if out == nil {
+			return existenceError, "empty response despite no error (anomalous SDK response)"
+		}
+		for _, lg := range out.LogGroups {
+			if aws.ToString(lg.LogGroupName) == name {
+				return existenceExists, ""
+			}
+		}
+		if out.NextToken == nil || aws.ToString(out.NextToken) == "" {
+			return existenceNotFound, "not present in any page for this prefix"
+		}
+		nextToken = out.NextToken
 	}
-	return existenceNotFound, "prefix matched only other log groups"
+	return existenceError, "DescribeLogGroups did not converge within the page cap"
 }
 
 // --- DMS ------------------------------------------------------------------------
