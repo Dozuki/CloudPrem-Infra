@@ -243,6 +243,13 @@ func TestBuildSelectsArtifactKeyPerFailedPodNode(t *testing.T) {
 	}
 }
 
+// TestBuildCapsAtThreeNodesPerChild covers the DISPLAY cap: with 5 distinct failed
+// nodes (different DisplayNames, so none dedup away), Build must fetch every
+// surviving candidate - the cap no longer bounds the S3 fan-out, only the number of
+// distinct bullets that make it into LogExcerpt - and keep the EARLIEST 3 by
+// FinishedAt (a, b, c) in the shown output, not the latest (c, d, e). Capping the
+// fetch itself first was the earlier bug: it let a distinct later diagnostic get
+// dropped before it was ever read (see TestBuildDedupSurvivesRetriesAndReclaimsSlot).
 func TestBuildCapsAtThreeNodesPerChild(t *testing.T) {
 	mkNode := func(id, finishedAt string) Node {
 		return Node{
@@ -267,41 +274,33 @@ func TestBuildCapsAtThreeNodesPerChild(t *testing.T) {
 		},
 	}
 	stub := &stubFetcher{fn: func(ctx context.Context, bucket, key string) (string, error) {
-		return "Error: boom\n", nil
+		return "Error: boom (" + key + ")\n", nil
 	}}
-	_ = Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
 
 	stub.mu.Lock()
 	got := append([]string(nil), stub.requested...)
 	stub.mu.Unlock()
-	if len(got) != 3 {
-		t.Errorf("requested %d objects, want 3 (the per-child node cap)", len(got))
+	if len(got) != 5 {
+		t.Errorf("requested %d objects, want 5 (every surviving candidate is fetched, the cap only bounds what is displayed)", len(got))
 	}
 	for _, r := range got {
 		if strings.Contains(r, "retry-a") {
 			t.Errorf("Retry node was fetched: %v", got)
 		}
 	}
-	// The cap must keep the EARLIEST 3 by FinishedAt (a, b, c), not the latest (c,
-	// d, e) - the originating failure is what explains why the run is red, and it
-	// must survive however many later nodes pile on top of it.
+	excerpt := children[0].LogExcerpt
 	for _, want := range []string{"a/main.log", "b/main.log", "c/main.log"} {
-		found := false
-		for _, r := range got {
-			if strings.Contains(r, want) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("requested %v, want it to include the earliest node %q", got, want)
+		if !strings.Contains(excerpt, want) {
+			t.Errorf("LogExcerpt = %q, want it to include the earliest node %q", excerpt, want)
 		}
 	}
 	for _, notWant := range []string{"d/main.log", "e/main.log"} {
-		for _, r := range got {
-			if strings.Contains(r, notWant) {
-				t.Errorf("requested %v, want the later nodes dropped in favor of the earliest", got)
-			}
+		if strings.Contains(excerpt, notWant) {
+			t.Errorf("LogExcerpt = %q, want the later nodes dropped in favor of the earliest", excerpt)
 		}
 	}
 }
@@ -581,7 +580,7 @@ func TestFailedPodNodesSkipsEmptyFinishedAtForEarliest(t *testing.T) {
 			},
 		},
 	}
-	nodes := failedPodNodes(wf, 0)
+	nodes := failedPodNodes(wf)
 	if len(nodes) != 2 {
 		t.Fatalf("got %d nodes, want 2", len(nodes))
 	}
@@ -668,5 +667,212 @@ func TestBuildOutputIsDeterministic(t *testing.T) {
 	wantJSON, _ := json.Marshal(wantChildren)
 	if string(gotJSON) != string(wantJSON) {
 		t.Errorf("Build() output does not match children.golden.json\ngot:  %s\nwant: %s", gotJSON, wantJSON)
+	}
+}
+
+// TestBuildSkipsPodNodeWhoseParentRetrySucceeded covers the retry-masking regression:
+// the harness retryStrategy is OnError/limit 2 (live/tests/argo/00-phase-templates.yaml
+// ~:105), so a Pod node can be Failed while the Retry node grouping its attempts
+// ultimately Succeeded. Such a Pod's failure was retried away and must not drive
+// failed_phase/log_uri or be fetched at all, even though it is the earliest failed
+// Pod node in the workflow.
+func TestBuildSkipsPodNodeWhoseParentRetrySucceeded(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-retrymask-abcde", Labels: map[string]string{"harness/config": "retrymask"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				// upgrade(0) failed first, but its Retry node ultimately succeeded
+				// (a later attempt, not modeled here, must have won) - this node's
+				// failure is masked and must be skipped entirely.
+				"retry-upgrade": {ID: "retry-upgrade", Type: "Retry", Phase: "Succeeded", DisplayName: "upgrade", Children: []string{"upgrade0"}},
+				"upgrade0": {
+					ID: "upgrade0", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: "2026-08-04T00:00:01Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "upgrade0/main.log"}}}},
+				},
+				// validate(0) is the real, unmasked failure - its Retry node also
+				// ultimately failed.
+				"retry-validate": {ID: "retry-validate", Type: "Retry", Phase: "Failed", DisplayName: "validate", Children: []string{"validate0"}},
+				"validate0": {
+					ID: "validate0", Type: "Pod", Phase: "Failed", DisplayName: "validate(0)", FinishedAt: "2026-08-04T00:00:02Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "validate0/main.log"}}}},
+				},
+			},
+		},
+	}
+	logs := map[string]string{
+		"b/validate0/main.log": "Error: assertion failed: thing not ready\n",
+		"b/upgrade0/main.log":  "Error: this must never be read: the node was retried away\n",
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	c := children[0]
+
+	stub.mu.Lock()
+	requested := append([]string(nil), stub.requested...)
+	stub.mu.Unlock()
+	for _, r := range requested {
+		if strings.Contains(r, "upgrade0") {
+			t.Errorf("requested %v, want the retried-away upgrade0 node never fetched", requested)
+		}
+	}
+	if c.FailedPhase != "validate" {
+		t.Errorf("FailedPhase = %q, want %q (the masked upgrade(0) node must not drive it)", c.FailedPhase, "validate")
+	}
+	wantURI := "s3://b/validate0/main.log"
+	if c.LogURI != wantURI {
+		t.Errorf("LogURI = %q, want %q", c.LogURI, wantURI)
+	}
+	if !strings.Contains(c.LogExcerpt, "assertion failed") {
+		t.Errorf("LogExcerpt = %q, want it to contain the real validate(0) diagnostic", c.LogExcerpt)
+	}
+	if strings.Contains(c.LogExcerpt, "retried away") {
+		t.Errorf("LogExcerpt = %q, want it to NEVER contain the masked upgrade0 text", c.LogExcerpt)
+	}
+}
+
+// TestBuildSkipsNoArtifactNodeInsteadOfWastingBudget covers the evicted/OOM-killed
+// regression: such an attempt has no main-logs artifact at all, so under the old
+// earliest-first cap (applied before filtering) three no-artifact nodes could fill
+// the entire 3-node budget and push the one real, useful failure out of the
+// candidate set altogether - even though it is later and would otherwise easily fit.
+func TestBuildSkipsNoArtifactNodeInsteadOfWastingBudget(t *testing.T) {
+	mkEvicted := func(id, finishedAt string) Node {
+		return Node{ID: id, Type: "Pod", Phase: "Error", DisplayName: "provision(" + id + ")", FinishedAt: finishedAt}
+	}
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-evicted-abcde", Labels: map[string]string{"harness/config": "evicted"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"e0": mkEvicted("0", "2026-08-04T00:00:01Z"),
+				"e1": mkEvicted("1", "2026-08-04T00:00:02Z"),
+				"e2": mkEvicted("2", "2026-08-04T00:00:03Z"),
+				"up0": {
+					ID: "up0", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: "2026-08-04T00:00:04Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "up0/main.log"}}}},
+				},
+			},
+		},
+	}
+	stub := &stubFetcher{logs: map[string]string{"b/up0/main.log": "upgrade failed: connection refused\n"}}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	c := children[0]
+	if c.FailedPhase != "upgrade" {
+		t.Errorf("FailedPhase = %q, want %q (the 3 no-artifact nodes must not spend the budget)", c.FailedPhase, "upgrade")
+	}
+	wantURI := "s3://b/up0/main.log"
+	if c.LogURI != wantURI {
+		t.Errorf("LogURI = %q, want %q", c.LogURI, wantURI)
+	}
+	if !strings.Contains(c.LogExcerpt, "connection refused") {
+		t.Errorf("LogExcerpt = %q, want it to contain the real upgrade(0) diagnostic instead of being empty", c.LogExcerpt)
+	}
+}
+
+// TestBuildDedupSurvivesRetriesAndReclaimsSlot covers the second MAJOR: dedup used to
+// run AFTER the 3-node fetch cap, so three identical retries of one step could fill
+// the entire budget and a genuinely distinct diagnostic on a later, different step
+// was never even fetched - the fix fetches every surviving candidate and dedups
+// while filling the display budget, so the distinct diagnostic reclaims the slot the
+// duplicate retries collapsed away.
+func TestBuildDedupSurvivesRetriesAndReclaimsSlot(t *testing.T) {
+	mkNode := func(id, displayName, finishedAt string) Node {
+		return Node{
+			ID: id, Type: "Pod", Phase: "Failed", DisplayName: displayName, FinishedAt: finishedAt,
+			Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: id + "/main.log"}}}},
+		}
+	}
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-reclaim-abcde", Labels: map[string]string{"harness/config": "reclaim"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				// Three retries of the same step, identical excerpt - must collapse
+				// to a single bullet, not consume all 3 budget slots.
+				"0": mkNode("0", "upgrade(0)", "2026-08-04T00:00:01Z"),
+				"1": mkNode("1", "upgrade(1)", "2026-08-04T00:00:02Z"),
+				"2": mkNode("2", "upgrade(2)", "2026-08-04T00:00:03Z"),
+				// A later, genuinely distinct failure - must survive and take the
+				// slot the retries' dedup freed up.
+				"3": mkNode("3", "validate(0)", "2026-08-04T00:00:04Z"),
+			},
+		},
+	}
+	logs := map[string]string{
+		"b/0/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+		"b/1/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+		"b/2/main.log": "Error: context deadline exceeded waiting for helm upgrade\n",
+		"b/3/main.log": "Error: stopping DMS Serverless Replication (arn:aws:dms:us-east-1:000000000000:replication-config:REPLICATIONCONFIGID): InvalidResourceStateFault: replication cannot be stopped.\n",
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	got := children[0].LogExcerpt
+	if !strings.Contains(got, "context deadline exceeded") {
+		t.Errorf("LogExcerpt = %q, want the retried step's excerpt to survive", got)
+	}
+	if !strings.Contains(got, "InvalidResourceStateFault") {
+		t.Errorf("LogExcerpt = %q, want the distinct validate(0) diagnostic to survive - it must not be dropped just because it wasn't in the earliest 3 nodes", got)
+	}
+	if n := len(strings.Split(got, "; ")); n != 2 {
+		t.Errorf("LogExcerpt = %q, want exactly 2 distinct bullets (3 retries collapsed to 1, plus the distinct failure), got %d", got, n)
+	}
+}
+
+// TestBuildLogURIMatchesReportedExcerptNode covers the log_uri/excerpt
+// correspondence MINOR: log_uri used to be pinned to the earliest candidate node
+// regardless of whether that node's own fetch produced any usable text, so a card
+// could link a log that does not contain the quoted excerpt at all. log_uri must
+// refer to the same node the reported excerpt actually came from.
+func TestBuildLogURIMatchesReportedExcerptNode(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-uricorr-abcde", Labels: map[string]string{"harness/config": "uricorr"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				// Earliest node's log carries no recognizable error line, so it
+				// contributes nothing to LogExcerpt.
+				"a": {
+					ID: "a", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: "2026-08-04T00:00:01Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "a/main.log"}}}},
+				},
+				// Later node's log carries the real diagnostic that ends up in
+				// LogExcerpt.
+				"b": {
+					ID: "b", Type: "Pod", Phase: "Failed", DisplayName: "validate(0)", FinishedAt: "2026-08-04T00:00:02Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "b/main.log"}}}},
+				},
+			},
+		},
+	}
+	logs := map[string]string{
+		"b/a/main.log": "just some polling noise, nothing here looks like an error\n",
+		"b/b/main.log": "Error: real diagnostic text\n",
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	c := children[0]
+	if !strings.Contains(c.LogExcerpt, "real diagnostic text") {
+		t.Fatalf("LogExcerpt = %q, want it to contain the real diagnostic", c.LogExcerpt)
+	}
+	wantURI := "s3://b/b/main.log"
+	if c.LogURI != wantURI {
+		t.Errorf("LogURI = %q, want %q (the node the reported excerpt actually came from, not the earliest candidate's)", c.LogURI, wantURI)
 	}
 }
