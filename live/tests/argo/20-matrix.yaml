@@ -205,6 +205,15 @@ spec:
       container:
         image: '{{workflow.parameters.image}}'
         command: ['/bin/bash', '-c']
+        env:
+          - name: ARGO_UI_BASE
+            # Literal, not a configMapKeyRef: harness-config is being edited by a
+            # concurrent PR, so a ref to a key that doesn't exist there yet would
+            # fail this pod at startup. The hostname is a stable public value and
+            # this file already hardcodes comparable values (e.g. --region
+            # us-east-1 on the harness evidence call below), so a literal is
+            # consistent here.
+            value: 'https://argo.dozuki.dev'
         args:
           - |
             set -uo pipefail
