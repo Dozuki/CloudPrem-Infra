@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
+	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	rgtypes "github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
 )
@@ -626,5 +628,82 @@ esac
 	}
 	if !found {
 		t.Fatalf("the orphan must still be REPORTED (non-blocking), not dropped: %+v", rep.Residuals)
+	}
+}
+
+// The wiring gap Lodestar-p52f flagged: every existence-probe test in existence_test.go
+// calls verifyResidualExistenceWith directly with a fake factory, so none of them
+// exercise the actual production seam - PhaseParams.verifyResidualExistence reading the
+// package var newVerifierClients - and none of them go through checkResiduals, which is
+// what actually calls verifyResidualExistence (residuals.go). Deleting that one call
+// site would leave every existing test green: the ones that construct a report by hand
+// never notice the probe never ran, and this file's other checkResiduals tests never
+// produce a residual that would need probing (the partial-index test's orphan is
+// demoted by the partial-index path itself, before existence probing would matter).
+//
+// This test closes that gap by overriding newVerifierClients (not verifyResidualExistenceWith)
+// and driving the whole thing through checkResiduals with the same fake-terragrunt-on-PATH
+// technique TestCheckResidualsPartialIndexDemotesTagReconcileFindings uses: a tag-reconcile
+// orphan that state genuinely does not have, so classifyResidual marks it Blocking, and the
+// only thing that can demote it is a real existence probe wired all the way through. If the
+// checkResiduals -> verifyResidualExistence call is ever deleted, factoryCalled stays false
+// and the residual stays Blocking, and this test fails on both counts.
+func TestCheckResidualsCallsTheRealExistenceProbeSeam(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake terragrunt below is a #!/bin/sh script")
+	}
+	workDir := t.TempDir()
+	for _, mod := range residualModules {
+		if err := os.MkdirAll(filepath.Join(workDir, mod), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", mod, err)
+		}
+	}
+	binDir := t.TempDir()
+	script := "#!/bin/sh\necho '{\"format_version\":\"1.0\",\"values\":{\"root_module\":{}}}'\nexit 0\n"
+	fakeTG := filepath.Join(binDir, "terragrunt")
+	if err := os.WriteFile(fakeTG, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake terragrunt: %v", err)
+	}
+	oldPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", oldPath) })
+	os.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath)
+
+	orphan := "arn:aws:rds:us-east-1:1:db:custx-bi-writer"
+	factoryCalled := false
+	oldFactory := newVerifierClients
+	t.Cleanup(func() { newVerifierClients = oldFactory })
+	newVerifierClients = func(_ context.Context, _ string) regionClientFactory {
+		return func(string) (*verifierAPISet, error) {
+			factoryCalled = true
+			return (&fakeVerifierAPI{describeDBInstances: func(*rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error) {
+				return nil, &rdstypes.DBInstanceNotFoundFault{Message: aws.String("gone")}
+			}}).apiSet(), nil
+		}
+	}
+
+	p := PhaseParams{
+		Region: "us-east-1", Matrix: &Matrix{},
+		Tags: map[string]TagAPI{"us-east-1": &residualTagAPI{arns: []string{orphan}}},
+	}
+	tg := TGOptions{WorkingDir: workDir}
+	rep := p.checkResiduals(context.Background(), tg, "teardown", "custx", []string{"us-east-1"}, nil)
+
+	if !factoryCalled {
+		t.Fatal("newVerifierClients was never invoked - checkResiduals is not wired to the existence probe (this is exactly the seam Lodestar-p52f item 6 flagged)")
+	}
+	if len(rep.Blocking()) != 0 {
+		t.Fatalf("the probe confirmed the RDS instance is gone; it must not still be Blocking: %+v", rep.Residuals)
+	}
+	found := false
+	for _, res := range rep.Residuals {
+		if res.ARN == orphan {
+			found = true
+			if res.Blocking {
+				t.Errorf("orphan residual still Blocking after a confirmed-gone probe result: %+v", res)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the orphan must still be REPORTED (demoted, not dropped): %+v", rep.Residuals)
 	}
 }
