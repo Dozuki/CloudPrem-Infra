@@ -242,6 +242,16 @@ var tfTypeToAWSType = map[string]string{
 // caught it. Nothing here checks the map against the terraform actually applied, so
 // adding a new resource type to terraform/ and forgetting this map is still a silent
 // gap that no test will fail on.
+//
+// A second, narrower gap: the guard only checks that a tfType has AN entry in one of
+// typesWithPlainARNAttribute or primaryARNFields - both hand-maintained in this same
+// package, neither cross-checked against a live `terraform providers schema -json`
+// run. It cannot tell a correct entry from a wrong one. A type mistakenly marked true
+// in typesWithPlainARNAttribute (or given a primaryARNFields override naming the wrong
+// attribute) passes this guard exactly as cleanly as a correct one would - the two
+// tables agreeing with each other proves only that they were edited consistently, not
+// that either one matches the provider schema. That is a real gap this test does not
+// close, only the "entry missing entirely" gap is.
 var primaryARNFields = map[string][]string{
 	"aws_eks_pod_identity_association": {"association_arn"},
 	"aws_rds_cluster":                  {"arn", "cluster_identifier"},

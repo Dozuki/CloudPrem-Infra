@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -602,5 +603,509 @@ func TestVerifyResidualExistenceDemotesAnUnregisteredType(t *testing.T) {
 	}
 	if len(rep.Incomplete) != 1 {
 		t.Fatalf("expected exactly one Incomplete note, got %+v", rep.Incomplete)
+	}
+}
+
+// --- Finding 1 sweep: a nil/empty response with err == nil is an anomalous SDK
+// response, never a legitimate "confirmed gone" - collapsing the two silently hides a
+// real leak behind a made-up answer. Each of these fails against the pre-fix code,
+// which read the nil response as existenceNotFound (or, for Secrets Manager,
+// existenceExists) instead of existenceError.
+
+func TestVerifyEC2NatGatewayNilResponseIsErrorNotNotFound(t *testing.T) {
+	api := &fakeVerifierAPI{describeNatGateways: func(*ec2.DescribeNatGatewaysInput) (*ec2.DescribeNatGatewaysOutput, error) {
+		return nil, nil
+	}}
+	state, note := verifyEC2NatGateway(context.Background(), api.apiSet(), "arn:aws:ec2:us-east-1:1:natgateway/nat-0123456789")
+	if state != existenceError {
+		t.Fatalf("state = %v, want existenceError for a nil response with no error (note=%q)", state, note)
+	}
+}
+
+func TestVerifyDMSReplicationConfigNilResponseIsErrorNotNotFound(t *testing.T) {
+	api := &fakeVerifierAPI{describeReplicationConfigs: func(*databasemigrationservice.DescribeReplicationConfigsInput) (*databasemigrationservice.DescribeReplicationConfigsOutput, error) {
+		return nil, nil
+	}}
+	state, note := verifyDMSReplicationConfig(context.Background(), api.apiSet(), "arn:aws:dms:us-east-1:1:replication-config:custx-bi-cfg")
+	if state != existenceError {
+		t.Fatalf("state = %v, want existenceError for a nil page with no error (note=%q)", state, note)
+	}
+}
+
+func TestVerifyLogGroupNilResponseIsErrorButNonNilEmptyPageStaysNotFound(t *testing.T) {
+	api := &fakeVerifierAPI{describeLogGroups: func(*cloudwatchlogs.DescribeLogGroupsInput) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
+		return nil, nil
+	}}
+	state, note := verifyLogGroup(context.Background(), api.apiSet(), "arn:aws:logs:us-east-1:1:log-group:/custx-bi/app:*")
+	if state != existenceError {
+		t.Fatalf("nil output: state = %v, want existenceError (note=%q)", state, note)
+	}
+	// A genuinely empty NON-NIL page is still the legitimate NotFound case (already
+	// covered by TestVerifyLogGroupPrefixSemantics) - this confirms the anomaly fix did
+	// not swallow it.
+	api.describeLogGroups = func(*cloudwatchlogs.DescribeLogGroupsInput) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
+		return &cloudwatchlogs.DescribeLogGroupsOutput{}, nil
+	}
+	state, _ = verifyLogGroup(context.Background(), api.apiSet(), "arn:aws:logs:us-east-1:1:log-group:/custx-bi/app:*")
+	if state != existenceNotFound {
+		t.Fatalf("non-nil empty page: state = %v, want existenceNotFound", state)
+	}
+}
+
+func TestVerifyDMSFilteredCallsNilResponseIsErrorNotNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		arn  string
+		call existenceVerifier
+		set  func(*fakeVerifierAPI)
+	}{
+		{
+			name: "replication instance",
+			arn:  "arn:aws:dms:us-east-1:1:rep:custx-bi-rep",
+			call: verifyDMSReplicationInstance,
+			set: func(f *fakeVerifierAPI) {
+				f.describeReplicationInstances = func(*databasemigrationservice.DescribeReplicationInstancesInput) (*databasemigrationservice.DescribeReplicationInstancesOutput, error) {
+					return nil, nil
+				}
+			},
+		},
+		{
+			name: "endpoint",
+			arn:  "arn:aws:dms:us-east-1:1:endpoint:custx-bi-src",
+			call: verifyDMSEndpoint,
+			set: func(f *fakeVerifierAPI) {
+				f.describeEndpoints = func(*databasemigrationservice.DescribeEndpointsInput) (*databasemigrationservice.DescribeEndpointsOutput, error) {
+					return nil, nil
+				}
+			},
+		},
+		{
+			name: "replication task",
+			arn:  "arn:aws:dms:us-east-1:1:task:custx-bi-task",
+			call: verifyDMSReplicationTask,
+			set: func(f *fakeVerifierAPI) {
+				f.describeReplicationTasks = func(*databasemigrationservice.DescribeReplicationTasksInput) (*databasemigrationservice.DescribeReplicationTasksOutput, error) {
+					return nil, nil
+				}
+			},
+		},
+		{
+			name: "certificate",
+			arn:  "arn:aws:dms:us-east-1:1:cert:custx-bi-cert",
+			call: verifyDMSCertificate,
+			set: func(f *fakeVerifierAPI) {
+				f.describeCertificates = func(*databasemigrationservice.DescribeCertificatesInput) (*databasemigrationservice.DescribeCertificatesOutput, error) {
+					return nil, nil
+				}
+			},
+		},
+		{
+			name: "subnet group",
+			arn:  "arn:aws:dms:us-east-1:1:subgrp:custx-bi-subgrp",
+			call: verifyDMSSubnetGroup,
+			set: func(f *fakeVerifierAPI) {
+				f.describeReplicationSubnetGroups = func(*databasemigrationservice.DescribeReplicationSubnetGroupsInput) (*databasemigrationservice.DescribeReplicationSubnetGroupsOutput, error) {
+					return nil, nil
+				}
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{}
+			c.set(api)
+			state, note := c.call(context.Background(), api.apiSet(), c.arn)
+			if state != existenceError {
+				t.Fatalf("state = %v, want existenceError for a nil response with no error (note=%q)", state, note)
+			}
+		})
+	}
+}
+
+func TestVerifySecretsManagerSecretNilResponseIsErrorNotExists(t *testing.T) {
+	api := &fakeVerifierAPI{describeSecret: func(*secretsmanager.DescribeSecretInput) (*secretsmanager.DescribeSecretOutput, error) {
+		return nil, nil
+	}}
+	state, note := verifySecretsManagerSecret(context.Background(), api.apiSet(), "arn:aws:secretsmanager:us-east-1:1:secret:custx-bi-db-abc123")
+	if state != existenceError {
+		t.Fatalf("state = %v, want existenceError for a nil response with no error, not a confident existenceExists (note=%q)", state, note)
+	}
+}
+
+// --- Finding 3: the EC2 id-filtered verifiers must not read err == nil as Exists
+// without checking the response actually contained the resource. Fails against the
+// pre-fix code, which discarded the output entirely and returned existenceExists on any
+// err == nil, including an empty list.
+
+func TestVerifyEC2FilteredListsTreatEmptySuccessAsErrorNotExists(t *testing.T) {
+	cases := []struct {
+		name string
+		arn  string
+		call existenceVerifier
+		set  func(*fakeVerifierAPI)
+	}{
+		{
+			name: "vpc",
+			arn:  "arn:aws:ec2:us-east-1:1:vpc/vpc-0123456789",
+			call: verifyEC2VPC,
+			set: func(f *fakeVerifierAPI) {
+				f.describeVpcs = func(*ec2.DescribeVpcsInput) (*ec2.DescribeVpcsOutput, error) {
+					return &ec2.DescribeVpcsOutput{}, nil
+				}
+			},
+		},
+		{
+			name: "subnet",
+			arn:  "arn:aws:ec2:us-east-1:1:subnet/subnet-0123456789",
+			call: verifyEC2Subnet,
+			set: func(f *fakeVerifierAPI) {
+				f.describeSubnets = func(*ec2.DescribeSubnetsInput) (*ec2.DescribeSubnetsOutput, error) {
+					return &ec2.DescribeSubnetsOutput{}, nil
+				}
+			},
+		},
+		{
+			name: "route table",
+			arn:  "arn:aws:ec2:us-east-1:1:route-table/rtb-0123456789",
+			call: verifyEC2RouteTable,
+			set: func(f *fakeVerifierAPI) {
+				f.describeRouteTables = func(*ec2.DescribeRouteTablesInput) (*ec2.DescribeRouteTablesOutput, error) {
+					return &ec2.DescribeRouteTablesOutput{}, nil
+				}
+			},
+		},
+		{
+			name: "network acl",
+			arn:  "arn:aws:ec2:us-east-1:1:network-acl/acl-0123456789",
+			call: verifyEC2NetworkACL,
+			set: func(f *fakeVerifierAPI) {
+				f.describeNetworkAcls = func(*ec2.DescribeNetworkAclsInput) (*ec2.DescribeNetworkAclsOutput, error) {
+					return &ec2.DescribeNetworkAclsOutput{}, nil
+				}
+			},
+		},
+		{
+			name: "internet gateway",
+			arn:  "arn:aws:ec2:us-east-1:1:internet-gateway/igw-0123456789",
+			call: verifyEC2InternetGateway,
+			set: func(f *fakeVerifierAPI) {
+				f.describeInternetGateways = func(*ec2.DescribeInternetGatewaysInput) (*ec2.DescribeInternetGatewaysOutput, error) {
+					return &ec2.DescribeInternetGatewaysOutput{}, nil
+				}
+			},
+		},
+		{
+			name: "elastic ip",
+			arn:  "arn:aws:ec2:us-east-1:1:elastic-ip/eipalloc-0123456789",
+			call: verifyEC2ElasticIP,
+			set: func(f *fakeVerifierAPI) {
+				f.describeAddresses = func(*ec2.DescribeAddressesInput) (*ec2.DescribeAddressesOutput, error) {
+					return &ec2.DescribeAddressesOutput{}, nil
+				}
+			},
+		},
+		{
+			name: "vpc endpoint",
+			arn:  "arn:aws:ec2:us-east-1:1:vpc-endpoint/vpce-0123456789",
+			call: verifyEC2VPCEndpoint,
+			set: func(f *fakeVerifierAPI) {
+				f.describeVpcEndpoints = func(*ec2.DescribeVpcEndpointsInput) (*ec2.DescribeVpcEndpointsOutput, error) {
+					return &ec2.DescribeVpcEndpointsOutput{}, nil
+				}
+			},
+		},
+		{
+			name: "volume",
+			arn:  "arn:aws:ec2:us-east-1:1:volume/vol-0123456789",
+			call: verifyEC2Volume,
+			set: func(f *fakeVerifierAPI) {
+				f.describeVolumes = func(*ec2.DescribeVolumesInput) (*ec2.DescribeVolumesOutput, error) {
+					return &ec2.DescribeVolumesOutput{}, nil
+				}
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			api := &fakeVerifierAPI{}
+			c.set(api)
+			state, note := c.call(context.Background(), api.apiSet(), c.arn)
+			if state != existenceError {
+				t.Fatalf("state = %v, want existenceError for a 200 with an empty list - the documented contract for a missing id-filtered resource is an error code, not an empty success (note=%q)", state, note)
+			}
+		})
+	}
+}
+
+// --- Finding 2: verifyRDSCluster must route Class A's secondary (DbClusterResourceId)
+// ARN through a db-cluster-resource-id Filter, never through DBClusterIdentifier, which
+// always 404s for that shape regardless of the cluster's real state.
+
+func TestLooksLikeDBClusterResourceIDDiscriminatesFromUserIdentifiers(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		{"cluster-co3qcvn73c42v4nvzbedvlxpzu", true}, // real DbClusterResourceId shape, lower-cased
+		{"cluster-short", false},                     // too short to be a resource id
+		{"custx-bi-cluster-01", false},               // ordinary hyphenated identifier
+		{"cluster-has-hyphens-inside-it-abc", false}, // hyphens inside the suffix
+	}
+	for _, c := range cases {
+		if got := looksLikeDBClusterResourceID(c.id); got != c.want {
+			t.Errorf("looksLikeDBClusterResourceID(%q) = %v, want %v", c.id, got, c.want)
+		}
+	}
+}
+
+func TestVerifyRDSClusterUsesResourceIDFilterForClassASecondaryARN(t *testing.T) {
+	resourceIDARN := "arn:aws:rds:us-east-1:1:cluster:cluster-co3qcvn73c42v4nvzbedvlxpzu"
+	var gotFilters []rdstypes.Filter
+	var gotIdentifier *string
+	api := &fakeVerifierAPI{describeDBClusters: func(in *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		gotFilters = in.Filters
+		gotIdentifier = in.DBClusterIdentifier
+		return &rds.DescribeDBClustersOutput{DBClusters: []rdstypes.DBCluster{{DBClusterIdentifier: aws.String("custx-bi")}}}, nil
+	}}
+	state, note := verifyRDSCluster(context.Background(), api.apiSet(), resourceIDARN)
+	if gotIdentifier != nil {
+		t.Errorf("DBClusterIdentifier = %q, want it left unset - a resource-id must never be passed there (it always 404s)", aws.ToString(gotIdentifier))
+	}
+	if len(gotFilters) != 1 || aws.ToString(gotFilters[0].Name) != "db-cluster-resource-id" || len(gotFilters[0].Values) != 1 || gotFilters[0].Values[0] != "cluster-co3qcvn73c42v4nvzbedvlxpzu" {
+		t.Fatalf("expected a single db-cluster-resource-id filter for the resource-id tail, got %+v", gotFilters)
+	}
+	if state != existenceExists {
+		t.Fatalf("state = %v, want existenceExists for a filter match (note=%q)", state, note)
+	}
+}
+
+func TestVerifyRDSClusterResourceIDFilterNoMatchIsLegitimateNotFound(t *testing.T) {
+	resourceIDARN := "arn:aws:rds:us-east-1:1:cluster:cluster-co3qcvn73c42v4nvzbedvlxpzu"
+	api := &fakeVerifierAPI{describeDBClusters: func(*rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		return &rds.DescribeDBClustersOutput{}, nil // genuine empty filtered result
+	}}
+	state, note := verifyRDSCluster(context.Background(), api.apiSet(), resourceIDARN)
+	if state != existenceNotFound {
+		t.Fatalf("state = %v, want existenceNotFound - a non-nil empty filtered list IS a legitimate no-match for this call shape (note=%q)", state, note)
+	}
+}
+
+func TestVerifyRDSClusterOrdinaryIdentifierUnaffectedByResourceIDBranch(t *testing.T) {
+	api := &fakeVerifierAPI{describeDBClusters: func(in *rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		if aws.ToString(in.DBClusterIdentifier) != "custx-bi-writer" {
+			t.Errorf("DBClusterIdentifier = %q, want custx-bi-writer", aws.ToString(in.DBClusterIdentifier))
+		}
+		if len(in.Filters) != 0 {
+			t.Errorf("Filters = %+v, want none for an ordinary identifier", in.Filters)
+		}
+		return &rds.DescribeDBClustersOutput{DBClusters: []rdstypes.DBCluster{{}}}, nil
+	}}
+	state, _ := verifyRDSCluster(context.Background(), api.apiSet(), "arn:aws:rds:us-east-1:1:cluster:custx-bi-writer")
+	if state != existenceExists {
+		t.Fatalf("state = %v, want existenceExists for an ordinary identifier match", state)
+	}
+}
+
+func TestVerifyRDSClusterOrdinaryIdentifierEmptySuccessIsAnomalyError(t *testing.T) {
+	api := &fakeVerifierAPI{describeDBClusters: func(*rds.DescribeDBClustersInput) (*rds.DescribeDBClustersOutput, error) {
+		return &rds.DescribeDBClustersOutput{}, nil // never legitimately happens for DBClusterIdentifier
+	}}
+	state, note := verifyRDSCluster(context.Background(), api.apiSet(), "arn:aws:rds:us-east-1:1:cluster:custx-bi-writer")
+	if state != existenceError {
+		t.Fatalf("state = %v, want existenceError - a missing identifier always raises DBClusterNotFoundFault, so an empty success is anomalous, not a legitimate absence (note=%q)", state, note)
+	}
+}
+
+// --- Finding 4: region derivation across more ARN shapes than the two existing
+// orchestration tests exercise (a regional and a region-less ARN).
+
+func TestArnRegionAcrossARNShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		arn  string
+		want string
+	}{
+		{"regional", "arn:aws:eks:us-east-1:1:cluster/custx-bi", "us-east-1"},
+		{"dr region", "arn:aws:eks:us-west-2:1:cluster/custx-bi-dr", "us-west-2"},
+		{"region-less (rds global cluster)", "arn:aws:rds::1:global-cluster:custx-bi-global", ""},
+		{"region-less (iam)", "arn:aws:iam::1:role/custx-bi-role", ""},
+		{"region-less (s3)", "arn:aws:s3:::custx-bi-uploads", ""},
+		{"malformed - too few fields", "arn:aws:ec2:us-east-1", ""},
+		{"malformed - no arn prefix", "not-an-arn:aws:ec2:us-east-1:1:vpc/vpc-1", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := arnRegion(c.arn); got != c.want {
+				t.Errorf("arnRegion(%q) = %q, want %q", c.arn, got, c.want)
+			}
+		})
+	}
+}
+
+// --- Finding 4: pagination coverage for the one paginated probe in this file.
+
+func TestVerifyDMSReplicationConfigPageCapFailsOpen(t *testing.T) {
+	pages := 0
+	api := &fakeVerifierAPI{describeReplicationConfigs: func(*databasemigrationservice.DescribeReplicationConfigsInput) (*databasemigrationservice.DescribeReplicationConfigsOutput, error) {
+		pages++
+		return &databasemigrationservice.DescribeReplicationConfigsOutput{
+			ReplicationConfigs: []dmstypes.ReplicationConfig{{ReplicationConfigArn: aws.String("arn:aws:dms:us-east-1:1:replication-config:never-matches")}},
+			Marker:             aws.String("keep-going"),
+		}, nil
+	}}
+	state, note := verifyDMSReplicationConfig(context.Background(), api.apiSet(), "arn:aws:dms:us-east-1:1:replication-config:custx-bi-cfg")
+	if state != existenceError {
+		t.Fatalf("state = %v, want existenceError once the page cap is hit (note=%q)", state, note)
+	}
+	if pages != maxDMSReplicationConfigPages {
+		t.Errorf("pages fetched = %d, want exactly maxDMSReplicationConfigPages (%d)", pages, maxDMSReplicationConfigPages)
+	}
+	if !strings.Contains(note, "did not converge") {
+		t.Errorf("note = %q, want it to explain the page cap was hit", note)
+	}
+}
+
+// --- Finding 4: the fail-open orchestration paths, tested distinctly - each must land
+// on Error-plus-Incomplete, never a bare NotFound that would read as a confirmed
+// absence.
+
+func TestVerifyResidualExistenceClientFactoryFailureFailsOpenLoudly(t *testing.T) {
+	wantErr := errors.New("no credentials for this region")
+	factory := func(string) (*verifierAPISet, error) { return nil, wantErr }
+	rep := &ResidualReport{Residuals: []Residual{
+		{Source: "tag-reconcile", ARN: "arn:aws:rds:us-east-1:1:db:custx-bi-writer", Type: "rds:db", Blocking: true},
+	}}
+	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", factory)
+	if rep.Residuals[0].Blocking {
+		t.Fatal("a client-factory failure must fail open (demoted), never left Blocking")
+	}
+	if len(rep.Incomplete) != 1 || !strings.Contains(rep.Incomplete[0], "no credentials for this region") {
+		t.Errorf("expected exactly one Incomplete note naming the client-build failure, got %+v", rep.Incomplete)
+	}
+}
+
+func TestVerifyResidualExistenceMalformedARNFailsOpenLoudly(t *testing.T) {
+	rep := &ResidualReport{Residuals: []Residual{
+		{Source: "tag-reconcile", ARN: "not-a-real-arn", Type: "rds:db", Blocking: true},
+	}}
+	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", func(string) (*verifierAPISet, error) { return nil, nil })
+	if rep.Residuals[0].Blocking {
+		t.Fatal("a malformed ARN must fail open (demoted), never left Blocking")
+	}
+	if len(rep.Incomplete) != 1 {
+		t.Fatalf("expected exactly one Incomplete note, got %+v", rep.Incomplete)
+	}
+}
+
+func TestVerifyResidualExistenceNilResponseFailsOpenLoudlyThroughOrchestration(t *testing.T) {
+	factory := func(string) (*verifierAPISet, error) {
+		return (&fakeVerifierAPI{describeNatGateways: func(*ec2.DescribeNatGatewaysInput) (*ec2.DescribeNatGatewaysOutput, error) {
+			return nil, nil
+		}}).apiSet(), nil
+	}
+	rep := &ResidualReport{Residuals: []Residual{
+		{Source: "tag-reconcile", ARN: "arn:aws:ec2:us-east-1:1:natgateway/nat-0123456789", Type: "ec2:natgateway", Blocking: true},
+	}}
+	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", factory)
+	if rep.Residuals[0].Blocking {
+		t.Fatal("an anomalous nil response must fail open (demoted), never left Blocking")
+	}
+	if len(rep.Incomplete) != 1 {
+		t.Fatalf("expected exactly one Incomplete note distinguishing this from a clean NotFound, got %+v", rep.Incomplete)
+	}
+	if strings.Contains(rep.Residuals[0].Why, "confirmed the resource is gone") {
+		t.Errorf("Why = %q, must not read as a confirmed NotFound for an unclassifiable nil response", rep.Residuals[0].Why)
+	}
+}
+
+// --- Finding 4: the invariant that must never break - existence verification can only
+// ever demote a Blocking residual, never promote a non-blocking one. This is the exact
+// direction that would recreate the original false-positive outage if it regressed.
+
+func TestVerifyResidualExistenceNeverPromotesANonBlockingResidual(t *testing.T) {
+	probed := false
+	factory := func(string) (*verifierAPISet, error) {
+		return (&fakeVerifierAPI{describeDBInstances: func(*rds.DescribeDBInstancesInput) (*rds.DescribeDBInstancesOutput, error) {
+			probed = true
+			return &rds.DescribeDBInstancesOutput{}, nil // would report existenceExists if ever reached
+		}}).apiSet(), nil
+	}
+	rep := &ResidualReport{Residuals: []Residual{
+		{Source: "tag-reconcile", ARN: "arn:aws:rds:us-east-1:1:db:custx-bi-writer", Type: "rds:db", Blocking: false},
+	}}
+	verifyResidualExistenceWith(context.Background(), rep, "us-east-1", factory)
+	if probed {
+		t.Error("existence verification probed a residual that was already non-blocking - it must only ever demote, never promote")
+	}
+	if rep.Residuals[0].Blocking {
+		t.Error("a non-blocking residual must never become Blocking as a side effect of existence verification")
+	}
+}
+
+// --- Finding 4: callWithOneRetry and isThrottling had zero coverage.
+
+func TestCallWithOneRetryRetriesExactlyOnceOnThrottling(t *testing.T) {
+	calls := 0
+	err := callWithOneRetry(context.Background(), func() error {
+		calls++
+		if calls < 2 {
+			return &smithy.GenericAPIError{Code: "ThrottlingException", Message: "slow down"}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("err = %v, want nil after the retry succeeds", err)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want exactly 2 (initial call plus one retry)", calls)
+	}
+}
+
+func TestCallWithOneRetryDoesNotRetryNonThrottlingErrors(t *testing.T) {
+	calls := 0
+	wantErr := &smithy.GenericAPIError{Code: "AccessDeniedException", Message: "no"}
+	err := callWithOneRetry(context.Background(), func() error {
+		calls++
+		return wantErr
+	})
+	if calls != 1 {
+		t.Errorf("calls = %d, want exactly 1 - only throttling is worth retrying", calls)
+	}
+	if err != wantErr {
+		t.Errorf("err = %v, want the original error passed through unchanged", err)
+	}
+}
+
+func TestCallWithOneRetryGivesUpAfterOneRetry(t *testing.T) {
+	calls := 0
+	err := callWithOneRetry(context.Background(), func() error {
+		calls++
+		return &smithy.GenericAPIError{Code: "ThrottlingException", Message: "still slow"}
+	})
+	if calls != 2 {
+		t.Errorf("calls = %d, want exactly 2 (no more than one retry even when the retry also throttles)", calls)
+	}
+	if err == nil {
+		t.Error("err = nil, want the throttling error surfaced after the retry also fails")
+	}
+}
+
+func TestIsThrottlingRecognizesEveryDocumentedCode(t *testing.T) {
+	for _, code := range []string{"Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "SlowDown", "RequestThrottled", "ThrottledException"} {
+		if !isThrottling(&smithy.GenericAPIError{Code: code, Message: "x"}) {
+			t.Errorf("isThrottling(%q) = false, want true", code)
+		}
+	}
+}
+
+func TestIsThrottlingRejectsNonThrottlingAndNonAPIErrors(t *testing.T) {
+	if isThrottling(&smithy.GenericAPIError{Code: "AccessDeniedException", Message: "no"}) {
+		t.Error("isThrottling(AccessDeniedException) = true, want false")
+	}
+	if isThrottling(nil) {
+		t.Error("isThrottling(nil) = true, want false")
+	}
+	if isThrottling(errors.New("plain error, not a smithy.APIError")) {
+		t.Error("isThrottling(plain error) = true, want false")
 	}
 }

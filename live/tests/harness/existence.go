@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -292,7 +293,7 @@ func isThrottling(err error) bool {
 		return false
 	}
 	switch ae.ErrorCode() {
-	case "Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "SlowDown":
+	case "Throttling", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded", "SlowDown", "RequestThrottled", "ThrottledException":
 		return true
 	}
 	return false
@@ -302,8 +303,20 @@ func isThrottling(err error) bool {
 // which reports "not found" as a smithy.APIError CODE STRING ("InvalidVpcID.NotFound")
 // rather than a modeled Go error type the way RDS/EKS/IAM/SQS's JSON protocols do.
 // notFoundCodes lists every code that means "gone" for the caller's resource type.
-func classifyByErrorCode(err error, notFoundCodes ...string) (existenceState, string) {
+//
+// outEmpty is the caller's answer to "did the response actually contain the resource I
+// filtered for?" on the err == nil path. Every caller here filters by an explicit id
+// list (VpcIds, SubnetIds, ...), and the documented EC2 contract for that shape is: a
+// missing id comes back as one of notFoundCodes, never as a 200 with an empty list. So
+// an err == nil response with outEmpty true never happens on a healthy id-filtered
+// call, and reading it as existenceExists would be confirming a resource the response
+// never actually contained - that gets the same existenceError anomaly treatment as
+// the nil-response cases elsewhere in this file, not a silent existenceExists.
+func classifyByErrorCode(err error, outEmpty bool, notFoundCodes ...string) (existenceState, string) {
 	if err == nil {
+		if outEmpty {
+			return existenceError, "no matching resource in the response despite no error (anomalous SDK response for an id-filtered call)"
+		}
 		return existenceExists, ""
 	}
 	var ae smithy.APIError
@@ -371,27 +384,82 @@ func classifyEKSNotFound(err error) (existenceState, string) {
 //
 // DBClusterIdentifier (and every sibling *Identifier field below) accepts either the
 // bare identifier or a full ARN, so these pass the bare identifier extracted by
-// arnResourceID rather than the ARN itself - the safer of the two documented forms,
-// since it sidesteps any ambiguity around the resource-id-shaped secondary ARN Class A
-// exists for (see residuals.go): a bare cluster identifier only ever means one thing.
+// arnResourceID rather than the ARN itself - EXCEPT verifyRDSCluster, which has to
+// handle a second ARN shape DBClusterIdentifier cannot take at all: see its own
+// comment below.
 
+// dbClusterResourceIDPattern recognizes Class A's secondary Aurora ARN tail
+// (residuals.go): the Resource Groups Tagging API returns Aurora clusters under a
+// SECOND ARN whose resource id is the cluster's DbClusterResourceId, lower-cased by
+// residuals.go on index - AWS's own fixed internal format, "cluster-" followed by
+// exactly 26 alphanumeric characters with no further hyphens. A user-chosen
+// DBClusterIdentifier is never this exact shape (AWS cluster identifiers commonly
+// contain hyphens throughout, e.g. "custx-bi-writer"), so this is a safe, explicit
+// discriminator rather than a guess - verified against a live DbClusterResourceId
+// value ("cluster-CO3QCVN73C42V4NVZBEDVLXPZU" pre-lowercase).
+var dbClusterResourceIDPattern = regexp.MustCompile(`^cluster-[0-9a-z]{26}$`)
+
+func looksLikeDBClusterResourceID(id string) bool {
+	return dbClusterResourceIDPattern.MatchString(id)
+}
+
+// verifyRDSCluster has to pick between two different DescribeDBClusters query shapes
+// depending on which ARN it was handed:
+//
+//   - The PRIMARY ARN's tail is a real DBClusterIdentifier, which the identifier
+//     field accepts directly and which raises DBClusterNotFoundFault (never a 200
+//     with an empty list) when it does not exist - a true get-by-identifier call.
+//   - Class A's SECONDARY ARN tail (residuals.go) is a DbClusterResourceId, which
+//     DescribeDBClusters does NOT accept as DBClusterIdentifier - AWS silently
+//     evaluates it as a literal identifier that can never match anything and raises
+//     DBClusterNotFoundFault regardless of whether the cluster is actually live.
+//     Passing this ARN's tail through arnResourceID as-is therefore always reports
+//     "confirmed gone", even for a healthy cluster (mitigated today because
+//     reconcileTagged also emits a separate residual for the primary ARN, which IS
+//     probed correctly - see the finding writeup - but this call itself is still
+//     wrong for that ARN and would misreport a genuine orphan of a cluster that
+//     ONLY ever surfaces via its secondary ARN).
+//     The fix: query by the documented db-cluster-resource-id Filter instead, which
+//     IS a genuine filtered-list call - a legitimate "no match" comes back as a 200
+//     with an empty DBClusters slice, not an error.
 func verifyRDSCluster(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
 	if id == "" {
 		return existenceError, "could not extract cluster identifier from arn"
 	}
-	err := callWithOneRetry(ctx, func() error {
-		_, e := c.RDS.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: aws.String(id)})
+	byResourceID := looksLikeDBClusterResourceID(id)
+	input := &rds.DescribeDBClustersInput{}
+	if byResourceID {
+		input.Filters = []rdstypes.Filter{{Name: aws.String("db-cluster-resource-id"), Values: []string{id}}}
+	} else {
+		input.DBClusterIdentifier = aws.String(id)
+	}
+	var out *rds.DescribeDBClustersOutput
+	var err error
+	_ = callWithOneRetry(ctx, func() error {
+		o, e := c.RDS.DescribeDBClusters(ctx, input)
+		out, err = o, e
 		return e
 	})
-	if err == nil {
-		return existenceExists, ""
+	if err != nil {
+		var nf *rdstypes.DBClusterNotFoundFault
+		if errors.As(err, &nf) {
+			return existenceNotFound, "DBClusterNotFoundFault"
+		}
+		return existenceError, err.Error()
 	}
-	var nf *rdstypes.DBClusterNotFoundFault
-	if errors.As(err, &nf) {
-		return existenceNotFound, "DBClusterNotFoundFault"
+	if out == nil || len(out.DBClusters) == 0 {
+		if byResourceID {
+			// A genuine filtered-list "no match" - see the comment above.
+			return existenceNotFound, "no db cluster matched this db-cluster-resource-id filter"
+		}
+		// DBClusterIdentifier is a get-by-identifier call: a missing identifier
+		// always raises DBClusterNotFoundFault (handled above), so an empty
+		// success here never happens on a healthy call and is an anomaly, not a
+		// legitimate absence.
+		return existenceError, "no db cluster in response despite no error (anomalous SDK response)"
 	}
-	return existenceError, err.Error()
+	return existenceExists, ""
 }
 
 func verifyRDSInstance(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
@@ -497,67 +565,81 @@ func verifyRDSGlobalCluster(ctx context.Context, c *verifierAPISet, arnStr strin
 // --- EC2 ------------------------------------------------------------------------
 //
 // EC2 has no modeled per-fault Go types (see classifyByErrorCode); every verifier below
-// matches the documented error CODE for its resource type.
+// matches the documented error CODE for its resource type. Each one also captures its
+// response and passes classifyByErrorCode whether it came back empty: these are all
+// id-filtered calls, so on err == nil the response is expected to actually contain the
+// resource - an empty one is the same SDK-response anomaly discussed on
+// classifyByErrorCode, not a legitimate "not found" (that always comes back as one of
+// the notFoundCodes below instead).
 
 func verifyEC2VPC(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeVpcsOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{VpcIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{VpcIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidVpcID.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.Vpcs) == 0, "InvalidVpcID.NotFound")
 }
 
 func verifyEC2Subnet(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeSubnetsOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{SubnetIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{SubnetIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidSubnetID.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.Subnets) == 0, "InvalidSubnetID.NotFound")
 }
 
 func verifyEC2RouteTable(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeRouteTablesOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{RouteTableIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{RouteTableIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidRouteTableID.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.RouteTables) == 0, "InvalidRouteTableID.NotFound")
 }
 
 func verifyEC2NetworkACL(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeNetworkAclsOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeNetworkAcls(ctx, &ec2.DescribeNetworkAclsInput{NetworkAclIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeNetworkAcls(ctx, &ec2.DescribeNetworkAclsInput{NetworkAclIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidNetworkAclID.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.NetworkAcls) == 0, "InvalidNetworkAclID.NotFound")
 }
 
 func verifyEC2InternetGateway(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeInternetGatewaysOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeInternetGateways(ctx, &ec2.DescribeInternetGatewaysInput{InternetGatewayIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeInternetGateways(ctx, &ec2.DescribeInternetGatewaysInput{InternetGatewayIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidInternetGatewayID.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.InternetGateways) == 0, "InvalidInternetGatewayID.NotFound")
 }
 
 // verifyEC2NatGateway needs a second check beyond the error code: DescribeNatGateways
 // returns a normal 200 for a nat gateway that has been deleted, with State == "deleted"
 // on the (sole) returned object - unlike every other EC2 type here, "gone" is not
-// exclusively an error path.
+// exclusively an error path. A nil/empty response with err == nil is still the same
+// anomaly as every other id-filtered EC2 call (see classifyByErrorCode): a missing id
+// always raises NatGatewayNotFound instead, so it gets existenceError here too, not a
+// silent existenceNotFound - reporting "confirmed gone" for a response that never
+// actually described the nat gateway would hide a real leak behind a made-up answer.
 func verifyEC2NatGateway(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
 	var out *ec2.DescribeNatGatewaysOutput
@@ -568,10 +650,10 @@ func verifyEC2NatGateway(ctx context.Context, c *verifierAPISet, arnStr string) 
 		return e
 	})
 	if err != nil {
-		return classifyByErrorCode(err, "NatGatewayNotFound")
+		return classifyByErrorCode(err, false, "NatGatewayNotFound")
 	}
 	if out == nil || len(out.NatGateways) == 0 {
-		return existenceNotFound, "no nat gateway returned"
+		return existenceError, "no nat gateway in response despite no error (anomalous SDK response)"
 	}
 	if out.NatGateways[0].State == "deleted" {
 		return existenceNotFound, "State=deleted"
@@ -581,35 +663,38 @@ func verifyEC2NatGateway(ctx context.Context, c *verifierAPISet, arnStr string) 
 
 func verifyEC2ElasticIP(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeAddressesOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{AllocationIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{AllocationIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidAllocationID.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.Addresses) == 0, "InvalidAllocationID.NotFound")
 }
 
 func verifyEC2VPCEndpoint(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeVpcEndpointsOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{VpcEndpointIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeVpcEndpoints(ctx, &ec2.DescribeVpcEndpointsInput{VpcEndpointIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidVpcEndpointId.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.VpcEndpoints) == 0, "InvalidVpcEndpointId.NotFound")
 }
 
 func verifyEC2Volume(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	id := arnResourceID(arnStr)
+	var out *ec2.DescribeVolumesOutput
 	var err error
 	_ = callWithOneRetry(ctx, func() error {
-		_, e := c.EC2.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{VolumeIds: []string{id}})
-		err = e
+		o, e := c.EC2.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{VolumeIds: []string{id}})
+		out, err = o, e
 		return e
 	})
-	return classifyByErrorCode(err, "InvalidVolume.NotFound")
+	return classifyByErrorCode(err, out == nil || len(out.Volumes) == 0, "InvalidVolume.NotFound")
 }
 
 // --- IAM ------------------------------------------------------------------------
@@ -673,9 +758,14 @@ func verifyS3Bucket(ctx context.Context, c *verifierAPISet, arnStr string) (exis
 // --- CloudWatch Logs --------------------------------------------------------------
 
 // verifyLogGroup: there is no per-name Describe for a log group, only a prefix list, so
-// this treats an EMPTY page as NotFound (a real empty page, not an error) and requires
-// an EXACT name match among what the prefix returns - the prefix can legitimately catch
-// other log groups that merely start with the same string.
+// this treats a genuinely EMPTY page (non-nil, zero LogGroups - the documented shape of
+// "nothing matched this prefix") as NotFound, and requires an EXACT name match among
+// what the prefix returns - the prefix can legitimately catch other log groups that
+// merely start with the same string. A NIL output with err == nil is a different thing
+// entirely: DescribeLogGroups never legitimately returns that on success, so it is an
+// anomalous SDK response, not evidence the log group is gone, and gets existenceError
+// instead - collapsing the two would silently confirm-gone a log group this call never
+// actually queried.
 func verifyLogGroup(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
 	name := strings.TrimSuffix(arnResourceID(arnStr), ":*")
 	if name == "" {
@@ -691,7 +781,10 @@ func verifyLogGroup(ctx context.Context, c *verifierAPISet, arnStr string) (exis
 	if err != nil {
 		return existenceError, err.Error()
 	}
-	if out == nil || len(out.LogGroups) == 0 {
+	if out == nil {
+		return existenceError, "empty response despite no error (anomalous SDK response)"
+	}
+	if len(out.LogGroups) == 0 {
 		return existenceNotFound, "empty page for this prefix"
 	}
 	for _, lg := range out.LogGroups {
@@ -724,7 +817,7 @@ func verifyDMSReplicationInstance(ctx context.Context, c *verifierAPISet, arnStr
 		out, err = o, e
 		return e
 	})
-	return classifyDMSListResult(err, out != nil && len(out.ReplicationInstances) > 0)
+	return classifyDMSListResult(err, out == nil, out != nil && len(out.ReplicationInstances) > 0)
 }
 
 func verifyDMSEndpoint(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
@@ -737,7 +830,7 @@ func verifyDMSEndpoint(ctx context.Context, c *verifierAPISet, arnStr string) (e
 		out, err = o, e
 		return e
 	})
-	return classifyDMSListResult(err, out != nil && len(out.Endpoints) > 0)
+	return classifyDMSListResult(err, out == nil, out != nil && len(out.Endpoints) > 0)
 }
 
 func verifyDMSReplicationTask(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
@@ -750,7 +843,7 @@ func verifyDMSReplicationTask(ctx context.Context, c *verifierAPISet, arnStr str
 		out, err = o, e
 		return e
 	})
-	return classifyDMSListResult(err, out != nil && len(out.ReplicationTasks) > 0)
+	return classifyDMSListResult(err, out == nil, out != nil && len(out.ReplicationTasks) > 0)
 }
 
 func verifyDMSCertificate(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
@@ -763,7 +856,7 @@ func verifyDMSCertificate(ctx context.Context, c *verifierAPISet, arnStr string)
 		out, err = o, e
 		return e
 	})
-	return classifyDMSListResult(err, out != nil && len(out.Certificates) > 0)
+	return classifyDMSListResult(err, out == nil, out != nil && len(out.Certificates) > 0)
 }
 
 func verifyDMSSubnetGroup(ctx context.Context, c *verifierAPISet, arnStr string) (existenceState, string) {
@@ -780,7 +873,7 @@ func verifyDMSSubnetGroup(ctx context.Context, c *verifierAPISet, arnStr string)
 		out, err = o, e
 		return e
 	})
-	return classifyDMSListResult(err, out != nil && len(out.ReplicationSubnetGroups) > 0)
+	return classifyDMSListResult(err, out == nil, out != nil && len(out.ReplicationSubnetGroups) > 0)
 }
 
 // maxDMSReplicationConfigPages bounds the unfiltered scan (see the type's comment
@@ -800,10 +893,15 @@ func verifyDMSReplicationConfig(ctx context.Context, c *verifierAPISet, arnStr s
 			return e
 		})
 		if err != nil {
-			return classifyDMSListResult(err, false)
+			return classifyDMSListResult(err, false, false)
 		}
 		if out == nil {
-			return existenceNotFound, "empty page"
+			// An unfiltered list call: a genuine "no more configs" is a non-nil page
+			// with an empty (or absent-Marker) slice, handled below by the loop
+			// itself. A nil page with err == nil never happens on a healthy call, so
+			// it is an anomaly - reporting it as NotFound would silently confirm a
+			// replication config gone that this page never actually described.
+			return existenceError, "empty page despite no error (anomalous SDK response)"
 		}
 		for _, rc := range out.ReplicationConfigs {
 			if aws.ToString(rc.ReplicationConfigArn) == arnStr {
@@ -822,8 +920,18 @@ func verifyDMSReplicationConfig(ctx context.Context, c *verifierAPISet, arnStr s
 // result: a ResourceNotFoundFault (if DMS chooses to raise one for a filter with no
 // matches, rather than returning an empty list, which is the more common behavior) maps
 // to NotFound the same as an empty list does; any other error is unclassifiable.
-func classifyDMSListResult(err error, found bool) (existenceState, string) {
+//
+// outIsNil separates that legitimate empty-list case from a genuinely anomalous
+// response: these are all filtered-list calls, and the documented behavior for "no
+// match" is a 200 with a non-nil, empty slice (found ends up false, same as always) -
+// a NIL output with err == nil is not that; it is an SDK response that never actually
+// described anything, and gets existenceError instead of the found-false NotFound path,
+// the same anomaly-vs-legitimate-empty distinction applied throughout this file.
+func classifyDMSListResult(err error, outIsNil bool, found bool) (existenceState, string) {
 	if err == nil {
+		if outIsNil {
+			return existenceError, "empty response despite no error (anomalous SDK response)"
+		}
 		if found {
 			return existenceExists, ""
 		}
@@ -857,7 +965,15 @@ func verifySecretsManagerSecret(ctx context.Context, c *verifierAPISet, arnStr s
 		}
 		return existenceError, err.Error()
 	}
-	if out != nil && out.DeletedDate != nil {
+	if out == nil {
+		// DescribeSecret never legitimately returns a nil output on err == nil - a
+		// live secret and a scheduled-deletion secret are both a populated struct
+		// (DeletedDate distinguishes them below). Reading this as existenceExists
+		// would be confirming a secret the response never actually described, so
+		// this gets the same anomaly treatment as everywhere else in this file.
+		return existenceError, "empty response despite no error (anomalous SDK response)"
+	}
+	if out.DeletedDate != nil {
 		return existenceNotFound, "already scheduled for deletion"
 	}
 	return existenceExists, ""
