@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -874,5 +875,252 @@ func TestBuildLogURIMatchesReportedExcerptNode(t *testing.T) {
 	wantURI := "s3://b/b/main.log"
 	if c.LogURI != wantURI {
 		t.Errorf("LogURI = %q, want %q (the node the reported excerpt actually came from, not the earliest candidate's)", c.LogURI, wantURI)
+	}
+}
+
+// TestBuildSkipsPodNodeBehindTwoLevelsOfRetry covers the finding-1 regression: the
+// teardown path is retried at TWO levels (live/tests/argo/10-scenario.yaml wraps the
+// Step in its own retryStrategy around harness-phase's own OnError retryStrategy from
+// 00-phase-templates.yaml), so a Pod's DIRECT parent Retry node can be Failed (the
+// inner attempt genuinely errored) while an OUTER Retry node further up ultimately
+// Succeeded on a later attempt. The old one-hop retriedAwayPodIDs only checked a Pod's
+// direct parent, so this shape survived unmasked - the exact regression class ce712b5
+// fixed for the direct-parent shape, still open here. The outer Retry's own Children
+// are a Steps node ID (not the Pod ID), which is exactly what the one-hop check could
+// never reach.
+func TestBuildSkipsPodNodeBehindTwoLevelsOfRetry(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-tworetry-abcde", Labels: map[string]string{"harness/config": "tworetry"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				// Outer Retry (the 10-scenario.yaml step-level retryStrategy)
+				// ultimately Succeeded on a later attempt not modeled here. Its
+				// Children are a STEPS node ID, not a Pod ID.
+				"outer-retry": {ID: "outer-retry", Type: "Retry", Phase: "Succeeded", DisplayName: "teardown-step", Children: []string{"attempt-steps"}},
+				"attempt-steps": {
+					ID: "attempt-steps", Type: "Steps", Phase: "Failed", DisplayName: "teardown-step(0)",
+					Children: []string{"inner-retry"},
+				},
+				// Inner Retry (harness-phase's own OnError retryStrategy) never
+				// recovered on THIS outer attempt - it stays Failed even though
+				// the outer attempt as a whole was superseded by a later,
+				// successful outer attempt.
+				"inner-retry": {ID: "inner-retry", Type: "Retry", Phase: "Failed", DisplayName: "teardown", Children: []string{"teardown0"}},
+				"teardown0": {
+					ID: "teardown0", Type: "Pod", Phase: "Failed", DisplayName: "teardown(0)", FinishedAt: "2026-08-04T00:00:01Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "teardown0/main.log"}}}},
+				},
+				// validate(0) is the real, unmasked failure.
+				"retry-validate": {ID: "retry-validate", Type: "Retry", Phase: "Failed", DisplayName: "validate", Children: []string{"validate0"}},
+				"validate0": {
+					ID: "validate0", Type: "Pod", Phase: "Failed", DisplayName: "validate(0)", FinishedAt: "2026-08-04T00:00:02Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "validate0/main.log"}}}},
+				},
+			},
+		},
+	}
+	logs := map[string]string{
+		"b/teardown0/main.log": "Error: this must never be read: retried away two levels up\n",
+		"b/validate0/main.log": "Error: assertion failed: thing not ready\n",
+	}
+	stub := &stubFetcher{logs: logs}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	c := children[0]
+
+	stub.mu.Lock()
+	requested := append([]string(nil), stub.requested...)
+	stub.mu.Unlock()
+	for _, r := range requested {
+		if strings.Contains(r, "teardown0") {
+			t.Errorf("requested %v, want the twice-retried-away teardown0 node never fetched", requested)
+		}
+	}
+	if c.FailedPhase != "validate" {
+		t.Errorf("FailedPhase = %q, want %q (the masked teardown(0) node must not drive it)", c.FailedPhase, "validate")
+	}
+	wantURI := "s3://b/validate0/main.log"
+	if c.LogURI != wantURI {
+		t.Errorf("LogURI = %q, want %q", c.LogURI, wantURI)
+	}
+	if strings.Contains(c.LogExcerpt, "retried away") || strings.Contains(c.Detail, "retried away") {
+		t.Errorf("LogExcerpt/Detail must never contain the masked teardown0 text; LogExcerpt=%q Detail=%q", c.LogExcerpt, c.Detail)
+	}
+}
+
+// TestRetriedAwayPodIDsDoesNotMaskUnresolvedRetryAncestors covers the dangerous
+// over-masking direction: a Pod behind a Retry ancestor that is still Running, or
+// that ultimately Failed/Errored (never recovered by any later attempt), must NOT be
+// masked - only a Succeeded Retry ancestor mutes a Pod's failure.
+func TestRetriedAwayPodIDsDoesNotMaskUnresolvedRetryAncestors(t *testing.T) {
+	cases := []struct {
+		name       string
+		retryPhase string
+	}{
+		{"running ancestor", "Running"},
+		{"failed ancestor", "Failed"},
+		{"errored ancestor", "Error"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nodes := map[string]Node{
+				"retry": {ID: "retry", Type: "Retry", Phase: c.retryPhase, DisplayName: "upgrade", Children: []string{"pod"}},
+				"pod":   {ID: "pod", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)"},
+			}
+			masked := retriedAwayPodIDs(nodes)
+			if masked["pod"] {
+				t.Errorf("retriedAwayPodIDs masked %q behind a %s Retry ancestor, want it unmasked", "pod", c.retryPhase)
+			}
+		})
+	}
+}
+
+// TestBuildInterleavesFetchByNodeIndexAcrossChildren covers the finding-2 shared-
+// budget-starvation regression: jobs used to dispatch child-major (every candidate of
+// child 0, then every candidate of child 1, ...), so a child with many candidates
+// could exhaust the single 45s OverallBudget before a LATER child's node 0 was ever
+// dispatched, starving that child's evidence entirely. The fix interleaves dispatch by
+// nodeIdx (every child's node 0 first, then node 1, ...) so budget exhaustion drops
+// the LATEST candidates across all children, never a whole child.
+//
+// To make this deterministic under a real clock: a single worker processes jobs
+// strictly in dispatch order, each fetch takes a fixed 20ms, and the overall budget is
+// set to 45ms. The early child carries 10 candidates (so child-major dispatch would
+// need >10 fetches, ~200ms, before ever reaching the late child's only node - long
+// past the 45ms budget), while nodeIdx-major dispatch puts the late child's node 0
+// second in line, well inside the budget.
+func TestBuildInterleavesFetchByNodeIndexAcrossChildren(t *testing.T) {
+	mkNode := func(id, displayName, finishedAt string) Node {
+		return Node{
+			ID: id, Type: "Pod", Phase: "Failed", DisplayName: displayName, FinishedAt: finishedAt,
+			Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: id + "/main.log"}}}},
+		}
+	}
+	earlyNodes := map[string]Node{}
+	for i := 0; i < 10; i++ {
+		id := "early" + string(rune('a'+i))
+		earlyNodes[id] = mkNode(id, "upgrade("+string(rune('a'+i))+")", "2026-08-04T00:00:0"+string(rune('1'+i%8))+"Z")
+	}
+	early := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-early-abcde", Labels: map[string]string{"harness/config": "early"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes:                 earlyNodes,
+		},
+	}
+	late := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-late-abcde", Labels: map[string]string{"harness/config": "late"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"late0": mkNode("late0", "upgrade(0)", "2026-08-04T00:00:01Z"),
+			},
+		},
+	}
+	stub := &stubFetcher{fn: func(ctx context.Context, bucket, key string) (string, error) {
+		time.Sleep(20 * time.Millisecond)
+		return "Error: boom (" + key + ")\n", nil
+	}}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{early, late}}, stub, BuildOptions{
+		Workers:       1,
+		OverallBudget: 45 * time.Millisecond,
+	})
+	if len(children) != 2 {
+		t.Fatalf("got %d children, want 2", len(children))
+	}
+	lateChild := children[1]
+	if lateChild.LogExcerpt == "" {
+		t.Errorf("late child LogExcerpt is empty, want the late child's node 0 to have been fetched within the shared budget (dispatch must be nodeIdx-major, not child-major)")
+	}
+}
+
+// TestBuildFailedPhaseMatchesLogURINodeWhenNodeZeroFetchFails covers the finding-3
+// inconsistency: failed_phase used to stay pinned to node 0's DisplayName fallback
+// even after log_uri moved on to a later node whose fetch actually produced the
+// reported excerpt - so the card could name one phase while linking a different
+// step's log. Node 0 here (upgrade(0)) always errors on fetch; node 1 (validate(0))
+// succeeds and supplies the only bullet. Both failed_phase and log_uri must come from
+// validate(0).
+func TestBuildFailedPhaseMatchesLogURINodeWhenNodeZeroFetchFails(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-phasematch-abcde", Labels: map[string]string{"harness/config": "phasematch"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"a": {
+					ID: "a", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: "2026-08-04T00:00:01Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "a/main.log"}}}},
+				},
+				"b": {
+					ID: "b", Type: "Pod", Phase: "Failed", DisplayName: "validate(0)", FinishedAt: "2026-08-04T00:00:02Z",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "b/main.log"}}}},
+				},
+			},
+		},
+	}
+	stub := &stubFetcher{fn: func(ctx context.Context, bucket, key string) (string, error) {
+		if strings.Contains(key, "a/main.log") {
+			return "", errors.New("s3: timeout")
+		}
+		return "Error: real diagnostic text\n", nil
+	}}
+	children := Build(context.Background(), WorkflowList{Items: []Workflow{wf}}, stub, BuildOptions{})
+	if len(children) != 1 {
+		t.Fatalf("got %d children, want 1", len(children))
+	}
+	c := children[0]
+	if !strings.Contains(c.LogExcerpt, "real diagnostic text") {
+		t.Fatalf("LogExcerpt = %q, want it to contain the real diagnostic", c.LogExcerpt)
+	}
+	wantURI := "s3://b/b/main.log"
+	if c.LogURI != wantURI {
+		t.Errorf("LogURI = %q, want %q", c.LogURI, wantURI)
+	}
+	if c.FailedPhase != "validate" {
+		t.Errorf("FailedPhase = %q, want %q (must come from the SAME node (validate(0)) log_uri points at, not node 0's fallback)", c.FailedPhase, "validate")
+	}
+}
+
+// TestChildBaseDetailDoesNotLeadWithRetriedAwayNode covers the finding-4 asymmetry:
+// Detail (the fallback text the renderer falls back to when log_excerpt is empty) used
+// to build from the UNFILTERED failedPodNodes list, so it could headline a Pod node
+// that evidenceCandidateNodes correctly excluded as retried-away, while failed_phase
+// named the real failing step. Detail must be built from the same filtered candidate
+// set.
+func TestChildBaseDetailDoesNotLeadWithRetriedAwayNode(t *testing.T) {
+	wf := Workflow{
+		Metadata: WorkflowMetadata{Name: "harness-detailmask-abcde", Labels: map[string]string{"harness/config": "detailmask"}},
+		Status: WorkflowStatus{
+			Phase:                 "Failed",
+			ArtifactRepositoryRef: ArtifactRepositoryRef{ArtifactRepository{S3RepoRef{Bucket: "b"}}},
+			Nodes: map[string]Node{
+				"retry-upgrade": {ID: "retry-upgrade", Type: "Retry", Phase: "Succeeded", DisplayName: "upgrade", Children: []string{"upgrade0"}},
+				"upgrade0": {
+					ID: "upgrade0", Type: "Pod", Phase: "Failed", DisplayName: "upgrade(0)", FinishedAt: "2026-08-04T00:00:01Z",
+					Message: "main: Error (exit code 1)",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "upgrade0/main.log"}}}},
+				},
+				"retry-validate": {ID: "retry-validate", Type: "Retry", Phase: "Failed", DisplayName: "validate", Children: []string{"validate0"}},
+				"validate0": {
+					ID: "validate0", Type: "Pod", Phase: "Failed", DisplayName: "validate(0)", FinishedAt: "2026-08-04T00:00:02Z",
+					Message: "main: Error (exit code 1)",
+					Outputs: NodeOutputs{Artifacts: []NodeArtifact{{Name: "main-logs", S3: &NodeArtifactS3{Key: "validate0/main.log"}}}},
+				},
+			},
+		},
+	}
+	c := childBase(wf)
+	if strings.Contains(c.Detail, "upgrade(0)") {
+		t.Errorf("Detail = %q, want it to NOT lead with the retried-away upgrade(0) node", c.Detail)
+	}
+	if !strings.Contains(c.Detail, "validate(0)") {
+		t.Errorf("Detail = %q, want it to contain the real validate(0) failure", c.Detail)
 	}
 }
