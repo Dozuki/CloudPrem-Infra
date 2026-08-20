@@ -764,9 +764,10 @@ variable "cloudwatch_exporter_enabled" {
 }
 
 variable "mimir_remote_write_enabled" {
-  description = "Ship a copy of this cluster's metrics to the central Mimir with Prometheus remote_write. Purely additive: the local Prometheus keeps its full TSDB, its rules and its Alertmanager whether this is on or off, which makes flipping it back off a zero-impact revert. Needs two things first: enable_mimir on the physical layer for the network path, and this env's ingest key seeded at <customer>/<environment>/mimir in Vault. Off by default until an env is deliberately rolled out. Silently a no-op unless this env's chart_version is >= 2.7.0, the release that carries the remote_write support: an older chart ignores the values and reports nothing."
+  description = "Ship a copy of this cluster's metrics to the central Mimir with Prometheus remote_write. Purely additive: the local Prometheus keeps its full TSDB, its rules and its Alertmanager whether this is on or off, which makes flipping it back off a zero-impact revert. NULL (the default) means on for any AWS env, in either partition - central metrics is the fleet default now, so a new env enrolls with no mimir lines in its env.hcl. Set false explicitly to opt an env out. Still needs the ingest key at <customer>/<environment>/mimir in Vault (Mimir-Tenant-Keys mints it from the env dir, so for a normal env it is already there) and, on commercial, the physical network path from enable_mimir. Silently a no-op unless this env's chart_version is >= 2.7.0, the release that carries the remote_write support: an older chart ignores the values and reports nothing."
   type        = bool
-  default     = false
+  nullable    = true
+  default     = null
 }
 
 variable "watchdog_heartbeat_enabled" {
@@ -776,9 +777,10 @@ variable "watchdog_heartbeat_enabled" {
 }
 
 variable "mimir_url" {
-  description = "Remote-write push endpoint. Commercial stacks resolve this name through the private hosted zone the physical layer creates over the PrivateLink endpoint; gov has no PrivateLink path and points at the public ingest name instead, so it overrides this."
+  description = "Remote-write push endpoint. NULL (the default) means partition-aware: the commercial name, resolved inside the VPC through the private hosted zone the physical layer creates over the PrivateLink endpoint, or the public gov ingest name in GovCloud, which has no PrivateLink path across the partition. Set explicitly only to point an env somewhere else. Getting this wrong is quiet rather than loud - a gov env left on the commercial name cannot reach it and simply fails every push - which is why the default knows about the partition instead of leaving it to each env.hcl."
   type        = string
-  default     = "https://mimir-int.dozuki.dev/api/v1/push"
+  nullable    = true
+  default     = null
 }
 
 # ---------------------------------------------------------------------------

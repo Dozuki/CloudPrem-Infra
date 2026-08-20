@@ -9,9 +9,20 @@
 # ---------------------------------------------------------------------------
 
 locals {
+  # enable_mimir is nullable so its default can depend on the partition. A bare
+  # `default = true` would turn this on in GovCloud too and trip the precondition below on
+  # both existing gov envs the moment they bump infra_version. Null resolves to on in
+  # commercial and off in gov; an explicit true/false always wins, which is how every
+  # already-enrolled env keeps rendering byte-identical.
+  mimir_enabled = var.enable_mimir != null ? var.enable_mimir : !local.is_us_gov
+
   # Extract the service region from the endpoint service name
-  # (format: com.amazonaws.vpce.<region>.vpce-svc-xxx). Guarded on the empty
-  # string because the split runs even while the feature is off.
+  # (format: com.amazonaws.vpce.<region>.vpce-svc-xxx). The split runs even while the
+  # feature is off, so it is guarded - but the guard is belt only: the variable rejects
+  # empty and is not nullable, so this branch is unreachable. Do not read the guard as
+  # "empty is a supported off switch". Empty would resolve mimir_is_cross_region to false
+  # and send "" to the EC2 API through the data source below, which is why the variable
+  # refuses it instead.
   mimir_service_region  = var.mimir_endpoint_service_name != "" ? element(split(".", var.mimir_endpoint_service_name), 3) : ""
   mimir_is_cross_region = local.mimir_service_region != "" && local.mimir_service_region != data.aws_region.current.region
 }
@@ -21,12 +32,12 @@ locals {
 # so we skip the filter and pass all subnets. AWS maps all consumer AZs for
 # cross-region endpoints. Environments outside the Mimir region always take the cross-region path.
 data "aws_vpc_endpoint_service" "mimir" {
-  count        = var.enable_mimir && !local.mimir_is_cross_region ? 1 : 0
+  count        = local.mimir_enabled && !local.mimir_is_cross_region ? 1 : 0
   service_name = var.mimir_endpoint_service_name
 }
 
 data "aws_subnets" "mimir_compatible" {
-  count = var.enable_mimir && !local.mimir_is_cross_region ? 1 : 0
+  count = local.mimir_enabled && !local.mimir_is_cross_region ? 1 : 0
 
   filter {
     name   = "subnet-id"
@@ -40,7 +51,7 @@ data "aws_subnets" "mimir_compatible" {
 }
 
 resource "aws_security_group" "mimir_endpoint" {
-  count = var.enable_mimir ? 1 : 0
+  count = local.mimir_enabled ? 1 : 0
 
   name_prefix = "mimir-endpoint-"
   description = "Allow Mimir ingest access from within the VPC"
@@ -75,7 +86,7 @@ resource "aws_security_group" "mimir_endpoint" {
 }
 
 resource "aws_vpc_endpoint" "mimir" {
-  count = var.enable_mimir ? 1 : 0
+  count = local.mimir_enabled ? 1 : 0
 
   vpc_id       = local.vpc_id
   service_name = var.mimir_endpoint_service_name
@@ -106,7 +117,7 @@ resource "aws_vpc_endpoint" "mimir" {
     # API, which reads like a typo rather than the partition it actually is.
     precondition {
       condition     = !local.is_us_gov
-      error_message = "enable_mimir is not supported on GovCloud: there is no PrivateLink path from the gov partition to the commercial Mimir. Leave enable_mimir false and set mimir_url on the logical layer to the public gov ingest endpoint instead."
+      error_message = "enable_mimir is not supported on GovCloud: there is no PrivateLink path from the gov partition to the commercial Mimir. Leave enable_mimir unset - null resolves to false in this partition - or set it false explicitly. Gov envs still reach Mimir over the public gov ingest endpoint, which the logical layer's mimir_url now defaults to on its own; it does not need setting."
     }
   }
 }
@@ -117,7 +128,7 @@ resource "aws_vpc_endpoint" "mimir" {
 # fails loudly instead of shipping metrics to whatever the legacy wildcard
 # points at.
 resource "aws_route53_zone" "mimir_private" {
-  count = var.enable_mimir ? 1 : 0
+  count = local.mimir_enabled ? 1 : 0
 
   name = var.mimir_ingest_fqdn
 
@@ -136,7 +147,7 @@ resource "aws_route53_zone" "mimir_private" {
 # Alias at the zone apex. A CNAME cannot live at an apex, and the interface
 # endpoint exposes both halves an alias needs (dns_name and hosted_zone_id).
 resource "aws_route53_record" "mimir" {
-  count = var.enable_mimir ? 1 : 0
+  count = local.mimir_enabled ? 1 : 0
 
   zone_id = aws_route53_zone.mimir_private[0].zone_id
   name    = var.mimir_ingest_fqdn

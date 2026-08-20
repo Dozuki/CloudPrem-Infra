@@ -198,6 +198,23 @@ locals {
   azure_instances = var.cloud == "azure" ? toset(["azure"]) : toset([])
 
   is_us_gov = var.cloud == "aws" ? data.aws_partition.current[0].partition == "aws-us-gov" : false
+
+  # Both mimir inputs are nullable so their defaults can be partition-aware. Null means
+  # "fleet default"; an explicit value always wins, which is what keeps every already
+  # enrolled env rendering byte-identical across this change.
+  #
+  # remote_write defaults on for both AWS partitions (the Azure gate stays where it is, at
+  # the use site). The URL cannot share one default: gov has no PrivateLink path to the
+  # commercial endpoint, so a single commercial default would leave every gov env pushing at
+  # a name it cannot reach.
+  mimir_remote_write_enabled = (
+    var.mimir_remote_write_enabled != null ? var.mimir_remote_write_enabled : var.cloud == "aws"
+  )
+  mimir_url = (
+    var.mimir_url != null ? var.mimir_url : (
+      local.is_us_gov ? "https://mimir-gov.dozuki.dev/api/v1/push" : "https://mimir-int.dozuki.dev/api/v1/push"
+    )
+  )
   ca_cert_pem_file = var.cloud == "azure" ? "vendor/azure-mysql-global.pem" : (
     local.is_us_gov ? "vendor/us-gov-west-1-bundle.pem" : "vendor/global-bundle.pem"
   )
