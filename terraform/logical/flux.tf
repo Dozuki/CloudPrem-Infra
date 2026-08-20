@@ -247,8 +247,8 @@ locals {
     # the chart's own remote-write alerts catch.
     global = {
       mimir = {
-        enabled = var.cloud == "aws" && var.mimir_remote_write_enabled
-        url     = var.mimir_url
+        enabled = var.cloud == "aws" && local.mimir_remote_write_enabled
+        url     = local.mimir_url
       }
       # Routes Alertmanager's always-firing Watchdog to the fleet relay, which
       # turns it into a CloudWatch datapoint instead of a Slack post, so the

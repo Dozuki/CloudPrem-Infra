@@ -556,20 +556,35 @@ variable "vault_endpoint_service_name" {
 }
 
 variable "enable_mimir" {
-  description = "Build the network path to the central Mimir: a VPC interface endpoint, its security group, and a private hosted zone for mimir_ingest_fqdn. Off by default so the code can land on every env with an infra_version bump without creating anything. Turning it on is one physical plan of four resources. This flag only builds the path; the logical layer decides whether Prometheus actually pushes (mimir_remote_write_enabled). Requires the infra release that ships mimir.tf: on an older infra_version the variable does not exist and the plan fails on an unsupported argument."
+  description = "Build the network path to the central Mimir: a VPC interface endpoint, its security group, and a private hosted zone for mimir_ingest_fqdn. NULL (the default) means partition-aware: on by default in the commercial partition, off in GovCloud, where PrivateLink cannot cross the partition boundary and this would hard-fail. Set an explicit true/false to override. A commercial env therefore joins central metrics with no mimir lines in its env.hcl at all. This flag only builds the path; the logical layer decides whether Prometheus actually pushes (mimir_remote_write_enabled). Requires the infra release that ships mimir.tf: on an older infra_version the variable does not exist and the plan fails on an unsupported argument."
   type        = bool
-  default     = false
-
-  validation {
-    condition     = !var.enable_mimir || var.mimir_endpoint_service_name != ""
-    error_message = "enable_mimir is true but mimir_endpoint_service_name is empty. Set it to the PrivateLink service name published by the Mimir stack."
-  }
+  nullable    = true
+  default     = null
 }
 
 variable "mimir_endpoint_service_name" {
-  description = "VPC Endpoint Service name for the Mimir PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). A service in another region is fine, the endpoint switches to the cross-region form on its own, but that region must be in the service's supported_regions list. Only read when enable_mimir is true."
+  description = "VPC Endpoint Service name for the Mimir PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). Defaults to the live commercial Mimir service, which is what makes a fresh commercial env enroll with no mimir lines in env.hcl; every commercial region reaches it, cross-region included, so one value covers the commercial fleet. A service in another region is fine, the endpoint switches to the cross-region form on its own, but that region must be in the service's supported_regions list. Only read when the resolved enable_mimir is true."
   type        = string
-  default     = ""
+  default     = "com.amazonaws.vpce.us-east-1.vpce-svc-0814f274d15a3d5a2"
+
+  # nullable = false so an explicit `= null` collapses onto the default instead of staying
+  # null: mimir.tf splits this string on "." to find the service region, and split() on null
+  # is a plan-time crash whose message names neither this variable nor the env that set it.
+  nullable = false
+
+  # An empty string used to be the way to say "feature off", and enable_mimir carried a
+  # validation pairing the two. enable_mimir is nullable now, so that pairing cannot live in
+  # a variable block any more - a validation cannot see the partition that resolves null.
+  # Rejecting empty outright is the simpler invariant and it removes the need: the name is
+  # only ever the default or a real service, so no code path downstream has to handle "".
+  # This matters because empty does NOT fail safe. It makes mimir_service_region "", which
+  # makes mimir_is_cross_region false, which is exactly the branch that RUNS the
+  # aws_vpc_endpoint_service lookup - so "" reaches the EC2 API and comes back as an
+  # InvalidParameter on a data source rather than as an error about a variable.
+  validation {
+    condition     = var.mimir_endpoint_service_name != ""
+    error_message = "mimir_endpoint_service_name must not be empty. Leave it unset to take the commercial default, or set the PrivateLink service name published by the Mimir stack. To turn the feature off, set enable_mimir = false."
+  }
 }
 
 variable "mimir_ingest_fqdn" {
