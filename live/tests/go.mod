@@ -4,27 +4,27 @@ go 1.25.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.7
-	github.com/aws/aws-sdk-go-v2/config v1.32.33
-	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.80.2
-	github.com/aws/aws-sdk-go-v2/service/databasemigrationservice v1.66.2
-	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.63.0
-	github.com/aws/aws-sdk-go-v2/service/ec2 v1.318.0
+	github.com/aws/aws-sdk-go-v2/config v1.32.37
+	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.82.2
+	github.com/aws/aws-sdk-go-v2/service/databasemigrationservice v1.66.6
+	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.63.3
+	github.com/aws/aws-sdk-go-v2/service/ec2 v1.321.2
 	github.com/aws/aws-sdk-go-v2/service/efs v1.44.7
-	github.com/aws/aws-sdk-go-v2/service/eks v1.90.2
+	github.com/aws/aws-sdk-go-v2/service/eks v1.91.0
 	github.com/aws/aws-sdk-go-v2/service/elasticache v1.56.7
 	github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2 v1.58.8
-	github.com/aws/aws-sdk-go-v2/service/iam v1.57.0
+	github.com/aws/aws-sdk-go-v2/service/iam v1.59.1
 	github.com/aws/aws-sdk-go-v2/service/kafka v1.58.3
 	github.com/aws/aws-sdk-go-v2/service/kms v1.55.7
-	github.com/aws/aws-sdk-go-v2/service/lambda v1.101.0
+	github.com/aws/aws-sdk-go-v2/service/lambda v1.101.4
 	github.com/aws/aws-sdk-go-v2/service/opensearch v1.75.7
-	github.com/aws/aws-sdk-go-v2/service/rds v1.123.2
-	github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi v1.35.3
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.2
-	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.44.2
+	github.com/aws/aws-sdk-go-v2/service/rds v1.124.3
+	github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi v1.36.1
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.2
+	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.44.6
 	github.com/aws/aws-sdk-go-v2/service/sns v1.42.7
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.46.4
-	github.com/aws/aws-sdk-go-v2/service/sts v1.45.2
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.46.6
+	github.com/aws/aws-sdk-go-v2/service/sts v1.45.6
 	github.com/aws/smithy-go v1.27.8
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.30.0
@@ -33,20 +33,20 @@ require (
 )
 
 require (
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.15 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.32 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.33 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.18 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.36 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.37 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.38 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.38 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.34 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.15 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.26 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.12.11 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.33 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.34 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.5.2 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.33.2 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.38.2 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.38 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.17 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.30 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.12.14 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.37 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.38 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.5.6 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.33.6 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.38.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
