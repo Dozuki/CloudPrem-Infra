@@ -810,17 +810,16 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 		// blocked it. smoke1bc2 re-emitted "retries exhausted" for two days while the
 		// answer - an EKS cluster and an Aurora writer that no state address covered -
 		// was one tag query away. Report first, then fail with the identities attached.
+		// Deliberately ungated on residualEnforce/residualBlocks: the phase is already
+		// failing because derr is non-nil, not because of residual policy, so there is
+		// nothing here for the switch to gate. The residual report is diagnostic (WHAT
+		// blocked the destroy), never the reason for failure at this call site - the
+		// switch only controls whether a residual finding can CAUSE a failure, and one
+		// never does here in either mode. Do not add a residualEnforce branch back in to
+		// "restore symmetry" with the other two call sites; those two are where a
+		// residual is genuinely the cause.
 		rep := p.checkResiduals(ctx, tg, "teardown", rm.AppliedCustomer, p.residualRegions(), derr)
 		p.recordResiduals(ctx, cfg, rm, rep)
-		if !residualEnforce() {
-			// The destroy itself failed independent of residual policy - that
-			// failure is never suppressed - but report-only mode still drops the
-			// residual report from the framing of WHY the phase failed, so the
-			// error keeps meaning "destroy failed" rather than "residuals blocked
-			// it" when the gate is off.
-			step("TEARDOWN residual check: HARNESS_RESIDUAL_ENFORCE=false, residual report is not part of the failure reason: %s", rep.Summary())
-			return fmt.Errorf("destroy: %w", derr)
-		}
 		step("TEARDOWN residual check: %s", rep.Summary())
 		return fmt.Errorf("destroy: %w\nblocking residuals (%s):\n%s", derr, rep.DestroyErr, rep.Summary())
 	}

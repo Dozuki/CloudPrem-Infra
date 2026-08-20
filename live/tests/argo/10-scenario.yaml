@@ -99,6 +99,11 @@ spec:
           configMapKeyRef:
             name: harness-config
             key: residual_enforce
+          # Fails safe to enforce if the key is ever missing from harness-config,
+          # instead of erroring the whole workflow at submission. Also removes the
+          # apply-ordering coupling that required 00-phase-templates.yaml (which owns
+          # the ConfigMap) to land before this file.
+          default: 'true'
 
   # A run is 1-2 hours and the recovery path is longer. This is a backstop against a hung
   # run holding the semaphore forever, not a target.

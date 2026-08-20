@@ -45,12 +45,15 @@ func TestResidualEnforceDefaultsToTrue(t *testing.T) {
 	}
 }
 
-// TestResidualBlocksOnlyFailsOnABlockingFindingWithEnforceOn is the decision every one
-// of the three gate call sites in phases.go (Provision, Teardown's post-destroy check,
-// and Teardown's destroy-error check) makes: a clean or informational-only report never
-// fails the phase, and a report with a blocking residual fails it only when enforce is
-// true. detection/recording/logging at the call sites happen before this is ever
-// asked, so this table only needs to cover the fail/don't-fail decision itself.
+// TestResidualBlocksOnlyFailsOnABlockingFindingWithEnforceOn is the decision made at
+// the two gate call sites in phases.go that residualEnforce actually gates - Provision
+// and Teardown's post-destroy (destroy-succeeded) check: a clean or informational-only
+// report never fails the phase, and a report with a blocking residual fails it only
+// when enforce is true. Teardown's destroy-error call site is deliberately not covered
+// here - it never calls residualBlocks or residualEnforce, because a destroy failure is
+// never gated on residual policy; see the comment at that call site in phases.go.
+// detection/recording/logging at the call sites happen before this is ever asked, so
+// this table only needs to cover the fail/don't-fail decision itself.
 func TestResidualBlocksOnlyFailsOnABlockingFindingWithEnforceOn(t *testing.T) {
 	blockingReport := &ResidualReport{Residuals: []Residual{
 		{ARN: "arn:aws:eks:us-east-1:076248559428:cluster/orphan", Type: "eks:cluster", Blocking: true},
