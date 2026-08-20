@@ -94,6 +94,11 @@ spec:
           configMapKeyRef:
             name: harness-config
             key: state_bucket
+      - name: residual-enforce
+        valueFrom:
+          configMapKeyRef:
+            name: harness-config
+            key: residual_enforce
 
   # A run is 1-2 hours and the recovery path is longer. This is a backstop against a hung
   # run holding the semaphore forever, not a target.
@@ -165,6 +170,8 @@ spec:
                   value: '{{workflow.parameters.repo-ref}}'
                 - name: deadline
                   value: '5400'
+                - name: residual-enforce
+                  value: '{{workflow.parameters.residual-enforce}}'
                 - name: extra-args
                   value: >-
                     --scenario {{workflow.parameters.scenario}}
@@ -189,6 +196,8 @@ spec:
                   value: '{{workflow.parameters.repo-ref}}'
                 - name: deadline
                   value: '5400'
+                - name: residual-enforce
+                  value: '{{workflow.parameters.residual-enforce}}'
 
         - - name: validate
             when: '{{steps.gate.outputs.result}} == run'
@@ -207,6 +216,8 @@ spec:
                   value: '{{workflow.parameters.repo-ref}}'
                 - name: deadline
                   value: '5400'
+                - name: residual-enforce
+                  value: '{{workflow.parameters.residual-enforce}}'
 
     # The staleness check itself. A script template so stdout is the step result the
     # `when:` clauses above compare against. GET /commits/{sha}/pulls lists the open
@@ -329,3 +340,5 @@ spec:
                 # diagnostics dump before the stack goes away.
                 - name: workflow-status
                   value: '{{workflow.status}}'
+                - name: residual-enforce
+                  value: '{{workflow.parameters.residual-enforce}}'

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,6 +65,36 @@ func (p PhaseParams) residualRegions() []string {
 		regions = append(regions, p.Matrix.Defaults.DRRegion)
 	}
 	return regions
+}
+
+// residualEnforce reports whether a blocking residual finding should fail the phase
+// it was found in. Absent, empty, or unparseable HARNESS_RESIDUAL_ENFORCE keeps
+// today's behavior (enforce): a laptop run with no env var set, or a lost/mistyped
+// one, must not silently go soft on a real orphan. Only an explicit false-y value
+// ("false", "0", ...) turns the gate report-only. Detection, recording and logging
+// run identically either way - this only decides whether a blocking finding also
+// fails the phase.
+func residualEnforce() bool {
+	v := os.Getenv("HARNESS_RESIDUAL_ENFORCE")
+	if v == "" {
+		return true
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return true
+	}
+	return b
+}
+
+// residualBlocks reports whether a residual report should fail the phase it was
+// found in. A report with no blocking residuals never fails a phase regardless of
+// enforce; a report that DOES have a blocking residual fails the phase only when
+// enforce is true - when it is false, the finding is still detected, recorded and
+// logged (the call sites do that before ever asking this), it just does not stop
+// the run. Pure and enforce-parameterized (rather than reading the env var itself)
+// so it is testable without HARNESS_RESIDUAL_ENFORCE gymnastics.
+func residualBlocks(rep *ResidualReport, enforce bool) bool {
+	return len(rep.Blocking()) > 0 && enforce
 }
 
 func resolveIdentifier(cfg Config, override string) string {
@@ -289,7 +320,11 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 		p.recordResiduals(ctx, cfg, rm, rep)
 		step("PROVISION residual check: %s", rep.Summary())
 		if blocking := rep.Blocking(); len(blocking) > 0 {
-			return fmt.Errorf("provision left %d resource(s) outside terraform state; see the manifest residual report:\n%s", len(blocking), rep.Summary())
+			if !residualBlocks(rep, residualEnforce()) {
+				step("PROVISION residual check: HARNESS_RESIDUAL_ENFORCE=false, %d blocking finding(s) demoted to report-only", len(blocking))
+			} else {
+				return fmt.Errorf("provision left %d resource(s) outside terraform state; see the manifest residual report:\n%s", len(blocking), rep.Summary())
+			}
 		}
 	}
 
@@ -777,6 +812,15 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 		// was one tag query away. Report first, then fail with the identities attached.
 		rep := p.checkResiduals(ctx, tg, "teardown", rm.AppliedCustomer, p.residualRegions(), derr)
 		p.recordResiduals(ctx, cfg, rm, rep)
+		if !residualEnforce() {
+			// The destroy itself failed independent of residual policy - that
+			// failure is never suppressed - but report-only mode still drops the
+			// residual report from the framing of WHY the phase failed, so the
+			// error keeps meaning "destroy failed" rather than "residuals blocked
+			// it" when the gate is off.
+			step("TEARDOWN residual check: HARNESS_RESIDUAL_ENFORCE=false, residual report is not part of the failure reason: %s", rep.Summary())
+			return fmt.Errorf("destroy: %w", derr)
+		}
 		step("TEARDOWN residual check: %s", rep.Summary())
 		return fmt.Errorf("destroy: %w\nblocking residuals (%s):\n%s", derr, rep.DestroyErr, rep.Summary())
 	}
@@ -809,7 +853,11 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 		p.recordResiduals(ctx, cfg, rm, rep)
 		step("TEARDOWN residual check: %s", rep.Summary())
 		if blocking := rep.Blocking(); len(blocking) > 0 {
-			return fmt.Errorf("destroy reported success but left %d tagged resource(s) behind; see the manifest residual report:\n%s", len(blocking), rep.Summary())
+			if !residualBlocks(rep, residualEnforce()) {
+				step("TEARDOWN residual check: HARNESS_RESIDUAL_ENFORCE=false, %d blocking finding(s) demoted to report-only", len(blocking))
+			} else {
+				return fmt.Errorf("destroy reported success but left %d tagged resource(s) behind; see the manifest residual report:\n%s", len(blocking), rep.Summary())
+			}
 		}
 	}
 	return nil

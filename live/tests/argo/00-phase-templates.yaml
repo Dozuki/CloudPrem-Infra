@@ -54,6 +54,13 @@ data:
   # Keep the guarded direct path available for rollback, but route normal janitor
   # findings only through the consolidated Resource Reaper report in #mpc-alerts.
   reaper_direct_slack_enabled: 'false'
+  # Rollout switch for Lodestar-1xm.36's residual gate (harness/residuals.go): a
+  # blocking finding still fails the phase when 'true', but only reports (detection,
+  # recording and logging all still run) when 'false'. Starts 'false' so the gate rolls
+  # out watching real runs before it can fail one; flip to 'true' once a few nightlies
+  # confirm it isn't noisy. The `run` template's own input parameter default stays
+  # 'true' as the safety net for any invocation that bypasses this ConfigMap value.
+  residual_enforce: 'false'
 ---
 # DDVtest has a hard ceiling of 10 VPCs per region and each test stack is about one VPC
 # (recovery is two). A nightly matrix plus a couple of PR runs will exhaust it mid-apply,
@@ -101,6 +108,12 @@ spec:
             value: 'false'
           - name: workflow-status
             value: ''
+          # Rollout switch for the residual gate (harness/residuals.go's
+          # residualEnforce). Default 'true' (enforce) is the safety net for a direct
+          # template invocation that skips 10-scenario.yaml's configMapKeyRef binding -
+          # see harness-config's residual_enforce for the rollout value actually in use.
+          - name: residual-enforce
+            value: 'true'
       activeDeadlineSeconds: '{{inputs.parameters.deadline}}'
       retryStrategy:
         limit: '2'
@@ -184,6 +197,8 @@ spec:
             value: '{{workflow.parameters.ddvtest-account-id}}'
           - name: APP_NAMESPACE
             value: dozuki
+          - name: HARNESS_RESIDUAL_ENFORCE
+            value: '{{inputs.parameters.residual-enforce}}'
         volumeMounts:
           - name: workspace
             mountPath: /workspace
