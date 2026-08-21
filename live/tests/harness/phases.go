@@ -173,7 +173,8 @@ func clampHRWaitBudget(desired time.Duration, deadlineEnv string, elapsed time.D
 // indistinguishable from a genuinely broken install). Every path logs the resolved
 // budget and which rule produced it.
 //
-// Returns a non-nil error (errInsufficientPhaseTime, unwrapped) exactly when
+// Returns a non-nil error (errInsufficientPhaseTime, propagated unmodified — it is
+// wrapped with %w, so match it with errors.Is, never ==) exactly when
 // clampHRWaitBudget's rule is "insufficient" — the caller (Provision, Validate) must not
 // call validateStack's wait with the zero duration that comes back alongside it; it must
 // skip straight to its normal validateStack-failure handling instead, so the run still

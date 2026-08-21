@@ -187,7 +187,8 @@ spec:
                 # alone, so the old 5400s (90m) deadline killed the pod before the wait
                 # could ever expire and trigger the diagnosis it exists to produce -
                 # never mind the apply time before the wait even starts. 9000s (150m)
-                # leaves ~35m for cluster setup + terragrunt apply ahead of the wait.
+                # leaves 30m for cluster setup + terragrunt apply ahead of the wait
+                # (150m - 90m budget - 25m reserve - 5m pod-vs-process startup slack).
                 # harness/phases.go also clamps the wait budget itself at runtime
                 # (HARNESS_POD_DEADLINE) so a future edit to either number alone cannot
                 # reopen this gap; live/tests/harness/deadline_invariant_test.go parses
@@ -249,7 +250,8 @@ spec:
                 # Same invariant as provision (see that step's comment). Validate's wait
                 # budget is hrWaitBudgetUpgrade = 75m; 75m + hrWaitReserve's 25m = 100m
                 # alone, so the old 5400s (90m) deadline could kill the pod before the
-                # wait expired too. 7200s (120m) leaves ~20m for setup ahead of the wait.
+                # wait expired too. 7200s (120m) leaves 15m for setup ahead of the wait
+                # (120m - 75m budget - 25m reserve - 5m pod-vs-process startup slack).
                 - name: deadline
                   value: '7200'
                 - name: residual-enforce

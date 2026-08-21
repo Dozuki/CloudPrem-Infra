@@ -24,6 +24,7 @@ func TestHRWaitBudgetConstants(t *testing.T) {
 
 func TestHRWaitBudgetUnsetReturnsBase(t *testing.T) {
 	t.Setenv(hrWaitBudgetOverrideEnv, "")
+	t.Setenv(hrPodDeadlineEnv, "") // no pod deadline: isolate the override from the clamp
 	os.Unsetenv(hrWaitBudgetOverrideEnv)
 	if got, err := hrWaitBudget(hrWaitBudgetInstall); err != nil || got != hrWaitBudgetInstall {
 		t.Errorf("hrWaitBudget(install) with no override = (%s, %v), want (%s, nil)", got, err, hrWaitBudgetInstall)
@@ -35,6 +36,7 @@ func TestHRWaitBudgetUnsetReturnsBase(t *testing.T) {
 
 func TestHRWaitBudgetValidOverrideReplacesBoth(t *testing.T) {
 	t.Setenv(hrWaitBudgetOverrideEnv, "45s")
+	t.Setenv(hrPodDeadlineEnv, "") // no pod deadline: isolate the override from the clamp
 	if got, err := hrWaitBudget(hrWaitBudgetInstall); err != nil || got != 45*time.Second {
 		t.Errorf("hrWaitBudget(install) with override = (%s, %v), want (45s, nil)", got, err)
 	}
@@ -45,6 +47,7 @@ func TestHRWaitBudgetValidOverrideReplacesBoth(t *testing.T) {
 
 func TestHRWaitBudgetInvalidOverrideIgnored(t *testing.T) {
 	t.Setenv(hrWaitBudgetOverrideEnv, "not-a-duration")
+	t.Setenv(hrPodDeadlineEnv, "") // no pod deadline: isolate the override from the clamp
 	if got, err := hrWaitBudget(hrWaitBudgetInstall); err != nil || got != hrWaitBudgetInstall {
 		t.Errorf("hrWaitBudget(install) with invalid override = (%s, %v), want the base %s unchanged, nil err", got, err, hrWaitBudgetInstall)
 	}
@@ -62,6 +65,7 @@ func TestHRWaitBudgetZeroOrNegativeOverrideRejected(t *testing.T) {
 	for _, v := range []string{"0s", "0m", "-5m", "-1ns"} {
 		t.Run(v, func(t *testing.T) {
 			t.Setenv(hrWaitBudgetOverrideEnv, v)
+			t.Setenv(hrPodDeadlineEnv, "") // no pod deadline: isolate the override from the clamp
 			if got, err := hrWaitBudget(hrWaitBudgetInstall); err != nil || got != hrWaitBudgetInstall {
 				t.Errorf("hrWaitBudget(install) with override %q = (%s, %v), want the base %s unchanged, nil err", v, got, err, hrWaitBudgetInstall)
 			}
