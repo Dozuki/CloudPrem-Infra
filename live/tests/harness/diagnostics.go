@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -276,21 +275,34 @@ func uploadArtifacts(ctx context.Context, client S3API, bucket, localDir, runID 
 			step("artifacts upload: %s", note)
 			continue
 		}
-		b, rerr := os.ReadFile(f.abs)
+		// os.Open + *os.File as Body, not os.ReadFile: a whole-file read would buffer up
+		// to capBytes (200MB) in the pod's RAM for a single artifact. *os.File satisfies
+		// io.ReadSeeker, which is all PutObject needs to stream the body while still
+		// computing the payload hash for SigV4 (it seeks back to 0 after hashing) — no
+		// buffering of the file content beyond the SDK's own internal chunking.
+		fh, rerr := os.Open(f.abs)
 		if rerr != nil {
-			note := fmt.Sprintf("%s: skipped, read failed: %v", f.rel, rerr)
+			note := fmt.Sprintf("%s: skipped, open failed: %v", f.rel, rerr)
 			skipped = append(skipped, note)
 			step("artifacts upload: %s", note)
 			continue
 		}
 		key := prefix + filepath.ToSlash(f.rel)
-		if _, perr := client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket: aws.String(bucket), Key: aws.String(key), Body: bytes.NewReader(b),
-		}); perr != nil {
+		_, perr := client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket: aws.String(bucket), Key: aws.String(key), Body: fh, ContentLength: aws.Int64(f.size),
+		})
+		closeErr := fh.Close()
+		if perr != nil {
 			note := fmt.Sprintf("%s: skipped, upload failed: %v", f.rel, perr)
 			skipped = append(skipped, note)
 			step("WARNING: artifacts upload failed: %s: %v", key, perr)
 			continue
+		}
+		if closeErr != nil {
+			// The PutObject call itself already succeeded (S3 has the bytes) — a Close
+			// error here is a local fd/fs problem, not an upload failure, so it is logged
+			// but does not move the file into skipped/re-count it as not-uploaded.
+			step("WARNING: artifacts upload: %s uploaded but close failed: %v", key, closeErr)
 		}
 		included = append(included, fmt.Sprintf("%s (%d bytes)", f.rel, f.size))
 		uploaded += f.size

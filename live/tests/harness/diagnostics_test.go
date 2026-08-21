@@ -253,6 +253,51 @@ func TestCaptureDiagnosticsUploadsOnlyWhenFull(t *testing.T) {
 	}
 }
 
+// TestCaptureDiagnosticsSkipsLiveClusterDumpWhenClusterEmpty pins the mechanism the
+// codex MAJOR fix (Teardown's final residual gate, phases.go) relies on: by the time
+// that gate runs, tg.Destroy() already succeeded and the cluster is gone, so it calls
+// captureDiagnostics with cluster="" — the function's existing "skip the kubectl
+// portion" signal (see captureDiagnostics' `full && cluster != ""` guard) — while
+// everything else (refs.txt, TF inventory, and the S3 upload) still runs.
+func TestCaptureDiagnosticsSkipsLiveClusterDumpWhenClusterEmpty(t *testing.T) {
+	orig := uploadArtifactsOnFailureFn
+	t.Cleanup(func() { uploadArtifactsOnFailureFn = orig })
+	var calls int
+	uploadArtifactsOnFailureFn = func(repoDir, runID, accountID, profile, region string) { calls++ }
+
+	repoDir := t.TempDir()
+	rp := RunParams{RepoDir: repoDir, RunID: "run1-min", ConfigName: "min", AccountID: "123456789012", Profile: "test-profile"}
+	tg := TGOptions{WorkingDir: t.TempDir()}
+
+	captureDiagnostics(rp, "us-east-1", "" /* cluster already destroyed by Destroy() */, true, tg, "", "")
+
+	dumpDir := filepath.Join(ArtifactsDir(repoDir, rp.RunID), "cluster")
+	if _, err := os.Stat(dumpDir); !os.IsNotExist(err) {
+		t.Errorf("expected no cluster/ dump dir when cluster is empty (cluster already destroyed), stat err=%v", err)
+	}
+	refsPath := filepath.Join(ArtifactsDir(repoDir, rp.RunID), "refs.txt")
+	if _, err := os.Stat(refsPath); err != nil {
+		t.Errorf("expected refs.txt to still be written even with no cluster dump: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected the upload to still be attempted (full=true) even with cluster empty, got %d call(s)", calls)
+	}
+}
+
+// TestTeardownResidualGateCapturesOnlyWhenPriorPhasesGreen exercises the same
+// teardownNeedsFailureCapture decision the residual-gate branch now uses (phases.go,
+// after `destroy reported success but left ... resource(s) behind`), pinned at the
+// pure-function level for the same reason as TestTeardownNeedsFailureCapture: Teardown
+// itself needs a real terragrunt/AWS/k8s environment to exercise end-to-end.
+func TestTeardownResidualGateCapturesOnlyWhenPriorPhasesGreen(t *testing.T) {
+	if !teardownNeedsFailureCapture(false) {
+		t.Error("a residual-gate failure after a green provision/validate must trigger its own capture+upload")
+	}
+	if teardownNeedsFailureCapture(true) {
+		t.Error("a residual-gate failure after an already-failed run must NOT re-trigger capture+upload (the pre-destroy call already ran full)")
+	}
+}
+
 func TestArtifactsRunIDMatchesAcrossPhases(t *testing.T) {
 	// artifactsRunID must produce the same value Teardown's captureDiagnostics call used
 	// to compute inline before WS2 (strings.TrimSuffix(statePrefix, "/")), so the

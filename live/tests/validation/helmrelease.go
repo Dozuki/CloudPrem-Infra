@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -296,7 +297,12 @@ func firstLine(s string) string {
 // This must never turn a diagnosable failure into a harness crash: any error building the
 // cluster client is handled by diagnoseReleaseWithClient exactly like any other diagnosis
 // error (see there).
-func diagnoseRelease(kubeconfig, appNamespace string, hr *unstructured.Unstructured) string {
+func diagnoseRelease(kubeconfig, appNamespace string, hr *unstructured.Unstructured) (result string) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = fmt.Sprintf("(diagnosis unavailable: panic: %v)", r)
+		}
+	}()
 	cs, err := clientFor(kubeconfig)
 	return diagnoseReleaseWithClient(cs, err, appNamespace, hr)
 }
@@ -498,15 +504,21 @@ func writeJobs(ctx context.Context, b *strings.Builder, cs kubernetes.Interface,
 }
 
 // capDiagnosis hard-caps the block so it stays Slack-card-safe regardless of how many
-// pods/events/jobs a broken cluster produces.
+// pods/events/jobs a broken cluster produces. Event messages are not guaranteed ASCII,
+// so the cut backs off to a UTF-8 rune boundary rather than an arbitrary byte index —
+// otherwise a split multi-byte character emits mojibake into the Slack card.
 func capDiagnosis(s string) string {
 	s = strings.TrimRight(s, "\n")
 	const max = 1500
 	const ellipsis = "…"
-	if len(s) > max {
-		s = s[:max-len(ellipsis)] + ellipsis
+	if len(s) <= max {
+		return s
 	}
-	return s
+	limit := max - len(ellipsis)
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit] + ellipsis
 }
 
 func dynamicFor(kubeconfig string) (dynamic.Interface, error) {

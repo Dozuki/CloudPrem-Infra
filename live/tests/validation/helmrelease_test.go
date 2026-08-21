@@ -282,6 +282,47 @@ func TestDiagnoseReleaseWithClient_ClientError(t *testing.T) {
 	}
 }
 
+// TestDiagnoseReleaseWithClient_PanicDegrades exercises the defer recover() invariant
+// directly: a panic inside a section (here, listing pods) must degrade to a
+// diagnosis-unavailable note, never propagate.
+func TestDiagnoseReleaseWithClient_PanicDegrades(t *testing.T) {
+	cs := k8sfake.NewSimpleClientset()
+	cs.PrependReactor("list", "pods", func(action kubetesting.Action) (bool, runtime.Object, error) {
+		panic("boom: kubelet unreachable")
+	})
+	out := diagnoseReleaseWithClient(cs, nil, "dozuki", nil)
+	if !strings.Contains(out, "diagnosis unavailable: panic: boom: kubelet unreachable") {
+		t.Fatalf("expected the panic to degrade to a diagnosis-unavailable note, got: %s", out)
+	}
+}
+
+// TestAwaitHelmReleaseReady_DiagnosisPanicDoesNotPropagate is the end-to-end version of
+// the invariant above: a panicking diagnosis must never turn a diagnosable wait failure
+// into a crashed harness run. The normal verdict (here, the InstallFailed terminal
+// reason) must survive intact, with only the diagnosis block degraded.
+func TestAwaitHelmReleaseReady_DiagnosisPanicDoesNotPropagate(t *testing.T) {
+	hr := testHR(fluxNamespace, 1,
+		hrCond("Ready", "False", "InstallFailed", "hook failed", 1),
+	)
+	panicCS := k8sfake.NewSimpleClientset()
+	panicCS.PrependReactor("list", "pods", func(action kubetesting.Action) (bool, runtime.Object, error) {
+		panic("boom: kubelet unreachable")
+	})
+	diagnose := func(h *unstructured.Unstructured) string {
+		return diagnoseReleaseWithClient(panicCS, nil, "dozuki", h)
+	}
+	err := awaitHelmReleaseReady(newFakeDC(hr), diagnose, "dozuki", "dozuki", time.Hour)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "failed (InstallFailed)") {
+		t.Fatalf("expected the normal terminal-reason verdict to survive a diagnosis panic: %v", err)
+	}
+	if !strings.Contains(err.Error(), "-- live diagnosis --") || !strings.Contains(err.Error(), "diagnosis unavailable: panic: boom: kubelet unreachable") {
+		t.Fatalf("expected a degraded diagnosis block, not a propagated panic: %v", err)
+	}
+}
+
 func TestDiagnoseReleaseWithClient_PodsEventsJobs(t *testing.T) {
 	const ns = "dozuki"
 	brokenPod := &corev1.Pod{

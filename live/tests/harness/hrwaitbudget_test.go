@@ -51,6 +51,25 @@ func TestHRWaitBudgetInvalidOverrideIgnored(t *testing.T) {
 	}
 }
 
+// TestHRWaitBudgetZeroOrNegativeOverrideRejected pins the codex MINOR fix:
+// time.ParseDuration happily accepts "-5m" and "0s" (no error), but either one would
+// make AwaitHelmReleaseReady time out on its first iteration, indistinguishable from a
+// genuinely broken install. hrWaitBudget must reject them the same way it rejects an
+// unparseable string: warn and fall back to base.
+func TestHRWaitBudgetZeroOrNegativeOverrideRejected(t *testing.T) {
+	for _, v := range []string{"0s", "0m", "-5m", "-1ns"} {
+		t.Run(v, func(t *testing.T) {
+			t.Setenv(hrWaitBudgetOverrideEnv, v)
+			if got := hrWaitBudget(hrWaitBudgetInstall); got != hrWaitBudgetInstall {
+				t.Errorf("hrWaitBudget(install) with override %q = %s, want the base %s unchanged", v, got, hrWaitBudgetInstall)
+			}
+			if got := hrWaitBudget(hrWaitBudgetUpgrade); got != hrWaitBudgetUpgrade {
+				t.Errorf("hrWaitBudget(upgrade) with override %q = %s, want the base %s unchanged", v, got, hrWaitBudgetUpgrade)
+			}
+		})
+	}
+}
+
 func TestFormatMinutes(t *testing.T) {
 	cases := []struct {
 		d    time.Duration
@@ -58,7 +77,8 @@ func TestFormatMinutes(t *testing.T) {
 	}{
 		{90 * time.Minute, "90m"},
 		{75 * time.Minute, "75m"},
-		{45 * time.Second, "0m"},
+		{45 * time.Second, "45s"},
+		{500 * time.Millisecond, "500ms"},
 	}
 	for _, tc := range cases {
 		if got := formatMinutes(tc.d); got != tc.want {

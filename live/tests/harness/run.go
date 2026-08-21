@@ -45,7 +45,16 @@ func step(format string, args ...interface{}) {
 // formatMinutes renders a duration as whole minutes ("90m") for the wait-budget log
 // line — plain time.Duration.String() would print "1h30m0s", which is correct but not
 // what the wait-start marker is meant to read as.
+//
+// Below one minute, "%dm" truncates to "0m" regardless of the actual value — silently
+// truthful-looking but wrong, and exactly the range HARNESS_HR_BUDGET_OVERRIDE's escape
+// hatch (phases.go's hrWaitBudget) is meant to exercise with small test durations like
+// "45s". Falls back to d.String() there instead ("45s", "500ms", ...), which is a
+// stdlib-standard rendering even though it does not match the whole-minutes style above.
 func formatMinutes(d time.Duration) string {
+	if d < time.Minute {
+		return d.String()
+	}
 	return fmt.Sprintf("%dm", int(d/time.Minute))
 }
 

@@ -54,7 +54,12 @@ const hrWaitBudgetOverrideEnv = "HARNESS_HR_BUDGET_OVERRIDE"
 // unless HARNESS_HR_BUDGET_OVERRIDE is set to a valid duration, in which case the
 // override wins and is logged loudly (it replaces both the install and upgrade budget,
 // whichever call site asked). An unset var is silent; an invalid value is logged as a
-// warning and ignored, so a typo cannot silently shrink the real wait.
+// warning and ignored, so a typo cannot silently shrink the real wait. A parsed value
+// <= 0 ("-5m", "0s", ...) gets the same treatment as unparseable: time.ParseDuration
+// accepts negative and zero durations without error, but either one makes
+// AwaitHelmReleaseReady time out on its very first iteration — indistinguishable from a
+// genuinely broken install, so it is rejected here rather than silently producing a
+// wait that can never succeed.
 func hrWaitBudget(base time.Duration) time.Duration {
 	v := os.Getenv(hrWaitBudgetOverrideEnv)
 	if v == "" {
@@ -63,6 +68,10 @@ func hrWaitBudget(base time.Duration) time.Duration {
 	d, err := time.ParseDuration(v)
 	if err != nil {
 		step("WARNING: %s=%q is not a valid duration, ignoring override: %v", hrWaitBudgetOverrideEnv, v, err)
+		return base
+	}
+	if d <= 0 {
+		step("WARNING: %s=%q is <= 0 (would time out immediately), ignoring override: falling back to base %s", hrWaitBudgetOverrideEnv, v, formatMinutes(base))
 		return base
 	}
 	step("HARNESS_HR_BUDGET_OVERRIDE ACTIVE: HelmRelease wait budget forced to %s (was %s)", formatMinutes(d), formatMinutes(base))
@@ -404,7 +413,7 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 		// on this error long before the separate teardown pod ever runs) and upload it —
 		// failure path only, before the error propagates.
 		captureFailureDump(p.RepoDir, p.artifactsRunID(cfg), resolveIdentifier(cfg, p.IdentifierOverride), p.Region, p.Profile, namespace)
-		uploadArtifactsOnFailure(p.RepoDir, p.artifactsRunID(cfg), p.AccountID, p.Profile, p.Region)
+		uploadArtifactsOnFailureFn(p.RepoDir, p.artifactsRunID(cfg), p.AccountID, p.Profile, p.Region)
 		return fmt.Errorf("provision validation: %w", verr)
 	}
 	// Baseline-flavor guard: only meaningful on an upgrade scenario about to flip to a
@@ -707,7 +716,7 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		// WS2: same failure-time dump + upload as Provision — see that call site's
 		// comment. Validate's namespace lives on the manifest, not a function param.
 		captureFailureDump(p.RepoDir, p.artifactsRunID(cfg), resolveIdentifier(cfg, p.IdentifierOverride), p.Region, p.Profile, rm.Namespace)
-		uploadArtifactsOnFailure(p.RepoDir, p.artifactsRunID(cfg), p.AccountID, p.Profile, p.Region)
+		uploadArtifactsOnFailureFn(p.RepoDir, p.artifactsRunID(cfg), p.AccountID, p.Profile, p.Region)
 		return fmt.Errorf("validation: %w", verr)
 	}
 	if rev < 1 {
@@ -951,6 +960,20 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 			if !residualBlocks(rep, residualEnforce()) {
 				step("TEARDOWN residual check: HARNESS_RESIDUAL_ENFORCE=false, %d blocking finding(s) demoted to report-only", len(blocking))
 			} else {
+				// Codex review: this gate runs AFTER tg.Destroy() already succeeded, so the
+				// same teardownNeedsFailureCapture treatment as the warm-reset/destroy
+				// branches applies — a run green through provision/validate that fails only
+				// here must not upload nothing. Unlike those two branches, the cluster is
+				// gone by now (Destroy succeeded), so a live-cluster dump would find nothing
+				// and is worthless; pass cluster="" to captureDiagnostics, which is its
+				// existing "skip the kubectl portion" signal (see its `full && cluster != ""`
+				// guard) — the terragrunt state/output capture and refs.txt it always writes
+				// are still real, still gone once the worktree is removed, and still worth
+				// having in the upload.
+				if teardownNeedsFailureCapture(failed) {
+					step("teardown residual gate failed after previously-green phases — capturing + uploading diagnostics now (cluster already destroyed, skipping live-cluster dump)")
+					captureDiagnostics(rp, p.Region, "", true, tg, tg.WorkingDir, "")
+				}
 				return fmt.Errorf("destroy reported success but left %d tagged resource(s) behind; see the manifest residual report:\n%s", len(blocking), rep.Summary())
 			}
 		}
