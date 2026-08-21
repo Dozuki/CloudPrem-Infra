@@ -193,6 +193,66 @@ func TestCaptureFailureDumpSkipsWhenNoIdentifier(t *testing.T) {
 	}
 }
 
+// TestTeardownNeedsFailureCapture pins the codex P1 fix's decision table: a teardown
+// error must trigger its own capture+upload exactly when no prior phase already did
+// (failed==false), and must NOT re-trigger one when a prior phase already ran the full
+// capture (failed==true) — see teardownNeedsFailureCapture's doc comment in phases.go.
+func TestTeardownNeedsFailureCapture(t *testing.T) {
+	cases := []struct {
+		name   string
+		failed bool
+		want   bool
+	}{
+		{"green run, teardown itself fails -> needs its own capture", false, true},
+		{"already-failed run, teardown also fails -> pre-destroy call already covered it", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := teardownNeedsFailureCapture(tc.failed); got != tc.want {
+				t.Errorf("teardownNeedsFailureCapture(%v) = %v, want %v", tc.failed, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCaptureDiagnosticsUploadsOnlyWhenFull pins the other half of the codex P1
+// invariant at the captureDiagnostics level: full=false (a fully-green run, or the
+// pre-destroy call on a run with nothing failed yet) must call the upload function
+// ZERO times, and full=true (what Teardown's new error-path calls use per
+// teardownNeedsFailureCapture) must call it. Spies on uploadArtifactsOnFailureFn rather
+// than calling the real uploadArtifactsOnFailure, which would make a live AWS
+// PutObject call — see that var's doc comment in diagnostics.go.
+//
+// cluster is left empty and toTG.WorkingDir points at an empty temp dir (no physical/
+// logical subdirs) so this never shells out to capture-cluster.sh or terragrunt —
+// exactly the "dump-dir/inputs absent" no-op paths captureTG and the cluster-dump
+// guard already take on their own.
+func TestCaptureDiagnosticsUploadsOnlyWhenFull(t *testing.T) {
+	orig := uploadArtifactsOnFailureFn
+	t.Cleanup(func() { uploadArtifactsOnFailureFn = orig })
+
+	var calls int
+	uploadArtifactsOnFailureFn = func(repoDir, runID, accountID, profile, region string) {
+		calls++
+	}
+
+	repoDir := t.TempDir()
+	rp := RunParams{RepoDir: repoDir, RunID: "run1-min", ConfigName: "min", AccountID: "123456789012", Profile: "test-profile"}
+	tg := TGOptions{WorkingDir: t.TempDir()}
+
+	calls = 0
+	captureDiagnostics(rp, "us-east-1", "" /* cluster */, false /* full */, tg, "", "")
+	if calls != 0 {
+		t.Errorf("full=false (green run) must upload nothing, got %d upload call(s)", calls)
+	}
+
+	calls = 0
+	captureDiagnostics(rp, "us-east-1", "" /* cluster */, true /* full */, tg, "", "")
+	if calls != 1 {
+		t.Errorf("full=true (failed run) must attempt exactly one upload, got %d", calls)
+	}
+}
+
 func TestArtifactsRunIDMatchesAcrossPhases(t *testing.T) {
 	// artifactsRunID must produce the same value Teardown's captureDiagnostics call used
 	// to compute inline before WS2 (strings.TrimSuffix(statePrefix, "/")), so the

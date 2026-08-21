@@ -150,6 +150,27 @@ func (p PhaseParams) statePrefix(cfg Config) string {
 	return p.RunID + "-" + cfg.Name + "/"
 }
 
+// teardownNeedsFailureCapture reports whether a destroy/reset error inside Teardown
+// needs its OWN captureDiagnostics(full=true) call, given failed (the outcome of the
+// PRIOR phases, exactly what Teardown's pre-destroy captureDiagnostics call already
+// used). Two cases:
+//
+//   - failed==true: a prior phase already failed, so the pre-destroy call above already
+//     ran with full=true — cluster dump + S3 upload already happened. Re-running it here
+//     would only duplicate that work, not add coverage the original dump lacks, so this
+//     returns false.
+//   - failed==false: every prior phase was green, so the pre-destroy call ran with
+//     full=false — no dump, no upload. If destroy/reset THEN fails, this is a failed run
+//     that has produced nothing durable yet, and this is the last moment before Teardown
+//     returns to capture and upload anything at all. Returns true.
+//
+// Extracted as a pure function (rather than inlined at both call sites) so the two-case
+// truth table is unit-testable without a real terragrunt destroy or AWS credentials —
+// see phases_test.go / diagnostics_test.go.
+func teardownNeedsFailureCapture(failed bool) bool {
+	return !failed
+}
+
 // artifactsRunID is the per-config run id ArtifactsDir/uploadArtifacts key off of —
 // statePrefix without its trailing slash. Kept as its own method (rather than inlined
 // at each WS2 call site) so Provision, Validate and Teardown can never compute this
@@ -861,6 +882,12 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	if p.ExecutionMode == "warm" {
 		step("TEARDOWN (warm mode): resetting logical layer instead of destroying physical infra")
 		if rerr := p.ResetLogical(ctx, tg, rm); rerr != nil {
+			// Codex P1: a run where every prior phase passed but the warm reset itself
+			// fails must still leave durable artifacts — see teardownNeedsFailureCapture.
+			if teardownNeedsFailureCapture(failed) {
+				step("teardown (warm reset) failed after previously-green phases — capturing + uploading diagnostics now")
+				captureDiagnostics(rp, p.Region, identifier, true, tg, tg.WorkingDir, "")
+			}
 			return fmt.Errorf("logical reset: %w", rerr)
 		}
 		return nil
@@ -882,6 +909,14 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 		rep := p.checkResiduals(ctx, tg, "teardown", rm.AppliedCustomer, p.residualRegions(), derr)
 		p.recordResiduals(ctx, cfg, rm, rep)
 		step("TEARDOWN residual check: %s", rep.Summary())
+		// Codex P1: same reasoning as the warm-reset branch above — a run that was green
+		// through provision/validate but fails HERE, on destroy, must not end with zero
+		// durable artifacts. teardownNeedsFailureCapture is false when a prior phase
+		// already failed (the pre-destroy captureDiagnostics call above already ran full).
+		if teardownNeedsFailureCapture(failed) {
+			step("teardown (destroy) failed after previously-green phases — capturing + uploading diagnostics now")
+			captureDiagnostics(rp, p.Region, identifier, true, tg, tg.WorkingDir, "")
+		}
 		return fmt.Errorf("destroy: %w\nblocking residuals (%s):\n%s", derr, rep.DestroyErr, rep.Summary())
 	}
 	// The CloudWatch agent creates /aws/containerinsights/<cluster>/* lazily at

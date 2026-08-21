@@ -70,9 +70,17 @@ func captureDiagnostics(p RunParams, region, cluster string, full bool, toTG TGO
 	// redundant. Later uploads under the same run-id prefix add/overwrite by key, so
 	// this one only ever adds to what the earlier call already put there.
 	if full {
-		uploadArtifactsOnFailure(p.RepoDir, p.RunID, p.AccountID, p.Profile, region)
+		uploadArtifactsOnFailureFn(p.RepoDir, p.RunID, p.AccountID, p.Profile, region)
 	}
 }
+
+// uploadArtifactsOnFailureFn is uploadArtifactsOnFailure behind a package-level
+// indirection so tests can substitute a spy for it: uploadArtifactsOnFailure builds a
+// real AWS client and makes a real PutObject call, which a unit test must never do
+// (no credentials in CI, and it would make captureDiagnostics's full=true path
+// untestable without live AWS access). Production code never reassigns this — only
+// *_test.go files do, always restoring it via t.Cleanup.
+var uploadArtifactsOnFailureFn = uploadArtifactsOnFailure
 
 // captureTG dumps `terragrunt state list` + `terragrunt output` for one module (no
 // secrets: state list has no values, output redacts sensitive). Best-effort.
