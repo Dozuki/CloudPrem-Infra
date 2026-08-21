@@ -38,9 +38,18 @@ import (
 // 80m, not 60m: the 2026-08-05 nightly was still at "replication_starting" 42 minutes into
 // this wait, healthy, and needed more runway - 60m leaves too little slack over the observed
 // crawl for a budget whose only job is catching a task that never progresses. The ceiling is
-// the validate pod's activeDeadlineSeconds (5400s in 10-scenario.yaml) minus the ~3 minutes
+// the validate pod's activeDeadlineSeconds (7200s in 10-scenario.yaml) minus everything
 // validate spends before this wait; the budget must stay comfortably inside that so the run
 // dies on this timeout's named verdict, never on an anonymous pod deadline kill.
+//
+// That headroom is no longer just the ~3 minutes of setup it used to be: the Flux
+// HelmRelease readiness wait now runs earlier in the same pod and can consume up to its own
+// budget before this wait even starts, so the two are in competition for one deadline. The
+// deadline went 5400s -> 7200s to cover it, but the sum of every budget in this pod still
+// exceeds the deadline - it only fits because budgets are ceilings, not typical durations.
+// A run where both waits crawl can still be killed anonymously. Tracked as Lodestar-spd4;
+// the real fix is one absolute phase deadline propagated as a context to every wait, not a
+// bigger number here. Do NOT shrink this budget to paper over it - 80m is evidence-based.
 const (
 	dmsWaitTimeout           = 15 * time.Minute
 	dmsServerlessWaitTimeout = 80 * time.Minute

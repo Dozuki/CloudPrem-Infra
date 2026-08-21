@@ -209,6 +209,13 @@ spec:
             value: '{{inputs.parameters.residual-enforce}}'
           - name: HARNESS_HR_BUDGET_OVERRIDE
             value: '{{inputs.parameters.hr-budget-override}}'
+          # This pod's own activeDeadlineSeconds (line 125 above, same input parameter),
+          # so harness/phases.go's hrWaitBudget can clamp the HelmRelease wait budget to
+          # fit inside it at runtime - a backstop against 10-scenario.yaml's deadline and
+          # the Go wait-budget constants drifting apart again (see that file's deadline
+          # comments and hrWaitReserve in phases.go).
+          - name: HARNESS_POD_DEADLINE
+            value: '{{inputs.parameters.deadline}}'
         volumeMounts:
           - name: workspace
             mountPath: /workspace
