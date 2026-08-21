@@ -24,7 +24,7 @@ data:
   # Pinned by DIGEST, not tag. The ECR repo allows mutable tags so `latest` can move, and
   # a moving tag must never swap the runtime under a workflow already running. The
   # "Harness image" workflow prints the digest to paste here on every publish.
-  image: '069174876992.dkr.ecr.us-east-1.amazonaws.com/mpc-test-harness@sha256:04b7aaa978277ab61469a3ca97c58f743528ebc792b0618b024c5ac0dc2c0226'
+  image: '069174876992.dkr.ecr.us-east-1.amazonaws.com/mpc-test-harness@sha256:aeb9b4593c8a713941138f5b2fbd910cb26565c79a76a003f6cedefbc7d71faa'
   ddvtest_account_id: '076248559428'
   # Already exists (infra-tf modules/cloudprem-test-harness). Its trust policy needs the
   # Argo workflow role added before any of this can assume it.
@@ -107,6 +107,14 @@ spec:
           - name: keep-on-failure
             value: 'false'
           - name: workflow-status
+            value: ''
+          # Test-only escape hatch for the Flux HelmRelease readiness wait budget
+          # (harness/phases.go's hrWaitBudget). Empty = use the real 90m install /
+          # 75m upgrade budgets. A Go duration string here replaces BOTH, which is how
+          # a live-fire forces the timeout branch without waiting 90 minutes for it.
+          # Non-empty values that do not parse, or that are <= 0, are ignored with a
+          # warning, so a typo cannot silently shorten a real run.
+          - name: hr-budget-override
             value: ''
           # Rollout switch for the residual gate (harness/residuals.go's
           # residualEnforce). Default 'true' (enforce) is the safety net for a direct
@@ -199,6 +207,8 @@ spec:
             value: dozuki
           - name: HARNESS_RESIDUAL_ENFORCE
             value: '{{inputs.parameters.residual-enforce}}'
+          - name: HARNESS_HR_BUDGET_OVERRIDE
+            value: '{{inputs.parameters.hr-budget-override}}'
         volumeMounts:
           - name: workspace
             mountPath: /workspace

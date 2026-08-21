@@ -94,6 +94,13 @@ spec:
           configMapKeyRef:
             name: harness-config
             key: state_bucket
+      # Test-only: forces the HelmRelease wait budget (see 00-phase-templates.yaml's
+      # hr-budget-override). Empty for every real run; a live-fire passes
+      # `-p hr-budget-override=5m` at submit time to reach the timeout branch on
+      # purpose. Deliberately NOT a configMapKeyRef - a ConfigMap value would apply to
+      # every concurrent run, and this must only ever affect the one run that asks.
+      - name: hr-budget-override
+        value: ''
       - name: residual-enforce
         valueFrom:
           configMapKeyRef:
@@ -177,6 +184,8 @@ spec:
                   value: '5400'
                 - name: residual-enforce
                   value: '{{workflow.parameters.residual-enforce}}'
+                - name: hr-budget-override
+                  value: '{{workflow.parameters.hr-budget-override}}'
                 - name: extra-args
                   value: >-
                     --scenario {{workflow.parameters.scenario}}
@@ -203,6 +212,8 @@ spec:
                   value: '5400'
                 - name: residual-enforce
                   value: '{{workflow.parameters.residual-enforce}}'
+                - name: hr-budget-override
+                  value: '{{workflow.parameters.hr-budget-override}}'
 
         - - name: validate
             when: '{{steps.gate.outputs.result}} == run'
@@ -223,6 +234,8 @@ spec:
                   value: '5400'
                 - name: residual-enforce
                   value: '{{workflow.parameters.residual-enforce}}'
+                - name: hr-budget-override
+                  value: '{{workflow.parameters.hr-budget-override}}'
 
     # The staleness check itself. A script template so stdout is the step result the
     # `when:` clauses above compare against. GET /commits/{sha}/pulls lists the open
