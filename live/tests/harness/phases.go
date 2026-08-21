@@ -30,6 +30,45 @@ import (
 // without an extra cross-package export — keep the two literals in sync.
 const appPassTimeout = 15 * time.Minute
 
+// hrWaitBudgetInstall and hrWaitBudgetUpgrade are the phase-aware ceilings passed to
+// validateStack's Flux HelmRelease readiness wait (validation.AwaitHelmReleaseReady).
+// Provision (a fresh install) and Validate (an upgrade) get different budgets because
+// they are different waits: an install has no remediation retries, so a stuck install
+// will not resolve no matter how long the wait runs, while an upgrade running
+// RetryOnFailure (since CPI v9.2.2) may still succeed on a later retry. Either way the
+// wait already reports WHY it is still waiting via the Released condition and, since
+// WS1, a live diagnosis block — these budgets are a backstop against a controller that
+// never reconciles at all, not a readiness estimate.
+const (
+	hrWaitBudgetInstall = 90 * time.Minute // Provision phase
+	hrWaitBudgetUpgrade = 75 * time.Minute // Validate phase
+)
+
+// hrWaitBudgetOverrideEnv is a test-only escape hatch: set to a Go time.ParseDuration
+// string (e.g. "45s") to replace BOTH hrWaitBudgetInstall and hrWaitBudgetUpgrade for a
+// run, so a test can exercise a genuine HelmRelease-wait timeout without burning the
+// real 75-90 minute budget. Never set in a normal run.
+const hrWaitBudgetOverrideEnv = "HARNESS_HR_BUDGET_OVERRIDE"
+
+// hrWaitBudget resolves the HelmRelease wait budget for one validateStack call: base
+// unless HARNESS_HR_BUDGET_OVERRIDE is set to a valid duration, in which case the
+// override wins and is logged loudly (it replaces both the install and upgrade budget,
+// whichever call site asked). An unset var is silent; an invalid value is logged as a
+// warning and ignored, so a typo cannot silently shrink the real wait.
+func hrWaitBudget(base time.Duration) time.Duration {
+	v := os.Getenv(hrWaitBudgetOverrideEnv)
+	if v == "" {
+		return base
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		step("WARNING: %s=%q is not a valid duration, ignoring override: %v", hrWaitBudgetOverrideEnv, v, err)
+		return base
+	}
+	step("HARNESS_HR_BUDGET_OVERRIDE ACTIVE: HelmRelease wait budget forced to %s (was %s)", formatMinutes(d), formatMinutes(base))
+	return d
+}
+
 // PhaseParams carries everything a single re-entrant phase needs. Unlike RunParams
 // (which held in-memory worktree/appliedWT state for a whole run), PhaseParams holds
 // only inputs derivable from CLI flags + the matrix; durable cross-phase state lives
@@ -109,6 +148,15 @@ func resolveIdentifier(cfg Config, override string) string {
 
 func (p PhaseParams) statePrefix(cfg Config) string {
 	return p.RunID + "-" + cfg.Name + "/"
+}
+
+// artifactsRunID is the per-config run id ArtifactsDir/uploadArtifacts key off of —
+// statePrefix without its trailing slash. Kept as its own method (rather than inlined
+// at each WS2 call site) so Provision, Validate and Teardown can never compute this
+// differently and land the failure-time dump and the teardown dump under different
+// run-id prefixes in .artifacts/ or in S3.
+func (p PhaseParams) artifactsRunID(cfg Config) string {
+	return strings.TrimSuffix(p.statePrefix(cfg), "/")
 }
 
 // Config resolves this phase's Config from the matrix and salts its customer
@@ -329,8 +377,13 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	}
 
 	rp := RunParams{Matrix: p.Matrix, Namespace: namespace, Profile: p.Profile}
-	rev, kc, caps, verr := validateStack(tg, rp, p.Region)
+	rev, kc, caps, verr := validateStack(tg, rp, p.Region, hrWaitBudget(hrWaitBudgetInstall), "install")
 	if verr != nil {
+		// WS2: capture what teardown would otherwise lose (an Argo provision pod exits
+		// on this error long before the separate teardown pod ever runs) and upload it —
+		// failure path only, before the error propagates.
+		captureFailureDump(p.RepoDir, p.artifactsRunID(cfg), resolveIdentifier(cfg, p.IdentifierOverride), p.Region, p.Profile, namespace)
+		uploadArtifactsOnFailure(p.RepoDir, p.artifactsRunID(cfg), p.AccountID, p.Profile, p.Region)
 		return fmt.Errorf("provision validation: %w", verr)
 	}
 	// Baseline-flavor guard: only meaningful on an upgrade scenario about to flip to a
@@ -628,8 +681,12 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		RunID: p.statePrefix(cfg), DRRegion: rm.DRRegion,
 		RestoreDrill: rm.RestoreDrill, EnableDR: rm.EnableDR, ToRef: rm.ToRef,
 	}
-	rev, kc, caps, verr := validateStack(tg, rp, p.Region)
+	rev, kc, caps, verr := validateStack(tg, rp, p.Region, hrWaitBudget(hrWaitBudgetUpgrade), "upgrade")
 	if verr != nil {
+		// WS2: same failure-time dump + upload as Provision — see that call site's
+		// comment. Validate's namespace lives on the manifest, not a function param.
+		captureFailureDump(p.RepoDir, p.artifactsRunID(cfg), resolveIdentifier(cfg, p.IdentifierOverride), p.Region, p.Profile, rm.Namespace)
+		uploadArtifactsOnFailure(p.RepoDir, p.artifactsRunID(cfg), p.AccountID, p.Profile, p.Region)
 		return fmt.Errorf("validation: %w", verr)
 	}
 	if rev < 1 {
@@ -787,12 +844,16 @@ func (p PhaseParams) Teardown(ctx context.Context, keepOnFailure, failed bool) (
 	defer wt.removeUnlessFailed(p.RepoDir, &err)
 
 	identifier := resolveIdentifier(cfg, p.IdentifierOverride)
-	// captureDiagnostics reads RepoDir/RunID/ConfigName/FromRef/ToRef/Profile/Namespace
-	// off RunParams; `identifier` ("<customer>-<env>") IS the EKS cluster name (run.go).
-	// RunID drives the .artifacts/<id> dir — use the per-config id WITHOUT trailing slash.
+	// captureDiagnostics reads RepoDir/RunID/ConfigName/FromRef/ToRef/AccountID/Profile/
+	// Namespace off RunParams; `identifier` ("<customer>-<env>") IS the EKS cluster name
+	// (run.go). RunID drives the .artifacts/<id> dir AND (WS2) the S3 upload's
+	// artifacts/<id> prefix — artifactsRunID is the one place that id is computed, so it
+	// can never drift from the failure-time dump's prefix in Provision/Validate.
+	// AccountID is needed only for WS2's own-account S3 client (captureDiagnostics ->
+	// uploadArtifactsOnFailure on full=true); nothing else here reads it off RunParams.
 	rp := RunParams{
-		RepoDir: p.RepoDir, RunID: strings.TrimSuffix(p.statePrefix(cfg), "/"),
-		ConfigName: cfg.Name, FromRef: rm.FromRef, ToRef: rm.ToRef,
+		RepoDir: p.RepoDir, RunID: p.artifactsRunID(cfg),
+		ConfigName: cfg.Name, FromRef: rm.FromRef, ToRef: rm.ToRef, AccountID: p.AccountID,
 		Profile: p.Profile, Namespace: rm.Namespace, Matrix: p.Matrix,
 	}
 	step("capturing diagnostics -> .artifacts/%s (full=%v)", rp.RunID, failed)

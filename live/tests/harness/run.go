@@ -42,6 +42,13 @@ func step(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "\n>> [harness %s] %s\n", time.Now().Format("15:04:05"), msg)
 }
 
+// formatMinutes renders a duration as whole minutes ("90m") for the wait-budget log
+// line — plain time.Duration.String() would print "1h30m0s", which is correct but not
+// what the wait-start marker is meant to read as.
+func formatMinutes(d time.Duration) string {
+	return fmt.Sprintf("%dm", int(d/time.Minute))
+}
+
 // RunParams configures one upgrade/fresh run (the local, single-process driver).
 type RunParams struct {
 	RepoDir           string
@@ -512,7 +519,11 @@ func generateLiveEnvs(worktreeDir string) error {
 // validateStack runs the post-apply assertion suite and returns the helm
 // revision, the kubeconfig path it generated (reused by the upgrade proof),
 // and the detected Capabilities for use by later validation stages.
-func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capabilities, error) {
+//
+// hrWaitBudget/hrWaitLabel are the caller's phase-aware ceiling for the Flux
+// HelmRelease readiness wait below (see hrWaitBudgetInstall/hrWaitBudgetUpgrade in
+// phases.go) and the label echoed in the wait-start log line ("install"/"upgrade").
+func validateStack(tg TGOptions, p RunParams, region string, hrWaitBudget time.Duration, hrWaitLabel string) (int, string, Capabilities, error) {
 	outs, err := readOutputs(tg, region)
 	if err != nil {
 		return 0, "", Capabilities{}, err
@@ -544,8 +555,8 @@ func validateStack(tg TGOptions, p RunParams, region string) (int, string, Capab
 	// Skipped when there is no HelmRelease — a pre-v7.19.0 baseline in an upgrade run
 	// installs through the TF helm provider, where the apply already waited.
 	if validation.HelmReleaseManaged(kc, p.Namespace, "dozuki") {
-		step("waiting on Flux HelmRelease dozuki (authoritative readiness)")
-		if herr := validation.AwaitHelmReleaseReady(kc, p.Namespace, "dozuki", 60*time.Minute); herr != nil {
+		step("waiting on Flux HelmRelease dozuki (%s budget %s)", hrWaitLabel, formatMinutes(hrWaitBudget))
+		if herr := validation.AwaitHelmReleaseReady(kc, p.Namespace, "dozuki", hrWaitBudget); herr != nil {
 			return 0, "", caps, herr
 		}
 	}
