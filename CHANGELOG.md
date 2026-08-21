@@ -2,6 +2,15 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.8.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.8.0...v9.8.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **alerting:** tier sns_to_slack severity by alarm name suffix ([#532](https://github.com/Dozuki/CloudPrem-Infra/issues/532)) ([4b590ce](https://github.com/Dozuki/CloudPrem-Infra/commit/4b590ce11f2bc9a875e38baaee3aabcb066c889c))
+* **dms:** drop replication log severity from detailed debug to default ([#522](https://github.com/Dozuki/CloudPrem-Infra/issues/522)) ([825cbe5](https://github.com/Dozuki/CloudPrem-Infra/commit/825cbe555fb7cfbe7b534dc4e392da9a585e9f5a))
+* **providers:** Update Terraform kubectl to v2.4.1 ([#478](https://github.com/Dozuki/CloudPrem-Infra/issues/478)) ([c6d3ba0](https://github.com/Dozuki/CloudPrem-Infra/commit/c6d3ba02d7e94de4348c3dc9b18c639dff053606))
+
 ## [9.8.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.7.0...v9.8.0) (2026-08-20)
 
 
