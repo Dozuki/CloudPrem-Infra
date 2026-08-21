@@ -39,6 +39,34 @@ func TestAllMatrixConfigsDisableAlertmanagerSlack(t *testing.T) {
 	}
 }
 
+// TestAllMatrixConfigsOptOutOfMimir guards Lodestar-6eau: smoke envs are not
+// infra-live env dirs, so Mimir-Tenant-Keys never mints their ingest key. From
+// CPI v9.8.0 the mimir flags default ON, and on a chart below the
+// placeholder-hook floor a missing Secret leaves the Prometheus CR
+// unreconciled and the HelmRelease in pending-install forever. Every config
+// must opt out on both layers.
+func TestAllMatrixConfigsOptOutOfMimir(t *testing.T) {
+	m, err := LoadMatrix("../matrix.yaml")
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	if len(m.Configs) == 0 {
+		t.Fatal("matrix has no configs; the guard below would pass vacuously")
+	}
+	for _, c := range m.Configs {
+		for _, key := range []string{"enable_mimir", "mimir_remote_write_enabled"} {
+			v, ok := c.FeatureFlags[key]
+			if !ok {
+				t.Errorf("config %q does not set %s; it will default to true and can wedge the HelmRelease in pending-install (Lodestar-6eau)", c.Name, key)
+				continue
+			}
+			if v != false {
+				t.Errorf("config %q has %s = %v, want false (Lodestar-6eau)", c.Name, key, v)
+			}
+		}
+	}
+}
+
 // TestPostStatusUsesEvidenceSubcommand guards the YAML/Go coupling: nothing else
 // keeps argo/20-matrix.yaml's post-status script pointed at `harness evidence` and
 // the relay payload carrying log_excerpt. If someone renames or drops the

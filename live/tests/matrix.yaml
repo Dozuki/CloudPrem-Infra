@@ -127,6 +127,13 @@ configs:
       # Worse, teardown deletes Alertmanager along with the cluster, so the resolved
       # notification never sends and the firing message outlives the stack it describes.
       alertmanager_slack_enabled: false
+      # Smoke envs are not infra-live env dirs, so Mimir-Tenant-Keys never mints their
+      # ingest key. From CPI v9.8.0 the mimir flags default ON, and on a chart below
+      # the placeholder-hook floor (2.10.20 / 3.7.0) the missing Secret leaves the
+      # Prometheus CR unreconciled and the HelmRelease in pending-install forever
+      # (Lodestar-6eau). Opt out on both layers: no PrivateLink path, no remote_write.
+      enable_mimir: false
+      mimir_remote_write_enabled: false
       # sso_admin_role_arn intentionally unset: when the harness runs AS the SSO
       # admin role (local runs), that identity IS the EKS cluster creator, so an
       # explicit access entry for it collides with the auto-created creator entry
@@ -209,6 +216,9 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+      # see min_default (Lodestar-6eau)
+      enable_mimir: false
+      mimir_remote_write_enabled: false
   # Recovery scenario (TestRecover / RunRecovery): recover_source is the "lost" stack
   # (DR on, drill on, BI off to keep the ~4h wall clock down); recover is the DR-REGION
   # rebuild stood up from the promoted cluster's snapshot + the adopted *-dr-* buckets.
@@ -233,6 +243,9 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+      # see min_default (Lodestar-6eau)
+      enable_mimir: false
+      mimir_remote_write_enabled: false
   - name: recover
     env: min
     env_path: "live/standard/us-west-2"   # the DR region — this config IS the rebuild
@@ -259,6 +272,9 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+      # see min_default (Lodestar-6eau)
+      enable_mimir: false
+      mimir_remote_write_enabled: false
   - name: full
     env: full
     feature_flags:
@@ -298,6 +314,9 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+      # see min_default (Lodestar-6eau)
+      enable_mimir: false
+      mimir_remote_write_enabled: false
   # slim_fresh / slim_upgrade carry no `paths:` key, but that does NOT mean they run on
   # every PR the way min_default does. Nightly-only for these two is enforced by the PR
   # workflow's hardcoded config set (.github/workflows/upgrade-tests.yml only ever submits
@@ -319,6 +338,9 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+      # see min_default (Lodestar-6eau)
+      enable_mimir: false
+      mimir_remote_write_enabled: false
     # Pins mirror infra-live standard/_mcp/dev/us-east-1/slim/env.hcl (dev-slim).
     # Update these when dev-slim's env.hcl moves.
     target_versions:
@@ -344,6 +366,9 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+      # see min_default (Lodestar-6eau)
+      enable_mimir: false
+      mimir_remote_write_enabled: false
     # Baseline = legacy flavor from version_defaults (no baseline_versions needed).
     # Target flips to the slim set: the legacy->slim migration path, in place.
     #
@@ -402,6 +427,9 @@ configs:
       vault_address: "http://vault.internal.dozuki.com:8200"
       managed_private_cloud: true
       alertmanager_slack_enabled: false
+      # see min_default (Lodestar-6eau)
+      enable_mimir: false
+      mimir_remote_write_enabled: false
     baseline_versions:
       chart_version: "2.10.0"
       image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.10"
