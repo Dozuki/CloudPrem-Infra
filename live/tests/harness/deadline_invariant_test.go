@@ -78,7 +78,13 @@ func scenarioStepDeadlines(t *testing.T, path string) map[string]int {
 // argo/10-scenario.yaml directly — the deadline numbers are never duplicated in Go — and
 // asserts, for every step that runs validateStack's HelmRelease wait, that
 //
-//	desired_wait_budget + hrWaitReserve  <=  that step's Argo pod deadline
+//	desired_wait_budget + hrWaitReserve + hrPodStartupSlack  <=  that step's Argo pod deadline
+//
+// hrPodStartupSlack is included here even though it approximates a clock-skew concern
+// (pod start vs process start) rather than real post-wait work like hrWaitReserve: the
+// static check exists to mirror exactly what clampHRWaitBudget enforces at runtime (see
+// phases.go), and that function subtracts both, so a static check that only knew about
+// one of them could pass while the runtime clamp still floors the wait on every run.
 //
 // This is the test that is meant to fail the moment the two files drift apart again:
 // either a wait-budget constant grows without the matching argo deadline, or a deadline
@@ -96,6 +102,7 @@ func TestDeadlineInvariant(t *testing.T) {
 		"provision": hrWaitBudgetInstall,
 		"validate":  hrWaitBudgetUpgrade,
 	}
+	reserve := hrWaitReserve + hrPodStartupSlack
 
 	for stepName, budget := range waitSteps {
 		secs, ok := deadlines[stepName]
@@ -103,10 +110,10 @@ func TestDeadlineInvariant(t *testing.T) {
 			t.Fatalf("%s: step %q has no numeric \"deadline\" argument in the scenario template — expected one for a step that runs the HelmRelease wait", scenarioWorkflowPath, stepName)
 		}
 		deadline := time.Duration(secs) * time.Second
-		required := budget + hrWaitReserve
+		required := budget + reserve
 		if required > deadline {
-			t.Errorf("%s step %q: wait budget %s + reserve %s = %s exceeds its pod deadline %s (%ds) — the pod will be killed before the HelmRelease wait can expire and trigger the failure-time dump/upload. Raise the step's deadline in %s or lower the wait budget in phases.go.",
-				scenarioWorkflowPath, stepName, formatMinutes(budget), formatMinutes(hrWaitReserve), formatMinutes(required), formatMinutes(deadline), secs, scenarioWorkflowPath)
+			t.Errorf("%s step %q: wait budget %s + reserve %s (dump+upload+margin) + %s (pod-start slack) = %s exceeds its pod deadline %s (%ds) — the pod will be killed before the HelmRelease wait can expire and trigger the failure-time dump/upload. Raise the step's deadline in %s or lower the wait budget in phases.go.",
+				scenarioWorkflowPath, stepName, formatMinutes(budget), formatMinutes(hrWaitReserve), formatMinutes(hrPodStartupSlack), formatMinutes(required), formatMinutes(deadline), secs, scenarioWorkflowPath)
 		}
 	}
 }
