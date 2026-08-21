@@ -175,8 +175,8 @@ func hrWaitBudget(base time.Duration) time.Duration {
 	case "fits":
 		step("HelmRelease wait budget: %s (%s), fits within %s", formatMinutes(resolved), source, hrPodDeadlineEnv)
 	case "clamped":
-		step("HelmRelease wait budget clamped %s -> %s (%s) to fit inside %s (reserve %s for dump+upload+margin)",
-			formatMinutes(desired), formatMinutes(resolved), source, hrPodDeadlineEnv, formatMinutes(hrWaitReserve))
+		step("HelmRelease wait budget clamped %s -> %s (%s) to fit inside %s (reserve %s for dump+upload+margin, %s pod-start slack)",
+			formatMinutes(desired), formatMinutes(resolved), source, hrPodDeadlineEnv, formatMinutes(hrWaitReserve), formatMinutes(hrPodStartupSlack))
 	case "floored":
 		step("WARNING: HelmRelease wait budget floored to %s (desired %s, %s) — phase is already close to its %s pod deadline; the wait may not get a fair chance",
 			formatMinutes(resolved), formatMinutes(desired), source, hrPodDeadlineEnv)
