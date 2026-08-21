@@ -50,32 +50,164 @@ const (
 // real 75-90 minute budget. Never set in a normal run.
 const hrWaitBudgetOverrideEnv = "HARNESS_HR_BUDGET_OVERRIDE"
 
-// hrWaitBudget resolves the HelmRelease wait budget for one validateStack call: base
-// unless HARNESS_HR_BUDGET_OVERRIDE is set to a valid duration, in which case the
-// override wins and is logged loudly (it replaces both the install and upgrade budget,
-// whichever call site asked). An unset var is silent; an invalid value is logged as a
-// warning and ignored, so a typo cannot silently shrink the real wait. A parsed value
-// <= 0 ("-5m", "0s", ...) gets the same treatment as unparseable: time.ParseDuration
-// accepts negative and zero durations without error, but either one makes
-// AwaitHelmReleaseReady time out on its very first iteration — indistinguishable from a
-// genuinely broken install, so it is rejected here rather than silently producing a
-// wait that can never succeed.
-func hrWaitBudget(base time.Duration) time.Duration {
-	v := os.Getenv(hrWaitBudgetOverrideEnv)
-	if v == "" {
-		return base
+// hrPodDeadlineEnv carries this pod's own Argo activeDeadlineSeconds, as a plain integer
+// number of seconds — 00-phase-templates.yaml sets it from the exact same
+// {{inputs.parameters.deadline}} that becomes activeDeadlineSeconds on the same
+// template, so the two can never read differently for one pod. hrWaitBudget uses it to
+// clamp the wait budget at runtime: a consensus-panel review found the deadline
+// (argo/10-scenario.yaml) and the wait budgets below could drift out of the invariant
+// they must satisfy —
+//
+//	setup + apply + wait_budget + dump(<=10m) + upload(<=10m) + margin  <=  pod_deadline
+//
+// — and had in fact already done so (provision's 90m wait inside a 90m deadline). The
+// clamp is the runtime backstop; deadline_invariant_test.go is the static one (it parses
+// 10-scenario.yaml directly so the two files cannot silently drift apart again).
+const hrPodDeadlineEnv = "HARNESS_POD_DEADLINE"
+
+// hrWaitReserve is the tail of a pod's deadline the wait budget must never encroach on:
+// the failure-time cluster dump (clusterDumpTimeout, diagnostics.go) plus the artifacts
+// upload (artifactsUploadTimeout) plus a flat margin for everything around them
+// (residual checks, log flushing, pod teardown). If the wait itself is allowed to run
+// right up to the deadline, the pod is killed before the dump/upload it exists to
+// trigger on a timeout ever runs — exactly the defect this clamp closes.
+const hrWaitReserve = clusterDumpTimeout + artifactsUploadTimeout + 5*time.Minute
+
+// hrPodStartupSlack is a second, separate deduction from the same clamp, for a different
+// reason than hrWaitReserve: Argo's activeDeadlineSeconds is measured from POD start, but
+// processStart (below) can only observe this PROCESS's start, which is strictly later —
+// image pull, container start, and docker-entrypoint.sh's own setup all happen first. So
+// time.Since(processStart) UNDERSTATES elapsed-since-pod-start, which makes the clamp
+// optimistic in the unsafe direction (a wait budget that looks like it fits might not).
+// Rather than plumb the real pod start time (the Kubernetes downward API, or a pod-status
+// read, both of which need RBAC this fix deliberately does not add), this is a flat,
+// deliberately conservative approximation of that gap, not a measured value — 5 minutes
+// comfortably covers a slow image pull without eating meaningfully into the wait on a run
+// that does not need it.
+const hrPodStartupSlack = 5 * time.Minute
+
+// hrWaitBudgetMinimum is a DECISION THRESHOLD, not a floor: below this much remaining
+// time, clampHRWaitBudget refuses to start the wait at all rather than returning a
+// shrunk-but-still-positive budget. Codex P1: an earlier version of this clamp raised a
+// starved remaining value back UP to this constant, which is backwards — remaining is
+// what is actually left of the pod's safe lifetime, and handing back MORE than that only
+// guarantees Kubernetes kills the pod mid-wait, consuming the reserve on nothing instead
+// of leaving it intact for the dump/upload. The clamp must only ever shrink; see
+// errInsufficientPhaseTime for the alternative when even the minimum will not fit.
+const hrWaitBudgetMinimum = 10 * time.Minute
+
+// errInsufficientPhaseTime is the sentinel clampHRWaitBudget wraps into its returned
+// error when remaining (what's left of the pod deadline after hrWaitReserve and
+// hrPodStartupSlack) is below hrWaitBudgetMinimum. hrWaitBudget propagates it unchanged;
+// Provision and Validate route it through the exact same captureFailureDump +
+// uploadArtifactsOnFailureFn path a validateStack failure takes, so the run still ends
+// with a named verdict and evidence — captured inside the reserve that is still
+// intact — instead of an anonymous pod-deadline kill mid-wait.
+var errInsufficientPhaseTime = errors.New("insufficient phase time remaining")
+
+// processStart anchors "elapsed since process start" for the deadline clamp. Argo's
+// activeDeadlineSeconds counts from pod start, and docker-entrypoint.sh does negligible
+// work before exec'ing this binary, so time.Since(processStart) is close enough to
+// "elapsed since the pod's deadline clock started" for the clamp's purpose. A package
+// var, not computed inside hrWaitBudget, so it is fixed once at binary startup rather
+// than drifting later into the run on every call.
+var processStart = time.Now()
+
+// clampHRWaitBudget is hrWaitBudget's pure core: given the desired wait budget, the raw
+// HARNESS_POD_DEADLINE value (seconds, as a string — may be unset, empty, or garbage),
+// and how long this process has already run, returns the budget to actually use, a short
+// rule name for logging, and an error:
+//
+//   - "no-deadline" — deadlineEnv is unset, empty, or unparseable: no clamp is possible,
+//     so desired passes through unchanged. This is the normal case for anything invoked
+//     outside 10-scenario.yaml's templateRef (a laptop `harness provision`, a template
+//     called directly without HARNESS_POD_DEADLINE wired) — it must behave exactly as it
+//     did before this clamp existed.
+//   - "fits" — deadlineEnv parsed, remaining is at least hrWaitBudgetMinimum, and desired
+//     already fits inside it: no clamp needed.
+//   - "clamped" — remaining is at least hrWaitBudgetMinimum but less than desired;
+//     reduced to exactly what remains. The clamp only ever SHRINKS — it never returns
+//     more than remaining.
+//   - "insufficient" (error != nil, budget == 0) — remaining is below
+//     hrWaitBudgetMinimum, including zero or negative: there is not enough of the pod's
+//     deadline left to run any real wait, so the caller must not start one at all. The
+//     wait is skipped entirely rather than started with a budget bigger than the pod's
+//     actual remaining safe lifetime — the shape a floor gets backwards.
+//
+// remaining = deadline - elapsed - hrWaitReserve - hrPodStartupSlack: two separately
+// named deductions, not one combined constant, because they mean different things — the
+// first is real post-wait work (dump + upload + margin), the second is a clock-skew
+// approximation (pod start vs process start) — and a future reader adjusting one must not
+// have to first reverse-engineer it out of a single blended number.
+//
+// Extracted as a pure function (env/clock read by the caller) so the arithmetic is
+// unit-testable without env vars or a real elapsed clock.
+func clampHRWaitBudget(desired time.Duration, deadlineEnv string, elapsed time.Duration) (time.Duration, string, error) {
+	if deadlineEnv == "" {
+		return desired, "no-deadline", nil
 	}
-	d, err := time.ParseDuration(v)
+	secs, err := strconv.Atoi(deadlineEnv)
 	if err != nil {
-		step("WARNING: %s=%q is not a valid duration, ignoring override: %v", hrWaitBudgetOverrideEnv, v, err)
-		return base
+		return desired, "no-deadline", nil
 	}
-	if d <= 0 {
-		step("WARNING: %s=%q is <= 0 (would time out immediately), ignoring override: falling back to base %s", hrWaitBudgetOverrideEnv, v, formatMinutes(base))
-		return base
+	deadline := time.Duration(secs) * time.Second
+	remaining := deadline - elapsed - hrWaitReserve - hrPodStartupSlack
+	if remaining < hrWaitBudgetMinimum {
+		return 0, "insufficient", fmt.Errorf("%w: %s left of %s deadline, need at least %s plus a %s reserve (dump+upload+margin+startup-slack)",
+			errInsufficientPhaseTime, formatMinutes(remaining), formatMinutes(deadline), formatMinutes(hrWaitBudgetMinimum), formatMinutes(hrWaitReserve+hrPodStartupSlack))
 	}
-	step("HARNESS_HR_BUDGET_OVERRIDE ACTIVE: HelmRelease wait budget forced to %s (was %s)", formatMinutes(d), formatMinutes(base))
-	return d
+	if remaining >= desired {
+		return desired, "fits", nil
+	}
+	return remaining, "clamped", nil
+}
+
+// hrWaitBudget resolves the HelmRelease wait budget for one validateStack call in two
+// stages: first the desired budget (base, or HARNESS_HR_BUDGET_OVERRIDE if it is set to
+// a valid positive duration — logged loudly either way, same as before this change), then
+// clampHRWaitBudget clamps that desired value to fit inside HARNESS_POD_DEADLINE, so an
+// override cannot push the wait past the pod's own deadline any more than the base
+// budgets can. An unset override is silent; an invalid or <= 0 one is logged as a
+// warning and ignored (time.ParseDuration accepts negative and zero durations without
+// error, but either would make AwaitHelmReleaseReady time out on its first iteration —
+// indistinguishable from a genuinely broken install). Every path logs the resolved
+// budget and which rule produced it.
+//
+// Returns a non-nil error (errInsufficientPhaseTime, propagated unmodified — it is
+// wrapped with %w, so match it with errors.Is, never ==) exactly when
+// clampHRWaitBudget's rule is "insufficient" — the caller (Provision, Validate) must not
+// call validateStack's wait with the zero duration that comes back alongside it; it must
+// skip straight to its normal validateStack-failure handling instead, so the run still
+// captures the failure-time dump and upload inside the reserve that made room for them.
+func hrWaitBudget(base time.Duration) (time.Duration, error) {
+	desired, source := base, "desired"
+	if v := os.Getenv(hrWaitBudgetOverrideEnv); v != "" {
+		d, err := time.ParseDuration(v)
+		switch {
+		case err != nil:
+			step("WARNING: %s=%q is not a valid duration, ignoring override: %v", hrWaitBudgetOverrideEnv, v, err)
+		case d <= 0:
+			step("WARNING: %s=%q is <= 0 (would time out immediately), ignoring override: falling back to base %s", hrWaitBudgetOverrideEnv, v, formatMinutes(base))
+		default:
+			step("HARNESS_HR_BUDGET_OVERRIDE ACTIVE: HelmRelease wait budget forced to %s (was %s)", formatMinutes(d), formatMinutes(base))
+			desired, source = d, "override"
+		}
+	}
+
+	resolved, clampRule, cerr := clampHRWaitBudget(desired, os.Getenv(hrPodDeadlineEnv), time.Since(processStart))
+	switch clampRule {
+	case "no-deadline":
+		step("HelmRelease wait budget: %s (%s) — no %s clamp applied (unset/unparseable)", formatMinutes(resolved), source, hrPodDeadlineEnv)
+	case "fits":
+		step("HelmRelease wait budget: %s (%s), fits within %s", formatMinutes(resolved), source, hrPodDeadlineEnv)
+	case "clamped":
+		step("HelmRelease wait budget clamped %s -> %s (%s) to fit inside %s (reserve %s for dump+upload+margin, %s pod-start slack)",
+			formatMinutes(desired), formatMinutes(resolved), source, hrPodDeadlineEnv, formatMinutes(hrWaitReserve), formatMinutes(hrPodStartupSlack))
+	case "insufficient":
+		step("WARNING: refusing to start the HelmRelease wait (desired %s, %s): %v — failing this phase now so the failure-time dump and S3 upload can still run inside the reserve, instead of the pod being killed mid-wait",
+			formatMinutes(desired), source, cerr)
+	}
+	return resolved, cerr
 }
 
 // PhaseParams carries everything a single re-entrant phase needs. Unlike RunParams
@@ -407,7 +539,19 @@ func (p PhaseParams) Provision(ctx context.Context, scenario, fromRef, toRef, de
 	}
 
 	rp := RunParams{Matrix: p.Matrix, Namespace: namespace, Profile: p.Profile}
-	rev, kc, caps, verr := validateStack(tg, rp, p.Region, hrWaitBudget(hrWaitBudgetInstall), "install")
+	// hrBudget carries a non-nil error exactly when clampHRWaitBudget refused to start
+	// the wait at all (codex P1 fix: not enough of the pod deadline is left even for the
+	// minimum). In that case skip validateStack's wait entirely rather than calling it
+	// with a zero budget — verr is set directly from hrErr and falls into the identical
+	// failure handling below, same as any other validateStack error.
+	hrBudget, hrErr := hrWaitBudget(hrWaitBudgetInstall)
+	var rev int
+	var kc string
+	var caps Capabilities
+	verr := hrErr
+	if verr == nil {
+		rev, kc, caps, verr = validateStack(tg, rp, p.Region, hrBudget, "install")
+	}
 	if verr != nil {
 		// WS2: capture what teardown would otherwise lose (an Argo provision pod exits
 		// on this error long before the separate teardown pod ever runs) and upload it —
@@ -711,7 +855,15 @@ func (p PhaseParams) Validate(ctx context.Context) (err error) {
 		RunID: p.statePrefix(cfg), DRRegion: rm.DRRegion,
 		RestoreDrill: rm.RestoreDrill, EnableDR: rm.EnableDR, ToRef: rm.ToRef,
 	}
-	rev, kc, caps, verr := validateStack(tg, rp, p.Region, hrWaitBudget(hrWaitBudgetUpgrade), "upgrade")
+	// hrBudget/hrErr: same codex P1 handling as Provision — see that call site's comment.
+	hrBudget, hrErr := hrWaitBudget(hrWaitBudgetUpgrade)
+	var rev int
+	var kc string
+	var caps Capabilities
+	verr := hrErr
+	if verr == nil {
+		rev, kc, caps, verr = validateStack(tg, rp, p.Region, hrBudget, "upgrade")
+	}
 	if verr != nil {
 		// WS2: same failure-time dump + upload as Provision — see that call site's
 		// comment. Validate's namespace lives on the manifest, not a function param.

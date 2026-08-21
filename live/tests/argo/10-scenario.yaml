@@ -94,6 +94,13 @@ spec:
           configMapKeyRef:
             name: harness-config
             key: state_bucket
+      # Test-only: forces the HelmRelease wait budget (see 00-phase-templates.yaml's
+      # hr-budget-override). Empty for every real run; a live-fire passes
+      # `-p hr-budget-override=5m` at submit time to reach the timeout branch on
+      # purpose. Deliberately NOT a configMapKeyRef - a ConfigMap value would apply to
+      # every concurrent run, and this must only ever affect the one run that asks.
+      - name: hr-budget-override
+        value: ''
       - name: residual-enforce
         valueFrom:
           configMapKeyRef:
@@ -173,10 +180,25 @@ spec:
                   value: '{{workflow.parameters.config}}'
                 - name: repo-ref
                   value: '{{workflow.parameters.repo-ref}}'
+                # Consensus-panel finding: this pod's activeDeadlineSeconds must satisfy
+                # setup + apply + wait_budget + dump(<=10m) + upload(<=10m) + margin <= deadline
+                # (harness/phases.go's hrWaitReserve = dump + upload + 5m margin = 25m).
+                # Provision's wait budget is hrWaitBudgetInstall = 90m; 90m + 25m = 115m
+                # alone, so the old 5400s (90m) deadline killed the pod before the wait
+                # could ever expire and trigger the diagnosis it exists to produce -
+                # never mind the apply time before the wait even starts. 9000s (150m)
+                # leaves 30m for cluster setup + terragrunt apply ahead of the wait
+                # (150m - 90m budget - 25m reserve - 5m pod-vs-process startup slack).
+                # harness/phases.go also clamps the wait budget itself at runtime
+                # (HARNESS_POD_DEADLINE) so a future edit to either number alone cannot
+                # reopen this gap; live/tests/harness/deadline_invariant_test.go parses
+                # this file to keep the two in sync.
                 - name: deadline
-                  value: '5400'
+                  value: '9000'
                 - name: residual-enforce
                   value: '{{workflow.parameters.residual-enforce}}'
+                - name: hr-budget-override
+                  value: '{{workflow.parameters.hr-budget-override}}'
                 - name: extra-args
                   value: >-
                     --scenario {{workflow.parameters.scenario}}
@@ -199,10 +221,16 @@ spec:
                   value: '{{workflow.parameters.config}}'
                 - name: repo-ref
                   value: '{{workflow.parameters.repo-ref}}'
+                # Upgrade runs no HelmRelease wait (Upgrade in phases.go applies the
+                # target ref and returns - Validate is the phase that waits), so it is
+                # not part of the deadline/wait_budget invariant above and stays at the
+                # original 5400s.
                 - name: deadline
                   value: '5400'
                 - name: residual-enforce
                   value: '{{workflow.parameters.residual-enforce}}'
+                - name: hr-budget-override
+                  value: '{{workflow.parameters.hr-budget-override}}'
 
         - - name: validate
             when: '{{steps.gate.outputs.result}} == run'
@@ -219,10 +247,17 @@ spec:
                   value: '{{workflow.parameters.config}}'
                 - name: repo-ref
                   value: '{{workflow.parameters.repo-ref}}'
+                # Same invariant as provision (see that step's comment). Validate's wait
+                # budget is hrWaitBudgetUpgrade = 75m; 75m + hrWaitReserve's 25m = 100m
+                # alone, so the old 5400s (90m) deadline could kill the pod before the
+                # wait expired too. 7200s (120m) leaves 15m for setup ahead of the wait
+                # (120m - 75m budget - 25m reserve - 5m pod-vs-process startup slack).
                 - name: deadline
-                  value: '5400'
+                  value: '7200'
                 - name: residual-enforce
                   value: '{{workflow.parameters.residual-enforce}}'
+                - name: hr-budget-override
+                  value: '{{workflow.parameters.hr-budget-override}}'
 
     # The staleness check itself. A script template so stdout is the step result the
     # `when:` clauses above compare against. GET /commits/{sha}/pulls lists the open
