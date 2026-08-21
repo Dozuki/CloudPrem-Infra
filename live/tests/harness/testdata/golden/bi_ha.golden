@@ -5,7 +5,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true
@@ -32,7 +32,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true
@@ -59,7 +59,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true
@@ -86,7 +86,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true
@@ -113,7 +113,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true
@@ -140,7 +140,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true
@@ -167,7 +167,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true
@@ -194,7 +194,7 @@ locals {
   alertmanager_slack_enabled = false
   bi_db_engine = "aurora"
   bi_dms_enabled = true
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smoke"
   db_engine = "aurora"
   enable_bi = true

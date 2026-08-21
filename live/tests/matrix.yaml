@@ -18,8 +18,8 @@ defaults:
 version_defaults:
   image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.11"   # what mpc-dev-min-logical runs; .8 was three builds stale
   nextjs_tag: "2.23.0"
-  chart_version: "2.10.0"  # Track the CURRENT chart so a run validates the pairing a real deploy
-                           # would get. This sits ahead of the fleet (2.8.x today) on purpose: the
+  chart_version: "2.10.22" # Track the CURRENT chart so a run validates the pairing a real deploy
+                           # would get. This sits ahead of the fleet (2.10.21 today) on purpose: the
                            # harness exists to find a bad pairing before an env does, so it tracks
                            # the newest published chart rather than the one already rolled out.
                            #
@@ -41,6 +41,12 @@ version_defaults:
                            # Hook templates are gated on values only newer CPI passes, so this
                            # chart stays safe on older baseline refs. Bump this when the chart
                            # releases, or the harness quietly tests a pairing nobody runs.
+                           #
+                           # HARD FLOOR 2.10.20 (2.x) / 3.7.0 (3.x) as of CPI v9.8.0 if the mimir
+                           # opt-out on the configs below is ever removed: #526 defaults central
+                           # metrics on, and below those releases a missing ingest key leaves
+                           # Prometheus unreconciled and the install in pending-install forever
+                           # (Lodestar-6eau).
   image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
 
 # Per-ref OVERRIDES — only keys that DIFFER from version_defaults need to be here.
@@ -369,7 +375,8 @@ configs:
       # see min_default (Lodestar-6eau)
       enable_mimir: false
       mimir_remote_write_enabled: false
-    # Baseline = legacy flavor from version_defaults (no baseline_versions needed).
+    # Baseline pinned explicitly below: the legacy flavor, but held to a fixed chart_version
+    # rather than inherited from version_defaults.
     # Target flips to the slim set: the legacy->slim migration path, in place.
     #
     # chart 3.3.0, not 3.1.1: 3.1.1 pins operator 4.2.1, which cannot be applied over an
@@ -379,6 +386,8 @@ configs:
     # `spec.strategy.rollingUpdate: Forbidden` and retries forever. 3.3.0 pins operator 4.2.2,
     # which renders explicit RollingUpdate values instead, so the apply lands and also heals an
     # install already wedged on the old shape.
+    baseline_versions:
+      chart_version: "2.10.0"  # pinned: the spec.strategy wedge this scenario reproduces was recorded against 2.10.0; see Lodestar-6eau.5 before moving it
     target_versions:
       app_image_flavor: "slim"
       chart_version: "3.3.0"
