@@ -50,8 +50,9 @@ version_defaults:
   image_repository: "069174876992.dkr.ecr.us-east-1.amazonaws.com"
 
 # Per-ref OVERRIDES — only keys that DIFFER from version_defaults need to be here.
-# The v6.0.x baselines predate the OCI chart; they inherit chart_version 0.4.1
-# from the defaults (harmless: their logical layer doesn't declare it).
+# The v6.0.x baselines predate the OCI chart and carry no chart override, so they
+# inherit whatever version_defaults holds (harmless: their logical layer doesn't
+# declare chart_version, so the value is never read). Only v6.1-release pins 0.4.1.
 versions:
   v6.0:
     image_tag: "3625f3c7a3fe9bd3fb87b03a23a4cbb683d44ded.4"
@@ -387,7 +388,8 @@ configs:
     # which renders explicit RollingUpdate values instead, so the apply lands and also heals an
     # install already wedged on the old shape.
     baseline_versions:
-      chart_version: "2.10.0"  # pinned: the spec.strategy wedge this scenario reproduces was recorded against 2.10.0; see Lodestar-6eau.5 before moving it
+      chart_version: "2.10.0"  # pinned: the spec.strategy wedge this scenario reproduces was recorded against 2.10.0; see Lodestar-6eau.5 before moving it.
+                               # Safe below the 2.10.20 hard floor above only while this config keeps enable_mimir: false.
     target_versions:
       app_image_flavor: "slim"
       chart_version: "3.3.0"
