@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.9.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.8.1...v9.9.0) (2026-08-22)
+
+
+### Features
+
+* **logical:** exclude burstable and accelerator instance categories instead of whitelisting c/m/r ([#543](https://github.com/Dozuki/CloudPrem-Infra/issues/543)) ([347b82b](https://github.com/Dozuki/CloudPrem-Infra/commit/347b82b0704f0a041f4377f0b042d88c17f1c113))
+
+
+### Bug Fixes
+
+* **harness:** smoke envs opt out of central Mimir so provision can converge ([#540](https://github.com/Dozuki/CloudPrem-Infra/issues/540)) ([8c94a94](https://github.com/Dozuki/CloudPrem-Infra/commit/8c94a94c205acca49c6f9d0a60ea6a72cc808d32))
+
 ## [9.8.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.8.0...v9.8.1) (2026-08-21)
 
 
