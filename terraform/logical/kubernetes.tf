@@ -412,8 +412,8 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
               #
               # node_excluded_instance_categories drops: t (burstable,
               # credit-throttled), p/g/gr/inf/trn/dl/vt/f (accelerators - GPU,
-              # graphics, Inferentia, Trainium, Elastic Fabric variants -
-              # nothing here schedules onto them), hpc (HPC-tuned, tightly-coupled
+              # graphics, Inferentia, Trainium, FPGA and video-transcoding
+              # variants - nothing here schedules onto them), hpc (HPC-tuned, tightly-coupled
               # networking this pool doesn't use), mac (Apple silicon, not
               # a general shape), u (ultra-high-memory, far past what any
               # workload here needs). Everything else - c, m, r, i, d, z, x
