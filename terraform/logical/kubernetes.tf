@@ -402,16 +402,31 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
                 operator = "In"
                 values   = ["amd64"]
               },
-              # Floor the hardware: without these, arch-only requirements let
-              # Karpenter buy previous-generation burstable instances - a live
-              # smoke cluster ran prometheus, alertmanager and opensearch on a
-              # c4.xlarge, with t2.medium alongside (t-class CPU credits throttle
-              # sustained load into mystery latency). Mirrors the built-in system
-              # pool's own category/generation floor.
+              # Exclude the hardware classes that are wrong for a general
+              # workload pool, rather than whitelisting a fixed set of
+              # families: without this, arch-only requirements let Karpenter
+              # buy previous-generation burstable instances - a live smoke
+              # cluster ran prometheus, alertmanager and opensearch on a
+              # c4.xlarge, with t2.medium alongside (t-class CPU credits
+              # throttle sustained load into mystery latency).
+              #
+              # node_excluded_instance_categories drops: t (burstable,
+              # credit-throttled), p/g/inf/trn/dl/vt/f (accelerators - GPU,
+              # Inferentia, Trainium, Elastic Fabric variants - nothing here
+              # schedules onto them), hpc (HPC-tuned, tightly-coupled
+              # networking this pool doesn't use), mac (Apple silicon, not
+              # a general shape), u (ultra-high-memory, far past what any
+              # workload here needs). Everything else - c, m, r, i, d, z, x
+              # and future families alike - is eligible by default; there is
+              # no floor on category beyond this exclusion. Karpenter's
+              # price-capacity-optimized allocation then picks the cheapest
+              # shape that clears the generation and memory/vCPU
+              # requirements below, so a new family becomes usable
+              # automatically instead of waiting on a whitelist edit.
               {
                 key      = "eks.amazonaws.com/instance-category"
-                operator = "In"
-                values   = ["c", "m", "r"]
+                operator = "NotIn"
+                values   = var.node_excluded_instance_categories
               },
               {
                 key      = "eks.amazonaws.com/instance-generation"

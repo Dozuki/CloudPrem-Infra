@@ -8,7 +8,7 @@
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | ~> 4.0 |
 | <a name="requirement_external"></a> [external](#requirement\_external) | ~> 2.0 |
 | <a name="requirement_helm"></a> [helm](#requirement\_helm) | ~> 3.0 |
-| <a name="requirement_kubectl"></a> [kubectl](#requirement\_kubectl) | 2.1.5 |
+| <a name="requirement_kubectl"></a> [kubectl](#requirement\_kubectl) | 2.4.1 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 3.0 |
 | <a name="requirement_local"></a> [local](#requirement\_local) | ~> 2.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
@@ -24,7 +24,7 @@
 | <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | ~> 4.0 |
 | <a name="provider_external"></a> [external](#provider\_external) | ~> 2.0 |
 | <a name="provider_helm"></a> [helm](#provider\_helm) | ~> 3.0 |
-| <a name="provider_kubectl"></a> [kubectl](#provider\_kubectl) | 2.1.5 |
+| <a name="provider_kubectl"></a> [kubectl](#provider\_kubectl) | 2.4.1 |
 | <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | ~> 3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | ~> 3.0 |
 | <a name="provider_tls"></a> [tls](#provider\_tls) | ~> 4.0 |
@@ -53,15 +53,15 @@ No modules.
 | [helm_release.istio_cni](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.istiod](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
 | [helm_release.ztunnel](https://registry.terraform.io/providers/hashicorp/helm/latest/docs/resources/release) | resource |
-| [kubectl_manifest.dozuki_helmrelease](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.dozuki_ocirepository](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.flux_relay_external_secret](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.flux_relay_secret_store](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.flux_slack_alert](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.flux_slack_provider](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.peer_auth_carveouts](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
-| [kubectl_manifest.peer_auth_strict](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/resources/manifest) | resource |
+| [kubectl_manifest.dozuki_helmrelease](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.dozuki_ocirepository](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.flux_relay_external_secret](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.flux_relay_secret_store](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.flux_slack_alert](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.flux_slack_provider](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.peer_auth_carveouts](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
+| [kubectl_manifest.peer_auth_strict](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/resources/manifest) | resource |
 | [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_binding_v1.vault_auth_delegator](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_v1.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_v1) | resource |
@@ -135,7 +135,7 @@ No modules.
 | [azurerm_key_vault_secret.db_master](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/key_vault_secret) | data source |
 | [azurerm_kubernetes_cluster.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/kubernetes_cluster) | data source |
 | [external_external.ops_htpasswd_hash](https://registry.terraform.io/providers/hashicorp/external/latest/docs/data-sources/external) | data source |
-| [kubectl_file_documents.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.1.5/docs/data-sources/file_documents) | data source |
+| [kubectl_file_documents.envoy_gateway_crds](https://registry.terraform.io/providers/alekc/kubectl/2.4.1/docs/data-sources/file_documents) | data source |
 | [kubernetes_service_v1.envoy_proxy_azure](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/data-sources/service_v1) | data source |
 | [vault_kv_secret_v2.datadog](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/kv_secret_v2) | data source |
 
@@ -210,8 +210,9 @@ No modules.
 | <a name="input_nextjs_tag"></a> [nextjs\_tag](#input\_nextjs\_tag) | Docker image tag for the Next.js frontend container. Changes with every deploy. | `string` | n/a | yes |
 | <a name="input_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#input\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding | `string` | n/a | yes |
 | <a name="input_nlb_https_target_group_arn"></a> [nlb\_https\_target\_group\_arn](#input\_nlb\_https\_target\_group\_arn) | NLB HTTPS target group ARN for TargetGroupBinding | `string` | n/a | yes |
-| <a name="input_node_min_memory_mib"></a> [node\_min\_memory\_mib](#input\_node\_min\_memory\_mib) | Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node\_min\_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. Default 4096 preserves the current on-demand pool floor exactly; the sizing model raises it per env. (4096 and 6144 admit identical c/m/r gen>4 instance sets - no size falls between them - so the default changes nothing.) | `number` | `4096` | no |
-| <a name="input_node_min_vcpu"></a> [node\_min\_vcpu](#input\_node\_min\_vcpu) | Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node\_min\_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. 0 = no CPU floor, requirement omitted entirely. Set per env from the sizing model so the env's workload fits its minimum node count. | `number` | `0` | no |
+| <a name="input_node_excluded_instance_categories"></a> [node\_excluded\_instance\_categories](#input\_node\_excluded\_instance\_categories) | EKS Auto Mode instance categories (eks.amazonaws.com/instance-category) the NodePool must never buy: burstable (credit-throttled), accelerators (p/g/inf/trn/dl/vt/f), HPC, Mac, ultra-memory. Everything else is eligible; Karpenter picks the cheapest shape that fits, and the amd64 and instance-generation requirements still apply. | `list(string)` | <pre>[<br/>  "t",<br/>  "p",<br/>  "g",<br/>  "inf",<br/>  "trn",<br/>  "dl",<br/>  "vt",<br/>  "f",<br/>  "hpc",<br/>  "mac",<br/>  "u"<br/>]</pre> | no |
+| <a name="input_node_min_memory_mib"></a> [node\_min\_memory\_mib](#input\_node\_min\_memory\_mib) | Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node\_min\_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. No floor beyond the default by default: 4096 preserves the historical on-demand pool floor exactly, and an env's env.hcl may raise it via the sizing model. This is independent of node\_excluded\_instance\_categories - that variable narrows which hardware families are eligible, this one narrows how small an eligible node can be. (4096 and 6144 admit identical gen>4 instance sets among eligible categories - no size falls between them - so the default changes nothing.) | `number` | `4096` | no |
+| <a name="input_node_min_vcpu"></a> [node\_min\_vcpu](#input\_node\_min\_vcpu) | Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node\_min\_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. No floor by default (0 = requirement omitted entirely); an env's env.hcl may add one. This is independent of node\_excluded\_instance\_categories, which controls which hardware families are eligible at all, not how big a node from an eligible family must be. Set per env from the sizing model so the env's workload fits its minimum node count. | `number` | `0` | no |
 | <a name="input_opensearch_min_domains"></a> [opensearch\_min\_domains](#input\_opensearch\_min\_domains) | Minimum number of domains (AZs) for OpenSearch topology spread constraints. Set to 3 for standard 3-AZ regions to ensure Karpenter provisions on-demand nodes in missing AZs rather than colocating pods. Set to 2 for regions with only 2 usable AZs (e.g. emea). | `number` | `3` | no |
 | <a name="input_opensearch_replicas"></a> [opensearch\_replicas](#input\_opensearch\_replicas) | OpenSearch master+data replica count. Default 1 is the migration-safe default: it never scales an env implicitly, but it is NOT a no-op - the pod template changes at 1 replica too (multi-node discovery env vars, topologySpreadConstraints), so an env taking this rolls its single OpenSearch pod once, with an EBS detach/reattach and a search gap of roughly 20 seconds. Sequence it per env like any other stateful rollout. Envs reach 3 (HA) by stepping 1 -> 2 -> 3, ONE step per apply, per the opensearch HA runbook: never jump 1 -> 3 (a fresh pair can form a bootstrap majority and split-brain). A PR changing this value MUST state the prior value in its body so the one-step rule is reviewable. 2 is transitional only, never a standing configuration. | `number` | `1` | no |
 | <a name="input_prefer_spot_app"></a> [prefer\_spot\_app](#input\_prefer\_spot\_app) | Enable spot-preferred placement for the app tier (scheduling.preferSpot.app in the chart). When true, replaces hard on-demand nodeSelector with spot-preferred bounded nodeAffinity while retaining on-demand tolerations. Requires chart\_version >= 2.10.12. | `bool` | `false` | no |

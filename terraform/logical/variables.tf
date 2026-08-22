@@ -488,8 +488,14 @@ variable "capacity_profile" {
   }
 }
 
+variable "node_excluded_instance_categories" {
+  description = "EKS Auto Mode instance categories (eks.amazonaws.com/instance-category) the NodePool must never buy: burstable (credit-throttled), accelerators (p/g/inf/trn/dl/vt/f), HPC, Mac, ultra-memory. Everything else is eligible; Karpenter picks the cheapest shape that fits, and the amd64 and instance-generation requirements still apply."
+  type        = list(string)
+  default     = ["t", "p", "g", "inf", "trn", "dl", "vt", "f", "hpc", "mac", "u"]
+}
+
 variable "node_min_vcpu" {
-  description = "Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. 0 = no CPU floor, requirement omitted entirely. Set per env from the sizing model so the env's workload fits its minimum node count."
+  description = "Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. No floor by default (0 = requirement omitted entirely); an env's env.hcl may add one. This is independent of node_excluded_instance_categories, which controls which hardware families are eligible at all, not how big a node from an eligible family must be. Set per env from the sizing model so the env's workload fits its minimum node count."
   type        = number
   default     = 0
   validation {
@@ -508,7 +514,7 @@ variable "node_min_vcpu" {
 }
 
 variable "node_min_memory_mib" {
-  description = "Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node_min_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. Default 4096 preserves the current on-demand pool floor exactly; the sizing model raises it per env. (4096 and 6144 admit identical c/m/r gen>4 instance sets - no size falls between them - so the default changes nothing.)"
+  description = "Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node_min_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. No floor beyond the default by default: 4096 preserves the historical on-demand pool floor exactly, and an env's env.hcl may raise it via the sizing model. This is independent of node_excluded_instance_categories - that variable narrows which hardware families are eligible, this one narrows how small an eligible node can be. (4096 and 6144 admit identical gen>4 instance sets among eligible categories - no size falls between them - so the default changes nothing.)"
   type        = number
   default     = 4096
   validation {
