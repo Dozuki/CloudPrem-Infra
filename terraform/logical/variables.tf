@@ -488,8 +488,33 @@ variable "capacity_profile" {
   }
 }
 
+variable "node_excluded_instance_categories" {
+  description = "EKS Auto Mode instance categories (eks.amazonaws.com/instance-category) the NodePool must never buy: burstable (credit-throttled), accelerators (p/g/gr/inf/trn/dl/vt/f), HPC, Mac, ultra-memory. Everything else is eligible; Karpenter picks the cheapest shape that fits, and the amd64 and instance-generation requirements still apply."
+  type        = list(string)
+  default     = ["t", "p", "g", "gr", "inf", "trn", "dl", "vt", "f", "hpc", "mac", "u"]
+
+  # This list fails OPEN: NotIn admits anything not named here. The old
+  # In ["c", "m", "r"] whitelist failed CLOSED instead - a typo produced no
+  # matching offering and pods sat Pending loudly, impossible to miss. A typo
+  # in an exclusion (e.g. "t3" instead of "t") gives no such signal: it
+  # silently re-admits burstable nodes and the mistake only shows up later as
+  # unexplained latency. These validations are the replacement signal.
+  validation {
+    condition     = length(var.node_excluded_instance_categories) > 0
+    error_message = "node_excluded_instance_categories must not be empty. NotIn against an empty list matches everything, so an empty list disables the exclusion entirely with no indication the guard is off."
+  }
+  validation {
+    condition     = alltrue([for c in var.node_excluded_instance_categories : can(regex("^[a-z]+$", c))])
+    error_message = "each entry must be a bare category prefix matching ^[a-z]+$ (e.g. \"t\", \"gr\", \"hpc\"), never a full instance family like \"t3\" or \"m5\". eks.amazonaws.com/instance-category holds only the category, so a family-shaped entry matches nothing and silently excludes nothing."
+  }
+  validation {
+    condition     = contains(var.node_excluded_instance_categories, "t")
+    error_message = "node_excluded_instance_categories must contain \"t\": burstable instances are credit-throttled and are the one category every general-purpose pool must always exclude."
+  }
+}
+
 variable "node_min_vcpu" {
-  description = "Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. 0 = no CPU floor, requirement omitted entirely. Set per env from the sizing model so the env's workload fits its minimum node count."
+  description = "Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node_min_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. No floor by default (0 = requirement omitted entirely); an env's env.hcl may add one. This is independent of node_excluded_instance_categories, which controls which hardware families are eligible at all, not how big a node from an eligible family must be. Set per env from the sizing model so the env's workload fits its minimum node count."
   type        = number
   default     = 0
   validation {
@@ -500,7 +525,8 @@ variable "node_min_vcpu" {
   # fails silently - the NodePool matches no offering the sizing model ever
   # intended, and every pod bound to it sits Pending forever while drifted nodes
   # are replaced by nothing. 64 is far above any shape the model produces
-  # (2xlarge = 8) while still admitting the whole practical c/m/r range.
+  # (2xlarge = 8) while still admitting the whole practical size range across
+  # every category node_excluded_instance_categories leaves eligible.
   validation {
     condition     = var.node_min_vcpu <= 64
     error_message = "node_min_vcpu must be <= 64, the top of the supported sizing range."
@@ -508,7 +534,7 @@ variable "node_min_vcpu" {
 }
 
 variable "node_min_memory_mib" {
-  description = "Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node_min_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. Default 4096 preserves the current on-demand pool floor exactly; the sizing model raises it per env. (4096 and 6144 admit identical c/m/r gen>4 instance sets - no size falls between them - so the default changes nothing.)"
+  description = "Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node_min_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. No floor beyond the default by default: 4096 preserves the historical on-demand pool floor exactly, and an env's env.hcl may raise it via the sizing model. This is independent of node_excluded_instance_categories - that variable narrows which hardware families are eligible, this one narrows how small an eligible node can be. (4096 and 6144 admit identical gen>4 instance sets among eligible categories - no size falls between them - so the default changes nothing.)"
   type        = number
   default     = 4096
   validation {
