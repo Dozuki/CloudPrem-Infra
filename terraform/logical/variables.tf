@@ -489,9 +489,28 @@ variable "capacity_profile" {
 }
 
 variable "node_excluded_instance_categories" {
-  description = "EKS Auto Mode instance categories (eks.amazonaws.com/instance-category) the NodePool must never buy: burstable (credit-throttled), accelerators (p/g/inf/trn/dl/vt/f), HPC, Mac, ultra-memory. Everything else is eligible; Karpenter picks the cheapest shape that fits, and the amd64 and instance-generation requirements still apply."
+  description = "EKS Auto Mode instance categories (eks.amazonaws.com/instance-category) the NodePool must never buy: burstable (credit-throttled), accelerators (p/g/gr/inf/trn/dl/vt/f), HPC, Mac, ultra-memory. Everything else is eligible; Karpenter picks the cheapest shape that fits, and the amd64 and instance-generation requirements still apply."
   type        = list(string)
-  default     = ["t", "p", "g", "inf", "trn", "dl", "vt", "f", "hpc", "mac", "u"]
+  default     = ["t", "p", "g", "gr", "inf", "trn", "dl", "vt", "f", "hpc", "mac", "u"]
+
+  # This list fails OPEN: NotIn admits anything not named here. The old
+  # In ["c", "m", "r"] whitelist failed CLOSED instead - a typo produced no
+  # matching offering and pods sat Pending loudly, impossible to miss. A typo
+  # in an exclusion (e.g. "t3" instead of "t") gives no such signal: it
+  # silently re-admits burstable nodes and the mistake only shows up later as
+  # unexplained latency. These validations are the replacement signal.
+  validation {
+    condition     = length(var.node_excluded_instance_categories) > 0
+    error_message = "node_excluded_instance_categories must not be empty. NotIn against an empty list matches everything, so an empty list disables the exclusion entirely with no indication the guard is off."
+  }
+  validation {
+    condition     = alltrue([for c in var.node_excluded_instance_categories : can(regex("^[a-z]+$", c))])
+    error_message = "each entry must be a bare category prefix matching ^[a-z]+$ (e.g. \"t\", \"gr\", \"hpc\"), never a full instance family like \"t3\" or \"m5\". eks.amazonaws.com/instance-category holds only the category, so a family-shaped entry matches nothing and silently excludes nothing."
+  }
+  validation {
+    condition     = contains(var.node_excluded_instance_categories, "t")
+    error_message = "node_excluded_instance_categories must contain \"t\": burstable instances are credit-throttled and are the one category every general-purpose pool must always exclude."
+  }
 }
 
 variable "node_min_vcpu" {
@@ -506,7 +525,8 @@ variable "node_min_vcpu" {
   # fails silently - the NodePool matches no offering the sizing model ever
   # intended, and every pod bound to it sits Pending forever while drifted nodes
   # are replaced by nothing. 64 is far above any shape the model produces
-  # (2xlarge = 8) while still admitting the whole practical c/m/r range.
+  # (2xlarge = 8) while still admitting the whole practical size range across
+  # every category node_excluded_instance_categories leaves eligible.
   validation {
     condition     = var.node_min_vcpu <= 64
     error_message = "node_min_vcpu must be <= 64, the top of the supported sizing range."
