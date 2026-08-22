@@ -3,7 +3,7 @@
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
@@ -28,7 +28,7 @@ locals {
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
@@ -53,7 +53,7 @@ locals {
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
@@ -78,7 +78,7 @@ locals {
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
@@ -103,7 +103,7 @@ locals {
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
@@ -128,7 +128,7 @@ locals {
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
@@ -153,7 +153,7 @@ locals {
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
@@ -178,7 +178,7 @@ locals {
 locals {
   alarm_email = "devops@dozuki.com"
   alertmanager_slack_enabled = false
-  chart_version = "2.10.0"
+  chart_version = "2.10.22"
   customer = "smokerec"
   db_engine = "aurora"
   enable_bi = false
