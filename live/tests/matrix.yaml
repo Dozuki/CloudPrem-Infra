@@ -146,6 +146,22 @@ configs:
       # explicit access entry for it collides with the auto-created creator entry
       # (ResourceInUseException). The creator already has cluster admin, so the
       # harness needs no explicit entry; leaving it unset works for local + CI.
+    # THROWAWAY BRANCH - do not merge. Lodestar-525 / Lodestar-1xm.40.5 live-fire leg A,
+    # lever redesigned under Lodestar-1xm.45: a nonexistent chart never reaches Flux
+    # because artifact-pins.tf resolves chart_version against ECR at apply time.
+    # Baseline installs the fleet's current chart so the upgrade phase performs a REAL
+    # helm upgrade (2.10.21 -> 2.10.22); a spec-only change would not trigger one. The
+    # target side cuts the per-attempt upgrade timeout to 30s (flux_upgrade_timeout is an
+    # existing logical variable, default 4h30m), so helm gives up before the rollout can
+    # finish and Flux records Released=False / Ready=False reason=UpgradeFailed under
+    # RetryOnFailure. Both tags exist in ECR, so the pin check passes and the failure
+    # lands inside Flux, which is what the terminal verdict branch, the live diagnosis
+    # block and the failure-time dump are for. golden_test.go fails on this config by
+    # design (min_default must not carry side maps on master).
+    baseline_versions:
+      chart_version: "2.10.21"
+    target_versions:
+      flux_upgrade_timeout: "30s"
   - name: bi_ha
     env: bi
     # What this scenario actually exercises: DMS Serverless replication (physical/bi.tf),
