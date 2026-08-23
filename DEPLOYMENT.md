@@ -16,11 +16,16 @@ brew install opentofu terragrunt
 # (`run --all`, `--non-interactive`). The old `--terragrunt-*` flags were REMOVED in
 # 0.85.0 with no grace period, so an old binary fails with "flag provided but not
 # defined". Check with `terragrunt --version`; if brew gives you something older,
-# `tgenv install 1.1.2` and let the committed `live/.terragrunt-version` select it -
-# do NOT run `tgenv use`, which switches the global default for every shell, worktree
-# and parallel session on the machine. Same for `tofuenv install 1.12.5` and
-# `live/.opentofu-version`. Note `tgenv install` switches the global default as a
-# side effect, so run it when nothing else is mid-plan.
+# install it from OUTSIDE this repo:  cd ~ && tgenv install 1.1.2 && tofuenv install 1.12.5
+# Then run terragrunt from `live/` or below and the committed `live/.terragrunt-version`
+# and `live/.opentofu-version` select the right pair for you.
+#
+# Do NOT run `tgenv use` / `tofuenv use`, and do not run the INSTALL from inside a repo
+# either. Both write whichever version file currently resolves (nearest `.terragrunt-version`
+# walking up from the cwd, then `$HOME`, then a file in the Homebrew Cellar), and `install`
+# calls `use` at the end. Run from `live/`, that target is this repo's COMMITTED pin, so the
+# command silently edits a tracked file. Run from anywhere unpinned and it retargets every
+# other shell and worktree on the machine.
 
 # Everything else
 brew install awscli helm kubectl hashicorp/tap/vault

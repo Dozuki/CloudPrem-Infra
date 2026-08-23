@@ -269,9 +269,10 @@ done
 # Presence is not enough. Terragrunt removed the --terragrunt-* flags in 0.85.0 and
 # `run-all` in 0.84.0, with no deprecation grace period, and this harness now uses the
 # post-0.78 CLI exclusively. An older terragrunt on PATH fails with a bare "flag
-# provided but not defined" ~20 minutes into a run rather than up front. Nothing pins
-# the local binary (no tgenv/asdf config in the repo, and DEPLOYMENT.md just says
-# `brew install`), so assert it here.
+# provided but not defined" ~20 minutes into a run rather than up front. `live/` does
+# carry a committed `.terragrunt-version`, but it only binds when terragrunt is launched
+# from `live/` or below and only when the caller uses tgenv at all, so it is a default,
+# not a guarantee. Assert the floor here regardless.
 #
 # The floor is 0.78 (where `run --all` and the unprefixed flags landed), NOT the
 # version the fleet pins. Verified against real binaries: 0.99.4 accepts the new CLI
@@ -290,10 +291,11 @@ else
 ERROR: terragrunt ${tg_major}.${tg_minor}.x is too old for this harness (need >= ${TG_MIN_MAJOR}.${TG_MIN_MINOR}).
   The harness uses the post-0.78 CLI (\`run --all\`, \`--non-interactive\`). An older
   binary fails with a bare "flag provided but not defined" partway into a run.
-  Install the version the fleet pins:  tgenv install 1.1.2
-  Then let live/.terragrunt-version select it - do NOT run 'tgenv use', which switches
-  the global default for every shell, worktree and parallel session on the machine.
-  'tgenv install' switches it too, as a side effect, so install when nothing is in flight.
+  Install the version the fleet pins, from outside the repo:  cd ~ && tgenv install 1.1.2
+  Then run from live/ and the committed live/.terragrunt-version selects it.
+  Do not run 'tgenv use', or the install itself, from inside the repo: both write whichever
+  version file currently resolves, which from live/ is the committed pin (a tracked file)
+  and from anywhere unpinned is the default every other shell and worktree shares.
 EOF
     exit 1
   fi
@@ -315,8 +317,8 @@ if [ "$tofu_ver" = "$FLEET_TOFU_VERSION" ]; then
   echo ">> OpenTofu ${tofu_ver} — matches the fleet pin"
 else
   echo ">> WARNING: OpenTofu ${tofu_ver:-unknown} != fleet pin ${FLEET_TOFU_VERSION}. This run tests an" >&2
-  echo ">>          engine Spacelift does not use.  tofuenv install ${FLEET_TOFU_VERSION}, then let" >&2
-  echo ">>          live/.opentofu-version select it (do not 'tofuenv use' - that is global)." >&2
+  echo ">>          engine Spacelift does not use.  Run 'cd ~ && tofuenv install ${FLEET_TOFU_VERSION}'," >&2
+  echo ">>          then run from live/ so live/.opentofu-version selects it. Do not 'tofuenv use'." >&2
 fi
 if [ -n "${tg_ver:-}" ] && [ "$(printf '%s' "$tg_raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" != "$FLEET_TG_VERSION" ]; then
   echo ">> WARNING: terragrunt is not the fleet pin ${FLEET_TG_VERSION} (1.x double-assumes iam_role; infra-live #158)." >&2
