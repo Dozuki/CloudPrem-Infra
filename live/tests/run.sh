@@ -291,11 +291,12 @@ else
 ERROR: terragrunt ${tg_major}.${tg_minor}.x is too old for this harness (need >= ${TG_MIN_MAJOR}.${TG_MIN_MINOR}).
   The harness uses the post-0.78 CLI (\`run --all\`, \`--non-interactive\`). An older
   binary fails with a bare "flag provided but not defined" partway into a run.
-  Install the version the fleet pins, from outside the repo:  cd ~ && tgenv install 1.1.2
+  Install the version the fleet pins, from OUTSIDE the repo:  cd ~ && tgenv install 1.1.2
   Then run from live/ and the committed live/.terragrunt-version selects it.
-  Do not run 'tgenv use', or the install itself, from inside the repo: both write whichever
-  version file currently resolves, which from live/ is the committed pin (a tracked file)
-  and from anywhere unpinned is the default every other shell and worktree shares.
+  Do not run 'tgenv use', or 'tgenv install', from inside the repo: both write whichever
+  version file currently resolves ('install' calls 'use'), which from live/ is the
+  committed pin - a tracked file - and from anywhere unpinned is the default every other
+  shell and worktree shares.
 EOF
     exit 1
   fi
@@ -317,8 +318,8 @@ if [ "$tofu_ver" = "$FLEET_TOFU_VERSION" ]; then
   echo ">> OpenTofu ${tofu_ver} — matches the fleet pin"
 else
   echo ">> WARNING: OpenTofu ${tofu_ver:-unknown} != fleet pin ${FLEET_TOFU_VERSION}. This run tests an" >&2
-  echo ">>          engine Spacelift does not use.  Run 'cd ~ && tofuenv install ${FLEET_TOFU_VERSION}'," >&2
-  echo ">>          then run from live/ so live/.opentofu-version selects it. Do not 'tofuenv use'." >&2
+  echo ">>          engine Spacelift does not use.  Run 'tofuenv install ${FLEET_TOFU_VERSION}', then run" >&2
+  echo ">>          from live/ so the committed live/.opentofu-version selects it." >&2
 fi
 if [ -n "${tg_ver:-}" ] && [ "$(printf '%s' "$tg_raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" != "$FLEET_TG_VERSION" ]; then
   echo ">> WARNING: terragrunt is not the fleet pin ${FLEET_TG_VERSION} (1.x double-assumes iam_role; infra-live #158)." >&2

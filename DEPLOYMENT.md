@@ -15,17 +15,23 @@ brew install opentofu terragrunt
 # Terragrunt matters here: the harness and these docs use the post-0.78 CLI
 # (`run --all`, `--non-interactive`). The old `--terragrunt-*` flags were REMOVED in
 # 0.85.0 with no grace period, so an old binary fails with "flag provided but not
-# defined". Check with `terragrunt --version`; if brew gives you something older,
-# install it from OUTSIDE this repo:  cd ~ && tgenv install 1.1.2 && tofuenv install 1.12.5
-# Then run terragrunt from `live/` or below and the committed `live/.terragrunt-version`
-# and `live/.opentofu-version` select the right pair for you.
+# defined". Check with `terragrunt --version`; if brew gives you something older:
 #
-# Do NOT run `tgenv use` / `tofuenv use`, and do not run the INSTALL from inside a repo
-# either. Both write whichever version file currently resolves (nearest `.terragrunt-version`
-# walking up from the cwd, then `$HOME`, then a file in the Homebrew Cellar), and `install`
-# calls `use` at the end. Run from `live/`, that target is this repo's COMMITTED pin, so the
-# command silently edits a tracked file. Run from anywhere unpinned and it retargets every
-# other shell and worktree on the machine.
+#   cd ~ && tgenv install 1.1.2       # from OUTSIDE the repo - see the tgenv warning below
+#   tofuenv install 1.12.5            # safe anywhere
+#
+# Then run terragrunt from `live/` or below; the committed `live/.terragrunt-version` and
+# `live/.opentofu-version` select the pair for you. You should not need a `use` command.
+#
+# The two tools differ, and the tgenv one is a real trap:
+#   - `tgenv use` writes to whichever version file currently RESOLVES (nearest
+#     `.terragrunt-version` walking up from the cwd, then `$HOME`, then the Cellar), and
+#     `tgenv install` calls `use` at the end. Run either from `live/` and it silently
+#     rewrites this repo's committed, TRACKED pin; run it from an unpinned directory and it
+#     retargets every other shell and worktree on the machine. So `cd ~` first.
+#   - `tofuenv` is better behaved: `tofuenv install` does not switch anything, and
+#     `tofuenv use` only writes tofuenv's own default, warning you when a nearer
+#     `.opentofu-version` overrides it. It will not touch `live/.opentofu-version`.
 
 # Everything else
 brew install awscli helm kubectl hashicorp/tap/vault
