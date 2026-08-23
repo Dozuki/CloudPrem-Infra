@@ -8,6 +8,9 @@
 tfplan
 terraform.tfstate.d/
 **/.terragrunt*
+# ...except the committed toolchain pin. The pattern above exists for
+# .terragrunt-cache; the version file is a tracked input, same as the lock file.
+!**/.terragrunt-version
 *.tfvars
 !terraform/physical-azure/examples/**/*.tfvars
 !terraform/logical/examples/**/*.tfvars
