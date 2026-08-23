@@ -109,9 +109,11 @@ This would give you 1 stack by spinning up the 4 modules inside only.
 
 ### Caveats
 Because we are using a terragrunt multimodule stack with dependencies between them,
-we are unable to run traditional `plan` commands with the `run-all` system. The plan is not able to infer information
+we are unable to run traditional `plan` commands with the `run --all` system (`run-all`
+was renamed in terragrunt 0.84 and removed; the pair the fleet pins is OpenTofu 1.12.5 +
+Terragrunt 1.1.2, committed in `live/.opentofu-version` and `live/.terragrunt-version`). The plan is not able to infer information
 about resources that have not been deployed yet, so it's kind of an all or nothing scenario if you
-want to stick to the run-all system. However, if you are developing a specific module like lets say
+want to stick to the `run --all` system. However, if you are developing a specific module like lets say
 the physical module, you can definitely `cd` into the `physical` directory and run single terragrunt commands
 like `terragrunt plan` or `terragrunt apply` and you'll be able to get a plan for that individual
 module. 
