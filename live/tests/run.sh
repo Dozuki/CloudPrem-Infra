@@ -290,8 +290,10 @@ else
 ERROR: terragrunt ${tg_major}.${tg_minor}.x is too old for this harness (need >= ${TG_MIN_MAJOR}.${TG_MIN_MINOR}).
   The harness uses the post-0.78 CLI (\`run --all\`, \`--non-interactive\`). An older
   binary fails with a bare "flag provided but not defined" partway into a run.
-  Install the version the fleet pins:  tgenv install 1.1.2 && tgenv use 1.1.2
-  Note tgenv switches the ACTIVE version globally - do not switch while a run is in flight.
+  Install the version the fleet pins:  tgenv install 1.1.2
+  Then let live/.terragrunt-version select it - do NOT run 'tgenv use', which switches
+  the global default for every shell, worktree and parallel session on the machine.
+  'tgenv install' switches it too, as a side effect, so install when nothing is in flight.
 EOF
     exit 1
   fi
@@ -313,7 +315,8 @@ if [ "$tofu_ver" = "$FLEET_TOFU_VERSION" ]; then
   echo ">> OpenTofu ${tofu_ver} — matches the fleet pin"
 else
   echo ">> WARNING: OpenTofu ${tofu_ver:-unknown} != fleet pin ${FLEET_TOFU_VERSION}. This run tests an" >&2
-  echo ">>          engine Spacelift does not use.  tofuenv install ${FLEET_TOFU_VERSION} && tofuenv use ${FLEET_TOFU_VERSION}" >&2
+  echo ">>          engine Spacelift does not use.  tofuenv install ${FLEET_TOFU_VERSION}, then let" >&2
+  echo ">>          live/.opentofu-version select it (do not 'tofuenv use' - that is global)." >&2
 fi
 if [ -n "${tg_ver:-}" ] && [ "$(printf '%s' "$tg_raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" != "$FLEET_TG_VERSION" ]; then
   echo ">> WARNING: terragrunt is not the fleet pin ${FLEET_TG_VERSION} (1.x double-assumes iam_role; infra-live #158)." >&2
