@@ -28,7 +28,8 @@ brew install opentofu terragrunt
 #     `.terragrunt-version` walking up from the cwd, then `$HOME`, then the Cellar), and
 #     `tgenv install` calls `use` at the end. Run either from `live/` and it silently
 #     rewrites this repo's committed, TRACKED pin; run it from an unpinned directory and it
-#     retargets every other shell and worktree on the machine. So `cd ~` first.
+#     retargets the shared default that unpinned shells and worktrees fall back to. So
+#     `cd ~` first.
 #   - `tofuenv` is better behaved: `tofuenv install` does not switch anything, and
 #     `tofuenv use` only writes tofuenv's own default, warning you when a nearer
 #     `.opentofu-version` overrides it. It will not touch `live/.opentofu-version`.

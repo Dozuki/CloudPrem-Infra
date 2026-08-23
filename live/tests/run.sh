@@ -295,8 +295,8 @@ ERROR: terragrunt ${tg_major}.${tg_minor}.x is too old for this harness (need >=
   Then run from live/ and the committed live/.terragrunt-version selects it.
   Do not run 'tgenv use', or 'tgenv install', from inside the repo: both write whichever
   version file currently resolves ('install' calls 'use'), which from live/ is the
-  committed pin - a tracked file - and from anywhere unpinned is the default every other
-  shell and worktree shares.
+  committed pin - a tracked file - and from anywhere unpinned is the shared default that
+  unpinned shells and worktrees fall back to.
 EOF
     exit 1
   fi
