@@ -162,10 +162,12 @@ resource "helm_release" "istiod" {
       # pods, forcing the second replica to wait for a second node.
       #
       # On the on-demand pool the constraint is cheaper to satisfy and still
-      # worth keeping: that pool already runs several nodes, and its
-      # do-not-disrupt workloads hold a practical floor of ~2 (kubernetes.tf),
-      # so minDomains 2 is normally met on arrival instead of forcing a
-      # scale-from-zero. It still does the job it is here for - under STRICT
+      # worth keeping: that pool runs the app tier and so is several nodes wide in
+      # every env. Do not lean on the pinned workloads for this - their floor is
+      # 1-2 nodes, not the ~2 this comment used to claim (see the floor note on the
+      # NodePool disruption block in kubernetes.tf), and it moves with opensearch's
+      # replica count. The pool's own width is what makes minDomains 2 normally met
+      # on arrival instead of forcing a scale-from-zero. It still does the job it is here for - under STRICT
       # mTLS, one node hosting both replicas is a single point of failure for
       # the untaint controller and the mesh CA together, and on gov the SCP
       # denies ec2:TerminateInstances, so recovering a stuck node there is a

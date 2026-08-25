@@ -395,10 +395,10 @@ locals {
     value    = "on-demand"
     effect   = "NoSchedule"
   }]
-  # karpenter.sh/do-not-disrupt="true" on every pod below, quoted string per the
-  # helm-controller precedent (this file, helm_release.flux, further down) -
-  # Kubernetes annotation values are strings and an unquoted true is rejected at
-  # apply time. This is what lets kubernetes.tf's on-demand NodePool run
+  # karpenter.sh/do-not-disrupt="true" on the EBS-volume owners below - not on every pod
+  # here, see the DE-PIN note further down and opensearch's replica-count conditional. The
+  # value must stay a QUOTED string: Kubernetes annotation values are strings and an
+  # unquoted true is rejected at apply time. This is what lets kubernetes.tf's on-demand NodePool run
   # WhenEmptyOrUnderutilized: the annotation exempts these specific pods' nodes
   # from voluntary consolidation instead of exempting the whole pool the way
   # WhenEmpty used to. Verified against the vendored subchart values (helm/chart
@@ -434,10 +434,13 @@ locals {
   # the infra_version bump carrying this change. Not a background no-op;
   # sequence it per env like any other stateful rollout (dev-min/qa first).
   #
-  # Floor: a pod carrying this annotation pins its node against consolidation
-  # for as long as the pod lives there, so the three volume owners set a practical
-  # floor of roughly 2 on-demand nodes per env - consolidation can shrink
-  # everything else on the pool, it cannot repack these onto fewer nodes.
+  # Floor: a pod carrying this annotation pins its node against consolidation for as
+  # long as the pod lives there. How many nodes that costs depends on opensearch's
+  # replica count, since the annotation below is conditional on it - 1 node in the
+  # collapsed prod envs where opensearch runs 3 replicas and is unpinned, leaving
+  # prometheus and alertmanager to share one, and 2-3 elsewhere. The measurement and
+  # the full breakdown live on the on-demand NodePool's disruption block in
+  # kubernetes.tf; keep the two in step.
   do_not_disrupt_annotation = { "karpenter.sh/do-not-disrupt" = "true" }
   app_stateful_scheduling = {
     for k, v in {
@@ -643,9 +646,21 @@ resource "helm_release" "flux" {
       create    = local.flux_slack_enabled
       resources = { requests = { memory = "256Mi" } }
     }
-    # do-not-disrupt on helm-controller ONLY. Karpenter VOLUNTARY DISRUPTION was
-    # evicting it mid-upgrade, which kills the reconciliation context and fails the
-    # release:
+    # helm-controller is deliberately NOT do-not-disrupt pinned. The pin used to live
+    # right here; it now sits on the db-migrations Job pod template instead (dozuki chart,
+    # dbMigrations.pinAgainstDisruption, default true, chart 2.10.24 and later).
+    #
+    # NOTHING ENFORCES THAT 2.10.24 FLOOR. var.chart_version is per env, so pinning an env
+    # below 2.10.24 would drop BOTH pins at once and leave migrations unprotected. There is
+    # a lifecycle precondition pattern in this file (see app_image_flavor below) but it is
+    # not used here on purpose: chart_version legitimately carries 3.x on dev-slim and
+    # pre-release strings like 2.10.24-dashfix.1 on gov, so a naive numeric compare would
+    # reject valid pins. Every fleet env is past 2.10.24 today; treat a downgrade below it
+    # as the thing to catch in review.
+    #
+    # The evidence that put a pin here in the first place, kept because it is still the
+    # reason the migration needs protecting - Karpenter VOLUNTARY DISRUPTION evicting
+    # helm-controller mid-upgrade kills the reconciliation context and fails the release:
     #
     #   17:25:41  helm upgrade running, "checking resources for changes: 220"
     #   17:28:13  Evicted pod: Underutilized   (helm-controller)
@@ -653,47 +668,61 @@ resource "helm_release" "flux" {
     #             ~8s later a new pod took leadership
     #   17:28:48  retried, succeeded
     #
-    # Flux retries so it self-heals, but the retry is not free: the same eviction
-    # during the pre-upgrade migration hook interrupts a running database
-    # migration rather than a resource diff, and that is the failed-release state
-    # that needs manual recovery. Already observed once as "pre-upgrade hooks
-    # failed: context canceled".
+    # Flux retries, so that case self-heals. The expensive case was the same eviction
+    # landing while the database migration was running rather than during a resource diff
+    # (observed then as "pre-upgrade hooks failed: context canceled", back when the
+    # migration was a Helm pre-upgrade hook).
     #
-    # What this annotation does and does not cover, because the difference matters:
-    #   consolidation (the "Underutilized" above) - fully excluded.
-    #   drift          - only DELAYED. EKS Auto Mode stamps a 24h
-    #                    terminationGracePeriod onto every NodeClaim (verified: it
-    #                    is present even where the NodePool spec leaves it unset),
-    #                    so drift eventually forces through.
-    #   expiry         - same, bounded by that grace against a 336h expireAfter.
-    #   spot interruption, node repair, manual deletion - NOT covered at all;
-    #                    those are forceful. helm-controller currently lands on the
-    #                    spot-preferred pool, so a migration is still not immune to
-    #                    losing its node. Migrations need to be resumable; this
-    #                    annotation only removes the self-inflicted case.
+    # It is no longer a hook, and that matters here. The dozuki chart renders db-migrations
+    # as a plain Job whose NAME is a content hash of the app image tag, db.resourceId and
+    # the pod template (dozuki.migrationJobName). There is no helm.sh/hook annotation on it,
+    # so a retried upgrade re-applies the identical Job name instead of re-running a hook:
+    # no second concurrent migration against non-transactional MySQL DDL, and a completed
+    # Job is simply reused. Checked against helm origin/release-2.x b169fdd. This is the
+    # failure mode that made the Job pin the right home for the annotation, and it is the
+    # first thing to re-verify if the chart ever turns db-migrations back into a hook.
     #
-    # Deliberately not applied to source-controller or notification-controller.
-    # Their work is short and idempotent - a re-fetch or a re-send - so eviction
-    # there has a low, retryable cost, and every annotated pod is another node
-    # consolidation cannot reclaim. helm-controller is the only one holding a long,
-    # non-idempotent operation.
+    # Why the Job pin is the better instrument. The migration is the operation whose
+    # interruption costs the most and is least recoverable, and the Job pin's scope matches
+    # it: Karpenter ignores terminal-phase pods, so the annotation affects consolidation
+    # only while the migration pod is still running. Pinning helm-controller instead held a
+    # whole node out of consolidation permanently to protect a window measured in minutes -
+    # measured 2026-08-21 (Lodestar-02z.21), helm-controller accounted for one of the two
+    # pinned nodes in every collapsed env, and it has no nodeSelector or affinity so it
+    # lands somewhere different in each one.
     #
-    # The value must stay a QUOTED string: Kubernetes annotation values are
-    # strings and an unquoted true is rejected at apply time.
+    # Residual risk, accepted and NOT fully covered - state it honestly. helm-controller
+    # interrupted mid-helm-upgrade can leave the release pending-upgrade.
+    #   - terminationGracePeriodSeconds is 600 (confirmed by rendering
+    #     fluxcd-community/flux2 at the pinned var.flux_chart_version; source-controller
+    #     renders 10). That is an OPPORTUNITY to finish, not a guarantee: the incident
+    #     above shows the controller cancelling its context and a new pod taking leadership
+    #     ~8s after eviction began, nowhere near the grace window.
+    #   - upgrade.strategy=RetryOnFailure on the HelmRelease below is the actual recovery
+    #     mechanism - see the long note there. It covers a failed reconciliation. Whether
+    #     it always clears a Helm release left locked in pending-upgrade has not been
+    #     verified on 1.6.2, so manual Helm state recovery stays on the table.
+    #   - Forceful disruption (spot interruption, node repair, manual delete, host failure)
+    #     was never covered by the annotation either, and helm-controller has no placement
+    #     constraint keeping it off those paths.
+    #
+    # Still deliberately not applied to source-controller or notification-controller either.
+    # Their work is short and idempotent - a re-fetch or a re-send - so eviction there has a
+    # low, retryable cost.
     #
     # Memory requests below are measured, not the chart defaults. All three controllers
     # ship a 64Mi request and every one of them runs several times that in every env
     # (14d window, 9 envs: helm-controller max 214Mi, source and notification 198Mi
     # each). A request that far under real usage makes the pod look nearly free to
-    # bin-packing and puts it near the front of the queue under node memory pressure -
-    # which for helm-controller is the eviction the annotation above exists to prevent,
-    # arriving by the one route the annotation does not cover. Values are F2
-    # (max working set x 1.2, rounded up to 32Mi). No limits, deliberately: an
+    # bin-packing and ranks it worse under node memory pressure, where kubelet sorts by
+    # usage relative to request. That route was never covered by the annotation anyway, so
+    # a truthful request is what keeps helm-controller's memory-pressure eviction risk low;
+    # the Karpenter annotation never had any bearing on this path (kubelet does not read
+    # it). Values are F2 (max working set x 1.2, rounded up to 32Mi). No limits: an
     # OOMKilled helm-controller mid-upgrade is the failure mode being designed out.
     helmController = {
-      create      = true
-      annotations = { "karpenter.sh/do-not-disrupt" = "true" }
-      resources   = { requests = { memory = "288Mi" } }
+      create    = true
+      resources = { requests = { memory = "288Mi" } }
     }
     sourceController = {
       create    = true
@@ -812,8 +841,10 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
       #
       # Why retry rather than remediate. Remediation's default strategy is rollback, and a
       # rollback here downgrades the chart and re-runs the OLD chart's pre-upgrade db-migrations
-      # hook against MySQL DDL that is not transactional - the same hazard the helm-controller
-      # do-not-disrupt pin above exists to avoid. Rollback also has a dead end: when
+      # migration against MySQL DDL that is not transactional. Nothing guards that: the
+      # db-migrations Job's own do-not-disrupt pin covers node disruption, not Helm
+      # re-executing an older chart's migration. Choosing retry over remediate is the
+      # guard. Rollback also has a dead end: when
       # .status.history carries no prior snapshot - a HelmRelease that ADOPTED a pre-existing helm
       # release and has not yet completed a Flux-driven upgrade - there is nothing to roll back
       # to, so the release goes
