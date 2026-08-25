@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.9.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.9.0...v9.9.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **logical:** drop the helm-controller do-not-disrupt pin, the migration job carries it ([#549](https://github.com/Dozuki/CloudPrem-Infra/issues/549)) ([551ecd1](https://github.com/Dozuki/CloudPrem-Infra/commit/551ecd12b13efce81b9f2f4a8f01b93cd2c3aeec))
+
 ## [9.9.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.8.1...v9.9.0) (2026-08-22)
 
 
