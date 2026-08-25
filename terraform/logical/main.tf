@@ -223,6 +223,12 @@ locals {
   cluster_host = var.cloud == "aws" ? data.aws_eks_cluster.main[0].endpoint : data.azurerm_kubernetes_cluster.main["azure"].kube_config[0].host
   cluster_ca   = var.cloud == "aws" ? data.aws_eks_cluster.main[0].certificate_authority[0].data : data.azurerm_kubernetes_cluster.main["azure"].kube_config[0].cluster_ca_certificate
 
+  # Standard cost-allocation tags, sourced from the AWS provider's own default_tags
+  # (see data.aws_default_tags.current above) rather than restated here, so this
+  # always matches whatever infra-live's root.hcl is currently injecting. AWS-only:
+  # nothing in kubernetes.tf that consumes this is created on Azure.
+  tags = var.cloud == "aws" ? data.aws_default_tags.current[0].tags : {}
+
   k8s_exec_command = var.cloud == "aws" ? "aws" : "kubelogin"
   k8s_exec_args = var.cloud == "aws" ? [
     "eks", "get-token", "--cluster-name", var.eks_cluster_id, "--region", data.aws_region.current[0].region
@@ -287,6 +293,15 @@ data "aws_region" "current" {
 }
 
 data "aws_caller_identity" "current" {
+  count = var.cloud == "aws" ? 1 : 0
+}
+
+# Reads back whatever default_tags the AWS provider is actually configured with
+# (injected by infra-live's root.hcl via a terragrunt generate block, invisible
+# anywhere in this repo) so kubernetes.tf can copy the same Service/Customer/
+# Environment cost-allocation tags onto resources the AWS provider itself never
+# touches - see local.tags below and the NodeClass in kubernetes.tf.
+data "aws_default_tags" "current" {
   count = var.cloud == "aws" ? 1 : 0
 }
 
