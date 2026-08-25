@@ -366,6 +366,23 @@ data "kubernetes_resource" "nodeclass_default" {
   }
 }
 
+locals {
+  nodeclass_default_spec = try(data.kubernetes_resource.nodeclass_default[0].object.spec, {})
+
+  # Optional fields are copied only when the built-in class actually carries them.
+  # Reading them unconditionally would emit an explicit null for any field EKS
+  # omits, and the CRD rejects a null where it expects a value or nothing - which
+  # would fail the apply in whichever environment first ran an EKS version that
+  # dropped a default, not in the one we tested. Every cluster checked on
+  # 2026-08-25 has all four, so this guard is for the version skew we cannot see
+  # rather than for a problem we currently have.
+  nodeclass_optional_fields = {
+    for field in ["ephemeralStorage", "networkPolicy", "networkPolicyEventLogs", "snatPolicy"] :
+    field => local.nodeclass_default_spec[field]
+    if try(local.nodeclass_default_spec[field], null) != null
+  }
+}
+
 resource "kubernetes_manifest" "nodeclass_dozuki" {
   count = var.cloud == "aws" ? 1 : 0
 
@@ -379,23 +396,24 @@ resource "kubernetes_manifest" "nodeclass_dozuki" {
       # would be a lie about who manages this object and could confuse the Auto
       # Mode controller into thinking it should also reconcile this one.
     }
-    spec = {
-      # Copied through from the built-in class rather than restated as literals,
-      # so an EKS-side change to networking/role/storage defaults doesn't
-      # silently diverge between the two classes on the next apply.
-      role                       = data.kubernetes_resource.nodeclass_default[0].object.spec.role
-      subnetSelectorTerms        = data.kubernetes_resource.nodeclass_default[0].object.spec.subnetSelectorTerms
-      securityGroupSelectorTerms = data.kubernetes_resource.nodeclass_default[0].object.spec.securityGroupSelectorTerms
-      ephemeralStorage           = data.kubernetes_resource.nodeclass_default[0].object.spec.ephemeralStorage
-      networkPolicy              = data.kubernetes_resource.nodeclass_default[0].object.spec.networkPolicy
-      networkPolicyEventLogs     = data.kubernetes_resource.nodeclass_default[0].object.spec.networkPolicyEventLogs
-      snatPolicy                 = data.kubernetes_resource.nodeclass_default[0].object.spec.snatPolicy
-      # The one field the built-in class doesn't have and the whole reason this
-      # resource exists. local.tags mirrors the AWS provider's own default_tags
-      # (main.tf), so every node this class launches carries the same
-      # Service/Customer/Environment keys as every other resource in the stack.
-      tags = local.tags
-    }
+    # Required fields are read directly so a missing one fails loudly; the
+    # optional ones merge in only when present (see local.nodeclass_optional_fields).
+    # Copied through rather than restated as literals, so an EKS-side change to
+    # networking/role/storage defaults doesn't silently diverge between the two
+    # classes on the next apply.
+    spec = merge(
+      {
+        role                       = data.kubernetes_resource.nodeclass_default[0].object.spec.role
+        subnetSelectorTerms        = data.kubernetes_resource.nodeclass_default[0].object.spec.subnetSelectorTerms
+        securityGroupSelectorTerms = data.kubernetes_resource.nodeclass_default[0].object.spec.securityGroupSelectorTerms
+        # The one field the built-in class doesn't have and the whole reason this
+        # resource exists. local.tags mirrors the AWS provider's own default_tags
+        # (main.tf), so every node this class launches carries the same
+        # Service/Customer/Environment keys as every other resource in the stack.
+        tags = local.tags
+      },
+      local.nodeclass_optional_fields,
+    )
   }
 
   lifecycle {
@@ -425,6 +443,15 @@ resource "kubernetes_manifest" "nodeclass_dozuki" {
         ])
       ]) == 0
       error_message = "local.tags contains a tag key EKS Auto Mode reserves and will reject on a NodeClass (\"Name\", or a key under kubernetes.io/, eks.amazonaws.com/, karpenter.sh/ or karpenter.k8s.aws/). These tags come from the AWS provider default_tags that infra-live's root.hcl injects, so fix it there rather than here."
+    }
+
+    precondition {
+      # An empty tag map produces a perfectly valid NodeClass that provisions
+      # nodes normally and tags none of them - the change would appear to ship
+      # and quietly accomplish nothing. That is worse than failing, because the
+      # only symptom is cost data that stays broken.
+      condition     = length(local.tags) > 0
+      error_message = "local.tags is empty, so this NodeClass would launch untagged nodes and defeat its own purpose. It mirrors the AWS provider's default_tags; confirm the caller is injecting them (infra-live's root.hcl generate block) before applying."
     }
   }
 }
@@ -460,9 +487,20 @@ resource "kubernetes_manifest" "nodeclass_dozuki" {
 # be: repointing it marks every EXISTING node in this pool Drifted, and Karpenter
 # replaces them SERIALLY under this pool's own disruption budget (budget 1,
 # consolidateAfter 5m, same as the taint removal above). Unlike that taint change
-# there is no second pool being deleted underneath this one, so - on an env that
-# has already converged past the two-pool collapse - this roll is serial only,
-# with no concurrent whole-fleet cascade. Tags only land on nodes created AFTER
+# there is no second pool being deleted underneath this one, so this drift does
+# not cascade the way the two-pool collapse did.
+#
+# That budget governs THIS voluntary drift and nothing else. It does not throttle
+# spot interruption, node expiry, Karpenter repair, a manual node deletion, or
+# disruption originating in another pool, so "serial" describes the roll, not a
+# guarantee about total concurrent churn. Two ways it goes wrong in practice: a
+# PodDisruptionBudget that never admits an eviction stalls the roll indefinitely
+# rather than failing, and a pod pinned by its EBS volume to one Availability
+# Zone cannot be replaced if that zone has no capacity - which is why an
+# environment whose volumes are clumped into a subset of its zones should be
+# sequenced deliberately instead of picked up in a bulk pin bump.
+#
+# Tags only land on nodes created AFTER
 # this ships; every node that already exists keeps its untagged EC2 instance and
 # EBS volume tags until it's replaced (by this drift roll or by ordinary
 # consolidation/expiry) and a fresh CreateFleet call picks up the new class.
