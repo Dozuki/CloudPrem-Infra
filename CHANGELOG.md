@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.10.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.9.1...v9.10.0) (2026-08-25)
+
+
+### Features
+
+* **logical:** tag Karpenter nodes through a custom EKS Auto Mode NodeClass ([#551](https://github.com/Dozuki/CloudPrem-Infra/issues/551)) ([7bfa8bd](https://github.com/Dozuki/CloudPrem-Infra/commit/7bfa8bd1ed1de0a3b09d89414714b438f029c943))
+
 ## [9.9.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.9.0...v9.9.1) (2026-08-25)
 
 
