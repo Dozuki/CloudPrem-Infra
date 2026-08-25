@@ -531,11 +531,11 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         # zone-pinned PVCs - so the whole pool was exempted from bin-packing to
         # protect four pods.
         #
-        # That protection now lives on the pods instead of the pool: opensearch,
-        # prometheus, alertmanager, the customer grafana, metrics-server and
-        # prometheus-adapter all carry `karpenter.sh/do-not-disrupt: "true"`
-        # (flux.tf, local.app_stateful_scheduling), the same mechanism already
-        # proven on helm-controller below. A node hosting one of those pods is
+        # That protection now lives on the pods instead of the pool. The EBS-volume
+        # owners carry `karpenter.sh/do-not-disrupt: "true"` via flux.tf's
+        # local.do_not_disrupt_annotation: prometheus and alertmanager always,
+        # opensearch only below 3 replicas (at 3+ it has replica redundancy and
+        # flux.tf drops the annotation). A node hosting one of those pods is
         # still skipped by consolidation; every other node in the pool - the
         # ones with no such pod, sitting empty or near-empty - is repacked
         # normally. consolidateAfter stays 5m (the retired spot pool ran 1m) so a
@@ -545,16 +545,19 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         #
         # Consequence worth stating plainly: a do-not-disrupt pod's node is
         # ineligible for VOLUNTARY consolidation for as long as that pod lives
-        # there (same boundary as helm-controller below - drift still forces
-        # through eventually, bounded by the NodeClaim's terminationGracePeriod;
-        # no expireAfter is set on this pool, so age alone never recycles it;
-        # only spot interruption/repair/manual delete
-        # are irrelevant here since this is the on-demand pool). The six
-        # annotated workloads pack onto roughly two nodes per env at current
-        # request sizes (opensearch's 3Gi request alone fills most of one
-        # 8GiB node), so that sets a practical floor of about 2 on-demand
-        # nodes per env - consolidation can shrink everything else on the
-        # pool, but it cannot repack those six onto fewer nodes on its own.
+        # there. Drift still forces through eventually, bounded by the NodeClaim's
+        # terminationGracePeriod, and no expireAfter is set on this pool, so age
+        # alone never recycles it. Of the forceful paths the annotation never
+        # covered, only spot interruption is made irrelevant by this being the
+        # on-demand pool; node repair and manual delete still apply.
+        #
+        # Resulting floor, measured 2026-08-21 and recorded on Lodestar-02z.21:
+        # 1 node in the collapsed prod envs, where opensearch runs 3 replicas and
+        # is therefore unpinned, leaving prometheus and alertmanager to share one
+        # node; 2-3 where opensearch is unpinned and they do not co-locate (dev-min
+        # at .large shapes sat them on separate nodes) or where a single-replica
+        # opensearch adds a pin of its own. Consolidation can shrink everything
+        # else on the pool, but it cannot repack the pinned pods onto fewer nodes.
         consolidationPolicy = "WhenEmptyOrUnderutilized"
         consolidateAfter    = "5m"
         # One node at a time regardless of pool size. The CRD default is 10% which
