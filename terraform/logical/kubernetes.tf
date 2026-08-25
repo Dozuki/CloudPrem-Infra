@@ -339,6 +339,123 @@ data "kubernetes_service_v1" "envoy_proxy_azure" {
 # This layer just passes the physical target-group ARNs as chart values (see the
 # gateway.stableProxyService.targetGroupBindings set entries below).
 
+# EKS Auto Mode creates and reconciles a built-in NodeClass named "default" the
+# moment compute_config is enabled (terraform/physical/eks.tf), and the NodePool
+# below pointed at it unmodified. That built-in class carries no spec.tags field
+# at all, and it is Karpenter (a controller), not the AWS provider, that calls
+# CreateFleet for every node - so infra-live's root.hcl default_tags, which tags
+# everything the AWS provider itself creates, never reaches a single EC2 instance
+# Karpenter launches. Every Auto Mode node in the fleet has shipped untagged since
+# day one, which leaves node compute unattributable to a customer or environment
+# in cost reporting. The EKS Auto Mode per-node management-hours surcharge lands
+# untagged for the same reason. (Figures are tracked internally, not here: this
+# repo is public.)
+#
+# Fix: read the built-in class's fields back (nothing here is safe to hardcode -
+# spec.role in particular is an EKS-generated name with a random suffix, unique
+# per cluster) and republish them on our own NodeClass, adding spec.tags. The
+# NodePool then points at ours instead of "default".
+data "kubernetes_resource" "nodeclass_default" {
+  count = var.cloud == "aws" ? 1 : 0
+
+  api_version = "eks.amazonaws.com/v1"
+  kind        = "NodeClass"
+
+  metadata {
+    name = "default"
+  }
+}
+
+locals {
+  nodeclass_default_spec = try(data.kubernetes_resource.nodeclass_default[0].object.spec, {})
+
+  # Optional fields are copied only when the built-in class actually carries them.
+  # Reading them unconditionally would emit an explicit null for any field EKS
+  # omits, and the CRD rejects a null where it expects a value or nothing - which
+  # would fail the apply in whichever environment first ran an EKS version that
+  # dropped a default, not in the one we tested. Every cluster checked on
+  # 2026-08-25 has all four, so this guard is for the version skew we cannot see
+  # rather than for a problem we currently have.
+  nodeclass_optional_fields = {
+    for field in ["ephemeralStorage", "networkPolicy", "networkPolicyEventLogs", "snatPolicy"] :
+    field => local.nodeclass_default_spec[field]
+    if try(local.nodeclass_default_spec[field], null) != null
+  }
+}
+
+resource "kubernetes_manifest" "nodeclass_dozuki" {
+  count = var.cloud == "aws" ? 1 : 0
+
+  manifest = {
+    apiVersion = "eks.amazonaws.com/v1"
+    kind       = "NodeClass"
+    metadata = {
+      name = "dozuki"
+      # Deliberately NOT labeled app.kubernetes.io/managed-by: eks - that label is
+      # what EKS stamps on the class IT owns and reconciles; putting it on ours
+      # would be a lie about who manages this object and could confuse the Auto
+      # Mode controller into thinking it should also reconcile this one.
+    }
+    # Required fields are read directly so a missing one fails loudly; the
+    # optional ones merge in only when present (see local.nodeclass_optional_fields).
+    # Copied through rather than restated as literals, so an EKS-side change to
+    # networking/role/storage defaults doesn't silently diverge between the two
+    # classes on the next apply.
+    spec = merge(
+      {
+        role                       = data.kubernetes_resource.nodeclass_default[0].object.spec.role
+        subnetSelectorTerms        = data.kubernetes_resource.nodeclass_default[0].object.spec.subnetSelectorTerms
+        securityGroupSelectorTerms = data.kubernetes_resource.nodeclass_default[0].object.spec.securityGroupSelectorTerms
+        # The one field the built-in class doesn't have and the whole reason this
+        # resource exists. local.tags mirrors the AWS provider's own default_tags
+        # (main.tf), so every node this class launches carries the same
+        # Service/Customer/Environment keys as every other resource in the stack.
+        tags = local.tags
+      },
+      local.nodeclass_optional_fields,
+    )
+  }
+
+  lifecycle {
+    precondition {
+      # role is EKS-generated per cluster (see the comment above) - if the data
+      # source above ever comes back without one, fail the plan loudly instead of
+      # creating a NodeClass with a blank IAM role, which Karpenter would accept
+      # but every node launch against it would then fail silently at CreateFleet.
+      condition     = try(data.kubernetes_resource.nodeclass_default[0].object.spec.role, "") != ""
+      error_message = "data.kubernetes_resource.nodeclass_default returned an empty (or missing) spec.role. Refusing to create kubernetes_manifest.nodeclass_dozuki with a blank node IAM role - that would silently fail to provision nodes. Confirm the built-in EKS Auto Mode NodeClass \"default\" exists and compute_config is enabled (terraform/physical/eks.tf) before re-applying."
+    }
+
+    precondition {
+      # local.tags mirrors whatever root.hcl injects, which means a tag added
+      # there lands here without anyone editing this file. EKS Auto Mode rejects
+      # a NodeClass whose spec.tags carries "Name" or a key under one of the
+      # reserved prefixes, and it rejects it at ADMISSION - so a bad key would
+      # not fail here, it would fail the apply in every environment at once with
+      # a message about the CRD rather than about root.hcl. As of 2026-08-25 the
+      # six injected keys (Environment, Customer, Service, ManagedBy, StackPath,
+      # Repo) are all fine; this exists so the seventh is caught in plan.
+      condition = length([
+        for key in keys(local.tags) : key
+        if key == "Name" || anytrue([
+          for reserved in ["kubernetes.io/", "eks.amazonaws.com/", "karpenter.sh/", "karpenter.k8s.aws/"] :
+          startswith(key, reserved)
+        ])
+      ]) == 0
+      error_message = "local.tags contains a tag key EKS Auto Mode reserves and will reject on a NodeClass (\"Name\", or a key under kubernetes.io/, eks.amazonaws.com/, karpenter.sh/ or karpenter.k8s.aws/). These tags come from the AWS provider default_tags that infra-live's root.hcl injects, so fix it there rather than here."
+    }
+
+    precondition {
+      # An empty tag map produces a perfectly valid NodeClass that provisions
+      # nodes normally and tags none of them - the change would appear to ship
+      # and quietly accomplish nothing. That is worse than failing, because the
+      # only symptom is cost data that stays broken.
+      condition     = length(local.tags) > 0
+      error_message = "local.tags is empty, so this NodeClass would launch untagged nodes and defeat its own purpose. It mirrors the AWS provider's default_tags; confirm the caller is injecting them (infra-live's root.hcl generate block) before applying."
+    }
+  }
+}
+
 # ONE custom NodePool per env. There were two (a weight-100 "spot" pool and this
 # tainted "on-demand" pool); the split is what held every env at ~6 nodes, because
 # each pool floors independently and neither can pack into the other. Collapsing
@@ -363,8 +480,38 @@ data "kubernetes_service_v1" "envoy_proxy_azure" {
 # After this change the taint is gone, so those tolerations are inert rather than
 # required, and on a spot-preferred env the istiod pin resolves to a spot-capable
 # pool. Both are tracked in Lodestar-02z.7, the post-convergence cleanup.
+#
+# nodeClassRef below points at kubernetes_manifest.nodeclass_dozuki (our tagged
+# class) instead of the built-in "default" one - see the comment on that resource
+# above for why. nodeClassRef is a static-drift field just like the taint used to
+# be: repointing it marks every EXISTING node in this pool Drifted, and Karpenter
+# replaces them SERIALLY under this pool's own disruption budget (budget 1,
+# consolidateAfter 5m, same as the taint removal above). Unlike that taint change
+# there is no second pool being deleted underneath this one, so this drift does
+# not cascade the way the two-pool collapse did.
+#
+# That budget governs THIS voluntary drift and nothing else. It does not throttle
+# spot interruption, node expiry, Karpenter repair, a manual node deletion, or
+# disruption originating in another pool, so "serial" describes the roll, not a
+# guarantee about total concurrent churn. Two ways it goes wrong in practice: a
+# PodDisruptionBudget that never admits an eviction stalls the roll indefinitely
+# rather than failing, and a pod pinned by its EBS volume to one Availability
+# Zone cannot be replaced if that zone has no capacity - which is why an
+# environment whose volumes are clumped into a subset of its zones should be
+# sequenced deliberately instead of picked up in a bulk pin bump.
+#
+# Tags only land on nodes created AFTER
+# this ships; every node that already exists keeps its untagged EC2 instance and
+# EBS volume tags until it's replaced (by this drift roll or by ordinary
+# consolidation/expiry) and a fresh CreateFleet call picks up the new class.
 resource "kubernetes_manifest" "nodepool_on_demand" {
   count = var.cloud == "aws" ? 1 : 0
+
+  # Ordering only - nodeClassRef.name below is a plain string, not a resource
+  # reference, so there is no implicit dependency on the NodeClass existing
+  # first. Without this, Karpenter could reconcile the NodePool before the
+  # NodeClass object it names is present.
+  depends_on = [kubernetes_manifest.nodeclass_dozuki]
 
   manifest = {
     apiVersion = "karpenter.sh/v1"
@@ -379,7 +526,7 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
             nodeClassRef = {
               group = "eks.amazonaws.com"
               kind  = "NodeClass"
-              name  = "default"
+              name  = "dozuki"
             }
             requirements = concat([
               {
