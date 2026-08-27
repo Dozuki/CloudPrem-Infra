@@ -145,7 +145,7 @@ variable "app_image_flavor" {
 }
 
 variable "beanstalkd_tag" {
-  description = "Tag for the dedicated beanstalkd fork image (repo <registry>/beanstalkd). Required when app_image_flavor is slim; ignored on legacy."
+  description = "Tag for the dedicated beanstalkd fork image (repo <registry>/beanstalkd). Required when app_image_flavor is slim. Optional on legacy: when set there, it switches beanstalkd to this dedicated image instead of the app image, and needs chart_version >= 2.10.27."
   type        = string
   default     = ""
   validation {

@@ -84,13 +84,16 @@ locals {
 
     sentry = { customerName = coalesce(var.customer, "Dozuki") }
 
-    # The slim keys (flavor, app.path, beanstalkd) are only emitted when the flavor is
-    # slim, so a legacy env's rendered values stay byte-identical to the pre-flavor
-    # shape. That matters because the flux_values Secret below is watched
-    # (reconcile.fluxcd.io/watch): any new leaf, even one the chart defaults anyway,
-    # changes the Secret and triggers a Helm upgrade on every legacy env at its next
-    # infra bump. Conditionals stay split per key: a single conditional mixing a
-    # string and an object attribute fails type unification against {}.
+    # The slim-only keys (flavor, app.path) are only emitted when the flavor is slim, so
+    # a legacy env's rendered values stay byte-identical to the pre-flavor shape. The
+    # beanstalkd key is different: it is keyed on beanstalkd_tag being set, not on the
+    # flavor, because chart 2.10.27 added the dedicated beanstalkd image on the legacy
+    # line too. With beanstalkd_tag left empty (the legacy default), this still emits
+    # nothing and the values stay byte-identical. That matters because the flux_values
+    # Secret below is watched (reconcile.fluxcd.io/watch): any new leaf, even one the
+    # chart defaults anyway, changes the Secret and triggers a Helm upgrade on every env
+    # at its next infra bump. Conditionals stay split per key: a single conditional
+    # mixing a string and an object attribute fails type unification against {}.
     images = merge(
       {
         app = merge(
@@ -100,7 +103,7 @@ locals {
         webnextjs = { tag = var.nextjs_tag }
       },
       var.app_image_flavor == "slim" ? { flavor = "slim" } : {},
-      var.app_image_flavor == "slim" ? { beanstalkd = { tag = var.beanstalkd_tag } } : {},
+      var.beanstalkd_tag != "" ? { beanstalkd = { tag = var.beanstalkd_tag } } : {},
     )
 
     ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
@@ -596,6 +599,37 @@ resource "kubernetes_secret_v1" "flux_values" {
         false
       )
       error_message = "app_image_flavor=slim requires chart_version >= 2.11.0 (first release with images.flavor support)."
+    }
+
+    # beanstalkd_tag on the legacy flavor needs the chart that taught images.beanstalkd.tag
+    # to the legacy line: 2.10.27 on the 2.x/release-2.x branch, or (once the 3.x/main port
+    # lands) 4.0.0+ on that line. 4.0.0 is a placeholder ceiling, not a real floor yet - lower
+    # it once main ships the equivalent. Before either floor, an older chart silently ignores
+    # the value and leaves beanstalkd running on the app image, so make that failure loud here
+    # instead of letting it surface as a workload that never gets the dedicated image.
+    #
+    # chart_version can carry a pre-release/build suffix (gov hotfixes are cut this way, e.g.
+    # dozuki-gov is pinned to "2.10.24-dashfix.1" today), and split(".", ...) on that string
+    # leaves a component like "27-hotfix" that tonumber() can't parse, tripping the try(...,
+    # false) fallback and failing the precondition even when the chart is new enough. Strip
+    # the suffix first (split("-", ...)[0]) so only the numeric "major.minor.patch" core is
+    # compared. This treats "2.10.27-hotfix.1" as satisfying >= 2.10.27, which is correct here:
+    # a hotfix tag cut off 2.10.27 does contain the chart change. This is not full semver
+    # pre-release ordering, just enough to stop a real chart version from reading as too old.
+    precondition {
+      condition = (
+        var.app_image_flavor == "slim" ||
+        var.beanstalkd_tag == "" ||
+        try(tonumber(split(".", split("-", var.chart_version)[0])[0]) >= 4, false) ||
+        try(
+          tonumber(split(".", split("-", var.chart_version)[0])[0]) == 2 && (
+            tonumber(split(".", split("-", var.chart_version)[0])[1]) > 10 ||
+            (tonumber(split(".", split("-", var.chart_version)[0])[1]) == 10 && tonumber(split(".", split("-", var.chart_version)[0])[2]) >= 27)
+          ),
+          false
+        )
+      )
+      error_message = "beanstalkd_tag is set on the legacy flavor but chart_version is below the floor that supports it (>= 2.10.27, or >= 4.0.0 once the main line ships this). An older chart silently ignores the value and leaves beanstalkd running on the app image instead of the dedicated one."
     }
   }
 }
@@ -1124,7 +1158,9 @@ resource "kubectl_manifest" "flux_slack_alert" {
       # notification - otherwise fleet messages are indistinguishable.
       # Just env + versions: summary and cluster duplicated env on every fleet
       # stack (eks_cluster_id == customer-environment), tripling the same value.
-      # Slim keys merge in conditionally so legacy manifests stay unchanged.
+      # app-flavor merges in conditionally so legacy manifests stay unchanged. beanstalkd-image
+      # keys on the tag being set, not the flavor, since legacy envs can also run the dedicated
+      # beanstalkd image now (chart_version >= 2.10.27).
       eventMetadata = merge(
         {
           env             = "${var.customer}-${var.environment}"
@@ -1132,10 +1168,8 @@ resource "kubectl_manifest" "flux_slack_alert" {
           app-image       = var.image_tag
           webnextjs-image = var.nextjs_tag
         },
-        var.app_image_flavor == "slim" ? {
-          app-flavor       = "slim"
-          beanstalkd-image = var.beanstalkd_tag
-        } : {},
+        var.app_image_flavor == "slim" ? { app-flavor = "slim" } : {},
+        var.beanstalkd_tag != "" ? { beanstalkd-image = var.beanstalkd_tag } : {},
       )
       eventSources = [
         { kind = "HelmRelease", name = "*" },
