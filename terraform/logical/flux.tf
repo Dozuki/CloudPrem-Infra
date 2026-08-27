@@ -14,6 +14,13 @@ locals {
   # wins on key collisions, matching the old later-set-overrides-earlier-value order).
   app_webnextjs_env = merge(var.webnextjs_env, var.nextjs_extra_env)
 
+  # chart_version with any pre-release/build suffix stripped, split into its components:
+  # "2.10.27" -> ["2","10","27"], "2.10.24-dashfix.1" -> ["2","10","24"]. Consumers must
+  # check length(...) == 3 before indexing; a malformed pin like "4" or "4-anything" splits
+  # to a 1-element list whose [0] is numerically 4, which would otherwise satisfy a bare
+  # major-only comparison and wave through a version that is not a real chart release.
+  chart_version_core = split(".", split("-", var.chart_version)[0])
+
   # gateway.hosts[0] is the primary; additional_gateway_hosts append from index 1.
   app_gateway_hosts = concat(
     [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name), tlsSecretName = "tls-secret" }],
@@ -611,20 +618,28 @@ resource "kubernetes_secret_v1" "flux_values" {
     # chart_version can carry a pre-release/build suffix (gov hotfixes are cut this way, e.g.
     # dozuki-gov is pinned to "2.10.24-dashfix.1" today), and split(".", ...) on that string
     # leaves a component like "27-hotfix" that tonumber() can't parse, tripping the try(...,
-    # false) fallback and failing the precondition even when the chart is new enough. Strip
-    # the suffix first (split("-", ...)[0]) so only the numeric "major.minor.patch" core is
-    # compared. This treats "2.10.27-hotfix.1" as satisfying >= 2.10.27, which is correct here:
-    # a hotfix tag cut off 2.10.27 does contain the chart change. This is not full semver
-    # pre-release ordering, just enough to stop a real chart version from reading as too old.
+    # false) fallback and failing the precondition even when the chart is new enough. So the
+    # comparison runs against local.chart_version_core, which strips the suffix first. This
+    # treats "2.10.27-hotfix.1" as satisfying >= 2.10.27, which is correct here: a hotfix tag
+    # cut off 2.10.27 does contain the chart change. This is not full semver pre-release
+    # ordering, just enough to stop a real chart version from reading as too old.
+    #
+    # length(...) == 3 is load-bearing, not defensive noise: without it a malformed pin of
+    # "4" or "4-anything" parses to a single component that is numerically 4, satisfies the
+    # major-only arm, and SILENTLY authorises the tag on a chart that does not support it -
+    # the exact silent-pass this precondition exists to prevent. Any parse failure or short
+    # list falls through try(..., false) to a loud refusal, which is the safe direction.
     precondition {
       condition = (
         var.app_image_flavor == "slim" ||
         var.beanstalkd_tag == "" ||
-        try(tonumber(split(".", split("-", var.chart_version)[0])[0]) >= 4, false) ||
         try(
-          tonumber(split(".", split("-", var.chart_version)[0])[0]) == 2 && (
-            tonumber(split(".", split("-", var.chart_version)[0])[1]) > 10 ||
-            (tonumber(split(".", split("-", var.chart_version)[0])[1]) == 10 && tonumber(split(".", split("-", var.chart_version)[0])[2]) >= 27)
+          length(local.chart_version_core) == 3 && (
+            tonumber(local.chart_version_core[0]) >= 4 ||
+            (tonumber(local.chart_version_core[0]) == 2 && (
+              tonumber(local.chart_version_core[1]) > 10 ||
+              (tonumber(local.chart_version_core[1]) == 10 && tonumber(local.chart_version_core[2]) >= 27)
+            ))
           ),
           false
         )

@@ -152,6 +152,16 @@ variable "beanstalkd_tag" {
     condition     = var.app_image_flavor != "slim" || trimspace(var.beanstalkd_tag) != ""
     error_message = "beanstalkd_tag is required when app_image_flavor is slim."
   }
+  # The slim check above treats a whitespace-only tag as empty, but the legacy-flavor
+  # consumers (the images map, the ECR pin lookup, the Slack eventMetadata) test
+  # `!= ""`, which a string of spaces passes. That mismatch would emit an unusable
+  # image reference, change the Flux-watched values Secret, and trigger an ECR lookup
+  # for a tag that cannot exist. Reject whitespace-only outright so both spellings mean
+  # the same thing everywhere and "" stays the single way to say "not set".
+  validation {
+    condition     = var.beanstalkd_tag == "" || trimspace(var.beanstalkd_tag) != ""
+    error_message = "beanstalkd_tag must not be whitespace-only; use \"\" to leave it unset."
+  }
 }
 
 variable "nextjs_extra_env" {
