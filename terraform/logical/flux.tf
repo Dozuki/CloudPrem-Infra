@@ -14,12 +14,15 @@ locals {
   # wins on key collisions, matching the old later-set-overrides-earlier-value order).
   app_webnextjs_env = merge(var.webnextjs_env, var.nextjs_extra_env)
 
-  # chart_version with any pre-release/build suffix stripped, split into its components:
-  # "2.10.27" -> ["2","10","27"], "2.10.24-dashfix.1" -> ["2","10","24"]. Consumers must
-  # check length(...) == 3 before indexing; a malformed pin like "4" or "4-anything" splits
-  # to a 1-element list whose [0] is numerically 4, which would otherwise satisfy a bare
-  # major-only comparison and wave through a version that is not a real chart release.
-  chart_version_core = split(".", split("-", var.chart_version)[0])
+  # chart_version with any pre-release or build suffix stripped, split into its components:
+  # "2.10.27" -> ["2","10","27"], "2.10.24-dashfix.1" -> ["2","10","24"],
+  # "2.10.27+build.1" -> ["2","10","27"]. Both separators are cut, not just "-": a "+build"
+  # suffix left in place makes the patch component non-numeric and refuses a chart that is
+  # actually new enough. Consumers must check length(...) == 3 before indexing; a malformed
+  # pin like "4" or "4-anything" splits to a 1-element list whose [0] is numerically 4, which
+  # would otherwise satisfy a bare major-only comparison and wave through a version that is
+  # not a real chart release.
+  chart_version_core = split(".", split("+", split("-", var.chart_version)[0])[0])
 
   # gateway.hosts[0] is the primary; additional_gateway_hosts append from index 1.
   app_gateway_hosts = concat(
