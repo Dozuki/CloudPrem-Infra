@@ -145,12 +145,22 @@ variable "app_image_flavor" {
 }
 
 variable "beanstalkd_tag" {
-  description = "Tag for the dedicated beanstalkd fork image (repo <registry>/beanstalkd). Required when app_image_flavor is slim; ignored on legacy."
+  description = "Tag for the dedicated beanstalkd fork image (repo <registry>/beanstalkd). Required when app_image_flavor is slim. Optional on legacy: when set there, it switches beanstalkd to this dedicated image instead of the app image, and needs chart_version >= 2.10.27."
   type        = string
   default     = ""
   validation {
     condition     = var.app_image_flavor != "slim" || trimspace(var.beanstalkd_tag) != ""
     error_message = "beanstalkd_tag is required when app_image_flavor is slim."
+  }
+  # The slim check above treats a whitespace-only tag as empty, but the legacy-flavor
+  # consumers (the images map, the ECR pin lookup, the Slack eventMetadata) test
+  # `!= ""`, which a string of spaces passes. That mismatch would emit an unusable
+  # image reference, change the Flux-watched values Secret, and trigger an ECR lookup
+  # for a tag that cannot exist. Reject whitespace-only outright so both spellings mean
+  # the same thing everywhere and "" stays the single way to say "not set".
+  validation {
+    condition     = var.beanstalkd_tag == "" || trimspace(var.beanstalkd_tag) != ""
+    error_message = "beanstalkd_tag must not be whitespace-only; use \"\" to leave it unset."
   }
 }
 

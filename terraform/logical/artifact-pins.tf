@@ -34,7 +34,9 @@ data "aws_ecr_image" "app_pin" {
 }
 
 data "aws_ecr_image" "beanstalkd_pin" {
-  count           = local.verify_ecr_pins && var.app_image_flavor == "slim" && var.beanstalkd_tag != "" ? 1 : 0
+  # Verified whenever the tag is set, not just on slim: chart 2.10.27 lets the legacy
+  # flavor run the dedicated beanstalkd image too.
+  count           = local.verify_ecr_pins && var.beanstalkd_tag != "" ? 1 : 0
   region          = local.pin_ecr_region
   registry_id     = local.pin_registry_id
   repository_name = "beanstalkd"
