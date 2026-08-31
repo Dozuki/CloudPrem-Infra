@@ -781,18 +781,6 @@ variable "flux_slack_channel" {
   default     = ""
 }
 
-variable "alertmanager_slack_enabled" {
-  description = "Post warning/critical Alertmanager notifications to the fleet-wide Slack webhook. On by default for AWS stacks, which is what every real env wants. Set false for stacks that are short-lived or disposable (the upgrade-test harness does): their Alertmanager dies with the cluster at teardown, so the resolved notification never sends and the firing message stays in the channel for a cluster that no longer exists."
-  type        = bool
-  default     = true
-}
-
-variable "alertmanager_slack_interactivity_enabled" {
-  description = "Enable the Slack Silence 2h action after the standalone signature-verified handler is deployed. The handler and Alertmanager reuse the fleet-global ops BasicAuth credential."
-  type        = bool
-  default     = false
-}
-
 variable "cloudwatch_exporter_enabled" {
   description = "Scrape the two EC2 EBS burst-credit CloudWatch metrics into Prometheus. On by default on AWS because nothing else in the cluster can see EBS exhaustion. Set false to opt a stack out of the small per-node CloudWatch bill; the physical IAM role and pod identity association stay, they just go unused."
   type        = bool
@@ -800,16 +788,10 @@ variable "cloudwatch_exporter_enabled" {
 }
 
 variable "mimir_remote_write_enabled" {
-  description = "Ship a copy of this cluster's metrics to the central Mimir with Prometheus remote_write. Purely additive: the local Prometheus keeps its full TSDB, its rules and its Alertmanager whether this is on or off, which makes flipping it back off a zero-impact revert. NULL (the default) means on for any AWS env, in either partition - central metrics is the fleet default now, so a new env enrolls with no mimir lines in its env.hcl. Set false explicitly to opt an env out. Still needs the ingest key at <customer>/<environment>/mimir in Vault (Mimir-Tenant-Keys mints it from the env dir, so for a normal env it is already there) and, on commercial, the physical network path from enable_mimir. Silently a no-op unless this env's chart_version is >= 2.7.0, the release that carries the remote_write support: an older chart ignores the values and reports nothing."
+  description = "Ship a copy of this cluster's metrics to the central Mimir with Prometheus remote_write. Purely additive to metrics: the local Prometheus keeps its full TSDB and its rules whether this is on or off. It is also now the alert path, though, from chart 2.10.25 on the 2.x line and 3.11.0 on the 3.x line: those releases dropped the per-cluster Alertmanager, so alert notifications go to the central Mimir Alertmanager and turning this off stops alert delivery for the environment, not just metrics. Below those versions the env still has its own Alertmanager and this flag is metrics-only. NULL (the default) means on for any AWS env, in either partition - central metrics is the fleet default now, so a new env enrolls with no mimir lines in its env.hcl. Set false explicitly to opt an env out. Still needs the ingest key at <customer>/<environment>/mimir in Vault (Mimir-Tenant-Keys mints it from the env dir, so for a normal env it is already there) and, on commercial, the physical network path from enable_mimir. Silently a no-op unless this env's chart_version is >= 2.7.0, the release that carries the remote_write support: an older chart ignores the values and reports nothing."
   type        = bool
   nullable    = true
   default     = null
-}
-
-variable "watchdog_heartbeat_enabled" {
-  description = "Route Alertmanager's Watchdog alert to the alert relay as a heartbeat. The relay recognizes alertname=Watchdog and records a CloudWatch datapoint instead of posting it, which is what lets a deadman alarm tell 'this environment stopped delivering alerts' apart from 'this environment has nothing to say'. Without it, an alert-delivery failure is indistinguishable from silence, and the alert that would report the failure has to travel the broken path to reach anyone. Off by default so a chart_version bump never changes alert routing on its own. A no-op unless chart_version is >= 2.8.0, the release that added the route. Turn this on and confirm heartbeat datapoints are arriving BEFORE arming the deadman alarm on the relay, or it pages immediately on missing data."
-  type        = bool
-  default     = false
 }
 
 variable "mimir_url" {

@@ -183,29 +183,6 @@ locals {
 
     monitoring = {
       enabled = true
-      # AWS/Gov stacks already expose the fleet-wide incoming webhook at
-      # secret/dozuki/global/slack -> webhookUrl. The chart's ExternalSecret
-      # projects it directly for Alertmanager; no third webhook value is copied
-      # through Terraform or Helm. Azure has no Vault path, so stays disabled
-      # until the same value is deliberately mirrored into Key Vault.
-      alertmanager = {
-        slack = {
-          enabled = var.cloud == "aws" && var.alertmanager_slack_enabled
-          # The shared Slack app sends Silence 2h button callbacks to the
-          # standalone interaction handler, which reuses the fleet-global ops
-          # login. Keep the button off until that signature-verified handler is
-          # deployed and configured in Slack.
-          #
-          # Carries the parent gate too, so a stack that opts out of Slack can
-          # never render interactivity=true under enabled=false. The chart does
-          # gate every interactivity consumer on both flags today, but the values
-          # we hand it should not depend on it staying that way.
-          interactivity = {
-            enabled = var.cloud == "aws" && var.alertmanager_slack_enabled && var.alertmanager_slack_interactivity_enabled
-          }
-        }
-      }
-
       # Alerts on EBS burst-credit exhaustion, which nothing in-cluster can see:
       # the node stays Ready and StorageReady=True while every disk-backed pod on
       # it stalls. The CloudWatch metric is the only thing that moves.
@@ -262,14 +239,6 @@ locals {
       mimir = {
         enabled = var.cloud == "aws" && local.mimir_remote_write_enabled
         url     = local.mimir_url
-      }
-      # Routes Alertmanager's always-firing Watchdog to the fleet relay, which
-      # turns it into a CloudWatch datapoint instead of a Slack post, so the
-      # relay's deadman alarms can see this environment stop reporting. Off by
-      # default: with the route pointed at the null receiver the relay gets no
-      # Watchdog traffic, and any deadman armed against it would page instantly.
-      watchdogHeartbeat = {
-        enabled = var.watchdog_heartbeat_enabled
       }
     }
 
@@ -508,11 +477,6 @@ locals {
       }
       "kube-prometheus-stack" = {
         prometheus = { prometheusSpec = {
-          nodeSelector = local.stateful_node_selector
-          tolerations  = local.stateful_tolerations
-          podMetadata  = { annotations = local.do_not_disrupt_annotation }
-        } }
-        alertmanager = { alertmanagerSpec = {
           nodeSelector = local.stateful_node_selector
           tolerations  = local.stateful_tolerations
           podMetadata  = { annotations = local.do_not_disrupt_annotation }
@@ -1090,6 +1054,10 @@ resource "kubectl_manifest" "flux_relay_secret_store" {
   })
 }
 
+# This serves Flux's own notification path (HelmRelease and Kustomization
+# failures), not Alertmanager. The "alertmanager-slack-relay" prefix on the
+# Vault paths below is historical: it names the shared relay service, not an
+# Alertmanager consumer. Do not delete these as Alertmanager remnants.
 resource "kubectl_manifest" "flux_relay_external_secret" {
   count      = local.flux_slack_use_relay ? 1 : 0
   depends_on = [kubectl_manifest.flux_relay_secret_store]
