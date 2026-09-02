@@ -148,6 +148,9 @@ variable "app_cron_mode" {
   description = "How the app's periodic work dispatches: crond (default, single in-app cron process), shadow (crond still dispatches, CronJobs run alongside suspended for validation), or cronjobs (crond scaled to zero, CronJobs dispatch). Both crond and CronJobs dispatching at once cannot be expressed here. Mode transitions are a human sequencing rule, not enforced by terraform: cronjobs may only move to shadow, never straight to crond, since disabling appCron deletes its CR and lets Kubernetes GC the CronJobs asynchronously against crond's scale-up, recreating the double-dispatch this variable exists to prevent."
   type        = string
   default     = "crond"
+  # nullable = false so an explicit null from a caller falls back to the safe default instead of
+  # failing the plan on the validation below (contains(..., null) is false).
+  nullable = false
   validation {
     condition     = contains(["crond", "shadow", "cronjobs"], var.app_cron_mode)
     error_message = "app_cron_mode must be crond, shadow, or cronjobs."

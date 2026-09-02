@@ -15,13 +15,19 @@ locals {
   app_webnextjs_env = merge(var.webnextjs_env, var.nextjs_extra_env)
 
   # app_cron_mode -> the deployments/appCron values that implement the crond/CronJobs cutover
-  # table (both-dispatching is unrepresentable by construction, see the variable). crond is
-  # deliberately the EMPTY diff - no crond or appCron key at all - so a plan on an env that has
-  # not opted in renders byte-identical to before this variable existed. shadow and cronjobs
-  # each add deployments.crond.replicaCount alongside the existing webNextjs entry, plus the
-  # whole appCron block. This is a values table, not a state machine: which mode an env may move
-  # to from another is a human/operator-interlock concern (see the variable), not something
-  # terraform enforces.
+  # table. crond is deliberately the EMPTY entry - no crond and no appCron key at all - so an env
+  # that has not opted in renders byte-identical to before this variable existed.
+  #
+  # What this table does and does not guarantee: it makes "crond dispatching AND CronJobs
+  # dispatching" unrepresentable in CONFIG, which is all terraform can do. The RUNTIME guarantee
+  # is the operator's exclusivity interlock, which refuses to unsuspend any generated CronJob
+  # until the crond Deployment is at replicas 0 with zero app=crond pods and has stayed that way
+  # for dwellSeconds. That matters because helm does not apply the two halves of a cutover
+  # atomically: on shadow -> cronjobs, nothing stops the CronJobs being unsuspended before the
+  # last crond pod exits, and the interlock is what closes that window, not this table.
+  #
+  # Likewise this is a values table, not a state machine. Which mode an env may move to from
+  # which is a human sequencing rule (see the variable), not something terraform enforces.
   app_cron_mode_values = {
     crond = {
       deployments = {}
@@ -347,7 +353,14 @@ locals {
       }
     }
 
-    deployments = { webNextjs = { env = local.app_webnextjs_env } }
+    # merge() is SHALLOW: this combines top-level keys under deployments, so webNextjs and the
+    # mode table's crond entry coexist only because they are distinct keys. If a base crond entry
+    # is ever added here, merge it explicitly at deployments.crond rather than letting the mode
+    # table replace the whole subtree.
+    deployments = merge(
+      { webNextjs = { env = local.app_webnextjs_env } },
+      local.app_cron_mode_values[var.app_cron_mode].deployments,
+    )
   }
 
   # Final values = base, merged with the azure-only block. Three keys collide between the two and all
@@ -557,11 +570,12 @@ locals {
     { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" && k != "metrics-server" },
     { grafana = merge(local.app_base_values.grafana, try(local.app_stateful_scheduling.grafana, {})) },
     { "metrics-server" = merge(local.app_base_values["metrics-server"], try(local.app_stateful_scheduling["metrics-server"], {})) },
-    # app_cron_mode: deployments deep-merges with the webNextjs entry already set above; appCron is
-    # a new top-level key, omitted entirely (length 0) in the default crond mode so the rendered
-    # values are byte-identical to before this variable existed.
-    { deployments = merge(local.app_base_values.deployments, local.app_cron_mode_values[var.app_cron_mode].deployments) },
-    { for k, v in local.app_cron_mode_values[var.app_cron_mode] : k => v if k != "deployments" && length(v) > 0 },
+    # appCron is a brand-new top-level key that no other map in this chain produces, so appending
+    # it here cannot clobber an intermediate contribution the way reconstructing `deployments`
+    # would (deployments is folded into app_base_values above for exactly that reason). The
+    # length filter is what omits the key entirely in crond mode, keeping an env that has not
+    # opted in byte-identical to before this variable existed.
+    { for k, v in local.app_cron_mode_values[var.app_cron_mode] : k => v if k == "appCron" && length(v) > 0 },
   )
 }
 
