@@ -14,6 +14,29 @@ locals {
   # wins on key collisions, matching the old later-set-overrides-earlier-value order).
   app_webnextjs_env = merge(var.webnextjs_env, var.nextjs_extra_env)
 
+  # app_cron_mode -> the deployments/appCron values that implement the crond/CronJobs cutover
+  # table (both-dispatching is unrepresentable by construction, see the variable). crond is
+  # deliberately the EMPTY diff - no crond or appCron key at all - so a plan on an env that has
+  # not opted in renders byte-identical to before this variable existed. shadow and cronjobs
+  # each add deployments.crond.replicaCount alongside the existing webNextjs entry, plus the
+  # whole appCron block. This is a values table, not a state machine: which mode an env may move
+  # to from another is a human/operator-interlock concern (see the variable), not something
+  # terraform enforces.
+  app_cron_mode_values = {
+    crond = {
+      deployments = {}
+      appCron     = {}
+    }
+    shadow = {
+      deployments = { crond = { replicaCount = 1 } }
+      appCron     = { enabled = true, suspend = true }
+    }
+    cronjobs = {
+      deployments = { crond = { replicaCount = 0 } }
+      appCron     = { enabled = true, suspend = false }
+    }
+  }
+
   # chart_version with any pre-release or build suffix stripped, split into its components:
   # "2.10.27" -> ["2","10","27"], "2.10.24-dashfix.1" -> ["2","10","24"],
   # "2.10.27+build.1" -> ["2","10","27"]. Both separators are cut, not just "-": a "+build"
@@ -534,6 +557,11 @@ locals {
     { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" && k != "metrics-server" },
     { grafana = merge(local.app_base_values.grafana, try(local.app_stateful_scheduling.grafana, {})) },
     { "metrics-server" = merge(local.app_base_values["metrics-server"], try(local.app_stateful_scheduling["metrics-server"], {})) },
+    # app_cron_mode: deployments deep-merges with the webNextjs entry already set above; appCron is
+    # a new top-level key, omitted entirely (length 0) in the default crond mode so the rendered
+    # values are byte-identical to before this variable existed.
+    { deployments = merge(local.app_base_values.deployments, local.app_cron_mode_values[var.app_cron_mode].deployments) },
+    { for k, v in local.app_cron_mode_values[var.app_cron_mode] : k => v if k != "deployments" && length(v) > 0 },
   )
 }
 
