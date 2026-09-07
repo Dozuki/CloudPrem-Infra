@@ -192,7 +192,6 @@ var tfTypeToAWSType = map[string]string{
 	"aws_nat_gateway":                   "ec2:natgateway",
 	"aws_eip":                           "ec2:elastic-ip",
 	"aws_vpc_endpoint":                  "ec2:vpc-endpoint",
-	"aws_ebs_volume":                    "ec2:volume",
 	"aws_kms_key":                       "kms:key",
 	"aws_kms_replica_key":               "kms:key",
 	"aws_kms_external_key":              "kms:key",
@@ -272,6 +271,15 @@ var primaryARNFields = map[string][]string{
 // deleteAfter and appears in the tagging index while belonging to no terraform address.
 // Enforcing on those would fail a healthy nightly the first time a backup window opened
 // mid-provision.
+//
+// The Auto Mode node trio (instance, network-interface, volume) is the other case, and
+// ec2:volume is here because of a premise that changed under this code. Karpenter calls
+// CreateFleet, so the provider's default_tags never reached a node; the comment below
+// therefore reasoned that any volume carrying Customer AND deleteAfter had to be
+// terraform's. #551 gave the NodeClass a spec.tags block sourced from aws_default_tags,
+// so every Auto Mode node now propagates both tags to its root and containerd volumes
+// (2 per node), and the tag query sees them. Nothing under terraform/ creates an
+// aws_ebs_volume, so a volume in this index is never terraform's to lose.
 var serviceCreatedTypes = map[string]bool{
 	"rds:snapshot":          true,
 	"rds:cluster-snapshot":  true,
@@ -279,18 +287,15 @@ var serviceCreatedTypes = map[string]bool{
 	"ec2:image":             true,
 	"ec2:instance":          true, // EKS Auto Mode nodes; the cluster owns their lifecycle
 	"ec2:network-interface": true, // attached by EKS/ELB/RDS to resources terraform does own
+	"ec2:volume":            true, // root and containerd volumes of those same Auto Mode nodes
 }
 
 // This map and terraformManagedTypes must stay DISJOINT, and TestResidualTypeMapsAreDisjoint
 // enforces it. An overlap is unresolvable from the AWS type alone: whichever branch
 // classifyResidual checked first would silently decide the other case, and the direction
-// that lost would be invisible. Three types were removed from this list for exactly that
+// that lost would be invisible. Two types were removed from this list for exactly that
 // reason, each because the tag query cannot actually see its service-created variant:
 //
-//	ec2:volume       the EBS CSI StorageClass propagates only deleteAfter
-//	                 (terraform/logical/kubernetes.tf), and the query requires Customer AND
-//	                 deleteAfter, so a CSI volume never surfaces. A volume that does surface
-//	                 is terraform's.
 //	logs:log-group   the CloudWatch agent's container-insights groups carry no harness tags
 //	                 at all (see the sweep in Teardown), so they cannot surface either.
 //	elasticloadbalancing:*  controller-created load balancers are tagged by the controller,
@@ -324,9 +329,9 @@ var terraformManagedTypes = func() map[string]bool {
 //	unmanaged        CloudPrem's terraform never creates this type, so its presence
 //	                 says nothing about terraform having lost anything.
 //
-// Order matters: service-created and index-lag are checked FIRST, because several of
-// those types (ec2:volume, ec2:security-group) are also terraform-managed elsewhere in
-// the stack and would otherwise be enforced on.
+// Order matters: service-created and index-lag are checked FIRST, because some of those
+// types (ec2:security-group) are also terraform-managed elsewhere in the stack and would
+// otherwise be enforced on.
 func classifyResidual(awsType string) (blocking bool, why string) {
 	switch {
 	case serviceCreatedTypes[awsType]:

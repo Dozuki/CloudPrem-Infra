@@ -175,6 +175,7 @@ func TestClassifyResidualDoesNotEnforceOnUnownedTypes(t *testing.T) {
 		{"automated rds snapshot", "arn:aws:rds:us-east-1:1:cluster-snapshot:rds:smoke1bc2-bi-2026-08-18", "service-created"},
 		{"stale tagging-index security group", "arn:aws:ec2:us-east-1:1:security-group/sg-deadbeef", "tagging index"},
 		{"type cloudprem terraform never creates", "arn:aws:ecr:us-east-1:1:repository/smoke1bc2-app", "unclassified"},
+		{"auto mode node volume", "arn:aws:ec2:us-east-1:1:volume/vol-01aaceb327cd39f96", "service-created"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -189,6 +190,31 @@ func TestClassifyResidualDoesNotEnforceOnUnownedTypes(t *testing.T) {
 				t.Errorf("why = %q, want it to mention %q", got[0].Why, c.wantWhy)
 			}
 		})
+	}
+}
+
+// The exact residual set every nightly produced from 2026-08-25 23:37Z onward, taken
+// from harness-min-default-lth2z. CPI #551 gave the Auto Mode NodeClass a spec.tags
+// block, so Karpenter's fleet, its instances, their ENIs and their EBS volumes all
+// started carrying Customer AND deleteAfter and surfacing in the tag query. Only the
+// volumes classified Blocking, and they failed PROVISION on all four configs for days
+// while terraform itself succeeded every run. None of these is terraform's to lose.
+func TestAutoModeNodeResidualsDoNotBlock(t *testing.T) {
+	idx := indexFixture(t)
+	arns := []string{
+		"arn:aws:ec2:us-east-1:076248559428:fleet/fleet-cd178737-1c86-6c05-ae92-092864b49b25",
+		"arn:aws:ec2:us-east-1:076248559428:instance/i-01c1c948d44c42a5d",
+		"arn:aws:ec2:us-east-1:076248559428:network-interface/eni-0476f42f6f0a657a2",
+		"arn:aws:ec2:us-east-1:076248559428:volume/vol-01aaceb327cd39f96",
+		"arn:aws:ec2:us-east-1:076248559428:volume/vol-06729f497050297e2",
+	}
+	got := reconcileTagged(arns, idx)
+	if len(got) != len(arns) {
+		t.Fatalf("every hit must still be REPORTED: got %d of %d", len(got), len(arns))
+	}
+	rep := &ResidualReport{Residuals: got}
+	if b := rep.Blocking(); len(b) != 0 {
+		t.Errorf("Auto Mode node residuals must not fail a run, got %d blocking: %+v", len(b), b)
 	}
 }
 
@@ -529,7 +555,6 @@ var typesWithPlainARNAttribute = map[string]bool{
 	"aws_nat_gateway":                   true,
 	"aws_eip":                           true,
 	"aws_vpc_endpoint":                  true,
-	"aws_ebs_volume":                    true,
 	"aws_kms_key":                       true,
 	"aws_kms_replica_key":               true,
 	"aws_kms_external_key":              true,
@@ -705,5 +730,38 @@ func TestCheckResidualsCallsTheRealExistenceProbeSeam(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the orphan must still be REPORTED (demoted, not dropped): %+v", rep.Residuals)
+	}
+}
+
+// The ec2:volume exemption rests on a fact about the repo, not about AWS: CloudPrem's
+// terraform creates no EBS volume of its own, so every volume the tag query returns
+// belongs to an Auto Mode node. The moment someone adds an aws_ebs_volume the exemption
+// silently starts hiding a terraform-owned orphan, and neither
+// TestEveryManagedTypeExposesAnARN nor TestEveryBlockingTypeHasAnExistenceVerifier can
+// see it - both only check types already IN tfTypeToAWSType. This is the guard for the
+// type that is deliberately out of it.
+func TestTerraformStillCreatesNoEBSVolume(t *testing.T) {
+	var found []string
+	err := filepath.Walk("../../../terraform", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Ext(path) != ".tf" {
+			return nil
+		}
+		b, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		if strings.Contains(string(b), `resource "aws_ebs_volume"`) {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking terraform/: %v", err)
+	}
+	if len(found) > 0 {
+		t.Errorf("terraform now creates an aws_ebs_volume (%v), but ec2:volume is exempted as service-created in residuals.go - a leaked one of these would be reported and never block. Re-add the tfTypeToAWSType entry and narrow the exemption (probe the volume's attachment) before shipping this", found)
 	}
 }
