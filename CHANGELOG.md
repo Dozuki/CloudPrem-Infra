@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.11.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.11.0...v9.11.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **logical:** stop the nodeclass phantom diff with computed_fields ([#559](https://github.com/Dozuki/CloudPrem-Infra/issues/559)) ([b951dfa](https://github.com/Dozuki/CloudPrem-Infra/commit/b951dfa8674cffc9a32d0aa27dc929db0316c385))
+
 ## [9.11.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.10.0...v9.11.0) (2026-08-27)
 
 
