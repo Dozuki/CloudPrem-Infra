@@ -416,6 +416,52 @@ resource "kubernetes_manifest" "nodeclass_dozuki" {
     )
   }
 
+  # Every optional attribute the NodeClass CRD defines but this object does not set
+  # plans as (known after apply) on EVERY run, so an otherwise-empty plan reports
+  # "1 to change" forever. Observed fleet-wide on every AWS logical stack:
+  # spec.ephemeralStorage.kmsKeyID, plus name/tags on securityGroupSelectorTerms and
+  # tags on subnetSelectorTerms. Nothing actually differs - the live object matches
+  # the built-in "default" NodeClass field for field - and applying it writes nothing,
+  # so the identical diff comes back on the next plan.
+  #
+  # It is not cosmetic. On a stack without autodeploy that phantom change lands the run
+  # UNCONFIRMED, and an UNCONFIRMED run is the stack's blocker, so it stalls the next
+  # real deploy until a human clears it. On the gov stacks it also fires a drift alert
+  # every weekday morning.
+  #
+  # metadata.labels and metadata.annotations are the provider's defaults and have to be
+  # restated: declaring this list REPLACES them rather than adding to it, and dropping
+  # them would surface the EKS-stamped nodeclass-hash annotations as a new diff.
+  #
+  # Paths name a whole attribute, never a leaf inside one. Probed on dev-min
+  # (run 01M23F8Z2FSM5R2YH33637G41R): "spec.securityGroupSelectorTerms" and
+  # "spec.subnetSelectorTerms" both took, while "spec.ephemeralStorage.kmsKeyID" did not
+  # and left that one unknown behind - so it is "spec.ephemeralStorage" here.
+  #
+  # DETECTION TRADE, read this before adding a fourth entry. Terraform will no longer show
+  # an out-of-band edit to spec.securityGroupSelectorTerms or spec.subnetSelectorTerms in a
+  # plan: it reads the live value, accepts it, and reports no change. So a NodeClass
+  # repointed by hand at a permissive security group or a public subnet is invisible here.
+  # The control for that is Kubernetes RBAC on the NodeClass CRD plus API audit logs, NOT
+  # this plan diff - anyone who can edit this object can equally edit the EKS-managed
+  # "default" class it copies (which Terraform reads and has never enforced) or create a
+  # NodeClass of their own, and neither shows up in a plan today either.
+  #
+  # What stays enforced: spec.tags, the whole reason this resource exists, and spec.role,
+  # which additionally has its own precondition below. Both are outside the list.
+  #
+  # The three listed values are copied wholesale from data.kubernetes_resource.nodeclass_default
+  # rather than authored, so they are a mirror of the cluster's own defaults, not a policy we
+  # set - if EKS changes the cluster's subnets or storage defaults we want to follow it, which
+  # is the same reason they are read from the data source in the first place.
+  computed_fields = [
+    "metadata.labels",
+    "metadata.annotations",
+    "spec.ephemeralStorage",
+    "spec.securityGroupSelectorTerms",
+    "spec.subnetSelectorTerms",
+  ]
+
   lifecycle {
     precondition {
       # role is EKS-generated per cluster (see the comment above) - if the data
