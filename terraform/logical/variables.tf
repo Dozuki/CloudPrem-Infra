@@ -501,6 +501,38 @@ variable "opensearch_min_domains" {
   }
 }
 
+variable "search_reindex_enabled" {
+  description = <<-EOT
+    Per-env override of the chart's search.reindex.enabled. null (the default) means "use
+    the chart default", and the key is not sent to the chart at all.
+
+    The chart default is what actually turns the feature on: true on charts carrying the
+    post-upgrade hook design, false on older charts (the release-2.x line, until it is
+    ported). That is why this defaults null - CPI never forces the flag onto an env whose
+    chart still has the old Job design.
+
+    Set false to opt an env out of the reindex entirely. This is also the unblock lever
+    when the hook fails a HelmRelease upgrade: set it, let the upgrade go green, fix the
+    cause, then clear it back to null.
+
+    Set true only on a pre-hook chart, where it switches on the old name-hash Job. Not
+    recommended.
+
+    The reindex is no longer triggered by this flag. On hook-carrying charts the decision
+    lives in a marker document stored in OpenSearch that records the database identity
+    (db.resourceId), a bump-only run id, and both app index UUIDs; a mismatch reindexes,
+    a match exits in seconds.
+
+    A logical restore (a mysqldump loaded into the live instance) changes no
+    terraform-visible identity, so force that case with the chart's search.reindex.runId
+    (bump-only: a new value reindexes, clearing it back to empty is a no-op), not with
+    this flag.
+  EOT
+  type        = bool
+  nullable    = true
+  default     = null
+}
+
 variable "capacity_profile" {
   description = "Node capacity profile for the consolidated NodePool. on-demand: nodes are on-demand only (production default). spot-preferred: Karpenter buys spot whenever any spot offering exists, falling back to on-demand on ICE - never hard spot-only, so zone-pinned EBS pods can always get capacity in their AZ."
   type        = string
