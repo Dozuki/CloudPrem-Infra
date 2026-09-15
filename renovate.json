@@ -42,6 +42,12 @@
       "commitMessagePrefix": "chore(ci):"
     },
     {
+      "description": "The terraform.yml python pin mirrors the python3.12 runtime aws_lambda_function.sns_to_slack declares (terraform/physical/monitoring.tf), so the Lambda tests run on the interpreter the function actually gets. Bump the Lambda runtime first, then lift this cap.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["python"],
+      "allowedVersions": "/^3\\.12(?:\\.|$)/"
+    },
+    {
       "description": "Breaking upgrades stay visible on the Dashboard but need an explicit decision before Renovate creates a PR.",
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true
