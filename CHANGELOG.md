@@ -2,6 +2,19 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.12.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.11.1...v9.12.0) (2026-09-15)
+
+
+### Features
+
+* **logical:** add app_cron_mode to drive the AppCron cutover ([#558](https://github.com/Dozuki/CloudPrem-Infra/issues/558)) ([5e1e640](https://github.com/Dozuki/CloudPrem-Infra/commit/5e1e6402ee4357aff365e67aec1dd251c58f7f89))
+* **logical:** expose search_reindex_enabled as a nullable per-env override ([#561](https://github.com/Dozuki/CloudPrem-Infra/issues/561)) ([c795885](https://github.com/Dozuki/CloudPrem-Infra/commit/c79588531429865bcd023d6379cb80e75c913e55))
+
+
+### Bug Fixes
+
+* **providers:** Update Terraform aws to v6.60.0 ([#557](https://github.com/Dozuki/CloudPrem-Infra/issues/557)) ([91a802e](https://github.com/Dozuki/CloudPrem-Infra/commit/91a802e14dbc75a8f4e5d85b52c0d956bd13a6a6))
+
 ## [9.11.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.11.0...v9.11.1) (2026-09-09)
 
 
