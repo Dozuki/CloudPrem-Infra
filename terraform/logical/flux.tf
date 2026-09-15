@@ -576,6 +576,10 @@ locals {
     # length filter is what omits the key entirely in crond mode, keeping an env that has not
     # opted in byte-identical to before this variable existed.
     { for k, v in local.app_cron_mode_values[var.app_cron_mode] : k => v if k == "appCron" && length(v) > 0 },
+    # search.reindex.enabled is omitted entirely when null, so the chart default wins.
+    # false is the per-env opt-out, and also the unblock lever for a HelmRelease stuck
+    # on a failing reindex hook.
+    var.search_reindex_enabled == null ? {} : { search = { reindex = { enabled = var.search_reindex_enabled } } },
   )
 }
 
