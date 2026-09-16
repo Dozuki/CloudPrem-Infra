@@ -268,6 +268,23 @@ variable "rds_freeable_memory_floor_mib" {
   }
 }
 
+variable "rds_cpu_tiered_alarms" {
+  description = "Split the RDS CPU alarm into a warning tier and a critical tier instead of one alarm that pages at 70%. Off by default so no existing environment changes: with it false the single <identifier>-rds-cpu-usage alarm is created exactly as before. With it true that alarm is replaced by <identifier>-rds-cpu-usage-warning (70% over 2x5m, the old numbers, and the -warning suffix is what makes the Slack card render orange without an @channel) and <identifier>-rds-cpu-usage-critical (rds_cpu_critical_threshold over 3x5m). Turn this on for an environment whose normal business load now sits at the old 70% line, so a real sustained event still pages but ordinary peaks do not. Note the alarm NAME changes when you opt in, which starts fresh alarm history for that environment - do not flip it mid-incident."
+  type        = bool
+  default     = false
+}
+
+variable "rds_cpu_critical_threshold" {
+  description = "CPU percentage for the critical tier when rds_cpu_tiered_alarms is true. Ignored otherwise. 85 over three consecutive 5-minute periods is the default because the flapping this exists to fix was 3-minute excursions to 70%."
+  type        = number
+  default     = 85
+
+  validation {
+    condition     = var.rds_cpu_critical_threshold >= 1 && var.rds_cpu_critical_threshold <= 100
+    error_message = "rds_cpu_critical_threshold must be between 1 and 100 percent."
+  }
+}
+
 variable "rds_backup_retention_period" {
   description = "The number of days to keep automatic database backups. Setting this value to 0 disables automatic backups."
   type        = number
