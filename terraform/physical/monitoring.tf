@@ -164,6 +164,13 @@ module "rds_cpu_alarm" {
 # in the name suffix, descriptions prefixed WARNING: / CRITICAL:, both pointed at the
 # same SNS topic.
 #
+# Flipping rds_cpu_tiered_alarms on an existing environment is a delete of the old
+# alarm plus two creates, across three separate resource addresses. Terraform will not
+# order those, so a failed apply can land between them and leave the instance with no
+# CPU alarm at all. It is a single short apply and the flag is opt-in, so this is an
+# accepted risk rather than a staged migration - but do it deliberately, not during an
+# incident, and confirm all three alarms afterwards.
+#
 # The suffix is not cosmetic. sns_to_slack's _alarm_severity() reads the alarm NAME
 # and nothing else: a name ending -warning renders an orange card with no @channel,
 # and everything else renders red with one. So the warning tier keeps the old 70% /

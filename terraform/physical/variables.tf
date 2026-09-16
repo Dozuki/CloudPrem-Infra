@@ -275,13 +275,13 @@ variable "rds_cpu_tiered_alarms" {
 }
 
 variable "rds_cpu_critical_threshold" {
-  description = "CPU percentage for the critical tier when rds_cpu_tiered_alarms is true. Ignored otherwise. 85 over three consecutive 5-minute periods is the default because the flapping this exists to fix was 3-minute excursions to 70%."
+  description = "CPU percentage for the critical tier when rds_cpu_tiered_alarms is true. 85 over three consecutive 5-minute periods is the default because the flapping this exists to fix was 3-minute excursions to 70%. Must be above 70, the fixed warning-tier threshold, so the two tiers cannot invert. The value is unused when rds_cpu_tiered_alarms is false, but the validation below still runs, so an out-of-range value fails the plan either way."
   type        = number
   default     = 85
 
   validation {
-    condition     = var.rds_cpu_critical_threshold >= 1 && var.rds_cpu_critical_threshold <= 100
-    error_message = "rds_cpu_critical_threshold must be between 1 and 100 percent."
+    condition     = var.rds_cpu_critical_threshold > 70 && var.rds_cpu_critical_threshold <= 100
+    error_message = "rds_cpu_critical_threshold must be above 70 and at most 100. At or below 70 it would sit under the warning tier, so critical would page while warning still read OK."
   }
 }
 
