@@ -756,7 +756,32 @@ resource "kubernetes_manifest" "nodepool_on_demand" {
         # One node at a time regardless of pool size. The CRD default is 10% which
         # rounds up to 1 at today's 4-7 nodes/env, but that scales invisibly with
         # the pool; pin it so a repack wave can never take two nodes at once.
-        budgets = [{ nodes = "1" }]
+        #
+        # The optional second budget blocks AMI-DRIFT replacement during an
+        # environment's busy hours. Drift is the path that actually hurts: it
+        # forces through do-not-disrupt, so it is the one disruption reason that
+        # will take a pinned singleton's node out from under it, and on the
+        # busiest environment it did exactly that in the middle of the working
+        # day. Overlapping budgets resolve to the most restrictive, so nodes="0"
+        # wins for Drifted while the window is active and the baseline nodes="1"
+        # still governs everything else.
+        #
+        # reasons is deliberately narrow. Left unset a budget applies to every
+        # reason, which would also stop Underutilized and Empty consolidation for
+        # the whole span and quietly hand back the savings this pool exists to
+        # capture.
+        #
+        # Empty by default, so every environment keeps today's behaviour until
+        # someone has measured that environment's own trough.
+        budgets = concat(
+          [{ nodes = "1" }],
+          var.karpenter_drift_block_schedule == "" ? [] : [{
+            nodes    = "0"
+            reasons  = ["Drifted"]
+            schedule = var.karpenter_drift_block_schedule
+            duration = var.karpenter_drift_block_duration
+          }]
+        )
       }
       weight = 10
     }
