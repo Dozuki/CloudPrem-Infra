@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.13.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.12.1...v9.13.0) (2026-09-22)
+
+
+### Features
+
+* **karpenter:** optional window blocking AMI-drift node replacement ([#568](https://github.com/Dozuki/CloudPrem-Infra/issues/568)) ([27d2bda](https://github.com/Dozuki/CloudPrem-Infra/commit/27d2bdae53f37128defa249ba15093c42602591f))
+* **monitoring:** optional warning/critical split for the RDS CPU alarm ([#564](https://github.com/Dozuki/CloudPrem-Infra/issues/564)) ([30a28b5](https://github.com/Dozuki/CloudPrem-Infra/commit/30a28b59f3c9474970d9b1c9c13ed3fecc779e47))
+
 ## [9.12.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.12.0...v9.12.1) (2026-09-22)
 
 
