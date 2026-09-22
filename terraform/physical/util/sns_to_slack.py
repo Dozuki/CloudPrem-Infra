@@ -306,10 +306,11 @@ def _alarm_evidence(trigger):
 def _alarm_severity(alarm_name):
     """Derive Slack severity from the fleet's alarm-name suffix convention.
 
-    No-suffix defaults to critical on purpose: only the NLB healthy-hosts pair
-    carries a tier suffix today, and silently downgrading any other alarm is
-    worse than the noisy page it replaces. Matches on the name only, never the
-    description text.
+    No-suffix defaults to critical on purpose: only a few alarms carry a tier
+    suffix today (the NLB healthy-hosts pair, and the RDS CPU pair on any env
+    that sets rds_cpu_tiered_alarms), and silently downgrading any other alarm
+    is worse than the noisy page it replaces. Matches on the name only, never
+    the description text.
     """
     if (alarm_name or '').lower().endswith('-warning'):
         return COLOR_WARNING, '🟠 WARNING', False, 'Review'

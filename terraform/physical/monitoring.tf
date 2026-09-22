@@ -128,7 +128,10 @@ module "rds_cpu_alarm" {
   source  = "terraform-aws-modules/cloudwatch/aws//modules/metric-alarm"
   version = "~> 5.0"
 
-  create_metric_alarm = var.db_engine == "rds"
+  # Replaced by the -warning / -critical pair below when rds_cpu_tiered_alarms is
+  # on. The resource address and the alarm name are both untouched, so every
+  # environment left on the default keeps this alarm and its history.
+  create_metric_alarm = var.db_engine == "rds" && !var.rds_cpu_tiered_alarms
 
   alarm_name        = "${local.identifier}-rds-cpu-usage"
   alarm_description = "CPU usage for RDS instance ${local.identifier}"
@@ -153,6 +156,71 @@ module "rds_cpu_alarm" {
   ok_actions = [
     module.sns.topic_arn
   ]
+}
+
+# Two-tier replacement for module.rds_cpu_alarm above, created only when
+# rds_cpu_tiered_alarms is on. Shaped after the nlb_healthy_hosts pair further down
+# this file, which is the fleet's warning/critical convention: two alarms, the tier
+# in the name suffix, descriptions prefixed WARNING: / CRITICAL:, both pointed at the
+# same SNS topic.
+#
+# Flipping rds_cpu_tiered_alarms on an existing environment is a delete of the old
+# alarm plus two creates, across three separate resource addresses. Terraform will not
+# order those, so a failed apply can land between them and leave the instance with no
+# CPU alarm at all. It is a single short apply and the flag is opt-in, so this is an
+# accepted risk rather than a staged migration - but do it deliberately, not during an
+# incident, and confirm all three alarms afterwards.
+#
+# The suffix is not cosmetic. sns_to_slack's _alarm_severity() reads the alarm NAME
+# and nothing else: a name ending -warning renders an orange card with no @channel,
+# and everything else renders red with one. So the warning tier keeps the old 70% /
+# 2x5m numbers and simply stops paging, while the critical tier is what wakes anyone.
+resource "aws_cloudwatch_metric_alarm" "rds_cpu_warning" {
+  count = var.db_engine == "rds" && var.rds_cpu_tiered_alarms ? 1 : 0
+
+  alarm_name          = "${local.identifier}-rds-cpu-usage-warning"
+  alarm_description   = "WARNING: CPU for RDS instance ${local.identifier} has been at or above 70% for 10 straight minutes - elevated, not yet sustained"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 70
+  evaluation_periods  = 2
+  datapoints_to_alarm = 2
+  period              = 300
+  namespace           = "AWS/RDS"
+  metric_name         = "CPUUtilization"
+  statistic           = "Average"
+  treat_missing_data  = "missing"
+
+  dimensions = {
+    DBInstanceIdentifier = local.identifier
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+  tags          = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_cpu_critical" {
+  count = var.db_engine == "rds" && var.rds_cpu_tiered_alarms ? 1 : 0
+
+  alarm_name          = "${local.identifier}-rds-cpu-usage-critical"
+  alarm_description   = "CRITICAL: CPU for RDS instance ${local.identifier} has been at or above ${var.rds_cpu_critical_threshold}% for 15 straight minutes - sustained saturation, not a peak"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = var.rds_cpu_critical_threshold
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  period              = 300
+  namespace           = "AWS/RDS"
+  metric_name         = "CPUUtilization"
+  statistic           = "Average"
+  treat_missing_data  = "missing"
+
+  dimensions = {
+    DBInstanceIdentifier = local.identifier
+  }
+
+  alarm_actions = [module.sns.topic_arn]
+  ok_actions    = [module.sns.topic_arn]
+  tags          = local.tags
 }
 
 module "rds_swap_usage_alarm" {
