@@ -158,7 +158,7 @@ variable "app_cron_mode" {
 }
 
 variable "beanstalkd_tag" {
-  description = "Tag for the dedicated beanstalkd fork image (repo <registry>/beanstalkd). Required when app_image_flavor is slim. Optional on legacy: when set there, it switches beanstalkd to this dedicated image instead of the app image, and needs chart_version >= 2.10.27."
+  description = "Tag for the dedicated beanstalkd fork image (repo <registry>/beanstalkd). Required when app_image_flavor is slim. Optional on legacy: when set there, it switches beanstalkd to this dedicated image instead of the app image, and needs chart_version >= 2.10.27 on the 2.x line or >= 3.12.0 on the 3.x line."
   type        = string
   default     = ""
   validation {

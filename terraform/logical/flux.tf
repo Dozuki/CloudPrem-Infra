@@ -622,11 +622,15 @@ resource "kubernetes_secret_v1" "flux_values" {
     }
 
     # beanstalkd_tag on the legacy flavor needs the chart that taught images.beanstalkd.tag
-    # to the legacy line: 2.10.27 on the 2.x/release-2.x branch, or (once the 3.x/main port
-    # lands) 4.0.0+ on that line. 4.0.0 is a placeholder ceiling, not a real floor yet - lower
-    # it once main ships the equivalent. Before either floor, an older chart silently ignores
-    # the value and leaves beanstalkd running on the app image, so make that failure loud here
-    # instead of letting it surface as a workload that never gets the dedicated image.
+    # to the legacy line: 2.10.27 on the 2.x/release-2.x branch, or 3.12.0 on the 3.x/main
+    # line. The 3.x half sat at a 4.0.0 placeholder ceiling waiting on that port; the port
+    # landed in chart 3.12.0, which selects the dedicated image on
+    # `or (eq images.flavor "slim") images.beanstalkd.tag` and scopes the tighter readiness
+    # probe to legacy-with-tag (templates/deployments/beanstalkd.yaml). 3.11.0 is still
+    # slim-only, so 3.12.0 is the real floor, not 4.0.0. The >= 4 arm stays so a future major
+    # carries the port forward. Before either floor, an older chart silently ignores the value
+    # and leaves beanstalkd running on the app image, so make that failure loud here instead
+    # of letting it surface as a workload that never gets the dedicated image.
     #
     # chart_version can carry a pre-release/build suffix (gov hotfixes are cut this way, e.g.
     # dozuki-gov is pinned to "2.10.24-dashfix.1" today), and split(".", ...) on that string
@@ -649,6 +653,7 @@ resource "kubernetes_secret_v1" "flux_values" {
         try(
           length(local.chart_version_core) == 3 && (
             tonumber(local.chart_version_core[0]) >= 4 ||
+            (tonumber(local.chart_version_core[0]) == 3 && tonumber(local.chart_version_core[1]) >= 12) ||
             (tonumber(local.chart_version_core[0]) == 2 && (
               tonumber(local.chart_version_core[1]) > 10 ||
               (tonumber(local.chart_version_core[1]) == 10 && tonumber(local.chart_version_core[2]) >= 27)
@@ -657,7 +662,7 @@ resource "kubernetes_secret_v1" "flux_values" {
           false
         )
       )
-      error_message = "beanstalkd_tag is set on the legacy flavor but chart_version is below the floor that supports it (>= 2.10.27, or >= 4.0.0 once the main line ships this). An older chart silently ignores the value and leaves beanstalkd running on the app image instead of the dedicated one."
+      error_message = "beanstalkd_tag is set on the legacy flavor but chart_version is below the floor that supports it (>= 2.10.27 on the 2.x line, >= 3.12.0 on the 3.x line, or >= 4.0.0). An older chart silently ignores the value and leaves beanstalkd running on the app image instead of the dedicated one."
     }
   }
 }
