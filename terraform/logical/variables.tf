@@ -544,19 +544,24 @@ variable "capacity_profile" {
 }
 
 variable "karpenter_drift_block_schedule" {
-  description = "Cron (UTC) marking the start of the daily window in which AMI-drift node replacement is BLOCKED on the on-demand pool. Empty (the default) leaves drift unrestricted, which is the behaviour every environment had before this variable existed. Set it, with karpenter_drift_block_duration, on an environment whose users are awake during the drain: Karpenter meters drift at one node at a time, and each replacement briefly takes any single-replica pod on that node with it, which is what produced the customer-visible 500 bursts on the busiest environment. Scoped to reasons=[Drifted] on purpose, so ordinary consolidation still runs all day and keeps saving money. Karpenter evaluates this cron in UTC and does NOT support timezones, so pick the window from the environment's own measured traffic trough and leave enough slack that a daylight-saving shift cannot push the trough outside it."
-  type        = string
-  default     = ""
-}
-
-variable "karpenter_drift_block_duration" {
-  description = "How long the drift block stays active after each karpenter_drift_block_schedule hit, as hours and/or minutes (for example 19h, or 19h30m). Required when karpenter_drift_block_schedule is set, and ignored otherwise. This is the BLOCKED span, so the window left open for drift is 24h minus this value: 19h starting at 10:00 UTC leaves 05:00-10:00 UTC open."
+  description = "Cron (UTC) marking the start of the daily window in which AMI-drift node replacement is BLOCKED on the on-demand pool. Empty (the default) leaves drift unrestricted, which is the behaviour every environment had before this variable existed. Set it, with karpenter_drift_block_duration, on an environment whose users are awake during the drain: Karpenter meters drift at one node at a time, and each replacement briefly takes any single-replica pod on that node with it, which is what produced the customer-visible 500 bursts on the busiest environment. Scoped to reasons=[Drifted] on purpose, so ordinary consolidation still runs all day and keeps saving money. Karpenter evaluates this cron in UTC and does NOT support timezones, so pick the window from the environment's own measured traffic trough and leave enough slack that a daylight-saving shift cannot push the trough outside it. Restricted to a plain daily 'M H * * *' - see the validation for why anything looser is dangerous here."
   type        = string
   default     = ""
 
   validation {
-    condition     = var.karpenter_drift_block_duration == "" || can(regex("^((([0-9]+(h|m))|([0-9]+h[0-9]+m))(0s)?)$", var.karpenter_drift_block_duration))
-    error_message = "karpenter_drift_block_duration must be empty or match the NodePool CRD's duration pattern (hours and/or minutes only, e.g. 19h or 19h30m). Seconds are not accepted; cron has no second hand."
+    condition     = var.karpenter_drift_block_schedule == "" || can(regex("^([0-9]|[1-5][0-9]) ([0-9]|1[0-9]|2[0-3]) \\* \\* \\*$", var.karpenter_drift_block_schedule))
+    error_message = "karpenter_drift_block_schedule must be empty or a plain daily cron of the form 'M H * * *' (for example '0 10 * * *'). This is deliberately stricter than the NodePool CRD, which accepts any cron-shaped string including dates that never occur, such as '0 0 31 2 *'. Karpenter's cron library returns the zero time when a schedule has no next occurrence and its IsActive check reads that as ALWAYS ACTIVE, so a typo of that shape would block AMI drift permanently and silently stop nodes being patched. Pinning day-of-month, month and day-of-week to * makes that unreachable."
+  }
+}
+
+variable "karpenter_drift_block_duration" {
+  description = "How long the drift block stays active after each karpenter_drift_block_schedule hit, in whole hours (for example 19h). Required when karpenter_drift_block_schedule is set, and ignored otherwise. This is the BLOCKED span, so the window left open for drift is 24h minus this value: 19h starting at 10:00 UTC leaves 05:00-10:00 UTC open."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.karpenter_drift_block_duration == "" || can(regex("^([1-9]|1[0-9]|2[0-3])h$", var.karpenter_drift_block_duration))
+    error_message = "karpenter_drift_block_duration must be empty or a whole number of hours from 1h to 23h. The NodePool CRD itself also accepts minutes, 0h, and 24h or more, but this interface is a DAILY window: paired with a daily schedule, any duration of 24h or more never lapses, so drift is blocked forever and nodes silently stop receiving AMI patches, while 0h blocks nothing at all. Both are typos that fail silently, so they are rejected here rather than in review."
   }
 
   validation {
