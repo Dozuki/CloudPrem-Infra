@@ -15,9 +15,9 @@
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.56.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.56.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.56.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.60.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.60.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.60.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
