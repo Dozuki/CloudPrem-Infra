@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.12.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.12.0...v9.12.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **logical:** lower the beanstalkd legacy-tag floor to chart 3.12.0 ([0b2bf3b](https://github.com/Dozuki/CloudPrem-Infra/commit/0b2bf3bb942890d4985ea4fa312435516b3e3929))
+
 ## [9.12.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.11.1...v9.12.0) (2026-09-15)
 
 
