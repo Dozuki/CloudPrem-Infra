@@ -543,6 +543,28 @@ variable "capacity_profile" {
   }
 }
 
+variable "karpenter_drift_block_schedule" {
+  description = "Cron (UTC) marking the start of the daily window in which AMI-drift node replacement is BLOCKED on the on-demand pool. Empty (the default) leaves drift unrestricted, which is the behaviour every environment had before this variable existed. Set it, with karpenter_drift_block_duration, on an environment whose users are awake during the drain: Karpenter meters drift at one node at a time, and each replacement briefly takes any single-replica pod on that node with it, which is what produced the customer-visible 500 bursts on the busiest environment. Scoped to reasons=[Drifted] on purpose, so ordinary consolidation still runs all day and keeps saving money. Karpenter evaluates this cron in UTC and does NOT support timezones, so pick the window from the environment's own measured traffic trough and leave enough slack that a daylight-saving shift cannot push the trough outside it."
+  type        = string
+  default     = ""
+}
+
+variable "karpenter_drift_block_duration" {
+  description = "How long the drift block stays active after each karpenter_drift_block_schedule hit, as hours and/or minutes (for example 19h, or 19h30m). Required when karpenter_drift_block_schedule is set, and ignored otherwise. This is the BLOCKED span, so the window left open for drift is 24h minus this value: 19h starting at 10:00 UTC leaves 05:00-10:00 UTC open."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.karpenter_drift_block_duration == "" || can(regex("^((([0-9]+(h|m))|([0-9]+h[0-9]+m))(0s)?)$", var.karpenter_drift_block_duration))
+    error_message = "karpenter_drift_block_duration must be empty or match the NodePool CRD's duration pattern (hours and/or minutes only, e.g. 19h or 19h30m). Seconds are not accepted; cron has no second hand."
+  }
+
+  validation {
+    condition     = (var.karpenter_drift_block_schedule == "") == (var.karpenter_drift_block_duration == "")
+    error_message = "karpenter_drift_block_schedule and karpenter_drift_block_duration must be set together. The CRD requires a duration whenever a schedule is present, and a duration with no schedule would silently never apply."
+  }
+}
+
 variable "node_excluded_instance_categories" {
   description = "EKS Auto Mode instance categories (eks.amazonaws.com/instance-category) the NodePool must never buy: burstable (credit-throttled), accelerators (p/g/gr/inf/trn/dl/vt/f), HPC, Mac, ultra-memory. Everything else is eligible; Karpenter picks the cheapest shape that fits, and the amd64 and instance-generation requirements still apply."
   type        = list(string)
