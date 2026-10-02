@@ -57,6 +57,7 @@ type EC2DescribeAPI interface {
 	DescribeDhcpOptions(context.Context, *ec2.DescribeDhcpOptionsInput, ...func(*ec2.Options)) (*ec2.DescribeDhcpOptionsOutput, error)
 	DescribeNetworkAcls(context.Context, *ec2.DescribeNetworkAclsInput, ...func(*ec2.Options)) (*ec2.DescribeNetworkAclsOutput, error)
 	DescribeLaunchTemplates(context.Context, *ec2.DescribeLaunchTemplatesInput, ...func(*ec2.Options)) (*ec2.DescribeLaunchTemplatesOutput, error)
+	DescribeFleets(context.Context, *ec2.DescribeFleetsInput, ...func(*ec2.Options)) (*ec2.DescribeFleetsOutput, error)
 }
 
 // EC2ExistenceVerifier checks the EC2 resource family. EC2 is where the measured
@@ -86,30 +87,8 @@ func idFilter(name string, ids []string) []ec2types.Filter {
 // ec2Present maps an arnResourceType "ec2:<type>" to its describe call. A type not on
 // this map is never verified and always counts as live.
 var ec2Present = map[string]ec2PresentFunc{
-	"ec2:instance": func(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
-		out := map[string]bool{}
-		in := &ec2.DescribeInstancesInput{Filters: idFilter("instance-id", ids), IncludeManagedResources: aws.Bool(true)}
-		for {
-			page, err := c.DescribeInstances(ctx, in)
-			if err != nil {
-				return nil, err
-			}
-			for _, r := range page.Reservations {
-				for _, i := range r.Instances {
-					// terminated is final. shutting-down still counts: it has not
-					// finished going away, and a stuck one is worth seeing.
-					if i.State != nil && i.State.Name == ec2types.InstanceStateNameTerminated {
-						continue
-					}
-					out[aws.ToString(i.InstanceId)] = true
-				}
-			}
-			if aws.ToString(page.NextToken) == "" {
-				return out, nil
-			}
-			in.NextToken = page.NextToken
-		}
-	},
+	"ec2:instance": presentInstances,
+	"ec2:fleet":    presentFleets,
 	"ec2:volume": func(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
 		out := map[string]bool{}
 		in := &ec2.DescribeVolumesInput{Filters: idFilter("volume-id", ids), IncludeManagedResources: aws.Bool(true)}
@@ -355,6 +334,145 @@ var ec2Present = map[string]ec2PresentFunc{
 		}
 		return out, nil
 	},
+}
+
+// presentInstances returns the instances that exist and are not terminated.
+// shutting-down still counts: it has not finished going away, and a stuck one is
+// worth seeing.
+func presentInstances(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	in := &ec2.DescribeInstancesInput{Filters: idFilter("instance-id", ids), IncludeManagedResources: aws.Bool(true)}
+	for {
+		page, err := c.DescribeInstances(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range page.Reservations {
+			for _, i := range r.Instances {
+				// terminated is final. shutting-down still counts: it has not
+				// finished going away, and a stuck one is worth seeing.
+				if i.State != nil && i.State.Name == ec2types.InstanceStateNameTerminated {
+					continue
+				}
+				out[aws.ToString(i.InstanceId)] = true
+			}
+		}
+		if aws.ToString(page.NextToken) == "" {
+			return out, nil
+		}
+		in.NextToken = page.NextToken
+	}
+}
+
+// presentFleets handles ec2:fleet. EKS Auto Mode launches nodes through instant
+// fleets, and AWS keeps an instant fleet's record "active" permanently after its
+// instances are gone (measured 2026-10-02: all 18 orphans left after the first
+// verifier were KMS keys plus 45 such fleets). So:
+//   - any deleted* state: gone.
+//   - instant: present only while one of its recorded instances is present under the
+//     instance rule above; no recorded instances means gone.
+//   - maintain/request (and anything else) not deleted: a real fleet, present.
+//   - not returned by DescribeFleets at all: gone.
+func presentFleets(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
+	fleets, err := describeFleets(ctx, c, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	instantInstances := map[string][]string{} // fleet id -> recorded instance ids
+	var allInstances []string
+	for _, f := range fleets {
+		id := aws.ToString(f.FleetId)
+		if strings.HasPrefix(string(f.FleetState), string(ec2types.FleetStateCodeDeleted)) {
+			continue
+		}
+		if f.Type != ec2types.FleetTypeInstant {
+			out[id] = true
+			continue
+		}
+		for _, inst := range f.Instances {
+			instantInstances[id] = append(instantInstances[id], inst.InstanceIds...)
+			allInstances = append(allInstances, inst.InstanceIds...)
+		}
+	}
+	if len(allInstances) == 0 {
+		return out, nil
+	}
+	sort.Strings(allInstances)
+	allInstances = compactStrings(allInstances)
+	liveInstances := map[string]bool{}
+	for start := 0; start < len(allInstances); start += existenceBatch {
+		chunk := allInstances[start:min(start+existenceBatch, len(allInstances))]
+		present, err := presentInstances(ctx, c, chunk)
+		if err != nil {
+			return nil, fmt.Errorf("instances of instant fleets: %w", err)
+		}
+		for id := range present {
+			liveInstances[id] = true
+		}
+	}
+	for fleetID, insts := range instantInstances {
+		for _, i := range insts {
+			if liveInstances[i] {
+				out[fleetID] = true
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// describeFleets looks fleets up by id. DescribeFleets has no fleet-id filter, so
+// this uses FleetIds; if the batch fails with InvalidFleetId.NotFound it retries one
+// id at a time so a single unknown id cannot hide the rest. Any other error fails
+// the check.
+func describeFleets(ctx context.Context, c EC2DescribeAPI, ids []string) ([]ec2types.FleetData, error) {
+	all, err := describeFleetPages(ctx, c, ids)
+	if err == nil {
+		return all, nil
+	}
+	if !isNotFoundCode(err, "InvalidFleetId.NotFound") {
+		return nil, err
+	}
+	all = nil
+	for _, id := range ids {
+		one, err := describeFleetPages(ctx, c, []string{id})
+		if err != nil {
+			if isNotFoundCode(err, "InvalidFleetId.NotFound") {
+				continue
+			}
+			return nil, err
+		}
+		all = append(all, one...)
+	}
+	return all, nil
+}
+
+func describeFleetPages(ctx context.Context, c EC2DescribeAPI, ids []string) ([]ec2types.FleetData, error) {
+	var all []ec2types.FleetData
+	in := &ec2.DescribeFleetsInput{FleetIds: ids}
+	for {
+		page, err := c.DescribeFleets(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page.Fleets...)
+		if aws.ToString(page.NextToken) == "" {
+			return all, nil
+		}
+		in.NextToken = page.NextToken
+	}
+}
+
+func compactStrings(sorted []string) []string {
+	out := sorted[:0]
+	for i, v := range sorted {
+		if v == "" || (i > 0 && v == sorted[i-1]) {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 func isNotFoundCode(err error, code string) bool {
