@@ -1234,7 +1234,12 @@ type taggedResources struct {
 // add counts one surviving (post-denylist) ARN. Shared by the tag query and the
 // existence check's rebuild (withoutGhosts) so both apply the same byType and
 // anchoring rules.
-func (r *taggedResources) add(arn string) {
+func (r *taggedResources) add(arn string) { r.addChecked(arn, false) }
+
+// addChecked is add with one extra fact: verifiedPresent means the owning service
+// positively confirmed the resource exists, which anchors it regardless of type.
+// Entries counted without that confirmation keep the insufficient-alone rule.
+func (r *taggedResources) addChecked(arn string, verifiedPresent bool) {
 	service, resourceType := arnResourceType(arn)
 	r.total++
 	key := resourceType
@@ -1246,7 +1251,7 @@ func (r *taggedResources) add(arn string) {
 	}
 	r.byType[key]++
 	r.arns = append(r.arns, arn)
-	if service == "" || !insufficientAloneTypes[resourceType] {
+	if verifiedPresent || service == "" || !insufficientAloneTypes[resourceType] {
 		r.anchored = true
 	}
 }
@@ -1701,6 +1706,12 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 	budget := o.sweepBudget()
 	start := o.now()
 	failedAttempts := 0
+	// postDestroyInconclusive stops further destroys this cycle once a destroy ran but
+	// its verification could not finish. That outcome counts as neither a success
+	// (rep.Swept) nor a failure (failedAttempts), so without this a MaxSweeps=1 cycle
+	// would go on to destroy the next candidate too. Whatever made the check fail
+	// (throttling, a lost permission) will most likely fail the next one as well.
+	postDestroyInconclusive := false
 	for i := range rep.Candidates {
 		c := &rep.Candidates[i]
 		if c.State != StateOrphan {
@@ -1748,6 +1759,10 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			// empty SweepResult is indistinguishable in the report (and in Slack) from
 			// one the loop never reached at all.
 			c.SweepResult = "skipped: max-sweeps cap met"
+			continue
+		}
+		if postDestroyInconclusive {
+			c.SweepResult = "skipped: an earlier post-destroy verification was inconclusive this cycle"
 			continue
 		}
 		if failedAttempts >= maxFailures {
@@ -1868,6 +1883,7 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 			c.State = StateUnknown
 			c.SweepResult = "destroy ran, but the post-destroy verification query failed: " + terr.Error()
 			rep.Inconclusive++
+			postDestroyInconclusive = true
 		case r.total > 0 && r.anchored:
 			c.State = StateResidue
 			c.Resources = r.total
@@ -1908,6 +1924,7 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 					c.State = StateUnknown
 					c.SweepResult = fmt.Sprintf("residue: attempted %d targeted delete(s) (%s), but the re-verify query failed: %v", attempted, formatByType(attemptedByType), terr2)
 					rep.Inconclusive++
+					postDestroyInconclusive = true
 					break
 				}
 				// The mixed outcome: some targeted deletes worked, some errored. The

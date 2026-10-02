@@ -26,10 +26,18 @@ import (
 // the same fail-loud posture as deniedResourceTypes. Any describe error that is not
 // a plain not-found aborts the whole check so the caller can fail closed to Unknown.
 
-// ExistenceVerifier reports which of the given ARNs are verified deleted. An ARN it
-// does not return in the map is treated as live by the caller.
+// ExistenceResult splits the checked ARNs three ways. Gone: the owning service says
+// it no longer exists. Present: the owning service positively returned it. Neither:
+// it could not be checked (unsupported type, no client for its region, unparseable
+// id), and the caller counts it as live under the same rules as before verification.
+type ExistenceResult struct {
+	Gone    map[string]bool
+	Present map[string]bool
+}
+
+// ExistenceVerifier checks tagged ARNs against their owning service.
 type ExistenceVerifier interface {
-	Gone(ctx context.Context, arns []string) (map[string]bool, error)
+	Verify(ctx context.Context, arns []string) (ExistenceResult, error)
 }
 
 // EC2DescribeAPI is the read-only EC2 surface the verifier needs, one client per region.
@@ -354,10 +362,10 @@ func isNotFoundCode(err error, code string) bool {
 	return errors.As(err, &ae) && ae.ErrorCode() == code
 }
 
-// Gone groups the ARNs by (region, type), runs one batched describe per group, and
-// returns the ARNs whose id did not come back as present. Unsupported types and
-// regions with no client are skipped, which the caller reads as live.
-func (v *EC2ExistenceVerifier) Gone(ctx context.Context, arns []string) (map[string]bool, error) {
+// Verify groups the ARNs by (region, type), runs one batched describe per group, and
+// sorts each checked ARN into Gone or Present. Unsupported types and regions with no
+// client land in neither, which the caller reads as live but unverified.
+func (v *EC2ExistenceVerifier) Verify(ctx context.Context, arns []string) (ExistenceResult, error) {
 	type key struct{ region, rtype string }
 	groups := map[key]map[string][]string{} // id -> ARNs carrying it
 	for _, a := range arns {
@@ -390,7 +398,7 @@ func (v *EC2ExistenceVerifier) Gone(ctx context.Context, arns []string) (map[str
 		}
 		return keys[i].rtype < keys[j].rtype
 	})
-	gone := map[string]bool{}
+	res := ExistenceResult{Gone: map[string]bool{}, Present: map[string]bool{}}
 	for _, k := range keys {
 		ids := make([]string, 0, len(groups[k]))
 		for id := range groups[k] {
@@ -402,19 +410,20 @@ func (v *EC2ExistenceVerifier) Gone(ctx context.Context, arns []string) (map[str
 			chunk := ids[start:end]
 			present, err := ec2Present[k.rtype](ctx, v.EC2[k.region], chunk)
 			if err != nil {
-				return nil, fmt.Errorf("describe %s in %s: %w", k.rtype, k.region, err)
+				return ExistenceResult{}, fmt.Errorf("describe %s in %s: %w", k.rtype, k.region, err)
 			}
 			for _, id := range chunk {
-				if present[id] {
-					continue
-				}
 				for _, a := range groups[k][id] {
-					gone[a] = true
+					if present[id] {
+						res.Present[a] = true
+					} else {
+						res.Gone[a] = true
+					}
 				}
 			}
 		}
 	}
-	return gone, nil
+	return res, nil
 }
 
 // errExistenceInconclusive marks a verification failure so callers can word it apart
@@ -427,18 +436,23 @@ func withoutGhosts(ctx context.Context, v ExistenceVerifier, r taggedResources) 
 	if v == nil || len(r.arns) == 0 {
 		return r, 0, nil
 	}
-	gone, err := v.Gone(ctx, r.arns)
+	res, err := v.Verify(ctx, r.arns)
 	if err != nil {
 		return taggedResources{}, 0, fmt.Errorf("%w: %v", errExistenceInconclusive, err)
 	}
 	var live taggedResources
 	ghosts := 0
 	for _, a := range r.arns {
-		if gone[a] {
+		if res.Gone[a] {
 			ghosts++
 			continue
 		}
-		live.add(a)
+		// A resource the owning service positively returned anchors on its own,
+		// whatever its type. insufficientAloneTypes exists because the tagging index
+		// can list a security group that is already gone; once EC2 has confirmed this
+		// one is there, that reasoning no longer applies, and applying it anyway would
+		// turn {deleted instance, live security group} into a false Clean.
+		live.addChecked(a, res.Present[a])
 	}
 	return live, ghosts, nil
 }

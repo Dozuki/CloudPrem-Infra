@@ -3314,13 +3314,21 @@ type fakeEC2Describe struct {
 	// ENIs) that EC2 hides unless the call sets IncludeManagedResources.
 	managed map[string]bool
 	err     error
+	ltErr   error // returned by DescribeLaunchTemplates only
 	calls   int
 }
 
-func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter, includeManaged ...*bool) ([]string, error) {
+func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter, wantName string, includeManaged ...*bool) ([]string, error) {
 	f.calls++
 	if f.err != nil {
 		return nil, f.err
+	}
+	// Real EC2 matches nothing on a misnamed filter key (or rejects it), so a wrong
+	// name must fail the test rather than silently look like "all gone".
+	for _, fl := range filters {
+		if aws.ToString(fl.Name) != wantName {
+			return nil, fmt.Errorf("fake EC2: filter name %q, want %q", aws.ToString(fl.Name), wantName)
+		}
 	}
 	showManaged := len(includeManaged) > 0 && aws.ToBool(includeManaged[0])
 	var out []string
@@ -3338,7 +3346,7 @@ func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter, includeManaged ...*b
 }
 
 func (f *fakeEC2Describe) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	ids, err := f.liveIn(in.Filters, in.IncludeManagedResources)
+	ids, err := f.liveIn(in.Filters, "instance-id", in.IncludeManagedResources)
 	if err != nil {
 		return nil, err
 	}
@@ -3354,7 +3362,7 @@ func (f *fakeEC2Describe) DescribeInstances(_ context.Context, in *ec2.DescribeI
 }
 
 func (f *fakeEC2Describe) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
-	ids, err := f.liveIn(in.Filters, in.IncludeManagedResources)
+	ids, err := f.liveIn(in.Filters, "volume-id", in.IncludeManagedResources)
 	out := &ec2.DescribeVolumesOutput{}
 	for _, id := range ids {
 		out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeStateInUse})
@@ -3363,7 +3371,7 @@ func (f *fakeEC2Describe) DescribeVolumes(_ context.Context, in *ec2.DescribeVol
 }
 
 func (f *fakeEC2Describe) DescribeNetworkInterfaces(_ context.Context, in *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-	ids, err := f.liveIn(in.Filters, in.IncludeManagedResources)
+	ids, err := f.liveIn(in.Filters, "network-interface-id", in.IncludeManagedResources)
 	out := &ec2.DescribeNetworkInterfacesOutput{}
 	for _, id := range ids {
 		out.NetworkInterfaces = append(out.NetworkInterfaces, ec2types.NetworkInterface{NetworkInterfaceId: aws.String(id)})
@@ -3372,7 +3380,7 @@ func (f *fakeEC2Describe) DescribeNetworkInterfaces(_ context.Context, in *ec2.D
 }
 
 func (f *fakeEC2Describe) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
-	ids, err := f.liveIn(in.Filter)
+	ids, err := f.liveIn(in.Filter, "nat-gateway-id")
 	out := &ec2.DescribeNatGatewaysOutput{}
 	for _, id := range ids {
 		st := ec2types.NatGatewayStateAvailable
@@ -3385,7 +3393,7 @@ func (f *fakeEC2Describe) DescribeNatGateways(_ context.Context, in *ec2.Describ
 }
 
 func (f *fakeEC2Describe) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpointsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "vpc-endpoint-id")
 	out := &ec2.DescribeVpcEndpointsOutput{}
 	for _, id := range ids {
 		out.VpcEndpoints = append(out.VpcEndpoints, ec2types.VpcEndpoint{VpcEndpointId: aws.String(id), State: ec2types.StateAvailable})
@@ -3394,7 +3402,7 @@ func (f *fakeEC2Describe) DescribeVpcEndpoints(_ context.Context, in *ec2.Descri
 }
 
 func (f *fakeEC2Describe) DescribeVpcs(_ context.Context, in *ec2.DescribeVpcsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "vpc-id")
 	out := &ec2.DescribeVpcsOutput{}
 	for _, id := range ids {
 		out.Vpcs = append(out.Vpcs, ec2types.Vpc{VpcId: aws.String(id)})
@@ -3403,7 +3411,7 @@ func (f *fakeEC2Describe) DescribeVpcs(_ context.Context, in *ec2.DescribeVpcsIn
 }
 
 func (f *fakeEC2Describe) DescribeSubnets(_ context.Context, in *ec2.DescribeSubnetsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "subnet-id")
 	out := &ec2.DescribeSubnetsOutput{}
 	for _, id := range ids {
 		out.Subnets = append(out.Subnets, ec2types.Subnet{SubnetId: aws.String(id)})
@@ -3412,7 +3420,7 @@ func (f *fakeEC2Describe) DescribeSubnets(_ context.Context, in *ec2.DescribeSub
 }
 
 func (f *fakeEC2Describe) DescribeInternetGateways(_ context.Context, in *ec2.DescribeInternetGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "internet-gateway-id")
 	out := &ec2.DescribeInternetGatewaysOutput{}
 	for _, id := range ids {
 		out.InternetGateways = append(out.InternetGateways, ec2types.InternetGateway{InternetGatewayId: aws.String(id)})
@@ -3421,7 +3429,7 @@ func (f *fakeEC2Describe) DescribeInternetGateways(_ context.Context, in *ec2.De
 }
 
 func (f *fakeEC2Describe) DescribeRouteTables(_ context.Context, in *ec2.DescribeRouteTablesInput, _ ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "route-table-id")
 	out := &ec2.DescribeRouteTablesOutput{}
 	for _, id := range ids {
 		out.RouteTables = append(out.RouteTables, ec2types.RouteTable{RouteTableId: aws.String(id)})
@@ -3430,7 +3438,7 @@ func (f *fakeEC2Describe) DescribeRouteTables(_ context.Context, in *ec2.Describ
 }
 
 func (f *fakeEC2Describe) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "group-id")
 	out := &ec2.DescribeSecurityGroupsOutput{}
 	for _, id := range ids {
 		out.SecurityGroups = append(out.SecurityGroups, ec2types.SecurityGroup{GroupId: aws.String(id)})
@@ -3439,7 +3447,7 @@ func (f *fakeEC2Describe) DescribeSecurityGroups(_ context.Context, in *ec2.Desc
 }
 
 func (f *fakeEC2Describe) DescribeAddresses(_ context.Context, in *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "allocation-id")
 	out := &ec2.DescribeAddressesOutput{}
 	for _, id := range ids {
 		out.Addresses = append(out.Addresses, ec2types.Address{AllocationId: aws.String(id)})
@@ -3448,7 +3456,7 @@ func (f *fakeEC2Describe) DescribeAddresses(_ context.Context, in *ec2.DescribeA
 }
 
 func (f *fakeEC2Describe) DescribeFlowLogs(_ context.Context, in *ec2.DescribeFlowLogsInput, _ ...func(*ec2.Options)) (*ec2.DescribeFlowLogsOutput, error) {
-	ids, err := f.liveIn(in.Filter)
+	ids, err := f.liveIn(in.Filter, "flow-log-id")
 	out := &ec2.DescribeFlowLogsOutput{}
 	for _, id := range ids {
 		out.FlowLogs = append(out.FlowLogs, ec2types.FlowLog{FlowLogId: aws.String(id)})
@@ -3457,7 +3465,7 @@ func (f *fakeEC2Describe) DescribeFlowLogs(_ context.Context, in *ec2.DescribeFl
 }
 
 func (f *fakeEC2Describe) DescribeDhcpOptions(_ context.Context, in *ec2.DescribeDhcpOptionsInput, _ ...func(*ec2.Options)) (*ec2.DescribeDhcpOptionsOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "dhcp-options-id")
 	out := &ec2.DescribeDhcpOptionsOutput{}
 	for _, id := range ids {
 		out.DhcpOptions = append(out.DhcpOptions, ec2types.DhcpOptions{DhcpOptionsId: aws.String(id)})
@@ -3466,7 +3474,7 @@ func (f *fakeEC2Describe) DescribeDhcpOptions(_ context.Context, in *ec2.Describ
 }
 
 func (f *fakeEC2Describe) DescribeNetworkAcls(_ context.Context, in *ec2.DescribeNetworkAclsInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkAclsOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, "network-acl-id")
 	out := &ec2.DescribeNetworkAclsOutput{}
 	for _, id := range ids {
 		out.NetworkAcls = append(out.NetworkAcls, ec2types.NetworkAcl{NetworkAclId: aws.String(id)})
@@ -3478,6 +3486,9 @@ func (f *fakeEC2Describe) DescribeLaunchTemplates(_ context.Context, in *ec2.Des
 	f.calls++
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.ltErr != nil {
+		return nil, f.ltErr
 	}
 	out := &ec2.DescribeLaunchTemplatesOutput{}
 	for _, id := range in.LaunchTemplateIds {
@@ -3521,6 +3532,7 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 		instanceState   map[string]ec2types.InstanceStateName
 		natState        map[string]ec2types.NatGatewayState
 		managed         map[string]bool
+		ltErr           error
 		ec2Err          error
 		unverified      bool
 		wantState       CandidateState
@@ -3592,6 +3604,39 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 			wantResources: 4,
 		},
 		{
+			// A security group EC2 positively confirms is still there anchors the
+			// orphan even once the deleted instance next to it drops out. Treating it
+			// as insufficient-alone here would be a false Clean on a real leak.
+			name:            "deleted instance plus verified-live security group is an orphan",
+			arns:            []string{ghostInstance, ec2ARN(testRegion, "security-group", "sg-live")},
+			live:            map[string]bool{"sg-live": true},
+			wantState:       StateOrphan,
+			wantResources:   1,
+			wantReasonParts: []string{"1 resources still live", "1 tagging-index entries verified deleted"},
+		},
+		{
+			name:            "deleted instance plus deleted security group is clean",
+			arns:            []string{ghostInstance, ec2ARN(testRegion, "security-group", "sg-ghost")},
+			wantState:       StateClean,
+			wantReasonParts: []string{"2 tagged entries in the tagging index, all verified deleted"},
+		},
+		{
+			// No EC2 client for the region, so the group could not be verified either
+			// way: it keeps today's insufficient-alone treatment.
+			name:            "unverifiable security group alone stays insufficient-alone",
+			arns:            []string{ec2ARN("eu-west-1", "security-group", "sg-unverified")},
+			wantState:       StateClean,
+			wantResources:   1,
+			wantReasonParts: []string{"insufficient-alone"},
+		},
+		{
+			name:            "launch template malformed-id error is unknown",
+			arns:            []string{ghostLT},
+			ltErr:           &smithy.GenericAPIError{Code: "InvalidLaunchTemplateId.Malformed", Message: "bad id"},
+			wantState:       StateUnknown,
+			wantReasonParts: []string{"existence check inconclusive"},
+		},
+		{
 			name:            "identity unverified and all ghosts is needs-review",
 			arns:            []string{ghostInstance, ghostVol},
 			unverified:      true,
@@ -3611,7 +3656,7 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 				rm.AppliedCustomer = appliedCustomerFor(t, "min_default", "run1")
 			}
 			seedManifest(t, f, primaryBucket(), "run1-min_default/", rm)
-			fe := &fakeEC2Describe{live: tc.live, instanceState: tc.instanceState, natState: tc.natState, managed: tc.managed, err: tc.ec2Err}
+			fe := &fakeEC2Describe{live: tc.live, instanceState: tc.instanceState, natState: tc.natState, managed: tc.managed, ltErr: tc.ltErr, err: tc.ec2Err}
 			deps := JanitorDeps{
 				S3:       f,
 				Tags:     map[string]TagAPI{testRegion: &arnTagAPI{arns: tc.arns}, testDR: &arnTagAPI{}},
@@ -3652,9 +3697,16 @@ func TestEC2ExistenceVerifierBatchesByTypeAndRegion(t *testing.T) {
 		ec2ARN(testDR, "volume", "vol-w"),
 		ec2ARN("eu-west-1", "volume", "vol-eu"),
 	}
-	gone, err := v.Gone(context.Background(), arns)
+	res, err := v.Verify(context.Background(), arns)
 	if err != nil {
-		t.Fatalf("Gone: %v", err)
+		t.Fatalf("Verify: %v", err)
+	}
+	gone := res.Gone
+	if !res.Present[arns[3]] {
+		t.Fatal("live DR volume should be reported verified present")
+	}
+	if res.Present[arns[4]] {
+		t.Fatal("an ARN in a region with no client is unverified, not present")
 	}
 	if east.calls != 1 || west.calls != 1 {
 		t.Fatalf("calls east=%d west=%d, want 1 each (batched by type and region)", east.calls, west.calls)
@@ -3696,5 +3748,169 @@ func TestSweepPostDestroyIgnoresTaggingIndexGhosts(t *testing.T) {
 	}
 	if rep.Residue != 0 {
 		t.Fatalf("rep.Residue = %d, want 0", rep.Residue)
+	}
+}
+
+// pagedVolumes serves DescribeVolumes from fixed pages so pagination and chunking are
+// exercised; every other call falls through to the embedded fake.
+type pagedVolumes struct {
+	*fakeEC2Describe
+	pages     [][]string // live volume ids per page, for one call's NextToken chain
+	errOnPage int        // 1-based page that errors; 0 = never
+	chunkLive map[string]bool
+	errOnCall int // 1-based DescribeVolumes call (chunk) that errors; 0 = never
+	volCalls  int
+	idsSeen   [][]string
+}
+
+func (p *pagedVolumes) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	p.volCalls++
+	if len(in.Filters) != 1 || aws.ToString(in.Filters[0].Name) != "volume-id" {
+		return nil, fmt.Errorf("unexpected filters %+v", in.Filters)
+	}
+	if p.errOnCall > 0 && p.volCalls == p.errOnCall {
+		return nil, &smithy.GenericAPIError{Code: "RequestLimitExceeded", Message: "slow down"}
+	}
+	if p.pages == nil {
+		p.idsSeen = append(p.idsSeen, in.Filters[0].Values)
+		out := &ec2.DescribeVolumesOutput{}
+		for _, id := range in.Filters[0].Values {
+			if p.chunkLive[id] {
+				out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeStateAvailable})
+			}
+		}
+		return out, nil
+	}
+	page := 0
+	if in.NextToken != nil {
+		page, _ = strconv.Atoi(aws.ToString(in.NextToken))
+	}
+	if p.errOnPage > 0 && page+1 == p.errOnPage {
+		return nil, &smithy.GenericAPIError{Code: "InternalError", Message: "boom"}
+	}
+	out := &ec2.DescribeVolumesOutput{}
+	for _, id := range p.pages[page] {
+		out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeStateAvailable})
+	}
+	if page+1 < len(p.pages) {
+		out.NextToken = aws.String(strconv.Itoa(page + 1))
+	}
+	return out, nil
+}
+
+func TestEC2ExistenceVerifierFollowsPagination(t *testing.T) {
+	v1, v2 := ec2ARN(testRegion, "volume", "vol-1"), ec2ARN(testRegion, "volume", "vol-2")
+	t.Run("live only on a later page after an empty one", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, pages: [][]string{{}, {}, {"vol-2"}}}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		res, err := v.Verify(context.Background(), []string{v1, v2})
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+		if pv.volCalls != 3 {
+			t.Fatalf("DescribeVolumes calls = %d, want 3 (every page)", pv.volCalls)
+		}
+		if !res.Gone[v1] || res.Gone[v2] || !res.Present[v2] {
+			t.Fatalf("gone=%v present=%v, want vol-1 gone and vol-2 present", res.Gone, res.Present)
+		}
+	})
+	t.Run("error on a later page fails the check", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, pages: [][]string{{}, {"vol-2"}}, errOnPage: 2}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		if _, err := v.Verify(context.Background(), []string{v1, v2}); err == nil {
+			t.Fatal("Verify succeeded, want an error from the failed second page")
+		}
+	})
+}
+
+func TestEC2ExistenceVerifierChunksLargeBatches(t *testing.T) {
+	var arns []string
+	for i := 0; i < 150; i++ {
+		arns = append(arns, ec2ARN(testRegion, "volume", fmt.Sprintf("vol-%03d", i)))
+	}
+	// One live id on each side of the 100-id boundary.
+	live := map[string]bool{"vol-099": true, "vol-100": true}
+	t.Run("live entries across the chunk boundary", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, chunkLive: live}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		res, err := v.Verify(context.Background(), arns)
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+		if pv.volCalls != 2 || len(pv.idsSeen[0]) != existenceBatch || len(pv.idsSeen[1]) != 50 {
+			t.Fatalf("calls=%d sizes=%d/%d, want 2 calls of 100 and 50", pv.volCalls, len(pv.idsSeen[0]), len(pv.idsSeen[len(pv.idsSeen)-1]))
+		}
+		if len(res.Gone) != 148 || !res.Present[arns[99]] || !res.Present[arns[100]] {
+			t.Fatalf("gone=%d present=%v, want 148 gone and vol-099/vol-100 present", len(res.Gone), res.Present)
+		}
+	})
+	t.Run("error in a later chunk fails the check", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, chunkLive: live, errOnCall: 2}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		if _, err := v.Verify(context.Background(), arns); err == nil {
+			t.Fatal("Verify succeeded, want an error from the failed second chunk")
+		}
+	})
+}
+
+// TestSweepVerifiedLiveSecurityGroupIsResidue: after a destroy, a security group EC2
+// confirms still exists is residue even though the instance next to it is gone.
+func TestSweepVerifiedLiveSecurityGroupIsResidue(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{{
+		Prefix: "smoke4879-min/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+		Identifier: "smoke4879-min", State: StateOrphan, Resources: 2,
+		Customer: "smoke4879", Region: testRegion,
+	}}}
+	tags := &arnTagAPI{arns: []string{ec2ARN(testRegion, "instance", "i-gone"), ec2ARN(testRegion, "security-group", "sg-live")}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		Exists:   &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: &fakeEC2Describe{live: map[string]bool{"sg-live": true}}}},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	if err := Sweep(context.Background(), deps, testOptions(time.Now()), rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue || rep.Residue != 1 || rep.Swept != 0 {
+		t.Fatalf("state=%q residue=%d swept=%d, want residue; reason=%q result=%q", c.State, rep.Residue, rep.Swept, c.Reason, c.SweepResult)
+	}
+}
+
+// TestSweepStopsAfterInconclusivePostDestroyCheck: an Unknown after a destroy counts
+// as neither a success nor a failure, so without a stop a MaxSweeps=1 cycle would go
+// on to destroy the next candidate too.
+func TestSweepStopsAfterInconclusivePostDestroyCheck(t *testing.T) {
+	cand := func(run string) Candidate {
+		return Candidate{
+			Prefix: run + "-min/", Bucket: primaryBucket(), RunID: run, ConfigName: "min_default",
+			Identifier: run + "-min", State: StateOrphan, Resources: 1,
+			Customer: run, Region: testRegion,
+		}
+	}
+	rep := &Report{Candidates: []Candidate{cand("smoke0001"), cand("smoke0002")}}
+	tags := &arnTagAPI{arns: []string{ec2ARN(testRegion, "instance", "i-x")}}
+	recorder := &teardownRecorder{}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		Exists:   &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: &fakeEC2Describe{err: errors.New("throttled")}}},
+		Teardown: recorder.teardown,
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+	opts.MaxSweepFailures = 5
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("teardown calls = %d, want 1 (an inconclusive post-destroy check must stop the cycle)", recorder.calls)
+	}
+	if rep.Candidates[0].State != StateUnknown {
+		t.Fatalf("first state = %q, want unknown", rep.Candidates[0].State)
+	}
+	second := rep.Candidates[1]
+	if second.State != StateOrphan || !strings.Contains(second.SweepResult, "skipped") {
+		t.Fatalf("second state=%q result=%q, want an orphan skipped this cycle", second.State, second.SweepResult)
 	}
 }
