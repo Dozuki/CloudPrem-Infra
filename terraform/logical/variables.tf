@@ -53,6 +53,12 @@ variable "enable_dashboards" {
   default     = false
 }
 
+variable "enable_testing_endpoints" {
+  description = "Renders /etc/dozuki/testing.json with enableTestingEndpoints=true (chart testing.enableTestingEndpoints), which turns on the app's /api/2.0/test/* endpoints for automated QA. login_limits/reset clears the login lockout, so this is for internal QA stacks only, never a customer install. Requires a chart that carries the testing block; older charts ignore it."
+  type        = bool
+  default     = false
+}
+
 variable "subsite_gateway_api_enabled" {
   description = "Switches subsite routing to Gateway API HTTPRoutes: the dozuki-operator reconciles one HTTPRoute per subsite off the chart's dozuki-gateway instead of the legacy nginx Ingress, so subsites route automatically on Envoy Gateway installs (no hand-created wildcard HTTPRoutes). Off by default - it changes subsite routing behavior, so enable per-env after validating. Requires a bundled dozuki-operator >= the version that ships gatewayAPI.enabled (older pins silently ignore it). Safe on GovCloud's exact-host gateway layout (the operator no-ops there)."
   type        = bool
