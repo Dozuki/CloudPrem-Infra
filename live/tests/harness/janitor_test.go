@@ -3310,18 +3310,25 @@ type fakeEC2Describe struct {
 	live          map[string]bool
 	instanceState map[string]ec2types.InstanceStateName
 	natState      map[string]ec2types.NatGatewayState
-	err           error
-	calls         int
+	// managed ids model AWS-managed resources (EKS Auto Mode nodes, their volumes and
+	// ENIs) that EC2 hides unless the call sets IncludeManagedResources.
+	managed map[string]bool
+	err     error
+	calls   int
 }
 
-func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter) ([]string, error) {
+func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter, includeManaged ...*bool) ([]string, error) {
 	f.calls++
 	if f.err != nil {
 		return nil, f.err
 	}
+	showManaged := len(includeManaged) > 0 && aws.ToBool(includeManaged[0])
 	var out []string
 	for _, fl := range filters {
 		for _, v := range fl.Values {
+			if f.managed[v] && !showManaged {
+				continue
+			}
 			if f.live[v] {
 				out = append(out, v)
 			}
@@ -3331,7 +3338,7 @@ func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter) ([]string, error) {
 }
 
 func (f *fakeEC2Describe) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, in.IncludeManagedResources)
 	if err != nil {
 		return nil, err
 	}
@@ -3347,7 +3354,7 @@ func (f *fakeEC2Describe) DescribeInstances(_ context.Context, in *ec2.DescribeI
 }
 
 func (f *fakeEC2Describe) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, in.IncludeManagedResources)
 	out := &ec2.DescribeVolumesOutput{}
 	for _, id := range ids {
 		out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeStateInUse})
@@ -3356,7 +3363,7 @@ func (f *fakeEC2Describe) DescribeVolumes(_ context.Context, in *ec2.DescribeVol
 }
 
 func (f *fakeEC2Describe) DescribeNetworkInterfaces(_ context.Context, in *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
-	ids, err := f.liveIn(in.Filters)
+	ids, err := f.liveIn(in.Filters, in.IncludeManagedResources)
 	out := &ec2.DescribeNetworkInterfacesOutput{}
 	for _, id := range ids {
 		out.NetworkInterfaces = append(out.NetworkInterfaces, ec2types.NetworkInterface{NetworkInterfaceId: aws.String(id)})
@@ -3474,7 +3481,7 @@ func (f *fakeEC2Describe) DescribeLaunchTemplates(_ context.Context, in *ec2.Des
 	}
 	out := &ec2.DescribeLaunchTemplatesOutput{}
 	for _, id := range in.LaunchTemplateIds {
-		if !f.live[id] {
+		if !f.live[id] || (f.managed[id] && !aws.ToBool(in.IncludeManagedResources)) {
 			// Real EC2 fails the whole call when any listed id is missing.
 			return nil, &smithy.GenericAPIError{Code: "InvalidLaunchTemplateId.NotFound", Message: "not found: " + id}
 		}
@@ -3513,6 +3520,7 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 		live            map[string]bool
 		instanceState   map[string]ec2types.InstanceStateName
 		natState        map[string]ec2types.NatGatewayState
+		managed         map[string]bool
 		ec2Err          error
 		unverified      bool
 		wantState       CandidateState
@@ -3573,6 +3581,17 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 			wantResources: 0,
 		},
 		{
+			// EKS Auto Mode nodes are AWS-managed; with managed-resource visibility set
+			// to hidden, a describe without IncludeManagedResources omits them, and
+			// an omission would read as deleted.
+			name:          "hidden managed resources still count",
+			arns:          []string{liveInstance, ec2ARN(testRegion, "volume", "vol-managed"), ec2ARN(testRegion, "network-interface", "eni-managed"), ec2ARN(testRegion, "launch-template", "lt-managed")},
+			live:          map[string]bool{"i-live": true, "vol-managed": true, "eni-managed": true, "lt-managed": true},
+			managed:       map[string]bool{"i-live": true, "vol-managed": true, "eni-managed": true, "lt-managed": true},
+			wantState:     StateOrphan,
+			wantResources: 4,
+		},
+		{
 			name:            "identity unverified and all ghosts is needs-review",
 			arns:            []string{ghostInstance, ghostVol},
 			unverified:      true,
@@ -3592,7 +3611,7 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 				rm.AppliedCustomer = appliedCustomerFor(t, "min_default", "run1")
 			}
 			seedManifest(t, f, primaryBucket(), "run1-min_default/", rm)
-			fe := &fakeEC2Describe{live: tc.live, instanceState: tc.instanceState, natState: tc.natState, err: tc.ec2Err}
+			fe := &fakeEC2Describe{live: tc.live, instanceState: tc.instanceState, natState: tc.natState, managed: tc.managed, err: tc.ec2Err}
 			deps := JanitorDeps{
 				S3:       f,
 				Tags:     map[string]TagAPI{testRegion: &arnTagAPI{arns: tc.arns}, testDR: &arnTagAPI{}},

@@ -57,6 +57,11 @@ type EC2ExistenceVerifier struct {
 	EC2 map[string]EC2DescribeAPI // keyed by region
 }
 
+// IncludeManagedResources is set on every describe that takes it (instances, volumes,
+// ENIs, launch templates). With the account's managed-resource visibility set to
+// hidden, EC2 omits AWS-managed resources (EKS Auto Mode nodes, their volumes and
+// ENIs) from those calls unless asked, and an omission here reads as "deleted".
+
 // existenceBatch caps the ids sent in one filter. EC2 documents a 200-value ceiling
 // on some filters; 100 stays clear of it everywhere.
 const existenceBatch = 100
@@ -75,7 +80,7 @@ func idFilter(name string, ids []string) []ec2types.Filter {
 var ec2Present = map[string]ec2PresentFunc{
 	"ec2:instance": func(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
 		out := map[string]bool{}
-		in := &ec2.DescribeInstancesInput{Filters: idFilter("instance-id", ids)}
+		in := &ec2.DescribeInstancesInput{Filters: idFilter("instance-id", ids), IncludeManagedResources: aws.Bool(true)}
 		for {
 			page, err := c.DescribeInstances(ctx, in)
 			if err != nil {
@@ -99,7 +104,7 @@ var ec2Present = map[string]ec2PresentFunc{
 	},
 	"ec2:volume": func(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
 		out := map[string]bool{}
-		in := &ec2.DescribeVolumesInput{Filters: idFilter("volume-id", ids)}
+		in := &ec2.DescribeVolumesInput{Filters: idFilter("volume-id", ids), IncludeManagedResources: aws.Bool(true)}
 		for {
 			page, err := c.DescribeVolumes(ctx, in)
 			if err != nil {
@@ -119,7 +124,7 @@ var ec2Present = map[string]ec2PresentFunc{
 	},
 	"ec2:network-interface": func(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
 		out := map[string]bool{}
-		in := &ec2.DescribeNetworkInterfacesInput{Filters: idFilter("network-interface-id", ids)}
+		in := &ec2.DescribeNetworkInterfacesInput{Filters: idFilter("network-interface-id", ids), IncludeManagedResources: aws.Bool(true)}
 		for {
 			page, err := c.DescribeNetworkInterfaces(ctx, in)
 			if err != nil {
@@ -329,7 +334,7 @@ var ec2Present = map[string]ec2PresentFunc{
 		// answers for exactly that id.
 		out := map[string]bool{}
 		for _, id := range ids {
-			page, err := c.DescribeLaunchTemplates(ctx, &ec2.DescribeLaunchTemplatesInput{LaunchTemplateIds: []string{id}})
+			page, err := c.DescribeLaunchTemplates(ctx, &ec2.DescribeLaunchTemplatesInput{LaunchTemplateIds: []string{id}, IncludeManagedResources: aws.Bool(true)})
 			if err != nil {
 				if isNotFoundCode(err, "InvalidLaunchTemplateId.NotFound") {
 					continue
