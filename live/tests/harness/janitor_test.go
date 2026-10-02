@@ -17,6 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/databasemigrationservice"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	rgtypes "github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -3281,5 +3283,634 @@ func TestWriteSweepReportSurfacesAPutFailure(t *testing.T) {
 	}
 	if _, nerr := WriteSweepReport(context.Background(), JanitorDeps{}, testOptions(time.Now()), rep); nerr == nil {
 		t.Fatal("WriteSweepReport with no S3 client: expected an error")
+	}
+}
+
+// ---- existence verification: tagging-index ghosts ----
+
+// arnTagAPI returns exactly the ARNs it was built with, so an existence test controls
+// every resource id the verifier sees. Wire it under ONE region and an empty fake
+// under the other, or every ARN comes back twice.
+type arnTagAPI struct{ arns []string }
+
+func (f *arnTagAPI) GetResources(context.Context, *resourcegroupstaggingapi.GetResourcesInput, ...func(*resourcegroupstaggingapi.Options)) (*resourcegroupstaggingapi.GetResourcesOutput, error) {
+	var list []rgtypes.ResourceTagMapping
+	for _, a := range f.arns {
+		list = append(list, rgtypes.ResourceTagMapping{ResourceARN: aws.String(a)})
+	}
+	return &resourcegroupstaggingapi.GetResourcesOutput{ResourceTagMappingList: list}, nil
+}
+
+// fakeEC2Describe answers every Describe call from a set of ids that still exist.
+// Filter-based calls return only the live ids among the filter values (what EC2 does:
+// a filter never errors on an id that is gone). instanceState overrides an instance's
+// reported state; launch templates are looked up by id and return the real
+// InvalidLaunchTemplateId.NotFound error for a missing one.
+type fakeEC2Describe struct {
+	live          map[string]bool
+	instanceState map[string]ec2types.InstanceStateName
+	natState      map[string]ec2types.NatGatewayState
+	// managed ids model AWS-managed resources (EKS Auto Mode nodes, their volumes and
+	// ENIs) that EC2 hides unless the call sets IncludeManagedResources.
+	managed map[string]bool
+	err     error
+	ltErr   error // returned by DescribeLaunchTemplates only
+	calls   int
+}
+
+func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter, wantName string, includeManaged ...*bool) ([]string, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	// Real EC2 matches nothing on a misnamed filter key (or rejects it), so a wrong
+	// name must fail the test rather than silently look like "all gone".
+	for _, fl := range filters {
+		if aws.ToString(fl.Name) != wantName {
+			return nil, fmt.Errorf("fake EC2: filter name %q, want %q", aws.ToString(fl.Name), wantName)
+		}
+	}
+	showManaged := len(includeManaged) > 0 && aws.ToBool(includeManaged[0])
+	var out []string
+	for _, fl := range filters {
+		for _, v := range fl.Values {
+			if f.managed[v] && !showManaged {
+				continue
+			}
+			if f.live[v] {
+				out = append(out, v)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEC2Describe) DescribeInstances(_ context.Context, in *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+	ids, err := f.liveIn(in.Filters, "instance-id", in.IncludeManagedResources)
+	if err != nil {
+		return nil, err
+	}
+	var insts []ec2types.Instance
+	for _, id := range ids {
+		st := ec2types.InstanceStateNameRunning
+		if s, ok := f.instanceState[id]; ok {
+			st = s
+		}
+		insts = append(insts, ec2types.Instance{InstanceId: aws.String(id), State: &ec2types.InstanceState{Name: st}})
+	}
+	return &ec2.DescribeInstancesOutput{Reservations: []ec2types.Reservation{{Instances: insts}}}, nil
+}
+
+func (f *fakeEC2Describe) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	ids, err := f.liveIn(in.Filters, "volume-id", in.IncludeManagedResources)
+	out := &ec2.DescribeVolumesOutput{}
+	for _, id := range ids {
+		out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeStateInUse})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeNetworkInterfaces(_ context.Context, in *ec2.DescribeNetworkInterfacesInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkInterfacesOutput, error) {
+	ids, err := f.liveIn(in.Filters, "network-interface-id", in.IncludeManagedResources)
+	out := &ec2.DescribeNetworkInterfacesOutput{}
+	for _, id := range ids {
+		out.NetworkInterfaces = append(out.NetworkInterfaces, ec2types.NetworkInterface{NetworkInterfaceId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+	ids, err := f.liveIn(in.Filter, "nat-gateway-id")
+	out := &ec2.DescribeNatGatewaysOutput{}
+	for _, id := range ids {
+		st := ec2types.NatGatewayStateAvailable
+		if s, ok := f.natState[id]; ok {
+			st = s
+		}
+		out.NatGateways = append(out.NatGateways, ec2types.NatGateway{NatGatewayId: aws.String(id), State: st})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpointsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+	ids, err := f.liveIn(in.Filters, "vpc-endpoint-id")
+	out := &ec2.DescribeVpcEndpointsOutput{}
+	for _, id := range ids {
+		out.VpcEndpoints = append(out.VpcEndpoints, ec2types.VpcEndpoint{VpcEndpointId: aws.String(id), State: ec2types.StateAvailable})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeVpcs(_ context.Context, in *ec2.DescribeVpcsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
+	ids, err := f.liveIn(in.Filters, "vpc-id")
+	out := &ec2.DescribeVpcsOutput{}
+	for _, id := range ids {
+		out.Vpcs = append(out.Vpcs, ec2types.Vpc{VpcId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeSubnets(_ context.Context, in *ec2.DescribeSubnetsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
+	ids, err := f.liveIn(in.Filters, "subnet-id")
+	out := &ec2.DescribeSubnetsOutput{}
+	for _, id := range ids {
+		out.Subnets = append(out.Subnets, ec2types.Subnet{SubnetId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeInternetGateways(_ context.Context, in *ec2.DescribeInternetGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
+	ids, err := f.liveIn(in.Filters, "internet-gateway-id")
+	out := &ec2.DescribeInternetGatewaysOutput{}
+	for _, id := range ids {
+		out.InternetGateways = append(out.InternetGateways, ec2types.InternetGateway{InternetGatewayId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeRouteTables(_ context.Context, in *ec2.DescribeRouteTablesInput, _ ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+	ids, err := f.liveIn(in.Filters, "route-table-id")
+	out := &ec2.DescribeRouteTablesOutput{}
+	for _, id := range ids {
+		out.RouteTables = append(out.RouteTables, ec2types.RouteTable{RouteTableId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+	ids, err := f.liveIn(in.Filters, "group-id")
+	out := &ec2.DescribeSecurityGroupsOutput{}
+	for _, id := range ids {
+		out.SecurityGroups = append(out.SecurityGroups, ec2types.SecurityGroup{GroupId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeAddresses(_ context.Context, in *ec2.DescribeAddressesInput, _ ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error) {
+	ids, err := f.liveIn(in.Filters, "allocation-id")
+	out := &ec2.DescribeAddressesOutput{}
+	for _, id := range ids {
+		out.Addresses = append(out.Addresses, ec2types.Address{AllocationId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeFlowLogs(_ context.Context, in *ec2.DescribeFlowLogsInput, _ ...func(*ec2.Options)) (*ec2.DescribeFlowLogsOutput, error) {
+	ids, err := f.liveIn(in.Filter, "flow-log-id")
+	out := &ec2.DescribeFlowLogsOutput{}
+	for _, id := range ids {
+		out.FlowLogs = append(out.FlowLogs, ec2types.FlowLog{FlowLogId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeDhcpOptions(_ context.Context, in *ec2.DescribeDhcpOptionsInput, _ ...func(*ec2.Options)) (*ec2.DescribeDhcpOptionsOutput, error) {
+	ids, err := f.liveIn(in.Filters, "dhcp-options-id")
+	out := &ec2.DescribeDhcpOptionsOutput{}
+	for _, id := range ids {
+		out.DhcpOptions = append(out.DhcpOptions, ec2types.DhcpOptions{DhcpOptionsId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeNetworkAcls(_ context.Context, in *ec2.DescribeNetworkAclsInput, _ ...func(*ec2.Options)) (*ec2.DescribeNetworkAclsOutput, error) {
+	ids, err := f.liveIn(in.Filters, "network-acl-id")
+	out := &ec2.DescribeNetworkAclsOutput{}
+	for _, id := range ids {
+		out.NetworkAcls = append(out.NetworkAcls, ec2types.NetworkAcl{NetworkAclId: aws.String(id)})
+	}
+	return out, err
+}
+
+func (f *fakeEC2Describe) DescribeLaunchTemplates(_ context.Context, in *ec2.DescribeLaunchTemplatesInput, _ ...func(*ec2.Options)) (*ec2.DescribeLaunchTemplatesOutput, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.ltErr != nil {
+		return nil, f.ltErr
+	}
+	out := &ec2.DescribeLaunchTemplatesOutput{}
+	for _, id := range in.LaunchTemplateIds {
+		if !f.live[id] || (f.managed[id] && !aws.ToBool(in.IncludeManagedResources)) {
+			// Real EC2 fails the whole call when any listed id is missing.
+			return nil, &smithy.GenericAPIError{Code: "InvalidLaunchTemplateId.NotFound", Message: "not found: " + id}
+		}
+		out.LaunchTemplates = append(out.LaunchTemplates, ec2types.LaunchTemplate{LaunchTemplateId: aws.String(id)})
+	}
+	return out, nil
+}
+
+func ec2ARN(region, rtype, id string) string {
+	return "arn:aws:ec2:" + region + ":" + testAccount + ":" + rtype + "/" + id
+}
+
+// TestClassifyVerifiesTaggedResourcesExist is the tagging-index ghost fix. The DDVtest
+// reaper report carried 26-33 harness stacks as eligible orphans whose every
+// RGTA-reported ARN described as NotFound and whose physical state held nothing:
+// GetResources keeps returning tag entries for resources that are already deleted.
+// classify must count only resources that still exist, fail closed when it cannot
+// tell, and count any type it has no describe call for as live.
+func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
+	ghostInstance := ec2ARN(testRegion, "instance", "i-ghost")
+	termInstance := ec2ARN(testRegion, "instance", "i-term")
+	liveInstance := ec2ARN(testRegion, "instance", "i-live")
+	ghostVol := ec2ARN(testRegion, "volume", "vol-ghost")
+	ghostENI := ec2ARN(testRegion, "network-interface", "eni-ghost")
+	ghostNAT := ec2ARN(testRegion, "natgateway", "nat-ghost")
+	deletedNAT := ec2ARN(testRegion, "natgateway", "nat-deleted")
+	ghostVPCE := ec2ARN(testRegion, "vpc-endpoint", "vpce-ghost")
+	ghostFlow := ec2ARN(testRegion, "vpc-flow-log", "fl-ghost")
+	ghostLT := ec2ARN(testRegion, "launch-template", "lt-ghost")
+	liveVPC := ec2ARN(testRegion, "vpc", "vpc-live")
+	rdsDB := "arn:aws:rds:" + testRegion + ":" + testAccount + ":db:smoke-db"
+
+	cases := []struct {
+		name            string
+		arns            []string
+		live            map[string]bool
+		instanceState   map[string]ec2types.InstanceStateName
+		natState        map[string]ec2types.NatGatewayState
+		managed         map[string]bool
+		ltErr           error
+		ec2Err          error
+		unverified      bool
+		wantState       CandidateState
+		wantResources   int
+		wantReasonParts []string
+	}{
+		{
+			name:            "all ghosts is clean",
+			arns:            []string{ghostInstance, ghostVol, ghostENI, ghostNAT, ghostVPCE, ghostFlow, ghostLT},
+			wantState:       StateClean,
+			wantResources:   0,
+			wantReasonParts: []string{"7 tagged entries in the tagging index, all verified deleted (index lag)"},
+		},
+		{
+			name:            "mixed live and ghost is an orphan counting only live",
+			arns:            []string{ghostInstance, liveInstance, ghostVol, liveVPC},
+			live:            map[string]bool{"i-live": true, "vpc-live": true},
+			wantState:       StateOrphan,
+			wantResources:   2,
+			wantReasonParts: []string{"2 resources still live", "2 tagging-index entries verified deleted"},
+		},
+		{
+			name:            "describe error is unknown, never clean",
+			arns:            []string{ghostInstance, ghostVol},
+			ec2Err:          &smithy.GenericAPIError{Code: "UnauthorizedOperation", Message: "nope"},
+			wantState:       StateUnknown,
+			wantReasonParts: []string{"existence check inconclusive"},
+		},
+		{
+			name:            "unsupported type counts as live",
+			arns:            []string{ghostInstance, rdsDB},
+			wantState:       StateOrphan,
+			wantResources:   1,
+			wantReasonParts: []string{"1 resources still live"},
+		},
+		{
+			name:            "terminated instance is gone",
+			arns:            []string{termInstance},
+			live:            map[string]bool{"i-term": true},
+			instanceState:   map[string]ec2types.InstanceStateName{"i-term": ec2types.InstanceStateNameTerminated},
+			wantState:       StateClean,
+			wantReasonParts: []string{"all verified deleted"},
+		},
+		{
+			name:          "shutting-down instance still counts",
+			arns:          []string{termInstance},
+			live:          map[string]bool{"i-term": true},
+			instanceState: map[string]ec2types.InstanceStateName{"i-term": ec2types.InstanceStateNameShuttingDown},
+			wantState:     StateOrphan,
+			wantResources: 1,
+		},
+		{
+			name:          "deleted nat gateway is gone",
+			arns:          []string{deletedNAT},
+			live:          map[string]bool{"nat-deleted": true},
+			natState:      map[string]ec2types.NatGatewayState{"nat-deleted": ec2types.NatGatewayStateDeleted},
+			wantState:     StateClean,
+			wantResources: 0,
+		},
+		{
+			// EKS Auto Mode nodes are AWS-managed; with managed-resource visibility set
+			// to hidden, a describe without IncludeManagedResources omits them, and
+			// an omission would read as deleted.
+			name:          "hidden managed resources still count",
+			arns:          []string{liveInstance, ec2ARN(testRegion, "volume", "vol-managed"), ec2ARN(testRegion, "network-interface", "eni-managed"), ec2ARN(testRegion, "launch-template", "lt-managed")},
+			live:          map[string]bool{"i-live": true, "vol-managed": true, "eni-managed": true, "lt-managed": true},
+			managed:       map[string]bool{"i-live": true, "vol-managed": true, "eni-managed": true, "lt-managed": true},
+			wantState:     StateOrphan,
+			wantResources: 4,
+		},
+		{
+			// A security group EC2 positively confirms is still there anchors the
+			// orphan even once the deleted instance next to it drops out. Treating it
+			// as insufficient-alone here would be a false Clean on a real leak.
+			name:            "deleted instance plus verified-live security group is an orphan",
+			arns:            []string{ghostInstance, ec2ARN(testRegion, "security-group", "sg-live")},
+			live:            map[string]bool{"sg-live": true},
+			wantState:       StateOrphan,
+			wantResources:   1,
+			wantReasonParts: []string{"1 resources still live", "1 tagging-index entries verified deleted"},
+		},
+		{
+			name:            "deleted instance plus deleted security group is clean",
+			arns:            []string{ghostInstance, ec2ARN(testRegion, "security-group", "sg-ghost")},
+			wantState:       StateClean,
+			wantReasonParts: []string{"2 tagged entries in the tagging index, all verified deleted"},
+		},
+		{
+			// No EC2 client for the region, so the group could not be verified either
+			// way: it keeps today's insufficient-alone treatment.
+			name:            "unverifiable security group alone stays insufficient-alone",
+			arns:            []string{ec2ARN("eu-west-1", "security-group", "sg-unverified")},
+			wantState:       StateClean,
+			wantResources:   1,
+			wantReasonParts: []string{"insufficient-alone"},
+		},
+		{
+			name:            "launch template malformed-id error is unknown",
+			arns:            []string{ghostLT},
+			ltErr:           &smithy.GenericAPIError{Code: "InvalidLaunchTemplateId.Malformed", Message: "bad id"},
+			wantState:       StateUnknown,
+			wantReasonParts: []string{"existence check inconclusive"},
+		},
+		{
+			name:            "identity unverified and all ghosts is needs-review",
+			arns:            []string{ghostInstance, ghostVol},
+			unverified:      true,
+			wantState:       StateNeedsReview,
+			wantReasonParts: []string{"applied-customer"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeJanitorS3()
+			now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+			rm := &RunManifest{
+				ConfigName: "min_default", DeleteAfter: now.Add(-10 * time.Hour).Format(time.RFC3339),
+				Region: testRegion, DRRegion: testDR,
+			}
+			if !tc.unverified {
+				rm.AppliedCustomer = appliedCustomerFor(t, "min_default", "run1")
+			}
+			seedManifest(t, f, primaryBucket(), "run1-min_default/", rm)
+			fe := &fakeEC2Describe{live: tc.live, instanceState: tc.instanceState, natState: tc.natState, managed: tc.managed, ltErr: tc.ltErr, err: tc.ec2Err}
+			deps := JanitorDeps{
+				S3:       f,
+				Tags:     map[string]TagAPI{testRegion: &arnTagAPI{arns: tc.arns}, testDR: &arnTagAPI{}},
+				Locks:    oneLockPerRegion(newFakeLockAPI()),
+				Exists:   &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: fe, testDR: &fakeEC2Describe{}}},
+				Matrix:   testMatrix(),
+				Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+			}
+			rep, err := Scan(context.Background(), deps, testOptions(now), JanitorWorkflowList{})
+			if err != nil {
+				t.Fatalf("Scan: %v", err)
+			}
+			c := mustCandidate(t, rep, "run1-min_default/")
+			if c.State != tc.wantState {
+				t.Fatalf("state = %q, want %q; reason=%q", c.State, tc.wantState, c.Reason)
+			}
+			if c.Resources != tc.wantResources {
+				t.Fatalf("resources = %d, want %d; reason=%q", c.Resources, tc.wantResources, c.Reason)
+			}
+			for _, p := range tc.wantReasonParts {
+				if !strings.Contains(c.Reason, p) {
+					t.Fatalf("reason = %q, want it to contain %q", c.Reason, p)
+				}
+			}
+		})
+	}
+}
+
+// TestEC2ExistenceVerifierBatchesByTypeAndRegion pins the call shape: one describe per
+// (region, type) for filter-based types, not one per ARN, and ARNs in a region with no
+// client are never reported gone.
+func TestEC2ExistenceVerifierBatchesByTypeAndRegion(t *testing.T) {
+	east := &fakeEC2Describe{}
+	west := &fakeEC2Describe{live: map[string]bool{"vol-w": true}}
+	v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: east, testDR: west}}
+	arns := []string{
+		ec2ARN(testRegion, "volume", "vol-1"), ec2ARN(testRegion, "volume", "vol-2"), ec2ARN(testRegion, "volume", "vol-3"),
+		ec2ARN(testDR, "volume", "vol-w"),
+		ec2ARN("eu-west-1", "volume", "vol-eu"),
+	}
+	res, err := v.Verify(context.Background(), arns)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	gone := res.Gone
+	if !res.Present[arns[3]] {
+		t.Fatal("live DR volume should be reported verified present")
+	}
+	if res.Present[arns[4]] {
+		t.Fatal("an ARN in a region with no client is unverified, not present")
+	}
+	if east.calls != 1 || west.calls != 1 {
+		t.Fatalf("calls east=%d west=%d, want 1 each (batched by type and region)", east.calls, west.calls)
+	}
+	for _, a := range arns[:3] {
+		if !gone[a] {
+			t.Fatalf("%s should be gone", a)
+		}
+	}
+	if gone[arns[3]] {
+		t.Fatal("live DR volume reported gone")
+	}
+	if gone[arns[4]] {
+		t.Fatal("an ARN in a region with no client must count as live, never gone")
+	}
+}
+
+// TestSweepPostDestroyIgnoresTaggingIndexGhosts: a destroy that worked must not land in
+// residue just because the tagging index still lists what it deleted.
+func TestSweepPostDestroyIgnoresTaggingIndexGhosts(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{{
+		Prefix: "smoke4879-min/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+		Identifier: "smoke4879-min", State: StateOrphan, Resources: 2,
+		Customer: "smoke4879", Region: testRegion,
+	}}}
+	tags := &arnTagAPI{arns: []string{ec2ARN(testRegion, "instance", "i-gone"), ec2ARN(testRegion, "vpc", "vpc-gone")}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		Exists:   &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: &fakeEC2Describe{}}},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	if err := Sweep(context.Background(), deps, testOptions(time.Now()), rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.SweepResult != sweepResultDestroyed {
+		t.Fatalf("SweepResult = %q, want destroyed; state=%q reason=%q", c.SweepResult, c.State, c.Reason)
+	}
+	if rep.Residue != 0 {
+		t.Fatalf("rep.Residue = %d, want 0", rep.Residue)
+	}
+}
+
+// pagedVolumes serves DescribeVolumes from fixed pages so pagination and chunking are
+// exercised; every other call falls through to the embedded fake.
+type pagedVolumes struct {
+	*fakeEC2Describe
+	pages     [][]string // live volume ids per page, for one call's NextToken chain
+	errOnPage int        // 1-based page that errors; 0 = never
+	chunkLive map[string]bool
+	errOnCall int // 1-based DescribeVolumes call (chunk) that errors; 0 = never
+	volCalls  int
+	idsSeen   [][]string
+}
+
+func (p *pagedVolumes) DescribeVolumes(_ context.Context, in *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
+	p.volCalls++
+	if len(in.Filters) != 1 || aws.ToString(in.Filters[0].Name) != "volume-id" {
+		return nil, fmt.Errorf("unexpected filters %+v", in.Filters)
+	}
+	if p.errOnCall > 0 && p.volCalls == p.errOnCall {
+		return nil, &smithy.GenericAPIError{Code: "RequestLimitExceeded", Message: "slow down"}
+	}
+	if p.pages == nil {
+		p.idsSeen = append(p.idsSeen, in.Filters[0].Values)
+		out := &ec2.DescribeVolumesOutput{}
+		for _, id := range in.Filters[0].Values {
+			if p.chunkLive[id] {
+				out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeStateAvailable})
+			}
+		}
+		return out, nil
+	}
+	page := 0
+	if in.NextToken != nil {
+		page, _ = strconv.Atoi(aws.ToString(in.NextToken))
+	}
+	if p.errOnPage > 0 && page+1 == p.errOnPage {
+		return nil, &smithy.GenericAPIError{Code: "InternalError", Message: "boom"}
+	}
+	out := &ec2.DescribeVolumesOutput{}
+	for _, id := range p.pages[page] {
+		out.Volumes = append(out.Volumes, ec2types.Volume{VolumeId: aws.String(id), State: ec2types.VolumeStateAvailable})
+	}
+	if page+1 < len(p.pages) {
+		out.NextToken = aws.String(strconv.Itoa(page + 1))
+	}
+	return out, nil
+}
+
+func TestEC2ExistenceVerifierFollowsPagination(t *testing.T) {
+	v1, v2 := ec2ARN(testRegion, "volume", "vol-1"), ec2ARN(testRegion, "volume", "vol-2")
+	t.Run("live only on a later page after an empty one", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, pages: [][]string{{}, {}, {"vol-2"}}}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		res, err := v.Verify(context.Background(), []string{v1, v2})
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+		if pv.volCalls != 3 {
+			t.Fatalf("DescribeVolumes calls = %d, want 3 (every page)", pv.volCalls)
+		}
+		if !res.Gone[v1] || res.Gone[v2] || !res.Present[v2] {
+			t.Fatalf("gone=%v present=%v, want vol-1 gone and vol-2 present", res.Gone, res.Present)
+		}
+	})
+	t.Run("error on a later page fails the check", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, pages: [][]string{{}, {"vol-2"}}, errOnPage: 2}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		if _, err := v.Verify(context.Background(), []string{v1, v2}); err == nil {
+			t.Fatal("Verify succeeded, want an error from the failed second page")
+		}
+	})
+}
+
+func TestEC2ExistenceVerifierChunksLargeBatches(t *testing.T) {
+	var arns []string
+	for i := 0; i < 150; i++ {
+		arns = append(arns, ec2ARN(testRegion, "volume", fmt.Sprintf("vol-%03d", i)))
+	}
+	// One live id on each side of the 100-id boundary.
+	live := map[string]bool{"vol-099": true, "vol-100": true}
+	t.Run("live entries across the chunk boundary", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, chunkLive: live}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		res, err := v.Verify(context.Background(), arns)
+		if err != nil {
+			t.Fatalf("Verify: %v", err)
+		}
+		if pv.volCalls != 2 || len(pv.idsSeen[0]) != existenceBatch || len(pv.idsSeen[1]) != 50 {
+			t.Fatalf("calls=%d sizes=%d/%d, want 2 calls of 100 and 50", pv.volCalls, len(pv.idsSeen[0]), len(pv.idsSeen[len(pv.idsSeen)-1]))
+		}
+		if len(res.Gone) != 148 || !res.Present[arns[99]] || !res.Present[arns[100]] {
+			t.Fatalf("gone=%d present=%v, want 148 gone and vol-099/vol-100 present", len(res.Gone), res.Present)
+		}
+	})
+	t.Run("error in a later chunk fails the check", func(t *testing.T) {
+		pv := &pagedVolumes{fakeEC2Describe: &fakeEC2Describe{}, chunkLive: live, errOnCall: 2}
+		v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: pv}}
+		if _, err := v.Verify(context.Background(), arns); err == nil {
+			t.Fatal("Verify succeeded, want an error from the failed second chunk")
+		}
+	})
+}
+
+// TestSweepVerifiedLiveSecurityGroupIsResidue: after a destroy, a security group EC2
+// confirms still exists is residue even though the instance next to it is gone.
+func TestSweepVerifiedLiveSecurityGroupIsResidue(t *testing.T) {
+	rep := &Report{Candidates: []Candidate{{
+		Prefix: "smoke4879-min/", Bucket: primaryBucket(), RunID: "smoke4879", ConfigName: "min_default",
+		Identifier: "smoke4879-min", State: StateOrphan, Resources: 2,
+		Customer: "smoke4879", Region: testRegion,
+	}}}
+	tags := &arnTagAPI{arns: []string{ec2ARN(testRegion, "instance", "i-gone"), ec2ARN(testRegion, "security-group", "sg-live")}}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		Exists:   &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: &fakeEC2Describe{live: map[string]bool{"sg-live": true}}}},
+		Teardown: func(context.Context, PhaseParams, bool) error { return nil },
+	}
+	if err := Sweep(context.Background(), deps, testOptions(time.Now()), rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	c := rep.Candidates[0]
+	if c.State != StateResidue || rep.Residue != 1 || rep.Swept != 0 {
+		t.Fatalf("state=%q residue=%d swept=%d, want residue; reason=%q result=%q", c.State, rep.Residue, rep.Swept, c.Reason, c.SweepResult)
+	}
+}
+
+// TestSweepStopsAfterInconclusivePostDestroyCheck: an Unknown after a destroy counts
+// as neither a success nor a failure, so without a stop a MaxSweeps=1 cycle would go
+// on to destroy the next candidate too.
+func TestSweepStopsAfterInconclusivePostDestroyCheck(t *testing.T) {
+	cand := func(run string) Candidate {
+		return Candidate{
+			Prefix: run + "-min/", Bucket: primaryBucket(), RunID: run, ConfigName: "min_default",
+			Identifier: run + "-min", State: StateOrphan, Resources: 1,
+			Customer: run, Region: testRegion,
+		}
+	}
+	rep := &Report{Candidates: []Candidate{cand("smoke0001"), cand("smoke0002")}}
+	tags := &arnTagAPI{arns: []string{ec2ARN(testRegion, "instance", "i-x")}}
+	recorder := &teardownRecorder{}
+	deps := JanitorDeps{
+		Matrix:   testMatrix(),
+		Tags:     map[string]TagAPI{testRegion: tags},
+		Exists:   &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: &fakeEC2Describe{err: errors.New("throttled")}}},
+		Teardown: recorder.teardown,
+	}
+	opts := testOptions(time.Now())
+	opts.MaxSweeps = 1
+	opts.MaxSweepFailures = 5
+	if err := Sweep(context.Background(), deps, opts, rep); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("teardown calls = %d, want 1 (an inconclusive post-destroy check must stop the cycle)", recorder.calls)
+	}
+	if rep.Candidates[0].State != StateUnknown {
+		t.Fatalf("first state = %q, want unknown", rep.Candidates[0].State)
+	}
+	second := rep.Candidates[1]
+	if second.State != StateOrphan || !strings.Contains(second.SweepResult, "skipped") {
+		t.Fatalf("second state=%q result=%q, want an orphan skipped this cycle", second.State, second.SweepResult)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/databasemigrationservice"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -442,6 +443,12 @@ func runJanitor(rest []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			*region:   databasemigrationservice.NewFromConfig(awsCfg),
 			*drRegion: databasemigrationservice.NewFromConfig(drCfg),
 		},
+		// Tagged ARNs are checked against EC2 before they count, so tagging-index
+		// entries for deleted resources do not read as live orphans.
+		Exists: &harness.EC2ExistenceVerifier{EC2: map[string]harness.EC2DescribeAPI{
+			*region:   ec2.NewFromConfig(awsCfg),
+			*drRegion: ec2.NewFromConfig(drCfg),
+		}},
 		Matrix:   m,
 		Teardown: harness.RealTeardown,
 	}
