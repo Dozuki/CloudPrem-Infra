@@ -381,7 +381,13 @@ type JanitorDeps struct {
 	// in either the primary or DR region. Optional: nil (or a missing region key) just
 	// means reclaimResidueByARN skips any ARN that would have needed it, leaving that
 	// resource reported rather than deleted.
-	DMS    map[string]DMSReclaimAPI
+	DMS map[string]DMSReclaimAPI
+	// Exists checks each tagged ARN against its owning service before it counts, so a
+	// tagging-index entry for an already-deleted resource cannot make a torn-down run
+	// look like an orphan (see janitor_exists.go). Optional: nil skips the check and
+	// counts every tagged entry as live, which is the pre-verification behavior and
+	// errs toward over-reporting, never toward a false Clean.
+	Exists ExistenceVerifier
 	Matrix *Matrix
 	// Teardown performs the actual destroy. Production wires it to PhaseParams.Teardown;
 	// tests substitute a fake so Sweep's SKIP/cap logic is exercised without a real repo
@@ -867,11 +873,26 @@ func classify(
 	// deleteAfter is present only when the harness generated env.hcl (root.hcl only
 	// emits the tag when delete_after is non-empty, and only withDeleteAfter ever sets
 	// it). A hand-authored stack cannot match either filter.
-	n, anchored, terr := countTagged(ctx, d.Tags, []string{m.Region, m.DRRegion}, queryCustomer)
+	tagged, terr := countTaggedDetailed(ctx, d.Tags, []string{m.Region, m.DRRegion}, queryCustomer)
 	if terr != nil {
 		base.State = StateUnknown
 		base.Reason = "tag lookup inconclusive: " + terr.Error() + identityNote
 		return base, nil
+	}
+	// The tagging index keeps entries for deleted resources. Count only what still
+	// exists; a describe that fails for any reason other than not-found leaves this
+	// candidate Unknown, never Clean. Resources stays the LIVE count; the ghost count
+	// only ever appears in the reason.
+	live, ghosts, verr := withoutGhosts(ctx, d.Exists, tagged)
+	if verr != nil {
+		base.State = StateUnknown
+		base.Reason = fmt.Sprintf("%d tagged entries found, but %v%s", tagged.total, verr, identityNote)
+		return base, nil
+	}
+	n, anchored := live.total, live.anchored
+	ghostNote := ""
+	if ghosts > 0 {
+		ghostNote = fmt.Sprintf(" (plus %d tagging-index entries verified deleted)", ghosts)
 	}
 	base.Resources = n
 	if n == 0 {
@@ -880,7 +901,12 @@ func classify(
 			// identity is not trustworthy enough to call this stack torn down. DO NOT
 			// guess - see the identityUnverified comment above.
 			base.State = StateNeedsReview
-			base.Reason = "manifest predates applied-customer recording (pre-fix run) and the recomputed identity found no tagged resources: a false negative here is exactly the P2 failure mode this fix closes (the recompute could be wrong if the config's customer flag changed since this run applied) - needs human review before trusting this as torn down"
+			base.Reason = "manifest predates applied-customer recording (pre-fix run) and the recomputed identity found no tagged resources: a false negative here is exactly the P2 failure mode this fix closes (the recompute could be wrong if the config's customer flag changed since this run applied) - needs human review before trusting this as torn down" + ghostNote
+			return base, nil
+		}
+		if ghosts > 0 {
+			base.State = StateClean
+			base.Reason = fmt.Sprintf("stale and unowned; %d tagged entries in the tagging index, all verified deleted (index lag)%s", ghosts, identityNote)
 			return base, nil
 		}
 		// Normal, not a leak: Teardown never deletes the manifest or the state prefix, so
@@ -895,20 +921,20 @@ func classify(
 		// for why a security group can never legitimately be the only thing left behind.
 		if identityUnverified {
 			base.State = StateNeedsReview
-			base.Reason = fmt.Sprintf("manifest predates applied-customer recording (pre-fix run); the recomputed identity found only %d insufficient-alone-evidence resources, functionally a negative result - needs human review before trusting this as torn down", n)
+			base.Reason = fmt.Sprintf("manifest predates applied-customer recording (pre-fix run); the recomputed identity found only %d insufficient-alone-evidence resources, functionally a negative result - needs human review before trusting this as torn down%s", n, ghostNote)
 			return base, nil
 		}
 		// The count still goes in the report (base.Resources above) so the reason is
 		// visible, but the state is Clean: Sweep never acts on Clean, and there is
 		// nothing to destroy - AWS's own real state already has the VPC gone.
 		base.State = StateClean
-		base.Reason = fmt.Sprintf("%d tagged resources remain, but all are insufficient-alone evidence types (e.g. a stale security-group tag no longer backed by a real VPC); treating as torn down%s", n, identityNote)
+		base.Reason = fmt.Sprintf("%d tagged resources remain, but all are insufficient-alone evidence types (e.g. a stale security-group tag no longer backed by a real VPC); treating as torn down%s%s", n, ghostNote, identityNote)
 		return base, nil
 	}
 	if age > 0 {
 		base.State = StateBlocked
 		base.LockAge = age.String()
-		base.Reason = fmt.Sprintf("%d resources still live but a stale lock (age %s) blocks an automatic destroy; needs a human force-unlock%s", n, age, identityNote)
+		base.Reason = fmt.Sprintf("%d resources still live but a stale lock (age %s) blocks an automatic destroy; needs a human force-unlock%s%s", n, age, ghostNote, identityNote)
 		return base, nil
 	}
 	// keep-on-failure, checked last and specifically here: everything above it (ownership,
@@ -918,11 +944,11 @@ func classify(
 	// WHY nothing happened instead of looking like an ordinary live run.
 	if base.KeepOnFailure {
 		base.State = StateKept
-		base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace, but the run set --keep-on-failure: left up on purpose, never auto-swept%s", n, identityNote)
+		base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace, but the run set --keep-on-failure: left up on purpose, never auto-swept%s%s", n, ghostNote, identityNote)
 		return base, nil
 	}
 	base.State = StateOrphan
-	base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace with no owner: a teardown FAILED%s", n, identityNote)
+	base.Reason = fmt.Sprintf("%d resources still live past delete_after + grace with no owner: a teardown FAILED%s%s", n, ghostNote, identityNote)
 	return base, nil
 }
 
@@ -1205,6 +1231,26 @@ type taggedResources struct {
 	arns []string
 }
 
+// add counts one surviving (post-denylist) ARN. Shared by the tag query and the
+// existence check's rebuild (withoutGhosts) so both apply the same byType and
+// anchoring rules.
+func (r *taggedResources) add(arn string) {
+	service, resourceType := arnResourceType(arn)
+	r.total++
+	key := resourceType
+	if service == "" {
+		key = "unknown"
+	}
+	if r.byType == nil {
+		r.byType = map[string]int{}
+	}
+	r.byType[key]++
+	r.arns = append(r.arns, arn)
+	if service == "" || !insufficientAloneTypes[resourceType] {
+		r.anchored = true
+	}
+}
+
 // countTaggedDetailed exhausts the paginator in every region and returns an error on
 // any failure. Silent under-enumeration is the worst outcome available here: it makes
 // the janitor declare a stack torn down when it is not, and then the leak is
@@ -1253,23 +1299,12 @@ func countTaggedDetailed(ctx context.Context, tags map[string]TagAPI, regions []
 				return taggedResources{}, fmt.Errorf("GetResources in %s: %w", region, err)
 			}
 			for _, res := range page.ResourceTagMappingList {
-				service, resourceType := arnResourceType(aws.ToString(res.ResourceARN))
+				arn := aws.ToString(res.ResourceARN)
+				service, resourceType := arnResourceType(arn)
 				if service != "" && isDeniedResourceType(service, resourceType) {
 					continue
 				}
-				r.total++
-				key := resourceType
-				if service == "" {
-					key = "unknown"
-				}
-				if r.byType == nil {
-					r.byType = map[string]int{}
-				}
-				r.byType[key]++
-				r.arns = append(r.arns, aws.ToString(res.ResourceARN))
-				if service == "" || !insufficientAloneTypes[resourceType] {
-					r.anchored = true
-				}
+				r.add(arn)
 			}
 		}
 	}
@@ -1279,8 +1314,9 @@ func countTaggedDetailed(ctx context.Context, tags map[string]TagAPI, regions []
 	return r, nil
 }
 
-// countTagged is the (total, anchored) view classify() needs for G8. A thin wrapper
-// over countTaggedDetailed - see that function for the actual query and filtering.
+// countTagged is the raw (total, anchored) view of the tag query, before any
+// existence check. classify and Sweep go through countTaggedDetailed plus
+// withoutGhosts instead; this wrapper stays for the query-shape tests.
 func countTagged(ctx context.Context, tags map[string]TagAPI, regions []string, customer string) (total int, anchored bool, err error) {
 	r, err := countTaggedDetailed(ctx, tags, regions, customer)
 	if err != nil {
@@ -1820,7 +1856,10 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 		// c.Customer is guaranteed non-empty here: the guard above this destroy routes
 		// a candidate without one to NeedsReview rather than letting it through, so the
 		// re-verify below always has an identity to query.
-		r, terr := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)
+		// countLiveTagged, not the raw tag query: a destroy that worked leaves tagging-
+		// index entries behind for minutes to days, and counting them here would turn
+		// every clean destroy into residue.
+		r, _, terr := countLiveTagged(ctx, d, []string{c.Region, c.DRRegion}, c.Customer)
 		switch {
 		case terr != nil:
 			// Inconclusive, not success: a query we could not complete must never
@@ -1862,7 +1901,7 @@ func Sweep(ctx context.Context, d JanitorDeps, o JanitorOptions, rep *Report) er
 				c.SweepResult = fmt.Sprintf("residue: %d targeted delete(s), none succeeded", failedReclaims)
 				rep.Residue++
 			default:
-				r2, terr2 := countTaggedDetailed(ctx, d.Tags, []string{c.Region, c.DRRegion}, c.Customer)
+				r2, _, terr2 := countLiveTagged(ctx, d, []string{c.Region, c.DRRegion}, c.Customer)
 				if terr2 != nil {
 					// Same fail-closed reasoning as the outer terr case: a re-verify
 					// query we could not complete must never be read as "it worked".

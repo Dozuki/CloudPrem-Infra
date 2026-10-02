@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/databasemigrationservice"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -141,6 +142,9 @@ func runReaperWorker(rest []string, stdin io.Reader, stdout, stderr io.Writer) i
 		DMS: map[string]harness.DMSReclaimAPI{
 			flags.region: databasemigrationservice.NewFromConfig(awsConfig), flags.drRegion: databasemigrationservice.NewFromConfig(drConfig),
 		},
+		Exists: &harness.EC2ExistenceVerifier{EC2: map[string]harness.EC2DescribeAPI{
+			flags.region: ec2.NewFromConfig(awsConfig), flags.drRegion: ec2.NewFromConfig(drConfig),
+		}},
 		Matrix: matrix, Teardown: harness.RealTeardown,
 	}
 	janitorOptions := harness.JanitorOptions{
