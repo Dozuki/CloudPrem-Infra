@@ -268,20 +268,25 @@ variable "rds_freeable_memory_floor_mib" {
   }
 }
 
-variable "rds_cpu_tiered_alarms" {
-  description = "Split the RDS CPU alarm into a warning tier and a critical tier instead of one alarm that pages at 70%. Off by default so no existing environment changes: with it false the single <identifier>-rds-cpu-usage alarm is created exactly as before. With it true that alarm is replaced by <identifier>-rds-cpu-usage-warning (70% over 2x5m, the old numbers, and the -warning suffix is what makes the Slack card render orange without an @channel) and <identifier>-rds-cpu-usage-critical (rds_cpu_critical_threshold over 3x5m). Turn this on for an environment whose normal business load now sits at the old 70% line, so a real sustained event still pages but ordinary peaks do not. Note the alarm NAME changes when you opt in, which starts fresh alarm history for that environment - do not flip it mid-incident."
-  type        = bool
-  default     = false
+variable "rds_cpu_warning_threshold" {
+  description = "CPU percentage for the RDS warning alarm. It fires when average CPU is at or above this for 30 of the last 36 five-minute periods (about 2.5 of the last 3 hours). A capacity signal, not a page: the -warning name suffix renders an orange Slack card with no @channel."
+  type        = number
+  default     = 80
+
+  validation {
+    condition     = var.rds_cpu_warning_threshold > 0 && var.rds_cpu_warning_threshold < 100
+    error_message = "rds_cpu_warning_threshold must be above 0 and below 100."
+  }
 }
 
 variable "rds_cpu_critical_threshold" {
-  description = "CPU percentage for the critical tier when rds_cpu_tiered_alarms is true. 85 over three consecutive 5-minute periods is the default because the flapping this exists to fix was 3-minute excursions to 70%. Must be above 70, the fixed warning-tier threshold, so the two tiers cannot invert. The value is unused when rds_cpu_tiered_alarms is false, but the validation below still runs, so an out-of-range value fails the plan either way."
+  description = "CPU percentage for the RDS critical alarm, which pages. It fires when average CPU is at or above this for 3 consecutive 5-minute periods. Must be above rds_cpu_warning_threshold so the two tiers cannot invert, and at most 100."
   type        = number
-  default     = 85
+  default     = 90
 
   validation {
-    condition     = var.rds_cpu_critical_threshold > 70 && var.rds_cpu_critical_threshold <= 100
-    error_message = "rds_cpu_critical_threshold must be above 70 and at most 100. At or below 70 it would sit under the warning tier, so critical would page while warning still read OK."
+    condition     = var.rds_cpu_critical_threshold > var.rds_cpu_warning_threshold && var.rds_cpu_critical_threshold <= 100
+    error_message = "rds_cpu_critical_threshold must be above rds_cpu_warning_threshold and at most 100. At or below the warning threshold, critical would page while warning still read OK."
   }
 }
 
