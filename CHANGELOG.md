@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.13.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.13.0...v9.13.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **physical:** rds cpu alarm pages on routine peaks, replace with a 3h sustained warning and a 90% critical ([#570](https://github.com/Dozuki/CloudPrem-Infra/issues/570)) ([1c651d7](https://github.com/Dozuki/CloudPrem-Infra/commit/1c651d7c9990be9760d87208dde6702e90d9bf5a))
+
 ## [9.13.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.12.1...v9.13.0) (2026-09-22)
 
 
