@@ -3717,6 +3717,36 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 			wantResources: 0,
 		},
 		{
+			// Termination has started but the instances can still be shutting down:
+			// a deleted_* fleet is only gone once its instances are.
+			name:          "deleted_terminating instant fleet with a shutting-down instance anchors",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-term")},
+			live:          map[string]bool{"i-stop": true},
+			instanceState: map[string]ec2types.InstanceStateName{"i-stop": ec2types.InstanceStateNameShuttingDown},
+			fleets: map[string]ec2types.FleetData{"fleet-term": func() ec2types.FleetData {
+				fd := instantFleet("i-stop")
+				fd.FleetState = ec2types.FleetStateCodeDeletedTerminatingInstances
+				return fd
+			}()},
+			wantState:     StateOrphan,
+			wantResources: 1,
+		},
+		{
+			name:          "deleted_running maintain fleet with a live instance anchors",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-dr")},
+			live:          map[string]bool{"i-live": true},
+			fleets:        map[string]ec2types.FleetData{"fleet-dr": {Type: ec2types.FleetTypeMaintain, FleetState: ec2types.FleetStateCodeDeletedRunning, Instances: []ec2types.DescribeFleetsInstances{{InstanceIds: []string{"i-live"}}}}},
+			wantState:     StateOrphan,
+			wantResources: 1,
+		},
+		{
+			name:          "deleted_running fleet whose instances are gone is a ghost",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-dr")},
+			fleets:        map[string]ec2types.FleetData{"fleet-dr": {Type: ec2types.FleetTypeMaintain, FleetState: ec2types.FleetStateCodeDeletedRunning, Instances: []ec2types.DescribeFleetsInstances{{InstanceIds: []string{"i-gone"}}}}},
+			wantState:     StateClean,
+			wantResources: 0,
+		},
+		{
 			name:            "fleet not returned at all is gone",
 			arns:            []string{ec2ARN(testRegion, "fleet", "fleet-missing")},
 			wantState:       StateClean,
