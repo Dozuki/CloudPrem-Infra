@@ -369,11 +369,13 @@ func presentInstances(ctx context.Context, c EC2DescribeAPI, ids []string) (map[
 // instances are gone (measured 2026-10-02: all 18 orphans left after the first
 // verifier were KMS keys plus 45 such fleets). So:
 //   - deleted: gone.
-//   - deleted_running / deleted_terminating (any type), and instant in any other
-//     state: present only while one of its recorded instances is present under the
-//     instance rule above; no recorded instances means gone. A fleet that is
-//     deleting can still have running or shutting-down instances.
-//   - maintain/request in any other state: a real fleet, present.
+//   - instant, any other state (including deleted_running / deleted_terminating,
+//     whose instances can still be running or shutting down): present only while
+//     one of its recorded instances is present under the instance rule above; no
+//     recorded instances means gone.
+//   - maintain/request, any other state: present. FleetData.Instances is only
+//     populated for instant fleets, so a deleting maintain/request fleet cannot be
+//     checked that way, and it fails closed.
 //   - not returned by DescribeFleets at all: gone.
 func presentFleets(ctx context.Context, c EC2DescribeAPI, ids []string) (map[string]bool, error) {
 	fleets, err := describeFleets(ctx, c, ids)
@@ -388,9 +390,7 @@ func presentFleets(ctx context.Context, c EC2DescribeAPI, ids []string) (map[str
 		if f.FleetState == ec2types.FleetStateCodeDeleted {
 			continue
 		}
-		deleting := f.FleetState == ec2types.FleetStateCodeDeletedRunning ||
-			f.FleetState == ec2types.FleetStateCodeDeletedTerminatingInstances
-		if f.Type != ec2types.FleetTypeInstant && !deleting {
+		if f.Type != ec2types.FleetTypeInstant {
 			out[id] = true
 			continue
 		}
