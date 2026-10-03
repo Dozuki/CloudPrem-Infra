@@ -3315,7 +3315,13 @@ type fakeEC2Describe struct {
 	managed map[string]bool
 	err     error
 	ltErr   error // returned by DescribeLaunchTemplates only
-	calls   int
+	// fleets answers DescribeFleets by id; an id not in the map is omitted, or fails
+	// the whole call with InvalidFleetId.NotFound when fleetNotFoundErrors is set.
+	fleets              map[string]ec2types.FleetData
+	fleetErr            error
+	fleetNotFoundErrors bool
+	fleetCalls          int
+	calls               int
 }
 
 func (f *fakeEC2Describe) liveIn(filters []ec2types.Filter, wantName string, includeManaged ...*bool) ([]string, error) {
@@ -3482,6 +3488,29 @@ func (f *fakeEC2Describe) DescribeNetworkAcls(_ context.Context, in *ec2.Describ
 	return out, err
 }
 
+func (f *fakeEC2Describe) DescribeFleets(_ context.Context, in *ec2.DescribeFleetsInput, _ ...func(*ec2.Options)) (*ec2.DescribeFleetsOutput, error) {
+	f.fleetCalls++
+	if f.fleetErr != nil {
+		return nil, f.fleetErr
+	}
+	if len(in.Filters) > 0 || len(in.FleetIds) == 0 {
+		return nil, fmt.Errorf("fake EC2: DescribeFleets wants FleetIds and no filters, got %+v", in)
+	}
+	out := &ec2.DescribeFleetsOutput{}
+	for _, id := range in.FleetIds {
+		fd, ok := f.fleets[id]
+		if !ok {
+			if f.fleetNotFoundErrors {
+				return nil, &smithy.GenericAPIError{Code: "InvalidFleetId.NotFound", Message: "not found: " + id}
+			}
+			continue
+		}
+		fd.FleetId = aws.String(id)
+		out.Fleets = append(out.Fleets, fd)
+	}
+	return out, nil
+}
+
 func (f *fakeEC2Describe) DescribeLaunchTemplates(_ context.Context, in *ec2.DescribeLaunchTemplatesInput, _ ...func(*ec2.Options)) (*ec2.DescribeLaunchTemplatesOutput, error) {
 	f.calls++
 	if f.err != nil {
@@ -3533,6 +3562,8 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 		natState        map[string]ec2types.NatGatewayState
 		managed         map[string]bool
 		ltErr           error
+		fleets          map[string]ec2types.FleetData
+		fleetErr        error
 		ec2Err          error
 		unverified      bool
 		wantState       CandidateState
@@ -3637,6 +3668,100 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 			wantReasonParts: []string{"existence check inconclusive"},
 		},
 		{
+			// EKS Auto Mode launches nodes through instant fleets, and AWS keeps an
+			// instant fleet's record "active" forever after its instances are gone.
+			name:            "instant fleet whose instances are all gone is a ghost",
+			arns:            []string{ec2ARN(testRegion, "fleet", "fleet-instant")},
+			live:            map[string]bool{"i-term": true},
+			instanceState:   map[string]ec2types.InstanceStateName{"i-term": ec2types.InstanceStateNameTerminated},
+			fleets:          map[string]ec2types.FleetData{"fleet-instant": instantFleet("i-gone", "i-term")},
+			wantState:       StateClean,
+			wantReasonParts: []string{"all verified deleted"},
+		},
+		{
+			name:          "instant fleet with no recorded instances is a ghost",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-empty")},
+			fleets:        map[string]ec2types.FleetData{"fleet-empty": instantFleet()},
+			wantState:     StateClean,
+			wantResources: 0,
+		},
+		{
+			name:          "instant fleet with one live instance anchors",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-instant")},
+			live:          map[string]bool{"i-live": true},
+			fleets:        map[string]ec2types.FleetData{"fleet-instant": instantFleet("i-gone", "i-live")},
+			wantState:     StateOrphan,
+			wantResources: 1,
+		},
+		{
+			name:          "instant fleet with a shutting-down instance anchors",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-instant")},
+			live:          map[string]bool{"i-stop": true},
+			instanceState: map[string]ec2types.InstanceStateName{"i-stop": ec2types.InstanceStateNameShuttingDown},
+			fleets:        map[string]ec2types.FleetData{"fleet-instant": instantFleet("i-stop")},
+			wantState:     StateOrphan,
+			wantResources: 1,
+		},
+		{
+			name:          "active maintain fleet is present",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-maintain")},
+			fleets:        map[string]ec2types.FleetData{"fleet-maintain": {Type: ec2types.FleetTypeMaintain, FleetState: ec2types.FleetStateCodeActive}},
+			wantState:     StateOrphan,
+			wantResources: 1,
+		},
+		{
+			name:          "deleted fleet is gone",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-del"), ec2ARN(testRegion, "fleet", "fleet-delinst")},
+			fleets:        map[string]ec2types.FleetData{"fleet-del": {Type: ec2types.FleetTypeMaintain, FleetState: ec2types.FleetStateCodeDeleted}, "fleet-delinst": {Type: ec2types.FleetTypeInstant, FleetState: ec2types.FleetStateCodeDeleted}},
+			wantState:     StateClean,
+			wantResources: 0,
+		},
+		{
+			// Termination has started but the instances can still be shutting down:
+			// a deleted_* fleet is only gone once its instances are.
+			name:          "deleted_terminating instant fleet with a shutting-down instance anchors",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-term")},
+			live:          map[string]bool{"i-stop": true},
+			instanceState: map[string]ec2types.InstanceStateName{"i-stop": ec2types.InstanceStateNameShuttingDown},
+			fleets: map[string]ec2types.FleetData{"fleet-term": func() ec2types.FleetData {
+				fd := instantFleet("i-stop")
+				fd.FleetState = ec2types.FleetStateCodeDeletedTerminatingInstances
+				return fd
+			}()},
+			wantState:     StateOrphan,
+			wantResources: 1,
+		},
+		{
+			// FleetData.Instances is only populated for instant fleets, so a deleting
+			// maintain/request fleet cannot be checked through it and stays present.
+			name:          "deleting maintain and request fleets stay present",
+			arns:          []string{ec2ARN(testRegion, "fleet", "fleet-dr"), ec2ARN(testRegion, "fleet", "fleet-dt")},
+			fleets:        map[string]ec2types.FleetData{"fleet-dr": {Type: ec2types.FleetTypeMaintain, FleetState: ec2types.FleetStateCodeDeletedRunning}, "fleet-dt": {Type: ec2types.FleetTypeRequest, FleetState: ec2types.FleetStateCodeDeletedTerminatingInstances}},
+			wantState:     StateOrphan,
+			wantResources: 2,
+		},
+		{
+			name:            "fleet not returned at all is gone",
+			arns:            []string{ec2ARN(testRegion, "fleet", "fleet-missing")},
+			wantState:       StateClean,
+			wantReasonParts: []string{"1 tagged entries in the tagging index, all verified deleted"},
+		},
+		{
+			name:            "DescribeFleets error is unknown",
+			arns:            []string{ec2ARN(testRegion, "fleet", "fleet-instant")},
+			fleetErr:        &smithy.GenericAPIError{Code: "UnauthorizedOperation", Message: "nope"},
+			wantState:       StateUnknown,
+			wantReasonParts: []string{"existence check inconclusive"},
+		},
+		{
+			name:            "instance lookup error inside the fleet check is unknown",
+			arns:            []string{ec2ARN(testRegion, "fleet", "fleet-instant")},
+			fleets:          map[string]ec2types.FleetData{"fleet-instant": instantFleet("i-gone")},
+			ec2Err:          &smithy.GenericAPIError{Code: "RequestLimitExceeded", Message: "slow down"},
+			wantState:       StateUnknown,
+			wantReasonParts: []string{"existence check inconclusive"},
+		},
+		{
 			name:            "identity unverified and all ghosts is needs-review",
 			arns:            []string{ghostInstance, ghostVol},
 			unverified:      true,
@@ -3656,7 +3781,7 @@ func TestClassifyVerifiesTaggedResourcesExist(t *testing.T) {
 				rm.AppliedCustomer = appliedCustomerFor(t, "min_default", "run1")
 			}
 			seedManifest(t, f, primaryBucket(), "run1-min_default/", rm)
-			fe := &fakeEC2Describe{live: tc.live, instanceState: tc.instanceState, natState: tc.natState, managed: tc.managed, ltErr: tc.ltErr, err: tc.ec2Err}
+			fe := &fakeEC2Describe{live: tc.live, instanceState: tc.instanceState, natState: tc.natState, managed: tc.managed, ltErr: tc.ltErr, fleets: tc.fleets, fleetErr: tc.fleetErr, err: tc.ec2Err}
 			deps := JanitorDeps{
 				S3:       f,
 				Tags:     map[string]TagAPI{testRegion: &arnTagAPI{arns: tc.arns}, testDR: &arnTagAPI{}},
@@ -3912,5 +4037,38 @@ func TestSweepStopsAfterInconclusivePostDestroyCheck(t *testing.T) {
 	second := rep.Candidates[1]
 	if second.State != StateOrphan || !strings.Contains(second.SweepResult, "skipped") {
 		t.Fatalf("second state=%q result=%q, want an orphan skipped this cycle", second.State, second.SweepResult)
+	}
+}
+
+func instantFleet(instanceIDs ...string) ec2types.FleetData {
+	fd := ec2types.FleetData{Type: ec2types.FleetTypeInstant, FleetState: ec2types.FleetStateCodeActive}
+	if len(instanceIDs) > 0 {
+		fd.Instances = []ec2types.DescribeFleetsInstances{{InstanceIds: instanceIDs}}
+	}
+	return fd
+}
+
+// TestEC2ExistenceVerifierFleetNotFoundFallsBackPerID: if a batched DescribeFleets
+// fails on one unknown id, the verifier retries id by id so the rest still resolve.
+func TestEC2ExistenceVerifierFleetNotFoundFallsBackPerID(t *testing.T) {
+	fe := &fakeEC2Describe{
+		fleetNotFoundErrors: true,
+		live:                map[string]bool{"i-live": true},
+		fleets: map[string]ec2types.FleetData{
+			"fleet-live": instantFleet("i-live"),
+			"fleet-real": {Type: ec2types.FleetTypeMaintain, FleetState: ec2types.FleetStateCodeActive},
+		},
+	}
+	v := &EC2ExistenceVerifier{EC2: map[string]EC2DescribeAPI{testRegion: fe}}
+	missing, liveF, real := ec2ARN(testRegion, "fleet", "fleet-missing"), ec2ARN(testRegion, "fleet", "fleet-live"), ec2ARN(testRegion, "fleet", "fleet-real")
+	res, err := v.Verify(context.Background(), []string{missing, liveF, real})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !res.Gone[missing] || !res.Present[liveF] || !res.Present[real] {
+		t.Fatalf("gone=%v present=%v, want missing gone and the other two present", res.Gone, res.Present)
+	}
+	if fe.fleetCalls != 4 {
+		t.Fatalf("DescribeFleets calls = %d, want 4 (one failed batch, then one per id)", fe.fleetCalls)
 	}
 }
