@@ -580,6 +580,9 @@ locals {
     # false is the per-env opt-out, and also the unblock lever for a HelmRelease stuck
     # on a failing reindex hook.
     var.search_reindex_enabled == null ? {} : { search = { reindex = { enabled = var.search_reindex_enabled } } },
+    # Omitted unless on, so an env that has not opted in renders byte-identical values
+    # and adopting this version does not trigger a Helm upgrade.
+    var.enable_testing_endpoints ? { testing = { enableTestingEndpoints = true } } : {},
   )
 }
 
