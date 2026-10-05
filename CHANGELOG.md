@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.14.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.13.1...v9.14.0) (2026-10-04)
+
+
+### Features
+
+* **logical:** enable_testing_endpoints sets the chart's testing.json opt-in ([#574](https://github.com/Dozuki/CloudPrem-Infra/issues/574)) ([c885d05](https://github.com/Dozuki/CloudPrem-Infra/commit/c885d0565c5f1b298dfee27cc839897b1454911c))
+
 ## [9.13.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.13.0...v9.13.1) (2026-10-02)
 
 
