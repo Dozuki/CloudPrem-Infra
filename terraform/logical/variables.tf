@@ -865,6 +865,13 @@ variable "cloudwatch_exporter_enabled" {
   default     = true
 }
 
+variable "local_alert_rules_enabled" {
+  description = "Render the chart's in-cluster alert rules (monitoring.localAlertRules.enabled). NULL (the default) omits the key so the chart default applies, which is true. Set false to hand alerting to central Grafana. A no-op until chart_version carries monitoring.localAlertRules; an older chart ignores the value."
+  type        = bool
+  nullable    = true
+  default     = null
+}
+
 variable "mimir_remote_write_enabled" {
   description = "Ship a copy of this cluster's metrics to the central Mimir with Prometheus remote_write. Purely additive to metrics: the local Prometheus keeps its full TSDB and its rules whether this is on or off. It is also now the alert path, though, from chart 2.10.25 on the 2.x line and 3.11.0 on the 3.x line: those releases dropped the per-cluster Alertmanager, so alert notifications go to the central Mimir Alertmanager and turning this off stops alert delivery for the environment, not just metrics. Below those versions the env still has its own Alertmanager and this flag is metrics-only. NULL (the default) means on for any AWS env, in either partition - central metrics is the fleet default now, so a new env enrolls with no mimir lines in its env.hcl. Set false explicitly to opt an env out. Still needs the ingest key at <customer>/<environment>/mimir in Vault (Mimir-Tenant-Keys mints it from the env dir, so for a normal env it is already there) and, on commercial, the physical network path from enable_mimir. Silently a no-op unless this env's chart_version is >= 2.7.0, the release that carries the remote_write support: an older chart ignores the values and reports nothing."
   type        = bool

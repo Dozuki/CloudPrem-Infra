@@ -580,6 +580,10 @@ locals {
     # false is the per-env opt-out, and also the unblock lever for a HelmRelease stuck
     # on a failing reindex hook.
     var.search_reindex_enabled == null ? {} : { search = { reindex = { enabled = var.search_reindex_enabled } } },
+    # monitoring.localAlertRules.enabled is omitted when null so the chart default wins and an
+    # env that has not opted in renders byte-identical values (no Helm upgrade on adoption).
+    # Merged into the existing monitoring map so monitoring.enabled and friends survive.
+    var.local_alert_rules_enabled == null ? {} : { monitoring = merge(local.app_base_values.monitoring, { localAlertRules = { enabled = var.local_alert_rules_enabled } }) },
     # Omitted unless on, so an env that has not opted in renders byte-identical values
     # and adopting this version does not trigger a Helm upgrade.
     var.enable_testing_endpoints ? { testing = { enableTestingEndpoints = true } } : {},
