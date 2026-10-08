@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.15.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.14.0...v9.15.0) (2026-10-08)
+
+
+### Features
+
+* **logical:** add local_alert_rules_enabled to hand fleet alerting to central grafana ([#577](https://github.com/Dozuki/CloudPrem-Infra/issues/577)) ([f1f0b88](https://github.com/Dozuki/CloudPrem-Infra/commit/f1f0b880e4fcfc1d66402b13ba4e767058dcc7ec))
+
 ## [9.14.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.13.1...v9.14.0) (2026-10-04)
 
 
