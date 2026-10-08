@@ -212,6 +212,11 @@ locals {
 
     monitoring = {
       enabled = true
+      # Chart-local alert rules. No-op until the pinned chart carries
+      # monitoring.localAlertRules (a chart that predates it ignores the key).
+      localAlertRules = {
+        enabled = var.local_alert_rules_enabled
+      }
       # Alerts on EBS burst-credit exhaustion, which nothing in-cluster can see:
       # the node stays Ready and StorageReady=True while every disk-backed pod on
       # it stalls. The CloudWatch metric is the only thing that moves.
