@@ -866,9 +866,10 @@ variable "cloudwatch_exporter_enabled" {
 }
 
 variable "local_alert_rules_enabled" {
-  description = "Render the chart's in-cluster alert rules (monitoring.localAlertRules.enabled). On by default. A no-op until chart_version carries monitoring.localAlertRules; an older chart ignores the value."
+  description = "Render the chart's in-cluster alert rules (monitoring.localAlertRules.enabled). NULL (the default) omits the key so the chart default applies, which is true. Set false to hand alerting to central Grafana. A no-op until chart_version carries monitoring.localAlertRules; an older chart ignores the value."
   type        = bool
-  default     = true
+  nullable    = true
+  default     = null
 }
 
 variable "mimir_remote_write_enabled" {
