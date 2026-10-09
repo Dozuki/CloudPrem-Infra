@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.17.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.16.0...v9.17.0) (2026-10-09)
+
+
+### Features
+
+* **logical:** pass the env VPC and Service CIDRs to the chart network policies ([#581](https://github.com/Dozuki/CloudPrem-Infra/issues/581)) ([95cb9eb](https://github.com/Dozuki/CloudPrem-Infra/commit/95cb9eb54623cf3c6d90cccbbcaa1111a3e7d29d))
+
 ## [9.16.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.15.0...v9.16.0) (2026-10-09)
 
 
