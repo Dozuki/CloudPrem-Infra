@@ -427,7 +427,7 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
 # Pod Identity: dozuki-operator node fence. Lets the operator read EC2 instance
 # state so it can taint nodes whose instance is terminated (non-graceful node shutdown).
 resource "aws_iam_role" "dozuki_operator_pod_identity" {
-  name = "${local.identifier}-${data.aws_region.current.region}-dozuki-operator-pod-identity"
+  name = "${local.identifier}-${data.aws_region.current.region}-operator-pod-identity"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
