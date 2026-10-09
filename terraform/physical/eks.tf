@@ -424,6 +424,56 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
   tags = local.tags
 }
 
+# Pod Identity: dozuki-operator node fence. Lets the operator read EC2 instance
+# state so it can taint nodes whose instance is terminated (non-graceful node shutdown).
+resource "aws_iam_role" "dozuki_operator_pod_identity" {
+  name = "${local.identifier}-${data.aws_region.current.region}-dozuki-operator-pod-identity"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "pods.eks.amazonaws.com"
+        }
+        Action = [
+          "sts:AssumeRole",
+          "sts:TagSession"
+        ]
+      }
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "dozuki_operator_pod_identity" {
+  name = "describe-instances"
+  role = aws_iam_role.dozuki_operator_pod_identity.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["ec2:DescribeInstances"]
+        # DescribeInstances does not support resource-level scoping.
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_eks_pod_identity_association" "dozuki_operator" {
+  cluster_name    = module.eks_cluster.cluster_name
+  namespace       = "dozuki"
+  service_account = "dozuki-operator"
+  role_arn        = aws_iam_role.dozuki_operator_pod_identity.arn
+
+  tags = local.tags
+}
+
 # Log shipping: Fluent Bit (amazon-cloudwatch-observability addon).
 #
 # EKS Auto Mode gives nodes a deliberately minimal role (only EKS worker + ECR pull),
