@@ -283,7 +283,9 @@ locals {
     }
 
     "dozuki-operator" = {
-      image            = { repository = "${var.image_repository}/dozuki-operator" }
+      image = { repository = "${var.image_repository}/dozuki-operator" }
+      # Off on Azure/onprem. On aws the operator calls ec2:DescribeInstances via the physical layer's pod identity role.
+      nodeFence        = { enabled = var.cloud == "aws", region = var.cloud == "aws" ? data.aws_region.current[0].region : "" }
       imagePullSecrets = [{ name = "ghcr-pull" }]
       grafana = {
         url         = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : ""
