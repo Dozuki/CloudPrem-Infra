@@ -29,11 +29,13 @@ locals {
   env_service_cidr    = try(one(data.aws_eks_cluster.main[*]).kubernetes_network_config[0].service_ipv4_cidr, null)
   netpol_denied_cidrs = compact(concat(local.env_vpc_cidrs, [local.env_service_cidr, "169.254.0.0/16"]))
 
-  # Chart floor: 3.20.0 carries the shared NetworkPolicy helper and the web-nextjs policy.
+  # Chart floor: 3.20.2 carries the Istio ambient kubelet probe-source ingress rule. 3.20.0 and 3.20.1 render a
+  # web-nextjs policy that blocks probes, so DWA pods fail readiness.
   netpol_chart_ok = var.cloud == "aws" && try(
     length(local.chart_version_core) == 3 && (
       tonumber(local.chart_version_core[0]) >= 4 ||
-      (tonumber(local.chart_version_core[0]) == 3 && tonumber(local.chart_version_core[1]) >= 20)
+      (tonumber(local.chart_version_core[0]) == 3 && tonumber(local.chart_version_core[1]) > 20) ||
+      (tonumber(local.chart_version_core[0]) == 3 && tonumber(local.chart_version_core[1]) == 20 && tonumber(local.chart_version_core[2]) >= 2)
     ), false
   )
 
