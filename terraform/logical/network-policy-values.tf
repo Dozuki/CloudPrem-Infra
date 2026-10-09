@@ -14,6 +14,14 @@
 data "aws_vpc" "cluster" {
   count = var.cloud == "aws" ? 1 : 0
   id    = data.aws_eks_cluster.main[0].vpc_config[0].vpc_id
+
+  # When the policy is on, fail the plan rather than enable it with a deny list missing the VPC or Service CIDR.
+  lifecycle {
+    postcondition {
+      condition     = !local.netpol_chart_ok || (length(self.cidr_block_associations) > 0 && data.aws_eks_cluster.main[0].kubernetes_network_config[0].service_ipv4_cidr != null)
+      error_message = "network policy deny list: the cluster VPC has no CIDR associations or the EKS Service CIDR is unknown."
+    }
+  }
 }
 
 locals {

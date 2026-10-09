@@ -360,6 +360,7 @@ locals {
     # is ever added here, merge it explicitly at deployments.crond rather than letting the mode
     # table replace the whole subtree.
     # puppeteer/webNextjs networkPolicy keys come from network-policy-values.tf.
+    # The cron-mode table must never carry webNextjs or puppeteer: this merge is shallow and would drop the networkPolicy subtree.
     deployments = merge({ webNextjs = merge({ env = local.app_webnextjs_env }, try(local.netpol_values.webNextjs, {})) }, try({ puppeteer = local.netpol_values.puppeteer }, {}), local.app_cron_mode_values[var.app_cron_mode].deployments)
   }
 
