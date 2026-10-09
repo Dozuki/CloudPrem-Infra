@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.16.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.15.0...v9.16.0) (2026-10-09)
+
+
+### Features
+
+* **physical:** pod identity role so the dozuki-operator node fence can read EC2 instance state ([#579](https://github.com/Dozuki/CloudPrem-Infra/issues/579)) ([afa2b2d](https://github.com/Dozuki/CloudPrem-Infra/commit/afa2b2daab74958ed372a661a7c687cf76ed53d3))
+
 ## [9.15.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.14.0...v9.15.0) (2026-10-08)
 
 
