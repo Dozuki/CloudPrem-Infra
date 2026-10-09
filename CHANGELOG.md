@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.17.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.17.0...v9.17.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **logical:** require chart 3.20.2 before switching on the web-nextjs NetworkPolicy ([#583](https://github.com/Dozuki/CloudPrem-Infra/issues/583)) ([6e5a54b](https://github.com/Dozuki/CloudPrem-Infra/commit/6e5a54b86d1f60c43d499dbeac34e1171a37c717))
+
 ## [9.17.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.16.0...v9.17.0) (2026-10-09)
 
 
