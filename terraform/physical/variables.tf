@@ -79,18 +79,6 @@ variable "aws_profile" {
   default     = ""
 }
 
-variable "cf_template_version" {
-  description = "Version of the CloudFormation template that deployed this stack for validation"
-  type        = number
-  default     = 0
-
-  validation {
-    // Allow for 0 so we can override this check when deploying from workstations or tests.
-    condition     = var.cf_template_version == 0 || var.cf_template_version >= 5
-    error_message = "CloudFormation template version is out of date. Update your CloudFormation to deploy this version of the infrastructure."
-  }
-}
-
 variable "subdomain_format" {
   type        = list(string)
   description = "Subdomain format specifying the order and/inclusion of customer, environment, and region (e.g., [%CUSTOMER%, %ENVIRONMENT%, %REGION%])"
