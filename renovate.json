@@ -32,6 +32,11 @@
 
   "packageRules": [
     {
+      "description": "The .terragrunt-version and .opentofu-version files here mirror the fleet pin. infra-live _spacelift/stacks.tf is canonical and _bin/check-tofu-pin-sync.sh fails when these drift from it, so a bump has to start in infra-live, not here.",
+      "matchPackageNames": ["gruntwork-io/terragrunt", "opentofu/opentofu"],
+      "enabled": false
+    },
+    {
       "description": "Terraform and Helm-values changes are part of the versioned deployment artifact. Use fix so release-please publishes a patch instead of leaving the merged change unreachable until some unrelated release.",
       "matchManagers": ["terraform", "helm-values"],
       "commitMessagePrefix": "fix(deps):"
