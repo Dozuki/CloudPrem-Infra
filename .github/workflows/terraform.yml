@@ -31,6 +31,17 @@ jobs:
       run: python3 test_sns_to_slack.py
       working-directory: ./terraform/physical/util
 
+  # The pre-commit hook regenerates env.hcl.example, but hooks can be skipped. This is
+  # the gate that keeps the committed file matching variables.tf.
+  env-hcl-example:
+    name: 'env.hcl.example'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+    - name: Check env.hcl.example is current
+      run: python3 scripts/gen-env-example.py --check
+
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
