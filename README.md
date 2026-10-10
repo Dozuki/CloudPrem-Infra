@@ -115,7 +115,10 @@ does.
 ## Configuration
 
 Feature flags are set per-environment in `env.hcl` and flow through the root
-`root.hcl` `inputs` merge. The most common operator-facing toggles:
+`root.hcl` `inputs` merge. **[`env.hcl.example`](env.hcl.example) lists every variable
+both layers accept**, with its description, type, accepted values and default. It is
+generated from `variables.tf`, so read it at the tag your env's `infra_version` pins. The
+most common operator-facing toggles:
 
 | Variable                       | Layer    | Default | Purpose                                                        |
 |--------------------------------|----------|---------|----------------------------------------------------------------|

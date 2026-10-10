@@ -18,6 +18,12 @@ repos:
         language: script
         files: ^terraform/logical/.*\.tf$
         pass_filenames: false
+      - id: env-hcl-example
+        name: env.hcl.example (generated from variables.tf)
+        entry: scripts/gen-env-example.py
+        language: script
+        files: ^(terraform/(physical|logical)/variables\.tf|scripts/gen-env-example\.py)$
+        pass_filenames: false
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: "v1.83.5"
     hooks:
