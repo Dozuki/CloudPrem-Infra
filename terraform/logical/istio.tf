@@ -5,12 +5,14 @@
 # (kubernetes.tf depends_on).
 
 locals {
-  istio_version    = "1.30.3"
-  istio_chart_repo = "https://istio-release.storage.googleapis.com/charts"
-  # Image hub override for airgapped installs. Gov phase 2 sets this to the gov ECR
-  # mirror (source registry.istio.io/release; gcr.io retires 2027-01-01). Empty
-  # string = chart default hub.
-  istio_image_hub = ""
+  istio_version = "1.30.3"
+  # The 1.30 chart defaults (registry.istio.io/release images and the
+  # istio-release GCS chart bucket) started returning 403 to anonymous pulls on
+  # 2026-10-13 as istio retires them, so new nodes could not start ztunnel or
+  # istio-cni. blob.istio.io and docker.io/istio are the replacements upstream
+  # points to: https://istio.io/latest/blog/2026/retirement-of-gcr.io-follow-up/
+  istio_chart_repo = "https://blob.istio.io/istio-release/charts"
+  istio_image_hub  = "docker.io/istio"
 
   # Platform contract: ambient runs on AWS EKS Auto Mode, both partitions. Gov
   # clusters pull docker.io/ghcr.io/quay.io today, so no image mirror is needed;
