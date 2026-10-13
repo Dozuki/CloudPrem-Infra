@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.17.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.17.1...v9.17.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **istio:** pull charts from blob.istio.io and images from docker.io/istio ([#589](https://github.com/Dozuki/CloudPrem-Infra/issues/589)) ([7e90b3a](https://github.com/Dozuki/CloudPrem-Infra/commit/7e90b3a1cea03fa06e4922acba51840c5945589e))
+
 ## [9.17.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.17.0...v9.17.1) (2026-10-09)
 
 
