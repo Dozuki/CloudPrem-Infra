@@ -16,7 +16,7 @@
 # each pulling ~12 providers (aws and azurerm alone are most of a gigabyte). Stage 3 warms
 # a plugin cache from the repo's committed lockfiles so those inits resolve locally.
 
-ARG ALPINE_VERSION=3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+ARG ALPINE_VERSION=3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 ARG GO_VERSION=1.25
 
 # Fleet pins. tofu/terragrunt MUST match infra-live/_spacelift/stacks.tf. Terragrunt
