@@ -370,13 +370,15 @@ locals {
   #   - objectStorage: base sets kmsKey/buckets/endpoint/credentials (the old set list); azure's
   #     seaweedfs_values adds publicBackend. Without the deep merge azure would keep only publicBackend
   #     and drop the buckets/credentials the app needs.
-  #   - global: base sets mimir; azure adds imagePullSecrets/seaweedfs. Shallow, azure would drop
-  #     mimir - harmless today (mimir is aws-only) but it would silently break the moment anything
-  #     else lands under global on both sides.
+  #   - global: base sets mimir; azure adds imagePullSecrets/seaweedfs (nonprod adds
+  #     imagePullSecrets too, via use_ghcr). Shallow, azure would drop mimir - harmless today
+  #     (mimir is aws-only) but it would silently break the moment anything else lands under
+  #     global on both sides.
   # Every other azure key (cert_manager, seaweedfs...) has no base collision and shallow-merges
   # cleanly. helm_release.app got the same effect from helm's deep merge of its two values files + set
   # list. All three deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values
-  # has none of the keys, so try(...,{}) yields {} and the merged result equals base.
+  # has none of the keys, so try(...,{}) yields {} and the merged result equals base (plus
+  # global.imagePullSecrets on nonprod).
   # AWS-only: pin every EBS-backed subchart workload to the on-demand NodePool.
   #
   # These pods (opensearch, prometheus, alertmanager) each own a zonal EBS volume -
