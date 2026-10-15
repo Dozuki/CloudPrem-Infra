@@ -136,8 +136,19 @@ variable "webnextjs_env" {
 }
 
 variable "image_repository" {
-  description = "Docker image repository (ECR) for app containers."
+  description = "Registry root for the app images and the chart: ECR for prod, ghcr.io/dozuki for nonprod (see environment_tier)."
   type        = string
+}
+
+variable "environment_tier" {
+  description = "prod pulls only images that passed QA and were promoted to ECR. nonprod (staging, dev, test) pulls CI builds from GHCR, so its image_repository must be ghcr.io/dozuki and ghcr_pull_* must be set."
+  type        = string
+  default     = "prod"
+
+  validation {
+    condition     = contains(["prod", "nonprod"], var.environment_tier)
+    error_message = "environment_tier must be \"prod\" or \"nonprod\"."
+  }
 }
 
 variable "app_image_flavor" {
@@ -698,13 +709,13 @@ variable "verify_artifact_pins" {
 }
 
 variable "ghcr_pull_username" {
-  description = "GitHub username for pulling MPC images from GHCR (Azure only)."
+  description = "GitHub username for pulling MPC images from GHCR (environment_tier = nonprod, and Azure)."
   type        = string
   default     = ""
 }
 
 variable "ghcr_pull_token" {
-  description = "GitHub token (read:packages) for pulling MPC images from GHCR (Azure only)."
+  description = "GitHub token (read:packages) for pulling MPC images from GHCR (environment_tier = nonprod, and Azure)."
   type        = string
   sensitive   = true
   default     = ""

@@ -567,7 +567,12 @@ locals {
     { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" && k != "global" },
     { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
     { objectStorage = merge(local.app_base_values.objectStorage, try(local.app_azure_values.objectStorage, {})) },
-    { global = merge(local.app_base_values.global, try(local.app_azure_values.global, {})) },
+    { global = merge(
+      local.app_base_values.global,
+      try(local.app_azure_values.global, {}),
+      # nonprod pulls from GHCR: same pull secret azure sets above (identical there, so a no-op).
+      { for k, v in { imagePullSecrets = [{ name = "ghcr-pull" }] } : k => v if local.use_ghcr },
+    ) },
     { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" && k != "metrics-server" },
     { grafana = merge(local.app_base_values.grafana, try(local.app_stateful_scheduling.grafana, {})) },
     { "metrics-server" = merge(local.app_base_values["metrics-server"], try(local.app_stateful_scheduling["metrics-server"], {})) },
@@ -675,11 +680,11 @@ resource "kubernetes_secret_v1" "flux_values" {
   }
 }
 
-# GHCR pull secret in flux-system for the Azure/generic OCIRepository (source-controller pulls the
-# chart from ghcr.io there instead of ECR). Mirrors the app-namespace ghcr-pull; AWS/gov use pod
-# identity + provider=aws instead, so this is azure-only.
+# GHCR pull secret in flux-system for the generic OCIRepository (source-controller pulls the chart
+# from ghcr.io instead of ECR). Mirrors the app-namespace ghcr-pull; ECR envs use pod identity +
+# provider=aws instead.
 resource "kubernetes_secret_v1" "flux_ghcr_pull" {
-  count = var.cloud == "azure" ? 1 : 0
+  count = local.use_ghcr ? 1 : 0
   metadata {
     name      = "flux-ghcr-pull"
     namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
@@ -857,20 +862,30 @@ resource "aws_eks_pod_identity_association" "flux_source_controller" {
 # OCIRepository: the same chart artifact env.hcl already pins (registry + chart_version).
 resource "kubectl_manifest" "dozuki_ocirepository" {
   depends_on = [helm_release.flux]
+
+  lifecycle {
+    precondition {
+      # Holds the standard in place: prod never runs unpromoted GHCR builds, nonprod never ECR.
+      condition     = var.cloud == "azure" || (var.environment_tier == "nonprod") == startswith(var.image_repository, "ghcr.io/")
+      error_message = "environment_tier = \"${var.environment_tier}\" does not match image_repository = \"${var.image_repository}\": prod pulls from ECR, nonprod from ghcr.io/dozuki."
+    }
+  }
+
   yaml_body = yamlencode({
     apiVersion = "source.toolkit.fluxcd.io/v1"
     kind       = "OCIRepository"
     metadata   = { name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
-    # provider=aws pulls with the source-controller's pod-identity ECR creds (AWS + gov). Azure has no
-    # pod identity, so it uses the default provider + the flux-system ghcr dockerconfigjson secret.
+    # provider=aws pulls from ECR with the source-controller's pod-identity creds (prod on AWS + gov).
+    # GHCR (nonprod, and Azure) uses the default provider + the flux-system ghcr dockerconfigjson
+    # secret.
     spec = merge(
       {
         interval = "10m"
         url      = "oci://${var.image_repository}/charts/dozuki"
         ref      = { tag = var.chart_version }
-        provider = var.cloud == "aws" ? "aws" : "generic"
+        provider = local.use_ghcr ? "generic" : "aws"
       },
-      var.cloud == "aws" ? {} : { secretRef = { name = "flux-ghcr-pull" } },
+      local.use_ghcr ? { secretRef = { name = "flux-ghcr-pull" } } : {},
     )
   })
 }

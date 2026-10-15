@@ -918,10 +918,18 @@ resource "kubernetes_service_account_v1" "eso_vault_auth" {
   }
 }
 
-# Image pull secret for GHCR (Azure only) — MPC images are pulled directly
-# from ghcr.io instead of being mirrored into ACR.
+# Image pull secret for GHCR — nonprod tiers (and Azure, instead of mirroring
+# into ACR) pull MPC images directly from ghcr.io.
 resource "kubernetes_secret_v1" "ghcr_pull" {
-  count = var.cloud == "azure" ? 1 : 0
+  count = local.use_ghcr ? 1 : 0
+
+  lifecycle {
+    precondition {
+      # Without creds every pod sits in ImagePullBackOff until the HelmRelease times out.
+      condition     = var.cloud == "azure" || var.ghcr_pull_token != ""
+      error_message = "environment_tier = \"nonprod\" pulls from GHCR, so ghcr_pull_username and ghcr_pull_token must be set."
+    }
+  }
 
   metadata {
     name      = "ghcr-pull"

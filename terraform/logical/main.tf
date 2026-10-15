@@ -123,13 +123,13 @@ provider "helm" {
   }
 
   # OCI chart-pull auth (helm provider 3.x: `registries` is a list attribute,
-  # replacing 2.x's repeatable `registry {}` block). AWS authenticates
-  # in-Terraform via the ECR token. Azure authenticates to GHCR with the
-  # ghcr_pull_* creds (same ones used for the cluster image-pull secret) — the
-  # kit does an ambient `helm registry login`, but a Spacelift worker has no
-  # such login, so the provider must carry the creds itself.
+  # replacing 2.x's repeatable `registry {}` block). ECR authenticates
+  # in-Terraform via the ECR token. GHCR (nonprod, and Azure) authenticates
+  # with the ghcr_pull_* creds (same ones used for the cluster image-pull
+  # secret) — the kit does an ambient `helm registry login`, but a Spacelift
+  # worker has no such login, so the provider must carry the creds itself.
   registries = (
-    var.cloud == "aws" ? [{
+    !local.use_ghcr ? [{
       url      = "oci://${var.image_repository}"
       username = data.aws_ecr_authorization_token.chart[0].user_name
       password = data.aws_ecr_authorization_token.chart[0].password
@@ -196,6 +196,11 @@ locals {
   # Provider-instance set for the azurerm provider for_each above: one on Azure,
   # none on AWS (so azurerm is never configured/authenticated on AWS deploys).
   azure_instances = var.cloud == "azure" ? toset(["azure"]) : toset([])
+
+  # ECR holds only images promoted after QA, so only prod pulls from it (with pod identity);
+  # nonprod tiers pull every CI build from GHCR (with the ghcr_pull_* creds). Azure is the
+  # exception: it pulls from GHCR at every tier because it has no ECR pull path today.
+  use_ghcr = var.environment_tier == "nonprod" || var.cloud == "azure"
 
   is_us_gov = var.cloud == "aws" ? data.aws_partition.current[0].partition == "aws-us-gov" : false
 
