@@ -111,6 +111,12 @@ jobs:
       run: ${{ matrix.tool }} fmt -check
       working-directory: ./terraform/${{ matrix.module }}
 
+    # Mocked providers only, so it needs no credentials.
+    - name: Test
+      if: matrix.module == 'logical'
+      run: ${{ matrix.tool }} test
+      working-directory: ./terraform/${{ matrix.module }}
+
     - name: Validate
       if: matrix.module == 'physical-azure'
       run: ${{ matrix.tool }} validate
