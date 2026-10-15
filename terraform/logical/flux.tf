@@ -143,6 +143,7 @@ locals {
       },
       var.app_image_flavor == "slim" ? { flavor = "slim" } : {},
       var.beanstalkd_tag != "" ? { beanstalkd = { tag = var.beanstalkd_tag } } : {},
+      var.puppeteer_tag != "" ? { puppeteer = { tag = var.puppeteer_tag } } : {},
     )
 
     ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
@@ -285,8 +286,10 @@ locals {
     "dozuki-operator" = {
       image = { repository = "${var.image_repository}/dozuki-operator" }
       # Off on Azure/onprem. On aws the operator calls ec2:DescribeInstances via the physical layer's pod identity role.
-      nodeFence        = { enabled = var.cloud == "aws", region = var.cloud == "aws" ? data.aws_region.current[0].region : "" }
-      imagePullSecrets = [{ name = "ghcr-pull" }]
+      nodeFence = { enabled = var.cloud == "aws", region = var.cloud == "aws" ? data.aws_region.current[0].region : "" }
+      # Where GHCR is used, global.imagePullSecrets already carries ghcr-pull, and the subchart
+      # (4.4.1+) concatenates both lists, so a second copy is a duplicate-key apply error.
+      imagePullSecrets = local.use_ghcr ? [] : [{ name = "ghcr-pull" }]
       grafana = {
         url         = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : ""
         primarySite = var.enable_primary_site_grafana
@@ -370,13 +373,15 @@ locals {
   #   - objectStorage: base sets kmsKey/buckets/endpoint/credentials (the old set list); azure's
   #     seaweedfs_values adds publicBackend. Without the deep merge azure would keep only publicBackend
   #     and drop the buckets/credentials the app needs.
-  #   - global: base sets mimir; azure adds imagePullSecrets/seaweedfs. Shallow, azure would drop
-  #     mimir - harmless today (mimir is aws-only) but it would silently break the moment anything
-  #     else lands under global on both sides.
+  #   - global: base sets mimir; azure adds imagePullSecrets/seaweedfs (nonprod adds
+  #     imagePullSecrets too, via use_ghcr). Shallow, azure would drop mimir - harmless today
+  #     (mimir is aws-only) but it would silently break the moment anything else lands under
+  #     global on both sides.
   # Every other azure key (cert_manager, seaweedfs...) has no base collision and shallow-merges
   # cleanly. helm_release.app got the same effect from helm's deep merge of its two values files + set
   # list. All three deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values
-  # has none of the keys, so try(...,{}) yields {} and the merged result equals base.
+  # has none of the keys, so try(...,{}) yields {} and the merged result equals base (plus
+  # global.imagePullSecrets on nonprod).
   # AWS-only: pin every EBS-backed subchart workload to the on-demand NodePool.
   #
   # These pods (opensearch, prometheus, alertmanager) each own a zonal EBS volume -
@@ -567,7 +572,12 @@ locals {
     { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" && k != "global" },
     { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
     { objectStorage = merge(local.app_base_values.objectStorage, try(local.app_azure_values.objectStorage, {})) },
-    { global = merge(local.app_base_values.global, try(local.app_azure_values.global, {})) },
+    { global = merge(
+      local.app_base_values.global,
+      try(local.app_azure_values.global, {}),
+      # nonprod pulls from GHCR: same pull secret azure sets above (identical there, so a no-op).
+      { for k, v in { imagePullSecrets = [{ name = "ghcr-pull" }] } : k => v if local.use_ghcr },
+    ) },
     { for k, v in local.app_stateful_scheduling : k => v if k != "grafana" && k != "metrics-server" },
     { grafana = merge(local.app_base_values.grafana, try(local.app_stateful_scheduling.grafana, {})) },
     { "metrics-server" = merge(local.app_base_values["metrics-server"], try(local.app_stateful_scheduling["metrics-server"], {})) },
@@ -675,11 +685,11 @@ resource "kubernetes_secret_v1" "flux_values" {
   }
 }
 
-# GHCR pull secret in flux-system for the Azure/generic OCIRepository (source-controller pulls the
-# chart from ghcr.io there instead of ECR). Mirrors the app-namespace ghcr-pull; AWS/gov use pod
-# identity + provider=aws instead, so this is azure-only.
+# GHCR pull secret in flux-system for the generic OCIRepository (source-controller pulls the chart
+# from ghcr.io instead of ECR). Mirrors the app-namespace ghcr-pull; ECR envs use pod identity +
+# provider=aws instead.
 resource "kubernetes_secret_v1" "flux_ghcr_pull" {
-  count = var.cloud == "azure" ? 1 : 0
+  count = local.use_ghcr ? 1 : 0
   metadata {
     name      = "flux-ghcr-pull"
     namespace = kubernetes_namespace_v1.flux_system.metadata[0].name
@@ -856,21 +866,32 @@ resource "aws_eks_pod_identity_association" "flux_source_controller" {
 
 # OCIRepository: the same chart artifact env.hcl already pins (registry + chart_version).
 resource "kubectl_manifest" "dozuki_ocirepository" {
-  depends_on = [helm_release.flux]
+  # flux_ghcr_pull: the secretRef below names it, so it must exist before a prod -> nonprod switch.
+  depends_on = [helm_release.flux, kubernetes_secret_v1.flux_ghcr_pull]
+
+  lifecycle {
+    precondition {
+      # Holds the standard in place: prod never runs unpromoted GHCR builds, nonprod never ECR.
+      condition     = var.cloud == "azure" || (var.environment_tier == "nonprod") == startswith(var.image_repository, "ghcr.io/")
+      error_message = "environment_tier = \"${var.environment_tier}\" does not match image_repository = \"${var.image_repository}\": prod pulls from ECR, nonprod from ghcr.io/dozuki."
+    }
+  }
+
   yaml_body = yamlencode({
     apiVersion = "source.toolkit.fluxcd.io/v1"
     kind       = "OCIRepository"
     metadata   = { name = "dozuki", namespace = kubernetes_namespace_v1.flux_system.metadata[0].name }
-    # provider=aws pulls with the source-controller's pod-identity ECR creds (AWS + gov). Azure has no
-    # pod identity, so it uses the default provider + the flux-system ghcr dockerconfigjson secret.
+    # provider=aws pulls from ECR with the source-controller's pod-identity creds (prod on AWS + gov).
+    # GHCR (nonprod, and Azure) uses the default provider + the flux-system ghcr dockerconfigjson
+    # secret.
     spec = merge(
       {
         interval = "10m"
         url      = "oci://${var.image_repository}/charts/dozuki"
         ref      = { tag = var.chart_version }
-        provider = var.cloud == "aws" ? "aws" : "generic"
+        provider = local.use_ghcr ? "generic" : "aws"
       },
-      var.cloud == "aws" ? {} : { secretRef = { name = "flux-ghcr-pull" } },
+      local.use_ghcr ? { secretRef = { name = "flux-ghcr-pull" } } : {},
     )
   })
 }

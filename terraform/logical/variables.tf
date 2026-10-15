@@ -136,8 +136,19 @@ variable "webnextjs_env" {
 }
 
 variable "image_repository" {
-  description = "Docker image repository (ECR) for app containers."
+  description = "Registry root for the app images and the chart: ECR for prod, ghcr.io/dozuki for nonprod (see environment_tier)."
   type        = string
+}
+
+variable "environment_tier" {
+  description = "prod pulls only images that passed QA and were promoted to ECR. nonprod (staging, dev, test) pulls CI builds from GHCR, so its image_repository must be ghcr.io/dozuki and ghcr_pull_* must be set."
+  type        = string
+  default     = "prod"
+
+  validation {
+    condition     = contains(["prod", "nonprod"], var.environment_tier)
+    error_message = "environment_tier must be \"prod\" or \"nonprod\"."
+  }
 }
 
 variable "app_image_flavor" {
@@ -180,6 +191,16 @@ variable "beanstalkd_tag" {
   validation {
     condition     = var.beanstalkd_tag == "" || trimspace(var.beanstalkd_tag) != ""
     error_message = "beanstalkd_tag must not be whitespace-only; use \"\" to leave it unset."
+  }
+}
+
+variable "puppeteer_tag" {
+  description = "Tag for the puppeteer-api image (slim flavor only). Empty keeps the chart's default, the short-sha tag published to ECR. GHCR publishes the same build as 0.0.0-<11-char sha>, so nonprod slim stacks must set it."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.environment_tier != "nonprod" || var.app_image_flavor != "slim" || trimspace(var.puppeteer_tag) != ""
+    error_message = "puppeteer_tag is required on a nonprod slim stack: the chart's default tag exists only in ECR."
   }
 }
 
@@ -698,13 +719,13 @@ variable "verify_artifact_pins" {
 }
 
 variable "ghcr_pull_username" {
-  description = "GitHub username for pulling MPC images from GHCR (Azure only)."
+  description = "GitHub username for pulling MPC images from GHCR (environment_tier = nonprod, and Azure)."
   type        = string
   default     = ""
 }
 
 variable "ghcr_pull_token" {
-  description = "GitHub token (read:packages) for pulling MPC images from GHCR (Azure only)."
+  description = "GitHub token (read:packages) for pulling MPC images from GHCR (environment_tier = nonprod, and Azure)."
   type        = string
   sensitive   = true
   default     = ""
