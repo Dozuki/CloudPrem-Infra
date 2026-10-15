@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.18.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.17.2...v9.18.0) (2026-10-15)
+
+
+### Features
+
+* **logical:** environment_tier selects the image registry (prod: ECR, nonprod: GHCR) ([#591](https://github.com/Dozuki/CloudPrem-Infra/issues/591)) ([43d82c0](https://github.com/Dozuki/CloudPrem-Infra/commit/43d82c07b710d56d15420b02bf1f7428db7cdedb))
+
 ## [9.17.2](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.17.1...v9.17.2) (2026-10-13)
 
 
