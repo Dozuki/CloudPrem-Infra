@@ -143,6 +143,7 @@ locals {
       },
       var.app_image_flavor == "slim" ? { flavor = "slim" } : {},
       var.beanstalkd_tag != "" ? { beanstalkd = { tag = var.beanstalkd_tag } } : {},
+      var.puppeteer_tag != "" ? { puppeteer = { tag = var.puppeteer_tag } } : {},
     )
 
     ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
@@ -285,8 +286,10 @@ locals {
     "dozuki-operator" = {
       image = { repository = "${var.image_repository}/dozuki-operator" }
       # Off on Azure/onprem. On aws the operator calls ec2:DescribeInstances via the physical layer's pod identity role.
-      nodeFence        = { enabled = var.cloud == "aws", region = var.cloud == "aws" ? data.aws_region.current[0].region : "" }
-      imagePullSecrets = [{ name = "ghcr-pull" }]
+      nodeFence = { enabled = var.cloud == "aws", region = var.cloud == "aws" ? data.aws_region.current[0].region : "" }
+      # Where GHCR is used, global.imagePullSecrets already carries ghcr-pull, and the subchart
+      # (4.4.1+) concatenates both lists, so a second copy is a duplicate-key apply error.
+      imagePullSecrets = local.use_ghcr ? [] : [{ name = "ghcr-pull" }]
       grafana = {
         url         = var.enable_dashboards ? "http://dozuki-dashboards-grafana" : ""
         primarySite = var.enable_primary_site_grafana

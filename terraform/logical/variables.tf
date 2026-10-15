@@ -194,6 +194,16 @@ variable "beanstalkd_tag" {
   }
 }
 
+variable "puppeteer_tag" {
+  description = "Tag for the puppeteer-api image (slim flavor only). Empty keeps the chart's default, the short-sha tag published to ECR. GHCR publishes the same build as 0.0.0-<11-char sha>, so nonprod slim stacks must set it."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.environment_tier != "nonprod" || var.app_image_flavor != "slim" || trimspace(var.puppeteer_tag) != ""
+    error_message = "puppeteer_tag is required on a nonprod slim stack: the chart's default tag exists only in ECR."
+  }
+}
+
 variable "nextjs_extra_env" {
   description = "Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs."
   type        = map(string)
