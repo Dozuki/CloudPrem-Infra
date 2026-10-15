@@ -861,7 +861,8 @@ resource "aws_eks_pod_identity_association" "flux_source_controller" {
 
 # OCIRepository: the same chart artifact env.hcl already pins (registry + chart_version).
 resource "kubectl_manifest" "dozuki_ocirepository" {
-  depends_on = [helm_release.flux]
+  # flux_ghcr_pull: the secretRef below names it, so it must exist before a prod -> nonprod switch.
+  depends_on = [helm_release.flux, kubernetes_secret_v1.flux_ghcr_pull]
 
   lifecycle {
     precondition {

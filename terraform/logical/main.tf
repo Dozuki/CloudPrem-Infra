@@ -197,9 +197,10 @@ locals {
   # none on AWS (so azurerm is never configured/authenticated on AWS deploys).
   azure_instances = var.cloud == "azure" ? toset(["azure"]) : toset([])
 
-  # ECR holds only images promoted after QA, so only prod pulls from it (with pod identity);
-  # nonprod tiers pull every CI build from GHCR (with the ghcr_pull_* creds). Azure is the
-  # exception: it pulls from GHCR at every tier because it has no ECR pull path today.
+  # ECR holds only images promoted after QA, so only prod pulls from it (chart via the
+  # source-controller pod identity, images via the node role). nonprod tiers pull every CI
+  # build from GHCR (with the ghcr_pull_* creds). Azure is the exception: it pulls from GHCR
+  # at every tier because it has no ECR pull path today.
   use_ghcr = var.environment_tier == "nonprod" || var.cloud == "azure"
 
   is_us_gov = var.cloud == "aws" ? data.aws_partition.current[0].partition == "aws-us-gov" : false
