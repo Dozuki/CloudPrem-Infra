@@ -926,7 +926,7 @@ resource "kubernetes_secret_v1" "ghcr_pull" {
   lifecycle {
     precondition {
       # Without creds every pod sits in ImagePullBackOff until the HelmRelease times out.
-      condition     = var.cloud == "azure" || var.ghcr_pull_token != ""
+      condition     = var.cloud == "azure" || (var.ghcr_pull_username != "" && var.ghcr_pull_token != "")
       error_message = "environment_tier = \"nonprod\" pulls from GHCR, so ghcr_pull_username and ghcr_pull_token must be set."
     }
   }
