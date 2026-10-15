@@ -402,3 +402,71 @@ run "azure_empty_token_passes" {
     error_message = "azure with an empty token must still plan the ghcr-pull secret"
   }
 }
+
+# ---- operator pull secret: one ghcr-pull, never two -----------------------------------------
+
+run "nonprod_operator_pull_secret_once" {
+  command = plan
+  variables {
+    environment_tier   = "nonprod"
+    image_repository   = "ghcr.io/dozuki"
+    ghcr_pull_username = "dozuki-bot"
+    ghcr_pull_token    = "ghp_mock"
+  }
+  assert {
+    condition     = try(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])["dozuki-operator"].imagePullSecrets), []) == []
+    error_message = "nonprod must not set dozuki-operator.imagePullSecrets: global.imagePullSecrets already carries ghcr-pull"
+  }
+}
+
+run "prod_operator_pull_secret_unchanged" {
+  command = plan
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])["dozuki-operator"].imagePullSecrets) == [{ name = "ghcr-pull" }]
+    error_message = "prod keeps its existing dozuki-operator.imagePullSecrets"
+  }
+}
+
+# ---- puppeteer tag: GHCR tags differ from the chart's ECR default ----------------------------
+
+run "nonprod_slim_puppeteer_tag_rendered" {
+  command = plan
+  variables {
+    environment_tier   = "nonprod"
+    image_repository   = "ghcr.io/dozuki"
+    ghcr_pull_username = "dozuki-bot"
+    ghcr_pull_token    = "ghp_mock"
+    app_image_flavor   = "slim"
+    beanstalkd_tag     = "6f41576"
+    puppeteer_tag      = "0.0.0-91adbf891a8"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]).images.puppeteer) == { tag = "0.0.0-91adbf891a8" }
+    error_message = "puppeteer_tag must render as images.puppeteer.tag"
+  }
+}
+
+run "nonprod_slim_without_puppeteer_tag_fails" {
+  command = plan
+  variables {
+    environment_tier   = "nonprod"
+    image_repository   = "ghcr.io/dozuki"
+    ghcr_pull_username = "dozuki-bot"
+    ghcr_pull_token    = "ghp_mock"
+    app_image_flavor   = "slim"
+    beanstalkd_tag     = "6f41576"
+  }
+  expect_failures = [var.puppeteer_tag]
+}
+
+run "prod_slim_without_puppeteer_tag_passes" {
+  command = plan
+  variables {
+    app_image_flavor = "slim"
+    beanstalkd_tag   = "6f41576"
+  }
+  assert {
+    condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]).images)), "puppeteer")
+    error_message = "an unset puppeteer_tag must leave the chart default alone"
+  }
+}
