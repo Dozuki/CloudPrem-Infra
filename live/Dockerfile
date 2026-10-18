@@ -5,7 +5,7 @@
 # iam_role and 403'd at init on every stack that has one (infra-live #158); 1.1.2
 # fixed the backend double-assume, proven on the gov parker canary on 2026-08-05
 # before the fleet moved to it (infra-live #235).
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 ARG TOFU_VERSION=1.12.5
 ARG TERRAGRUNT_VERSION=1.1.2
