@@ -356,6 +356,13 @@ data "aws_iam_policy_document" "logging_policy" {
       aws_s3_bucket.logging_bucket.arn,
       "${aws_s3_bucket.logging_bucket.arn}/*",
     ]
+
+    # Only log deliveries for this account's buckets (confused-deputy guard).
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
   }
 
   # S3.5: reject plaintext requests. The S3 log-delivery service and any
@@ -443,6 +450,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_en
 
   rule {
     bucket_key_enabled = false
+    # Computed in the provider, so state it: an update that omits it may clear the SSE-C block.
+    blocked_encryption_types = ["SSE-C"]
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
     }
@@ -657,6 +666,18 @@ resource "aws_s3_bucket_lifecycle_configuration" "logging_bucket" {
 
     noncurrent_version_expiration {
       noncurrent_days = 30
+    }
+  }
+
+  # Access logs are audit trail: keep a year, then let noncurrent expiry clean up.
+  rule {
+    id     = "access-log-retention"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 365
     }
   }
 }
