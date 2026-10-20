@@ -434,6 +434,9 @@ resource "aws_s3_bucket" "logging_bucket" {
   }
 }
 
+# SSE-S3, not KMS: S3 server access log delivery does not support SSE-KMS on the target
+# bucket and drops every log when it is set.
+#tfsec:ignore:aws-s3-encryption-customer-key
 resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_encryption" {
 
   bucket = aws_s3_bucket.logging_bucket.bucket
@@ -441,8 +444,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_en
   rule {
     bucket_key_enabled = false
     apply_server_side_encryption_by_default {
-      kms_master_key_id = local.s3_kms_key_id
-      sse_algorithm     = "aws:kms"
+      sse_algorithm = "AES256"
     }
   }
 }
