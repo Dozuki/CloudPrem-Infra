@@ -356,6 +356,13 @@ data "aws_iam_policy_document" "logging_policy" {
       aws_s3_bucket.logging_bucket.arn,
       "${aws_s3_bucket.logging_bucket.arn}/*",
     ]
+
+    # Only log deliveries for this account's buckets (confused-deputy guard).
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
   }
 
   # S3.5: reject plaintext requests. The S3 log-delivery service and any
@@ -434,15 +441,19 @@ resource "aws_s3_bucket" "logging_bucket" {
   }
 }
 
+# SSE-S3, not KMS: S3 server access log delivery does not support SSE-KMS on the target
+# bucket and drops every log when it is set.
+#tfsec:ignore:aws-s3-encryption-customer-key
 resource "aws_s3_bucket_server_side_encryption_configuration" "logging_bucket_encryption" {
 
   bucket = aws_s3_bucket.logging_bucket.bucket
 
   rule {
     bucket_key_enabled = false
+    # Computed in the provider, so state it: an update that omits it may clear the SSE-C block.
+    blocked_encryption_types = ["SSE-C"]
     apply_server_side_encryption_by_default {
-      kms_master_key_id = local.s3_kms_key_id
-      sse_algorithm     = "aws:kms"
+      sse_algorithm = "AES256"
     }
   }
 }
@@ -655,6 +666,18 @@ resource "aws_s3_bucket_lifecycle_configuration" "logging_bucket" {
 
     noncurrent_version_expiration {
       noncurrent_days = 30
+    }
+  }
+
+  # Access logs are audit trail: keep a year, then let noncurrent expiry clean up.
+  rule {
+    id     = "access-log-retention"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 365
     }
   }
 }

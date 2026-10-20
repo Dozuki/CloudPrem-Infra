@@ -604,6 +604,13 @@ data "aws_iam_policy_document" "dr_logging_bucket" {
       aws_s3_bucket.dr_logging_bucket[0].arn,
       "${aws_s3_bucket.dr_logging_bucket[0].arn}/*",
     ]
+
+    # Only log deliveries for this account's buckets (confused-deputy guard).
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
   }
 
   # S3.5: reject plaintext requests, same as every other bucket here.
@@ -679,6 +686,18 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_logging_bucket" {
 
     noncurrent_version_expiration {
       noncurrent_days = 30
+    }
+  }
+
+  # Same one-year retention as the primary log bucket.
+  rule {
+    id     = "access-log-retention"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 365
     }
   }
 }
