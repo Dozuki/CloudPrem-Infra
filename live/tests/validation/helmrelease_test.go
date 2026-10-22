@@ -1,6 +1,7 @@
 package validation
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -252,6 +253,94 @@ func TestAwaitHelmReleaseReady_TransportErrorExempt(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "connection refused") {
 		t.Fatalf("expected the transport error to surface: %v", err)
+	}
+}
+
+// --- forced retry of an install that stalled on a rollout ---------------------------
+
+const stalledRolloutMsg = "Helm install failed for release dozuki/dozuki with chart dozuki@2.10.22: failed early due to stalled resources: [Deployment/dozuki/dozuki-app-deployment status: 'Failed']"
+
+func stalledRolloutHR() *unstructured.Unstructured {
+	return testHR(fluxNamespace, 1,
+		hrCond("Ready", "False", "InstallFailed", stalledRolloutMsg, 1),
+		hrCond("Stalled", "True", "RetriesExceeded", "Failed to install after 1 attempt(s)", 1),
+		hrCond("Released", "False", "InstallFailed", stalledRolloutMsg, 1),
+	)
+}
+
+// onForce stands in for helm-controller: when the harness writes the force annotations it
+// echoes the token in status.lastHandledForceAt and replaces the conditions with conds,
+// which is what the next read sees. The Stalled condition is deliberately kept, because
+// the real controller may leave the pre-retry one in place.
+func onForce(dc *dynamicfake.FakeDynamicClient, conds ...map[string]interface{}) {
+	dc.PrependReactor("patch", "helmreleases", func(a kubetesting.Action) (bool, runtime.Object, error) {
+		pa := a.(kubetesting.PatchAction)
+		var p struct {
+			Metadata struct{ Annotations map[string]string }
+		}
+		if err := json.Unmarshal(pa.GetPatch(), &p); err != nil {
+			return true, nil, err
+		}
+		obj, err := dc.Tracker().Get(helmReleaseGVR, pa.GetNamespace(), pa.GetName())
+		if err != nil {
+			return true, nil, err
+		}
+		u := obj.(*unstructured.Unstructured).DeepCopy()
+		items := []interface{}{hrCond("Stalled", "True", "RetriesExceeded", "Failed to install after 1 attempt(s)", 1)}
+		for _, c := range conds {
+			items = append(items, c)
+		}
+		_ = unstructured.SetNestedField(u.Object, p.Metadata.Annotations["reconcile.fluxcd.io/forceAt"], "status", "lastHandledForceAt")
+		_ = unstructured.SetNestedSlice(u.Object, items, "status", "conditions")
+		return false, nil, dc.Tracker().Update(helmReleaseGVR, u, pa.GetNamespace())
+	})
+}
+
+func patchCount(dc *dynamicfake.FakeDynamicClient) int {
+	n := 0
+	for _, a := range dc.Actions() {
+		if a.GetVerb() == "patch" {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAwaitHelmReleaseReady_StalledRolloutInstallIsRetried(t *testing.T) {
+	dc := newFakeDC(stalledRolloutHR()).(*dynamicfake.FakeDynamicClient)
+	onForce(dc, hrCond("Ready", "True", "UpgradeSucceeded", "Helm upgrade succeeded", 1))
+
+	if err := awaitHelmReleaseReady(dc, stubDiagnose(nil), "dozuki", "dozuki", time.Hour); err != nil {
+		t.Fatalf("expected the forced retry to recover the install: %v", err)
+	}
+	if n := patchCount(dc); n != 1 {
+		t.Fatalf("patches = %d, want exactly 1", n)
+	}
+}
+
+func TestAwaitHelmReleaseReady_StalledRolloutRetriedOnlyOnce(t *testing.T) {
+	dc := newFakeDC(stalledRolloutHR()).(*dynamicfake.FakeDynamicClient)
+	onForce(dc, hrCond("Ready", "False", "UpgradeFailed", "Helm upgrade failed: failed early due to stalled resources", 1))
+
+	err := awaitHelmReleaseReady(dc, stubDiagnose(nil), "dozuki", "dozuki", time.Hour)
+	wantDiagSuffix(t, err)
+	if !strings.Contains(err.Error(), "failed (UpgradeFailed)") || !strings.Contains(err.Error(), "after one forced retry of a failed install: InstallFailed") {
+		t.Fatalf("expected the retry's own verdict naming the retried failure: %v", err)
+	}
+	if n := patchCount(dc); n != 1 {
+		t.Fatalf("patches = %d, want exactly 1", n)
+	}
+}
+
+func TestAwaitHelmReleaseReady_OtherInstallFailuresAreNotRetried(t *testing.T) {
+	dc := newFakeDC(testHR(fluxNamespace, 1,
+		hrCond("Ready", "False", "InstallFailed", "Helm install failed: pre-install hook failed", 1),
+	)).(*dynamicfake.FakeDynamicClient)
+
+	err := awaitHelmReleaseReady(dc, stubDiagnose(nil), "dozuki", "dozuki", time.Hour)
+	wantDiagSuffix(t, err)
+	if n := patchCount(dc); n != 0 {
+		t.Fatalf("patches = %d, want none for a hook failure", n)
 	}
 }
 

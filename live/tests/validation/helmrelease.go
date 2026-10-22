@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -134,11 +135,20 @@ func awaitHelmReleaseReady(dc dynamic.Interface, diagnose func(*unstructured.Uns
 	// appeared, and diagnose degrades that to "HelmRelease CR absent" rather than
 	// erroring.
 	var lastHR *unstructured.Unstructured
+	// forceToken is set once this wait has spent its one forced retry (see
+	// installStalledOnRollout). forcedFrom is the failure that retry answered, and
+	// forcedStalledMsg its Stalled message, so a leftover copy is not read as the
+	// retry's own verdict.
+	forceToken, forcedFrom, forcedStalledMsg := "", "", ""
 
 	// diagSuffix appends the live diagnosis to a failure verdict without ever being
 	// able to replace it: it is always concatenated onto an already-built error message.
 	diagSuffix := func(hr *unstructured.Unstructured) string {
-		return "\n-- live diagnosis --\n" + diagnose(hr)
+		note := ""
+		if forcedFrom != "" {
+			note = "\n(after one forced retry of a failed install: " + forcedFrom + ")"
+		}
+		return note + "\n-- live diagnosis --\n" + diagnose(hr)
 	}
 
 	for {
@@ -162,22 +172,48 @@ func awaitHelmReleaseReady(dc dynamic.Interface, diagnose func(*unstructured.Uns
 			}
 
 			if ready == "True" {
+				if forceToken != "" {
+					reason += ", after one forced install retry"
+				}
 				fmt.Fprintf(os.Stderr, ">> [harness %s] HelmRelease %s Ready (%s) — %s\n",
 					time.Now().Format("15:04:05"), name, time.Since(started).Round(time.Second), reason)
 				return nil
 			}
 
-			// Terminal failures. Install still runs remediation.retries = 0, and a release
-			// with no successful history stays on the install config forever, so these two
-			// checks remain final: waiting longer cannot change the answer, and the message
-			// names the actual cause (a failed hook, an unready workload, a values error).
-			// They also still catch a pre-v9.2.2 baseline, which has no retry strategy and
-			// does drive Ready to False on a failed upgrade.
-			if stalled == "True" {
-				return fmt.Errorf("HelmRelease %s stalled (%s): %s%s", name, sReason, firstLine(sMsg), diagSuffix(hr))
-			}
-			if ready == "False" && isTerminalReason(reason) {
-				return fmt.Errorf("HelmRelease %s failed (%s): %s%s", name, reason, firstLine(msg), diagSuffix(hr))
+			// Until helm-controller echoes the force token back, every condition still
+			// describes the attempt being retried, so none of them is a verdict yet.
+			handled, _, _ := unstructured.NestedString(hr.Object, "status", "lastHandledForceAt")
+			if forceToken == "" || handled == forceToken {
+				// A first install that failed only because a workload missed its rollout
+				// deadline gets one forced retry. On a cold Auto Mode node the 2GB app image
+				// can take most of the 10m Deployment progress deadline to pull, and the
+				// retry finds it cached. Flux runs the forced action as an upgrade, so if
+				// that fails too it lands on UpgradeFailed below and stays final.
+				if forceToken == "" && installStalledOnRollout(hr) {
+					forcedFrom = fmt.Sprintf("%s: %s", reason, firstLine(msg))
+					forcedStalledMsg = sMsg
+					token, ferr := forceRelease(ctx, dc, hr)
+					if ferr != nil {
+						return fmt.Errorf("HelmRelease %s failed (%s): %s (forced retry could not be requested: %v)%s", name, reason, firstLine(msg), ferr, diagSuffix(hr))
+					}
+					forceToken = token
+					fmt.Fprintf(os.Stderr, ">> [harness %s] WARNING: HelmRelease %s install stalled on a workload rollout, forcing one retry: %s\n",
+						time.Now().Format("15:04:05"), name, forcedFrom)
+					continue
+				}
+
+				// Terminal failures. Install still runs remediation.retries = 0, and a release
+				// with no successful history stays on the install config forever, so these two
+				// checks remain final: waiting longer cannot change the answer, and the message
+				// names the actual cause (a failed hook, an unready workload, a values error).
+				// They also still catch a pre-v9.2.2 baseline, which has no retry strategy and
+				// does drive Ready to False on a failed upgrade.
+				if stalled == "True" && !(forceToken != "" && sMsg == forcedStalledMsg) {
+					return fmt.Errorf("HelmRelease %s stalled (%s): %s%s", name, sReason, firstLine(sMsg), diagSuffix(hr))
+				}
+				if ready == "False" && isTerminalReason(reason) {
+					return fmt.Errorf("HelmRelease %s failed (%s): %s%s", name, reason, firstLine(msg), diagSuffix(hr))
+				}
 			}
 
 			// Retryable but reported. Under RetryOnFailure the only honest record of a
@@ -242,6 +278,28 @@ func isTerminalReason(reason string) bool {
 		return true
 	}
 	return false
+}
+
+// installStalledOnRollout reports whether hr failed a first install because helm gave up on
+// a workload that did not roll out in time ("failed early due to stalled resources"),
+// rather than on a hook, a values error or anything else a second attempt cannot fix.
+func installStalledOnRollout(hr *unstructured.Unstructured) bool {
+	for _, ct := range []string{"Ready", "Released"} {
+		if _, reason, msg, _ := condition(hr, ct); reason == "InstallFailed" && strings.Contains(msg, "stalled resources") {
+			return true
+		}
+	}
+	return false
+}
+
+// forceRelease writes the annotation pair `flux reconcile hr --force` writes, which makes
+// helm-controller run one release action regardless of failure counts. It returns the
+// token, which the controller echoes in status.lastHandledForceAt once it has acted.
+func forceRelease(ctx context.Context, dc dynamic.Interface, hr *unstructured.Unstructured) (string, error) {
+	token := time.Now().UTC().Format(time.RFC3339Nano)
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{"reconcile.fluxcd.io/requestedAt":%q,"reconcile.fluxcd.io/forceAt":%q}}}`, token, token)
+	_, err := dc.Resource(helmReleaseGVR).Namespace(hr.GetNamespace()).Patch(ctx, hr.GetName(), types.MergePatchType, []byte(patch), metav1.PatchOptions{FieldManager: "flux-client-side-apply"})
+	return token, err
 }
 
 // condition returns the named condition's status, reason and message, plus the generation
