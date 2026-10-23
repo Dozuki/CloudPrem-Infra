@@ -2,6 +2,14 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.19.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.18.1...v9.19.0) (2026-10-23)
+
+
+### Features
+
+* **logical:** add search_backend to run search against a managed or external OpenSearch ([#597](https://github.com/Dozuki/CloudPrem-Infra/issues/597)) ([074614c](https://github.com/Dozuki/CloudPrem-Infra/commit/074614cf3a995e0ae129b2590db275c6678bc3ff))
+* **physical:** optional managed OpenSearch domain for the search backend ([#596](https://github.com/Dozuki/CloudPrem-Infra/issues/596)) ([54d729a](https://github.com/Dozuki/CloudPrem-Infra/commit/54d729a8c45dceeb835d9894c45b0eb83dce8aa8))
+
 ## [9.18.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.18.0...v9.18.1) (2026-10-20)
 
 
