@@ -204,6 +204,16 @@ variable "puppeteer_tag" {
   }
 }
 
+variable "puppeteer_base_url" {
+  description = "Origin puppeteer-api renders against, set as its RENDER_BASE_URL (slim flavor only). The service then ignores a request's baseUrl, so a caller cannot make the pod load from another origin. Use the site's own https origin, e.g. https://dozuki.example.com. Empty leaves it unset, which lets a caller pick the origin. One origin per install: a platform serving several hostnames renders every site against this one."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.puppeteer_base_url == "" || can(regex("^https?://[^/@?#\\s]+$", var.puppeteer_base_url))
+    error_message = "puppeteer_base_url must be an http(s) origin with no path, query or credentials (e.g. https://dozuki.example.com), or empty."
+  }
+}
+
 variable "nextjs_extra_env" {
   description = "Extra env vars for the web-nextjs deployment (name => value), e.g. per-env service API URLs."
   type        = map(string)
