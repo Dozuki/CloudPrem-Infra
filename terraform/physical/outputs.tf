@@ -157,3 +157,18 @@ output "aurora_migration_credentials_secret" {
   description = "Secret ARN holding the Aurora migration target credentials (empty when no migration is active). Runner use only."
   value       = try(aws_secretsmanager_secret.aurora_migration_credentials[0].arn, "")
 }
+
+output "opensearch_endpoint" {
+  description = "VPC endpoint hostname of the managed OpenSearch domain (empty when the domain is off)."
+  value       = try(aws_opensearch_domain.this[0].endpoint, "")
+}
+
+output "opensearch_credential_secret" {
+  description = "Secret ARN holding the managed OpenSearch master user as JSON {username, password} (empty when the domain is off)."
+  value       = try(aws_secretsmanager_secret.opensearch[0].arn, "")
+}
+
+output "opensearch_domain_arn" {
+  description = "ARN of the managed OpenSearch domain (empty when the domain is off)."
+  value       = try(aws_opensearch_domain.this[0].arn, "")
+}

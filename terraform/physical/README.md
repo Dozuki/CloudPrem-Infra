@@ -15,9 +15,9 @@
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.60.0 |
-| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.60.0 |
-| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.60.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.67.0 |
+| <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.67.0 |
+| <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.67.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | 3.3.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 | <a name="provider_terraform"></a> [terraform](#provider\_terraform) | n/a |
@@ -139,6 +139,8 @@
 | [aws_lambda_function_event_invoke_config.sns_to_slack](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function_event_invoke_config) | resource |
 | [aws_lambda_permission.dms_restart_permission](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_lambda_permission.sns_to_slack_permission](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
+| [aws_opensearch_domain.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain) | resource |
+| [aws_opensearch_domain_policy.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain_policy) | resource |
 | [aws_rds_cluster.dr_aurora_secondary](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster) | resource |
 | [aws_rds_global_cluster.aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_global_cluster) | resource |
 | [aws_route53_record.mimir](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
@@ -181,13 +183,16 @@
 | [aws_s3_bucket_versioning.guide_buckets_versioning](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
 | [aws_s3_bucket_versioning.logging_bucket_versioning_block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
 | [aws_secretsmanager_secret.aurora_migration_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
+| [aws_secretsmanager_secret.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret_version.aurora_migration_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
+| [aws_secretsmanager_secret_version.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_secretsmanager_secret_version.primary_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_secretsmanager_secret_version.replica_database_credentials](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
 | [aws_security_group.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.mimir_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group_rule.aurora_migration_dms_to_rds](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
@@ -215,10 +220,12 @@
 | [null_resource.create_dms_cloudwatch_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.create_dms_vpc_role](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.dr_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
+| [null_resource.opensearch_slr](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [null_resource.s3_replication_job_init](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [random_id.aurora_final_snapshot](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/id) | resource |
 | [random_password.aurora](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.bi_aurora](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
+| [random_password.opensearch](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [terraform_data.aurora_migration_phase](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 | [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
 | [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
@@ -255,6 +262,7 @@
 | [aws_region.dr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_route53_zone.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route53_zone) | data source |
 | [aws_s3_bucket.guide_buckets](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/s3_bucket) | data source |
+| [aws_subnet.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnet) | data source |
 | [aws_subnets.mimir_compatible](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_subnets.private](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_subnets.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
@@ -316,6 +324,11 @@
 | <a name="input_mimir_endpoint_service_name"></a> [mimir\_endpoint\_service\_name](#input\_mimir\_endpoint\_service\_name) | VPC Endpoint Service name for the Mimir PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). Defaults to the live commercial Mimir service, which is what makes a fresh commercial env enroll with no mimir lines in env.hcl; every commercial region reaches it, cross-region included, so one value covers the commercial fleet. A service in another region is fine, the endpoint switches to the cross-region form on its own, but that region must be in the service's supported\_regions list. Only read when the resolved enable\_mimir is true. | `string` | `"com.amazonaws.vpce.us-east-1.vpce-svc-0814f274d15a3d5a2"` | no |
 | <a name="input_mimir_ingest_fqdn"></a> [mimir\_ingest\_fqdn](#input\_mimir\_ingest\_fqdn) | Hostname this cluster uses to reach Mimir. A private hosted zone is created for exactly this name, so it overrides the public record inside this VPC and nothing else. Must match a name on the Mimir load balancer's certificate or the TLS handshake fails. | `string` | `"mimir-int.dozuki.dev"` | no |
 | <a name="input_nlb_alarms_enabled"></a> [nlb\_alarms\_enabled](#input\_nlb\_alarms\_enabled) | Create CloudWatch alarms on the app NLB's target group HealthyHostCount (module.nlb, in nlb.tf). module.nlb is unconditional and always exists in this stack, so the alarms are created in the same apply as the NLB itself - there is no ordering hazard around the NLB or target group resources existing. There is still a fresh-install gap in the underlying metric itself: HealthyHostCount only reports once targets are registered, and registration happens later, in the logical layer's chart install, not in this apply. The alarms are written to tolerate that gap (treat\_missing\_data = missing) rather than relying on this variable to cover it. Kept as an operator escape hatch: set false to mute during planned NLB/target-group maintenance. On an infra\_version older than the one that ships this variable, the plan simply has no unsupported argument (same pattern as enable\_mimir), so a fresh install on an old pin is unaffected either way. | `bool` | `true` | no |
+| <a name="input_opensearch_domain_enabled"></a> [opensearch\_domain\_enabled](#input\_opensearch\_domain\_enabled) | Physical-only override that keeps the managed OpenSearch domain while logical runs another backend (for example during validation). null means follow search\_backend == "managed". | `bool` | `null` | no |
+| <a name="input_opensearch_ebs_size"></a> [opensearch\_ebs\_size](#input\_opensearch\_ebs\_size) | Per-node gp3 volume size in GiB for the managed OpenSearch domain. | `number` | `100` | no |
+| <a name="input_opensearch_engine_version"></a> [opensearch\_engine\_version](#input\_opensearch\_engine\_version) | Engine version of the managed OpenSearch domain. | `string` | `"OpenSearch_3.5"` | no |
+| <a name="input_opensearch_instance_count"></a> [opensearch\_instance\_count](#input\_opensearch\_instance\_count) | Data node count of the managed OpenSearch domain. With 2 or more nodes the domain spreads across min(count, distinct AZs with a private subnet, 3) AZs, and the count must divide evenly by that AZ count. | `number` | `3` | no |
+| <a name="input_opensearch_instance_type"></a> [opensearch\_instance\_type](#input\_opensearch\_instance\_type) | Data node instance type of the managed OpenSearch domain. | `string` | `"m7g.large.search"` | no |
 | <a name="input_operations_owner"></a> [operations\_owner](#input\_operations\_owner) | Which on-call owns this stack's DR page: 'dozuki' (Dozuki 24/7 on-call, the MPC posture) or 'customer' (the customer's named on-call runs the failover, Dozuki advisory). Empty derives it from managed\_private\_cloud. Stamped into the page so the receiver knows whether they are the actor or the advisor. | `string` | `""` | no |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | Specifies whether data protection settings are enabled. If true they will prevent stack deletion until protections have been manually disabled. | `bool` | `true` | no |
 | <a name="input_rds_adopt_dr_cmk"></a> [rds\_adopt\_dr\_cmk](#input\_rds\_adopt\_dr\_cmk) | Whether the database is encrypted with a Terraform-managed customer KMS key. True is the<br/>default and there is no longer any other gate on it: DR does not have to be enabled, and<br/>there is no separate opt-in. A fresh stack gets a CMK.<br/><br/>The name is historical (the key was originally introduced for DR) and reads narrower than<br/>what this actually controls, which is the database's encryption key. Read it as "adopt a<br/>customer-managed key", not "only when DR is on".<br/><br/>Set false ONLY on a stack whose database already exists on the AWS-managed key. That is<br/>what the flag is for: the KMS key is immutable on RDS and Aurora, so such a database can<br/>adopt a CMK only by being REPLACED, and false is what holds it flat. Pinning<br/>rds\_kms\_key\_id to an already-adopted CMK has the same effect.<br/><br/>The db-replace-guard PLAN policy blocks an unintended replacement (its safe list is<br/>added/changed/moved and it requires the allow-db-replace stack label otherwise), so<br/>getting this wrong fails closed rather than losing data. | `bool` | `true` | no |
@@ -337,6 +350,7 @@
 | <a name="input_s3_block_public_access"></a> [s3\_block\_public\_access](#input\_s3\_block\_public\_access) | To conform with SCP we can disable adding a public access block to the S3 buckets. This should only be disabled if absolutely necessary. | `bool` | `true` | no |
 | <a name="input_s3_existing_buckets"></a> [s3\_existing\_buckets](#input\_s3\_existing\_buckets) | List of the existing Dozuki buckets to use. Do not include the logging bucket. | <pre>list(object({<br/>    type        = string<br/>    bucket_name = string<br/>  }))</pre> | `[]` | no |
 | <a name="input_s3_kms_key_id"></a> [s3\_kms\_key\_id](#input\_s3\_kms\_key\_id) | KMS key identifier (key id, key ARN, alias name, or alias ARN) for a donor key that already encrypted objects this stack must keep reading: either buckets migrated in via s3\_existing\_buckets, or a key an older version of this module used for the stack's own buckets. It only grants this stack's roles decrypt access to that key. It never encrypts buckets this stack creates, which always use their own KMS key. Objects record their key at write time, so leave this set for as long as any object written under the donor key must remain readable. | `string` | `""` | no |
+| <a name="input_search_backend"></a> [search\_backend](#input\_search\_backend) | Where the application's search index lives: in\_cluster (chart-managed OpenSearch), managed (an AWS OpenSearch domain created by this layer), or external (an endpoint supplied to the logical layer). Only managed creates anything here. | `string` | `"in_cluster"` | no |
 | <a name="input_slack_bot_token"></a> [slack\_bot\_token](#input\_slack\_bot\_token) | Slack bot token (chat:write, plus reactions:write to mark resolved alarms) for SNS alerts via chat.postMessage. Stored as an SSM SecureString the lambda reads at runtime; takes precedence over slack\_webhook\_url when set together with slack\_channel\_id. | `string` | `""` | no |
 | <a name="input_slack_channel_id"></a> [slack\_channel\_id](#input\_slack\_channel\_id) | Slack channel ID the bot-token alerts post to. Required alongside slack\_bot\_token. The bot must be a member of this channel (invite it, or grant chat:write.public for public channels) or every delivery fails not\_in\_channel at runtime. | `string` | `""` | no |
 | <a name="input_slack_webhook_url"></a> [slack\_webhook\_url](#input\_slack\_webhook\_url) | URL to an optional Slack webhook for SNS alerts. Prefer slack\_bot\_token + slack\_channel\_id: webhook posts have a synthetic author no token can delete or edit, and the URL sits in the lambda's plaintext env. | `string` | `""` | no |
@@ -383,6 +397,9 @@
 | <a name="output_nlb_dns_name"></a> [nlb\_dns\_name](#output\_nlb\_dns\_name) | The FQDN of the NLB. |
 | <a name="output_nlb_http_target_group_arn"></a> [nlb\_http\_target\_group\_arn](#output\_nlb\_http\_target\_group\_arn) | NLB HTTP target group ARN for TargetGroupBinding |
 | <a name="output_nlb_https_target_group_arn"></a> [nlb\_https\_target\_group\_arn](#output\_nlb\_https\_target\_group\_arn) | NLB HTTPS target group ARN for TargetGroupBinding |
+| <a name="output_opensearch_credential_secret"></a> [opensearch\_credential\_secret](#output\_opensearch\_credential\_secret) | Secret ARN holding the managed OpenSearch master user as JSON {username, password} (empty when the domain is off). |
+| <a name="output_opensearch_domain_arn"></a> [opensearch\_domain\_arn](#output\_opensearch\_domain\_arn) | ARN of the managed OpenSearch domain (empty when the domain is off). |
+| <a name="output_opensearch_endpoint"></a> [opensearch\_endpoint](#output\_opensearch\_endpoint) | VPC endpoint hostname of the managed OpenSearch domain (empty when the domain is off). |
 | <a name="output_primary_db_secret"></a> [primary\_db\_secret](#output\_primary\_db\_secret) | Secretmanager ARN to MySQL credential storage |
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | Private subnet IDs for the VPC |
 | <a name="output_s3_kms_key_id"></a> [s3\_kms\_key\_id](#output\_s3\_kms\_key\_id) | n/a |
