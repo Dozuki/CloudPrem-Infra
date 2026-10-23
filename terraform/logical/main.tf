@@ -253,6 +253,9 @@ locals {
   db_bi_host     = var.enable_bi ? nonsensitive(jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["host"]) : ""
   db_bi_password = var.enable_bi ? jsondecode(data.aws_secretsmanager_secret_version.db_bi[0].secret_string)["password"] : ""
 
+  # Managed OpenSearch credentials (search_backend = managed only)
+  opensearch_credentials = var.cloud == "aws" && var.search_backend == "managed" ? jsondecode(data.aws_secretsmanager_secret_version.opensearch[0].secret_string) : {}
+
   # Grafana
   grafana_url            = var.enable_bi ? format("https://%s/%s", var.dns_domain_name, var.grafana_subpath) : null
   grafana_admin_username = var.enable_bi ? var.customer != "" ? var.customer : "dozuki" : "dozuki"
@@ -334,6 +337,22 @@ data "aws_secretsmanager_secret_version" "db_master" {
 data "aws_secretsmanager_secret_version" "db_bi" {
   count     = var.cloud == "aws" && var.enable_bi ? 1 : 0
   secret_id = var.bi_database_credential_secret
+}
+
+data "aws_secretsmanager_secret_version" "opensearch" {
+  count     = var.cloud == "aws" && var.search_backend == "managed" ? 1 : 0
+  secret_id = var.opensearch_credential_secret
+
+  lifecycle {
+    precondition {
+      condition     = var.opensearch_endpoint != "" && var.opensearch_credential_secret != ""
+      error_message = "search_backend = managed requires opensearch_endpoint and opensearch_credential_secret (physical outputs). Empty means physical has not applied the domain yet."
+    }
+    precondition {
+      condition     = var.opensearch_endpoint != null && can(regex("^[A-Za-z0-9.-]+$", coalesce(var.opensearch_endpoint, "")))
+      error_message = "opensearch_endpoint must be a bare host name: no scheme, port, path or whitespace."
+    }
+  }
 }
 
 data "azurerm_kubernetes_cluster" "main" {

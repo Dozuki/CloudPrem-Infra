@@ -116,6 +116,7 @@ No modules.
 | [vault_kv_secret_v2.db](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.google_translate](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.grafana](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
+| [vault_kv_secret_v2.opensearch](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_kv_secret_v2.tls](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/kv_secret_v2) | resource |
 | [vault_policy.eso_readonly](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [vault_policy.flux_relay_readonly](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
@@ -134,6 +135,7 @@ No modules.
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_secretsmanager_secret_version.db_bi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/secretsmanager_secret_version) | data source |
 | [aws_secretsmanager_secret_version.db_master](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/secretsmanager_secret_version) | data source |
+| [aws_secretsmanager_secret_version.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/secretsmanager_secret_version) | data source |
 | [aws_vpc.cluster](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
 | [azurerm_key_vault_secret.db_master](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/key_vault_secret) | data source |
 | [azurerm_kubernetes_cluster.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/kubernetes_cluster) | data source |
@@ -221,8 +223,10 @@ No modules.
 | <a name="input_node_excluded_instance_categories"></a> [node\_excluded\_instance\_categories](#input\_node\_excluded\_instance\_categories) | EKS Auto Mode instance categories (eks.amazonaws.com/instance-category) the NodePool must never buy: burstable (credit-throttled), accelerators (p/g/gr/inf/trn/dl/vt/f), HPC, Mac, ultra-memory. Everything else is eligible; Karpenter picks the cheapest shape that fits, and the amd64 and instance-generation requirements still apply. | `list(string)` | <pre>[<br/>  "t",<br/>  "p",<br/>  "g",<br/>  "gr",<br/>  "inf",<br/>  "trn",<br/>  "dl",<br/>  "vt",<br/>  "f",<br/>  "hpc",<br/>  "mac",<br/>  "u"<br/>]</pre> | no |
 | <a name="input_node_min_memory_mib"></a> [node\_min\_memory\_mib](#input\_node\_min\_memory\_mib) | Minimum instance memory in MiB, EXCLUSIVE - this value is passed to Karpenter's Gt verbatim and is NOT decremented the way node\_min\_vcpu is. So 8192 means 'strictly more than 8192 MiB', i.e. the smallest admissible node is 16 GiB, not 8 GiB. No floor beyond the default by default: 4096 preserves the historical on-demand pool floor exactly, and an env's env.hcl may raise it via the sizing model. This is independent of node\_excluded\_instance\_categories - that variable narrows which hardware families are eligible, this one narrows how small an eligible node can be. (4096 and 6144 admit identical gen>4 instance sets among eligible categories - no size falls between them - so the default changes nothing.) | `number` | `4096` | no |
 | <a name="input_node_min_vcpu"></a> [node\_min\_vcpu](#input\_node\_min\_vcpu) | Minimum vCPU per node, INCLUSIVE (renders eks.amazonaws.com/instance-cpu Gt node\_min\_vcpu - 1, because Karpenter's Gt is exclusive). 4 means 'at least 4 vCPU'. No floor by default (0 = requirement omitted entirely); an env's env.hcl may add one. This is independent of node\_excluded\_instance\_categories, which controls which hardware families are eligible at all, not how big a node from an eligible family must be. Set per env from the sizing model so the env's workload fits its minimum node count. | `number` | `0` | no |
-| <a name="input_opensearch_min_domains"></a> [opensearch\_min\_domains](#input\_opensearch\_min\_domains) | Minimum number of domains (AZs) for OpenSearch topology spread constraints. Set to 3 for standard 3-AZ regions to ensure Karpenter provisions on-demand nodes in missing AZs rather than colocating pods. Set to 2 for regions with only 2 usable AZs (e.g. emea). | `number` | `3` | no |
-| <a name="input_opensearch_replicas"></a> [opensearch\_replicas](#input\_opensearch\_replicas) | OpenSearch master+data replica count. Default 1 is the migration-safe default: it never scales an env implicitly, but it is NOT a no-op - the pod template changes at 1 replica too (multi-node discovery env vars, topologySpreadConstraints), so an env taking this rolls its single OpenSearch pod once, with an EBS detach/reattach and a search gap of roughly 20 seconds. Sequence it per env like any other stateful rollout. Envs reach 3 (HA) by stepping 1 -> 2 -> 3, ONE step per apply, per the opensearch HA runbook: never jump 1 -> 3 (a fresh pair can form a bootstrap majority and split-brain). A PR changing this value MUST state the prior value in its body so the one-step rule is reviewable. 2 is transitional only, never a standing configuration. | `number` | `1` | no |
+| <a name="input_opensearch_credential_secret"></a> [opensearch\_credential\_secret](#input\_opensearch\_credential\_secret) | Secrets Manager secret id holding the managed OpenSearch username and password as JSON (physical output). Only read when search\_backend = managed. | `string` | `""` | no |
+| <a name="input_opensearch_endpoint"></a> [opensearch\_endpoint](#input\_opensearch\_endpoint) | Endpoint host of the managed OpenSearch domain (physical output). Only read when search\_backend = managed. | `string` | `""` | no |
+| <a name="input_opensearch_min_domains"></a> [opensearch\_min\_domains](#input\_opensearch\_min\_domains) | Minimum number of domains (AZs) for OpenSearch topology spread constraints. Set to 3 for standard 3-AZ regions to ensure Karpenter provisions on-demand nodes in missing AZs rather than colocating pods. Set to 2 for regions with only 2 usable AZs (e.g. emea). Ignored unless search\_backend = in\_cluster. | `number` | `3` | no |
+| <a name="input_opensearch_replicas"></a> [opensearch\_replicas](#input\_opensearch\_replicas) | OpenSearch master+data replica count. Default 1 is the migration-safe default: it never scales an env implicitly, but it is NOT a no-op - the pod template changes at 1 replica too (multi-node discovery env vars, topologySpreadConstraints), so an env taking this rolls its single OpenSearch pod once, with an EBS detach/reattach and a search gap of roughly 20 seconds. Sequence it per env like any other stateful rollout. Envs reach 3 (HA) by stepping 1 -> 2 -> 3, ONE step per apply, per the opensearch HA runbook: never jump 1 -> 3 (a fresh pair can form a bootstrap majority and split-brain). A PR changing this value MUST state the prior value in its body so the one-step rule is reviewable. 2 is transitional only, never a standing configuration. Ignored unless search\_backend = in\_cluster. | `number` | `1` | no |
 | <a name="input_prefer_spot_app"></a> [prefer\_spot\_app](#input\_prefer\_spot\_app) | Enable spot-preferred placement for the app tier (scheduling.preferSpot.app in the chart). When true, replaces hard on-demand nodeSelector with spot-preferred bounded nodeAffinity while retaining on-demand tolerations. Requires chart\_version >= 2.10.12. | `bool` | `false` | no |
 | <a name="input_primary_db_secret"></a> [primary\_db\_secret](#input\_primary\_db\_secret) | ARN to secret containing primary db credentials | `string` | n/a | yes |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | When true, retain Vault secrets on destroy (soft delete). When false, permanently purge all versions. | `bool` | `true` | no |
@@ -235,6 +239,7 @@ No modules.
 | <a name="input_s3_objects_bucket"></a> [s3\_objects\_bucket](#input\_s3\_objects\_bucket) | Name of the bucket to store guide objects. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_pdfs_bucket"></a> [s3\_pdfs\_bucket](#input\_s3\_pdfs\_bucket) | Name of the bucket to store guide pdfs. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
 | <a name="input_s3_replicate_buckets"></a> [s3\_replicate\_buckets](#input\_s3\_replicate\_buckets) | Whether or not we are replicating objects from existing S3 buckets. | `bool` | `false` | no |
+| <a name="input_search_backend"></a> [search\_backend](#input\_search\_backend) | Where search runs. in\_cluster (default) keeps the chart's OpenSearch subchart. managed and external turn the subchart off and point the chart at the Vault entry <customer>/<env>/opensearch (keys host, port, scheme, username, password). managed also seeds that entry from opensearch\_endpoint and opensearch\_credential\_secret (physical outputs); external expects the operator to write it. Both require cloud = aws. Azure (Key Vault) support is a follow-up. | `string` | `"in_cluster"` | no |
 | <a name="input_search_reindex_enabled"></a> [search\_reindex\_enabled](#input\_search\_reindex\_enabled) | Per-env override of the chart's search.reindex.enabled. null (the default) means "use<br/>the chart default", and the key is not sent to the chart at all.<br/><br/>The chart default is what actually turns the feature on: true on charts carrying the<br/>post-upgrade hook design, false on older charts (the release-2.x line, until it is<br/>ported). That is why this defaults null - CPI never forces the flag onto an env whose<br/>chart still has the old Job design.<br/><br/>Set false to opt an env out of the reindex entirely. This is also the unblock lever<br/>when the hook fails a HelmRelease upgrade: set it, let the upgrade go green, fix the<br/>cause, then clear it back to null.<br/><br/>Set true only on a pre-hook chart, where it switches on the old name-hash Job. Not<br/>recommended.<br/><br/>The reindex is no longer triggered by this flag. On hook-carrying charts the decision<br/>lives in a marker document stored in OpenSearch that records the database identity<br/>(db.resourceId), a bump-only run id, and both app index UUIDs; a mismatch reindexes,<br/>a match exits in seconds.<br/><br/>A logical restore (a mysqldump loaded into the live instance) changes no<br/>terraform-visible identity, so force that case with the chart's search.reindex.runId<br/>(bump-only: a new value reindexes, clearing it back to empty is a no-op), not with<br/>this flag. | `bool` | `null` | no |
 | <a name="input_seaweedfs_volume_size_gb"></a> [seaweedfs\_volume\_size\_gb](#input\_seaweedfs\_volume\_size\_gb) | PVC size in GB for each SeaweedFS volume server (Azure only). | `number` | `100` | no |
 | <a name="input_sentry_dsn"></a> [sentry\_dsn](#input\_sentry\_dsn) | Sentry DSN (Azure only; AWS reads Vault). | `string` | `""` | no |
@@ -266,3 +271,43 @@ No modules.
 | <a name="output_ingress_ip"></a> [ingress\_ip](#output\_ingress\_ip) | Public IP of the ingress load balancer (Azure only; point DNS here). |
 | <a name="output_replicate_instructions"></a> [replicate\_instructions](#output\_replicate\_instructions) | n/a |
 <!-- END_TF_DOCS -->
+
+## Search backend
+
+`search_backend` picks where search runs. `in_cluster` (default) keeps the chart's OpenSearch
+subchart and changes nothing. `managed` and `external` turn the subchart off and point the chart
+at the Vault entry `secret/<customer>/<env>/opensearch` (keys `host`, `port`, `scheme`,
+`username`, `password`). Both need `cloud = aws`.
+
+- `managed`: this layer writes the Vault entry from `opensearch_endpoint` and
+  `opensearch_credential_secret` (physical outputs). It fails the plan while either is empty.
+- `external`: you write the entry. Read the password from a file so it stays out of shell
+  history, and write that file without a trailing newline (`vault` reads it byte for byte):
+
+  ```
+  umask 077
+  pwfile=$(mktemp) && trap 'rm -f "$pwfile"' EXIT INT TERM
+  IFS= read -rs OS_PASSWORD && printf '%s' "$OS_PASSWORD" > "$pwfile" && unset OS_PASSWORD
+  VAULT_ADDR="$ENV_VAULT_ADDR" vault kv put "secret/$CUSTOMER/$ENV/opensearch" \
+    host="$ENDPOINT_HOST" port=443 scheme=https username="$OS_USER" password=@"$pwfile"
+  ```
+
+  `ENDPOINT_HOST` is the bare hostname, with no scheme or port.
+
+Switching backends, in order:
+
+- `in_cluster` to `external`: write the Vault entry BEFORE flipping `search_backend`.
+- `managed` to `external`: the apply destroys the entry this layer seeded. Write the external entry
+  right after that apply. Until then the ESO refresh fails and the pods keep the last synced
+  Secret (the chart's ExternalSecret uses `deletionPolicy: Merge`).
+
+After switching to a backend that has no indices yet, existing content is not searchable until
+a reindex completes, so leave `search_reindex_enabled` unset or true.
+
+Both modes need `chart_version >= 3.21.0`.
+
+Switching `managed` or `external` back to `in_cluster` brings the opensearch subchart back. If its old
+PVCs were retained, their indices are stale. The reindex hook will usually skip because its marker still
+matches, so the required step is bumping the chart's `search.reindex.runId` (this module does not expose it;
+set it through the reindex runbook or run a manual reindex Job) and making sure `search_reindex_enabled` is
+not `false`.

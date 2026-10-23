@@ -564,7 +564,7 @@ locals {
           }
         }
       }
-    } : k => v if var.cloud == "aws"
+    } : k => v if var.cloud == "aws" && !(k == "opensearch" && var.search_backend != "in_cluster")
   }
 
   app_values = merge(
@@ -590,7 +590,16 @@ locals {
     # search.reindex.enabled is omitted entirely when null, so the chart default wins.
     # false is the per-env opt-out, and also the unblock lever for a HelmRelease stuck
     # on a failing reindex hook.
-    var.search_reindex_enabled == null ? {} : { search = { reindex = { enabled = var.search_reindex_enabled } } },
+    # One search entry: merge() is shallow, so reindex and opensearch.external must share it.
+    # Both are omitted for in_cluster with reindex unset, so such an env renders byte-identical values.
+    var.search_reindex_enabled == null && var.search_backend == "in_cluster" ? {} : {
+      search = merge(
+        var.search_reindex_enabled == null ? {} : { reindex = { enabled = var.search_reindex_enabled } },
+        var.search_backend == "in_cluster" ? {} : { opensearch = { external = { enabled = true } } },
+      )
+    },
+    # The subchart is off for managed and external; the chart does not turn it off itself.
+    var.search_backend == "in_cluster" ? {} : { opensearch = { enabled = false } },
     # monitoring.localAlertRules.enabled is omitted when null so the chart default wins and an
     # env that has not opted in renders byte-identical values (no Helm upgrade on adoption).
     # Merged into the existing monitoring map so monitoring.enabled and friends survive.
@@ -625,11 +634,28 @@ resource "kubernetes_secret_v1" "flux_values" {
   }
   data = { "values.yaml" = yamlencode(local.app_values) }
 
+  # Flux watches this Secret, so the Vault entry the chart will read must exist before the values flip.
+  depends_on = [vault_kv_secret_v2.opensearch]
+
   # slim needs the chart's images.flavor contract, first shipped in chart 2.11.0. A
   # pre-flavor chart silently ignores images.flavor and renders the legacy beanstalkd
   # and crond entrypoints against the slim image (which carries neither), so the plan
   # passes and the workloads can't start. Fail that combination at plan time instead.
   lifecycle {
+    precondition {
+      condition     = var.search_backend == "in_cluster" || var.cloud == "aws"
+      error_message = "search_backend managed or external requires cloud = aws. That is also what keeps Vault and ESO on (vault.enabled = cloud == aws); without Vault the chart would render a blank search endpoint."
+    }
+    precondition {
+      condition = var.search_backend == "in_cluster" || try(
+        length(local.chart_version_core) == 3 && (
+          tonumber(local.chart_version_core[0]) > 3 ||
+          (tonumber(local.chart_version_core[0]) == 3 && tonumber(local.chart_version_core[1]) >= 21)
+        ),
+        false
+      )
+      error_message = "search_backend managed or external requires chart_version >= 3.21.0 (first dozuki chart with search.opensearch.external). The 2.x chart line does not have it yet."
+    }
     precondition {
       condition = var.app_image_flavor != "slim" || try(
         tonumber(split(".", var.chart_version)[0]) > 2 ||
@@ -906,7 +932,7 @@ resource "kubectl_manifest" "dozuki_helmrelease" {
     helm_release.cert_manager, helm_release.envoy_gateway, helm_release.external_secrets,
     kubernetes_service_account_v1.eso_vault_auth, kubernetes_secret_v1.ghcr_pull,
     aws_eks_addon.cloudwatch_observability, kubernetes_secret_v1.gateway_tls, helm_release.external_dns,
-    kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, vault_kv_secret_v2.tls,
+    kubernetes_secret_v1.redis_auth_eg, azurerm_key_vault_secret.app, vault_kv_secret_v2.tls, vault_kv_secret_v2.opensearch,
     helm_release.istio_base, helm_release.istiod, helm_release.istio_cni, helm_release.ztunnel,
     kubernetes_labels.ambient_dozuki, kubernetes_labels.ambient_envoy_gateway, kubernetes_labels.ambient_redis,
   ]

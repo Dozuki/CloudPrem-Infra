@@ -509,7 +509,7 @@ variable "azure_kubelogin_login" {
 }
 
 variable "opensearch_replicas" {
-  description = "OpenSearch master+data replica count. Default 1 is the migration-safe default: it never scales an env implicitly, but it is NOT a no-op - the pod template changes at 1 replica too (multi-node discovery env vars, topologySpreadConstraints), so an env taking this rolls its single OpenSearch pod once, with an EBS detach/reattach and a search gap of roughly 20 seconds. Sequence it per env like any other stateful rollout. Envs reach 3 (HA) by stepping 1 -> 2 -> 3, ONE step per apply, per the opensearch HA runbook: never jump 1 -> 3 (a fresh pair can form a bootstrap majority and split-brain). A PR changing this value MUST state the prior value in its body so the one-step rule is reviewable. 2 is transitional only, never a standing configuration."
+  description = "OpenSearch master+data replica count. Default 1 is the migration-safe default: it never scales an env implicitly, but it is NOT a no-op - the pod template changes at 1 replica too (multi-node discovery env vars, topologySpreadConstraints), so an env taking this rolls its single OpenSearch pod once, with an EBS detach/reattach and a search gap of roughly 20 seconds. Sequence it per env like any other stateful rollout. Envs reach 3 (HA) by stepping 1 -> 2 -> 3, ONE step per apply, per the opensearch HA runbook: never jump 1 -> 3 (a fresh pair can form a bootstrap majority and split-brain). A PR changing this value MUST state the prior value in its body so the one-step rule is reviewable. 2 is transitional only, never a standing configuration. Ignored unless search_backend = in_cluster."
   type        = number
   default     = 1
   validation {
@@ -519,13 +519,35 @@ variable "opensearch_replicas" {
 }
 
 variable "opensearch_min_domains" {
-  description = "Minimum number of domains (AZs) for OpenSearch topology spread constraints. Set to 3 for standard 3-AZ regions to ensure Karpenter provisions on-demand nodes in missing AZs rather than colocating pods. Set to 2 for regions with only 2 usable AZs (e.g. emea)."
+  description = "Minimum number of domains (AZs) for OpenSearch topology spread constraints. Set to 3 for standard 3-AZ regions to ensure Karpenter provisions on-demand nodes in missing AZs rather than colocating pods. Set to 2 for regions with only 2 usable AZs (e.g. emea). Ignored unless search_backend = in_cluster."
   type        = number
   default     = 3
   validation {
     condition     = contains([1, 2, 3], var.opensearch_min_domains)
     error_message = "opensearch_min_domains must be 1, 2, or 3."
   }
+}
+
+variable "search_backend" {
+  description = "Where search runs. in_cluster (default) keeps the chart's OpenSearch subchart. managed and external turn the subchart off and point the chart at the Vault entry <customer>/<env>/opensearch (keys host, port, scheme, username, password). managed also seeds that entry from opensearch_endpoint and opensearch_credential_secret (physical outputs); external expects the operator to write it. Both require cloud = aws. Azure (Key Vault) support is a follow-up."
+  type        = string
+  default     = "in_cluster"
+  validation {
+    condition     = contains(["in_cluster", "managed", "external"], var.search_backend)
+    error_message = "search_backend must be in_cluster, managed, or external."
+  }
+}
+
+variable "opensearch_endpoint" {
+  description = "Endpoint host of the managed OpenSearch domain (physical output). Only read when search_backend = managed."
+  type        = string
+  default     = ""
+}
+
+variable "opensearch_credential_secret" {
+  description = "Secrets Manager secret id holding the managed OpenSearch username and password as JSON (physical output). Only read when search_backend = managed."
+  type        = string
+  default     = ""
 }
 
 variable "search_reindex_enabled" {
