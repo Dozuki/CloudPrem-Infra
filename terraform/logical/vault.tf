@@ -225,6 +225,31 @@ resource "vault_kv_secret_v2" "cache" {
   })
 }
 
+# Read by the chart's ExternalSecret when search.opensearch.external.enabled is true.
+# Only managed seeds it. Switching managed -> external destroys the seeded entry, so write the
+# external one right after that apply (see README).
+resource "vault_kv_secret_v2" "opensearch" {
+  count               = var.cloud == "aws" && var.search_backend == "managed" ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/opensearch"
+  delete_all_versions = !var.protect_resources
+
+  lifecycle {
+    precondition {
+      condition     = try(length(local.opensearch_credentials["username"]) > 0 && length(local.opensearch_credentials["password"]) > 0, false)
+      error_message = "The opensearch_credential_secret must decode to JSON with a non-empty username and password."
+    }
+  }
+
+  data_json = jsonencode({
+    host     = var.opensearch_endpoint
+    port     = "443"
+    scheme   = "https"
+    username = local.opensearch_credentials["username"]
+    password = local.opensearch_credentials["password"]
+  })
+}
+
 resource "vault_kv_secret_v2" "google_translate" {
   count               = var.cloud == "aws" ? 1 : 0
   mount               = "secret"
