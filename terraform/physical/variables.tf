@@ -899,3 +899,56 @@ variable "rds_log_exports" {
     error_message = "rds_log_exports entries must be among: audit, error, general, slowquery."
   }
 }
+
+# --- Managed OpenSearch (search backend) --- #
+
+variable "search_backend" {
+  description = "Where the application's search index lives: in_cluster (chart-managed OpenSearch), managed (an AWS OpenSearch domain created by this layer), or external (an endpoint supplied to the logical layer). Only managed creates anything here."
+  type        = string
+  default     = "in_cluster"
+
+  validation {
+    condition     = contains(["in_cluster", "managed", "external"], var.search_backend)
+    error_message = "search_backend must be one of: in_cluster, managed, external."
+  }
+}
+
+variable "opensearch_domain_enabled" {
+  description = "Physical-only override that keeps the managed OpenSearch domain while logical runs another backend (for example during validation). null means follow search_backend == \"managed\"."
+  type        = bool
+  default     = null
+}
+
+variable "opensearch_engine_version" {
+  description = "Engine version of the managed OpenSearch domain."
+  type        = string
+  default     = "OpenSearch_3.5"
+}
+
+variable "opensearch_instance_type" {
+  description = "Data node instance type of the managed OpenSearch domain."
+  type        = string
+  default     = "m7g.large.search"
+}
+
+variable "opensearch_instance_count" {
+  description = "Data node count of the managed OpenSearch domain. With 2 or more nodes the domain spreads across min(count, distinct AZs with a private subnet, 3) AZs, and the count must divide evenly by that AZ count."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.opensearch_instance_count >= 1 && floor(var.opensearch_instance_count) == var.opensearch_instance_count
+    error_message = "opensearch_instance_count must be a whole number of at least 1."
+  }
+}
+
+variable "opensearch_ebs_size" {
+  description = "Per-node gp3 volume size in GiB for the managed OpenSearch domain."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.opensearch_ebs_size >= 10 && floor(var.opensearch_ebs_size) == var.opensearch_ebs_size
+    error_message = "opensearch_ebs_size must be a whole number of at least 10 GiB."
+  }
+}
