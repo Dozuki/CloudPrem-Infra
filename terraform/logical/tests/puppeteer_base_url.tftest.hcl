@@ -141,6 +141,18 @@ run "unset_renders_no_env" {
   }
 }
 
+# Below chart 3.20.2 netpol_values is empty, so nothing may emit a puppeteer key: the flux values stay as master renders them.
+run "unset_old_chart_emits_no_puppeteer" {
+  command = plan
+  variables {
+    chart_version = "3.20.0"
+  }
+  assert {
+    condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).deployments), "puppeteer")
+    error_message = "an unset puppeteer_base_url on a chart without the netpol values must not emit a puppeteer key"
+  }
+}
+
 run "set_renders_env_beside_netpol" {
   command = plan
   variables {
