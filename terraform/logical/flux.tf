@@ -14,6 +14,14 @@ locals {
   # wins on key collisions, matching the old later-set-overrides-earlier-value order).
   app_webnextjs_env = merge(var.webnextjs_env, var.nextjs_extra_env)
 
+  # puppeteer-api chart values: the egress deny list (network-policy-values.tf) plus the render-origin
+  # pin. Empty when neither applies, so an unset puppeteer_base_url on an older chart emits no
+  # puppeteer key and the flux values stay byte-identical.
+  app_puppeteer_values = merge(
+    try(local.netpol_values.puppeteer, {}),
+    var.puppeteer_base_url != "" ? { env = { RENDER_BASE_URL = var.puppeteer_base_url } } : {},
+  )
+
   # app_cron_mode -> the deployments/appCron values that implement the crond/CronJobs cutover
   # table. crond is deliberately the EMPTY entry - no crond and no appCron key at all - so an env
   # that has not opted in renders byte-identical to before this variable existed.
@@ -364,7 +372,7 @@ locals {
     # table replace the whole subtree.
     # puppeteer/webNextjs networkPolicy keys come from network-policy-values.tf.
     # The cron-mode table must never carry webNextjs or puppeteer: this merge is shallow and would drop the networkPolicy subtree.
-    deployments = merge({ webNextjs = merge({ env = local.app_webnextjs_env }, try(local.netpol_values.webNextjs, {})) }, try({ puppeteer = local.netpol_values.puppeteer }, {}), local.app_cron_mode_values[var.app_cron_mode].deployments)
+    deployments = merge({ webNextjs = merge({ env = local.app_webnextjs_env }, try(local.netpol_values.webNextjs, {})) }, length(local.app_puppeteer_values) > 0 ? { puppeteer = local.app_puppeteer_values } : {}, local.app_cron_mode_values[var.app_cron_mode].deployments)
   }
 
   # Final values = base, merged with the azure-only block. Three keys collide between the two and all
@@ -655,6 +663,20 @@ resource "kubernetes_secret_v1" "flux_values" {
         false
       )
       error_message = "search_backend managed or external requires chart_version >= 3.21.0 (first dozuki chart with search.opensearch.external). The 2.x chart line does not have it yet."
+    }
+    precondition {
+      condition = var.puppeteer_base_url == "" || try(
+        length(local.chart_version_core) == 3 && (
+          tonumber(local.chart_version_core[0]) > 3 ||
+          (tonumber(local.chart_version_core[0]) == 3 && tonumber(local.chart_version_core[1]) >= 22)
+        ),
+        false
+      )
+      error_message = "puppeteer_base_url requires chart_version >= 3.22.0 (first dozuki chart with deployments.puppeteer.env). An older chart ignores the value and renders puppeteer-api unpinned."
+    }
+    precondition {
+      condition     = var.puppeteer_base_url == "" || var.app_image_flavor == "slim"
+      error_message = "puppeteer_base_url requires app_image_flavor=slim: puppeteer-api renders only on the slim flavor."
     }
     precondition {
       condition = var.app_image_flavor != "slim" || try(
