@@ -136,8 +136,8 @@ variables {
 run "unset_renders_no_env" {
   command = plan
   assert {
-    condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).deployments.puppeteer), "env")
-    error_message = "an unset puppeteer_base_url must leave deployments.puppeteer.env out of the values"
+    condition     = keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).deployments.puppeteer) == ["networkPolicy"]
+    error_message = "an unset puppeteer_base_url must leave deployments.puppeteer exactly as master renders it: the networkPolicy key and nothing else"
   }
 }
 
@@ -197,6 +197,67 @@ run "rejects_credentials" {
     app_image_flavor   = "slim"
     beanstalkd_tag     = "btag"
     puppeteer_base_url = "https://user:pw@dozuki.example.com"
+  }
+  expect_failures = [var.puppeteer_base_url]
+}
+
+run "set_accepts_a_port" {
+  command = plan
+  variables {
+    chart_version      = "3.22.0"
+    app_image_flavor   = "slim"
+    beanstalkd_tag     = "btag"
+    puppeteer_base_url = "https://dozuki.example.com:8443"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).deployments.puppeteer.env.RENDER_BASE_URL == "https://dozuki.example.com:8443"
+    error_message = "an origin with a port must render as given"
+  }
+}
+
+run "set_accepts_a_later_major_chart" {
+  command = plan
+  variables {
+    chart_version      = "4.0.0"
+    app_image_flavor   = "slim"
+    beanstalkd_tag     = "btag"
+    puppeteer_base_url = "https://dozuki.example.com"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).deployments.puppeteer.env.RENDER_BASE_URL == "https://dozuki.example.com"
+    error_message = "a chart newer than the floor on a later major must accept the value"
+  }
+}
+
+run "rejects_backslash" {
+  command = plan
+  variables {
+    chart_version      = "3.22.0"
+    app_image_flavor   = "slim"
+    beanstalkd_tag     = "btag"
+    puppeteer_base_url = "https://dozuki.example.com\\guides"
+  }
+  expect_failures = [var.puppeteer_base_url]
+}
+
+run "rejects_bad_port" {
+  command = plan
+  variables {
+    chart_version      = "3.22.0"
+    app_image_flavor   = "slim"
+    beanstalkd_tag     = "btag"
+    puppeteer_base_url = "https://dozuki.example.com:abc"
+  }
+  expect_failures = [var.puppeteer_base_url]
+}
+
+run "rejects_percent_encoding" {
+  command = plan
+  variables {
+    chart_version      = "3.22.0"
+    app_image_flavor   = "slim"
+    beanstalkd_tag     = "btag"
+    puppeteer_base_url = "https://dozuki.example.com%2Fguides"
   }
   expect_failures = [var.puppeteer_base_url]
 }
