@@ -15,8 +15,9 @@
 #      --requirepass and into the envoy-ratelimit pod via REDIS_AUTH env var
 #      sourced from the same Secret (no plaintext in ConfigMap).
 #   2. NetworkPolicy: ingress to redis-system/redis limited to pods in
-#      envoy-gateway-system. Enforcement is CNI-dependent (EKS Auto Mode
-#      enforces via VPC CNI network policies; docker-desktop may not).
+#      envoy-gateway-system. Enforcement is CNI-dependent (on EKS Auto Mode it
+#      needs the amazon-vpc-cni ConfigMap from network-policy.tf; docker-desktop
+#      may not enforce at all).
 #      NetworkPolicy is defense-in-depth; AUTH is the in-band control.
 #   3. securityContext: non-root (uid 999), read-only root filesystem,
 #      no privilege escalation, all capabilities dropped.
@@ -235,13 +236,16 @@ resource "kubernetes_service_v1" "ratelimit_redis" {
 # All other ingress to the redis pod is denied by the absence of a matching
 # ingress rule (default-deny for selected pods).
 #
-# NOTE: NetworkPolicy enforcement is CNI-dependent. EKS Auto Mode (AWS VPC CNI
-# with network policy support) enforces this. docker-desktop's built-in CNI
-# may silently ignore NetworkPolicy; test there is only for apply/syntax
-# validation. Auth (--requirepass / REDIS_AUTH) is the primary in-band control.
+# NOTE: NetworkPolicy enforcement is CNI-dependent. On EKS Auto Mode it only
+# enforces once the amazon-vpc-cni ConfigMap exists, which network-policy.tf
+# creates on AWS. docker-desktop's built-in CNI may ignore NetworkPolicy, so a
+# test there only checks apply/syntax. Auth (--requirepass / REDIS_AUTH) stays
+# the in-band control.
 # ---------------------------------------------------------------------------
 
 resource "kubernetes_network_policy_v1" "ratelimit_redis" {
+  depends_on = [kubernetes_config_map_v1.amazon_vpc_cni]
+
   metadata {
     name      = "redis-allow-ratelimit"
     namespace = kubernetes_namespace_v1.ratelimit_redis.metadata[0].name

@@ -744,6 +744,7 @@ resource "helm_release" "flux" {
   depends_on = [
     aws_eks_pod_identity_association.flux_source_controller,
     aws_iam_role_policy.flux_source_ecr_read,
+    kubernetes_config_map_v1.amazon_vpc_cni,
   ]
 
   # Only the controllers the app-delivery path needs; the rest add footprint + images to mirror.
