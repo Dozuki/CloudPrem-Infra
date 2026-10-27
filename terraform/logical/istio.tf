@@ -284,7 +284,7 @@ resource "helm_release" "ztunnel" {
 
 resource "kubernetes_labels" "ambient_dozuki" {
   count      = local.mesh_enabled ? 1 : 0
-  depends_on = [helm_release.ztunnel]
+  depends_on = [helm_release.ztunnel, kubernetes_config_map_v1.amazon_vpc_cni]
 
   api_version = "v1"
   kind        = "Namespace"
@@ -301,7 +301,7 @@ resource "kubernetes_labels" "ambient_envoy_gateway" {
   count = local.mesh_enabled ? 1 : 0
   # envoy-gateway-system is created by the EG release (create_namespace), not by a
   # Terraform namespace resource.
-  depends_on = [helm_release.ztunnel, helm_release.envoy_gateway]
+  depends_on = [helm_release.ztunnel, helm_release.envoy_gateway, kubernetes_config_map_v1.amazon_vpc_cni]
 
   api_version = "v1"
   kind        = "Namespace"
@@ -318,7 +318,7 @@ resource "kubernetes_labels" "ambient_redis" {
   count = local.mesh_enabled ? 1 : 0
   # The NetworkPolicy must allow HBONE 15008 before redis-system is enrolled (and
   # enrollment must be removed before the rule on teardown).
-  depends_on = [helm_release.ztunnel, kubernetes_network_policy_v1.ratelimit_redis]
+  depends_on = [helm_release.ztunnel, kubernetes_network_policy_v1.ratelimit_redis, kubernetes_config_map_v1.amazon_vpc_cni]
 
   api_version = "v1"
   kind        = "Namespace"
