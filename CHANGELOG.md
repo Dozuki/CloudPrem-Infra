@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.20.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.19.0...v9.20.0) (2026-10-27)
+
+
+### Features
+
+* **logical:** enforce NetworkPolicy unconditionally on EKS Auto Mode ([#600](https://github.com/Dozuki/CloudPrem-Infra/issues/600)) ([cb63eb5](https://github.com/Dozuki/CloudPrem-Infra/commit/cb63eb5fdc584e23143bdcc595823e98751a9754))
+
 ## [9.19.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.18.1...v9.19.0) (2026-10-23)
 
 
