@@ -321,3 +321,23 @@ run "managed_rejects_empty_password" {
   }
   expect_failures = [vault_kv_secret_v2.opensearch]
 }
+
+# quarterly_version_number shares this file's mocks; it has nothing to do with search.
+run "quarterly_version_unset_renders_nothing" {
+  command = plan
+  assert {
+    condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]))), "quarterlyVersionNumber")
+    error_message = "an empty quarterly_version_number must not add quarterlyVersionNumber to the chart values"
+  }
+}
+
+run "quarterly_version_set_passes_through" {
+  command = plan
+  variables {
+    quarterly_version_number = "Q4 2026"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).quarterlyVersionNumber == "Q4 2026"
+    error_message = "quarterly_version_number must reach the chart as quarterlyVersionNumber"
+  }
+}

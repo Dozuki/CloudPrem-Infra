@@ -607,6 +607,8 @@ locals {
     # Omitted unless on, so an env that has not opted in renders byte-identical values
     # and adopting this version does not trigger a Helm upgrade.
     var.enable_testing_endpoints ? { testing = { enableTestingEndpoints = true } } : {},
+    # Omitted when empty, same reason as above: no Helm upgrade for an env that has not set it.
+    var.quarterly_version_number == "" ? {} : { quarterlyVersionNumber = var.quarterly_version_number },
   )
 }
 

@@ -65,6 +65,7 @@ No modules.
 | [kubernetes_cluster_role_binding_v1.dozuki_list_role_binding](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_binding_v1.vault_auth_delegator](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_binding_v1) | resource |
 | [kubernetes_cluster_role_v1.dozuki_list_role](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/cluster_role_v1) | resource |
+| [kubernetes_config_map_v1.amazon_vpc_cni](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1) | resource |
 | [kubernetes_config_map_v1.flux_values_diff](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map_v1) | resource |
 | [kubernetes_deployment_v1.ratelimit_redis](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/deployment_v1) | resource |
 | [kubernetes_job_v1.dms_start](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/job_v1) | resource |
@@ -231,6 +232,7 @@ No modules.
 | <a name="input_primary_db_secret"></a> [primary\_db\_secret](#input\_primary\_db\_secret) | ARN to secret containing primary db credentials | `string` | n/a | yes |
 | <a name="input_protect_resources"></a> [protect\_resources](#input\_protect\_resources) | When true, retain Vault secrets on destroy (soft delete). When false, permanently purge all versions. | `bool` | `true` | no |
 | <a name="input_puppeteer_tag"></a> [puppeteer\_tag](#input\_puppeteer\_tag) | Tag for the puppeteer-api image (slim flavor only). Empty keeps the chart's default, the short-sha tag published to ECR. GHCR publishes the same build as 0.0.0-<11-char sha>, so nonprod slim stacks must set it. | `string` | `""` | no |
+| <a name="input_quarterly_version_number"></a> [quarterly\_version\_number](#input\_quarterly\_version\_number) | Release label shown on the login page and Manage > General (e.g. "Q4 2026"), passed to the chart as quarterlyVersionNumber, which mounts it over the image's baked-in quarterlyVersionNumber.json. Empty keeps the image's label and renders no values change. Needs chart >= the release that added quarterlyVersionNumber; older charts ignore it. | `string` | `""` | no |
 | <a name="input_rustici_managed_password"></a> [rustici\_managed\_password](#input\_rustici\_managed\_password) | Rustici managed password (Azure only; AWS reads Vault). | `string` | `""` | no |
 | <a name="input_rustici_password"></a> [rustici\_password](#input\_rustici\_password) | Rustici password (Azure only; AWS reads Vault). | `string` | `""` | no |
 | <a name="input_s3_documents_bucket"></a> [s3\_documents\_bucket](#input\_s3\_documents\_bucket) | Name of the bucket to store documents. Use with 'create\_s3\_buckets' = false. | `string` | `""` | no |
