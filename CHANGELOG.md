@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.21.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.20.0...v9.21.0) (2026-10-29)
+
+
+### Features
+
+* **logical:** quarterly_version_number sets the app's release label through the chart ([bfc6211](https://github.com/Dozuki/CloudPrem-Infra/commit/bfc621157925904a6244bda97b7a397bedfd1c12))
+
 ## [9.20.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.19.0...v9.20.0) (2026-10-27)
 
 
