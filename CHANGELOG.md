@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.22.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.21.0...v9.22.0) (2026-10-31)
+
+
+### Features
+
+* **monitoring:** pass cloudwatch alarm targets to the chart's yace exporter ([#603](https://github.com/Dozuki/CloudPrem-Infra/issues/603)) ([0f1a751](https://github.com/Dozuki/CloudPrem-Infra/commit/0f1a751e3043790fcc9bdc0685688d53c42c6516))
+
 ## [9.21.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.20.0...v9.21.0) (2026-10-29)
 
 
