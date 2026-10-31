@@ -987,3 +987,21 @@ variable "memcached_proxy_backend_replicas" {
     error_message = "memcached_proxy_backend_replicas must be at least 1: zero renders an empty pool and every key resolves to nothing."
   }
 }
+
+variable "cloudwatch_alarm_targets" {
+  description = "Comes from the physical output of the same name. Tells the chart's YACE exporter which CloudWatch alarm targets to scrape. An older physical without the output leaves every job off."
+  type = object({
+    customer                  = optional(string, "")
+    environment               = optional(string, "")
+    rds_mode                  = optional(string, "")
+    nlb_enabled               = optional(bool, false)
+    dms_replication_config_id = optional(string, "")
+    s3_replication_rules = optional(list(object({
+      key               = string
+      sourceBucket      = string
+      destinationBucket = string
+      ruleId            = string
+    })), [])
+  })
+  default = {}
+}

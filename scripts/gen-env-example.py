@@ -27,6 +27,7 @@ WIDTH = 100
 WIRED = {
     "azure_eso_identity_client_id", "azure_key_vault_id", "azure_key_vault_uri",
     "azure_resource_group", "azure_tenant_id", "bi_database_credential_secret",
+    "cloudwatch_alarm_targets",
     "db_resource_id", "dms_enabled", "dms_replication_generation", "dms_task_arn",
     "dns_domain_name", "eks_cluster_id", "nlb_http_target_group_arn",
     "nlb_https_target_group_arn", "primary_db_secret", "s3_documents_bucket",
