@@ -172,3 +172,22 @@ output "opensearch_domain_arn" {
   description = "ARN of the managed OpenSearch domain (empty when the domain is off)."
   value       = try(aws_opensearch_domain.this[0].arn, "")
 }
+
+output "cloudwatch_alarm_targets" {
+  description = "What the CloudWatch metric alarms watch, for the chart's YACE exporter to scrape instead (empty values mean that target is off)."
+  value = {
+    customer                  = local.tags.Customer
+    environment               = local.tags.Environment
+    rds_mode                  = var.db_engine == "rds" ? "instance" : "cluster"
+    nlb_enabled               = length(local.nlb_alarm_target_groups) > 0
+    dms_replication_config_id = local.bi_replication_config_id
+    s3_replication_rules = [
+      for k, v in(var.enable_dr ? { for k, v in aws_s3_bucket.guide_buckets : k => v.id } : {}) : {
+        key               = k
+        sourceBucket      = v
+        destinationBucket = aws_s3_bucket.dr_guide_buckets[k].id
+        ruleId            = "dr-${k}"
+      }
+    ]
+  }
+}

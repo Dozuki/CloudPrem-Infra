@@ -244,6 +244,28 @@ locals {
         # to CloudWatch and falls back to the standard Resource Groups Tagging
         # endpoint either way, so this does not make every call FIPS.
         fips = local.is_us_gov
+
+        # These feed the central fleet alert rules that replace this env's
+        # CloudWatch metric alarms. The chart keys exist from chart 2.10.40 /
+        # 3.24.0; older charts ignore them. rds and nlb need the tag values to
+        # build their searchTags, so they stay off when those are empty.
+        customer    = var.cloudwatch_alarm_targets.customer
+        environment = var.cloudwatch_alarm_targets.environment
+        rds = {
+          enabled = var.cloudwatch_alarm_targets.rds_mode != "" && var.cloudwatch_alarm_targets.customer != "" && var.cloudwatch_alarm_targets.environment != ""
+          mode    = var.cloudwatch_alarm_targets.rds_mode
+        }
+        nlb = {
+          enabled = var.cloudwatch_alarm_targets.nlb_enabled && var.cloudwatch_alarm_targets.customer != "" && var.cloudwatch_alarm_targets.environment != ""
+        }
+        dms = {
+          enabled             = var.cloudwatch_alarm_targets.dms_replication_config_id != ""
+          replicationConfigId = var.cloudwatch_alarm_targets.dms_replication_config_id
+        }
+        s3Replication = {
+          enabled = length(var.cloudwatch_alarm_targets.s3_replication_rules) > 0
+          rules   = var.cloudwatch_alarm_targets.s3_replication_rules
+        }
       }
     }
 
