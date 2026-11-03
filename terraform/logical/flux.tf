@@ -589,6 +589,13 @@ locals {
     } : k => v if var.cloud == "aws" && !(k == "opensearch" && var.search_backend != "in_cluster")
   }
 
+  ecp_enabled = (var.cloud == "aws" && nonsensitive(anytrue([for v in [
+    var.ecp_sentry_json, var.ecp_frontegg_json, var.ecp_mail_json, var.ecp_sendgrid_json,
+    var.ecp_openai_json, var.ecp_pendo_json, var.ecp_slack_json, var.ecp_web_nextjs_env_json,
+    ] : v != null]))) || anytrue([for v in [
+    var.ecp_cdn, var.ecp_bi_dashboards, var.ecp_common, var.ecp_csp, var.ecp_testing, var.ecp_third_party_services,
+  ] : v != null])
+
   app_values = merge(
     local.app_base_values,
     { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" && k != "global" },
@@ -631,6 +638,27 @@ locals {
     var.enable_testing_endpoints ? { testing = { enableTestingEndpoints = true } } : {},
     # Omitted when empty, same reason as above: no Helm upgrade for an env that has not set it.
     var.quarterly_version_number == "" ? {} : { quarterlyVersionNumber = var.quarterly_version_number },
+    # Only added when an ECP var is set, so every other env renders identical values. Flags only, never the blobs.
+    local.ecp_enabled ? { ecpConfig = {
+      eso = {
+        frontegg       = var.cloud == "aws" && nonsensitive(var.ecp_frontegg_json != null)
+        mail           = var.cloud == "aws" && nonsensitive(var.ecp_mail_json != null)
+        sendgrid       = var.cloud == "aws" && nonsensitive(var.ecp_sendgrid_json != null)
+        openai         = var.cloud == "aws" && nonsensitive(var.ecp_openai_json != null)
+        pendo          = var.cloud == "aws" && nonsensitive(var.ecp_pendo_json != null)
+        slack          = var.cloud == "aws" && nonsensitive(var.ecp_slack_json != null)
+        sentryOverride = var.cloud == "aws" && nonsensitive(var.ecp_sentry_json != null)
+        webNextjsEnv   = var.cloud == "aws" && nonsensitive(var.ecp_web_nextjs_env_json != null)
+      }
+      passthrough = { for k, v in {
+        cdn                = var.ecp_cdn
+        biDashboards       = var.ecp_bi_dashboards
+        common             = var.ecp_common
+        csp                = var.ecp_csp
+        testing            = var.ecp_testing
+        thirdPartyServices = var.ecp_third_party_services
+      } : k => v if v != null }
+    } } : {},
   )
 }
 
@@ -659,7 +687,12 @@ resource "kubernetes_secret_v1" "flux_values" {
   data = { "values.yaml" = yamlencode(local.app_values) }
 
   # Flux watches this Secret, so the Vault entry the chart will read must exist before the values flip.
-  depends_on = [vault_kv_secret_v2.opensearch]
+  depends_on = [
+    vault_kv_secret_v2.opensearch,
+    vault_kv_secret_v2.ecp_sentry, vault_kv_secret_v2.ecp_frontegg, vault_kv_secret_v2.ecp_mail,
+    vault_kv_secret_v2.ecp_sendgrid, vault_kv_secret_v2.ecp_openai, vault_kv_secret_v2.ecp_pendo,
+    vault_kv_secret_v2.ecp_slack, vault_kv_secret_v2.ecp_web_nextjs,
+  ]
 
   # slim needs the chart's images.flavor contract, first shipped in chart 2.11.0. A
   # pre-flavor chart silently ignores images.flavor and renders the legacy beanstalkd

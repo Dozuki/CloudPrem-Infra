@@ -1005,3 +1005,165 @@ variable "cloudwatch_alarm_targets" {
   })
   default = {}
 }
+
+variable "ecp_sentry_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/sentry (property json) for the chart's ecpConfig.eso.sentryOverride. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_sentry_json == null || can(keys(jsondecode(var.ecp_sentry_json)))
+    error_message = "ecp_sentry_json must be a JSON object."
+  }
+}
+
+variable "ecp_frontegg_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/frontegg (property json) for the chart's ecpConfig.eso.frontegg. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_frontegg_json == null || can(keys(jsondecode(var.ecp_frontegg_json)))
+    error_message = "ecp_frontegg_json must be a JSON object."
+  }
+}
+
+variable "ecp_mail_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/mail (property json) for the chart's ecpConfig.eso.mail. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_mail_json == null || can(keys(jsondecode(var.ecp_mail_json)))
+    error_message = "ecp_mail_json must be a JSON object."
+  }
+}
+
+variable "ecp_sendgrid_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/sendgrid (property json) for the chart's ecpConfig.eso.sendgrid. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_sendgrid_json == null || can(keys(jsondecode(var.ecp_sendgrid_json)))
+    error_message = "ecp_sendgrid_json must be a JSON object."
+  }
+}
+
+variable "ecp_openai_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/openai (property json) for the chart's ecpConfig.eso.openai. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_openai_json == null || can(keys(jsondecode(var.ecp_openai_json)))
+    error_message = "ecp_openai_json must be a JSON object."
+  }
+}
+
+variable "ecp_pendo_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/pendo (property json) for the chart's ecpConfig.eso.pendo. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_pendo_json == null || can(keys(jsondecode(var.ecp_pendo_json)))
+    error_message = "ecp_pendo_json must be a JSON object."
+  }
+}
+
+variable "ecp_slack_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/slack (property json) for the chart's ecpConfig.eso.slack. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_slack_json == null || can(keys(jsondecode(var.ecp_slack_json)))
+    error_message = "ecp_slack_json must be a JSON object."
+  }
+}
+
+variable "ecp_web_nextjs_env_json" {
+  description = "Optional. JSON object written to Vault <customer>/<environment>/web-nextjs, each key becomes a Vault property and an env var on web-nextjs. Set as a write-only stack env var, never in env.hcl."
+  type        = string
+  default     = null
+  sensitive   = true
+
+  validation {
+    condition     = var.ecp_web_nextjs_env_json == null || (can(keys(jsondecode(var.ecp_web_nextjs_env_json))) && alltrue([for v in try(values(jsondecode(var.ecp_web_nextjs_env_json)), [null]) : v != null && can(tostring(v))]) && alltrue([for k in try(keys(jsondecode(var.ecp_web_nextjs_env_json)), ["!"]) : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", k))]))
+    error_message = "ecp_web_nextjs_env_json must be a JSON object whose keys are env var names and whose values are all non-null scalars."
+  }
+}
+
+variable "ecp_cdn" {
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.cdn. Non-secret values only: shown in plan output."
+  type        = any
+  default     = null
+
+  validation {
+    condition     = var.ecp_cdn == null || can(keys(var.ecp_cdn))
+    error_message = "ecp_cdn must be an object or map."
+  }
+}
+
+variable "ecp_bi_dashboards" {
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.biDashboards. Non-secret values only: shown in plan output."
+  type        = any
+  default     = null
+
+  validation {
+    condition     = var.ecp_bi_dashboards == null || can(keys(var.ecp_bi_dashboards))
+    error_message = "ecp_bi_dashboards must be an object or map."
+  }
+}
+
+variable "ecp_common" {
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.common. Non-secret values only: shown in plan output."
+  type        = any
+  default     = null
+
+  validation {
+    condition     = var.ecp_common == null || can(keys(var.ecp_common))
+    error_message = "ecp_common must be an object or map."
+  }
+}
+
+variable "ecp_csp" {
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.csp. Non-secret values only: shown in plan output."
+  type        = any
+  default     = null
+
+  validation {
+    condition     = var.ecp_csp == null || can(keys(var.ecp_csp))
+    error_message = "ecp_csp must be an object or map."
+  }
+}
+
+variable "ecp_testing" {
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.testing. Non-secret values only: shown in plan output."
+  type        = any
+  default     = null
+
+  validation {
+    condition     = var.ecp_testing == null || can(keys(var.ecp_testing))
+    error_message = "ecp_testing must be an object or map."
+  }
+}
+
+variable "ecp_third_party_services" {
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.thirdPartyServices. Non-secret values only: shown in plan output."
+  type        = any
+  default     = null
+
+  validation {
+    condition     = var.ecp_third_party_services == null || can(keys(var.ecp_third_party_services))
+    error_message = "ecp_third_party_services must be an object or map."
+  }
+}
