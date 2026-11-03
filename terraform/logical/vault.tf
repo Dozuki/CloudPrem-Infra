@@ -325,7 +325,7 @@ resource "vault_kv_secret_v2" "ecp_web_nextjs" {
   mount               = "secret"
   name                = "${local.vault_env_prefix}/web-nextjs"
   delete_all_versions = !var.protect_resources
-  data_json           = var.ecp_web_nextjs_env_json
+  data_json           = jsonencode(jsondecode(var.ecp_web_nextjs_env_json))
 }
 
 # The env smtp password is no longer Terraform-managed. The dozuki chart's

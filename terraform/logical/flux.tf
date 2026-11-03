@@ -589,10 +589,10 @@ locals {
     } : k => v if var.cloud == "aws" && !(k == "opensearch" && var.search_backend != "in_cluster")
   }
 
-  ecp_enabled = nonsensitive(anytrue([for v in [
+  ecp_enabled = (var.cloud == "aws" && nonsensitive(anytrue([for v in [
     var.ecp_sentry_json, var.ecp_frontegg_json, var.ecp_mail_json, var.ecp_sendgrid_json,
     var.ecp_openai_json, var.ecp_pendo_json, var.ecp_slack_json, var.ecp_web_nextjs_env_json,
-    ] : v != null])) || anytrue([for v in [
+    ] : v != null]))) || anytrue([for v in [
     var.ecp_cdn, var.ecp_bi_dashboards, var.ecp_common, var.ecp_csp, var.ecp_testing, var.ecp_third_party_services,
   ] : v != null])
 
@@ -641,14 +641,14 @@ locals {
     # Only added when an ECP var is set, so every other env renders identical values. Flags only, never the blobs.
     local.ecp_enabled ? { ecpConfig = {
       eso = {
-        frontegg       = nonsensitive(var.ecp_frontegg_json != null)
-        mail           = nonsensitive(var.ecp_mail_json != null)
-        sendgrid       = nonsensitive(var.ecp_sendgrid_json != null)
-        openai         = nonsensitive(var.ecp_openai_json != null)
-        pendo          = nonsensitive(var.ecp_pendo_json != null)
-        slack          = nonsensitive(var.ecp_slack_json != null)
-        sentryOverride = nonsensitive(var.ecp_sentry_json != null)
-        webNextjsEnv   = nonsensitive(var.ecp_web_nextjs_env_json != null)
+        frontegg       = var.cloud == "aws" && nonsensitive(var.ecp_frontegg_json != null)
+        mail           = var.cloud == "aws" && nonsensitive(var.ecp_mail_json != null)
+        sendgrid       = var.cloud == "aws" && nonsensitive(var.ecp_sendgrid_json != null)
+        openai         = var.cloud == "aws" && nonsensitive(var.ecp_openai_json != null)
+        pendo          = var.cloud == "aws" && nonsensitive(var.ecp_pendo_json != null)
+        slack          = var.cloud == "aws" && nonsensitive(var.ecp_slack_json != null)
+        sentryOverride = var.cloud == "aws" && nonsensitive(var.ecp_sentry_json != null)
+        webNextjsEnv   = var.cloud == "aws" && nonsensitive(var.ecp_web_nextjs_env_json != null)
       }
       passthrough = { for k, v in {
         cdn                = var.ecp_cdn

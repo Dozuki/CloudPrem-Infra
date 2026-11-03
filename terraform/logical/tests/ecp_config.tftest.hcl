@@ -207,4 +207,112 @@ run "azure_creates_no_ecp_entries" {
     condition     = length(vault_kv_secret_v2.ecp_frontegg) == 0
     error_message = "azure must create no ecp Vault entries"
   }
+  assert {
+    condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]))), "ecpConfig")
+    error_message = "a secret ecp var on azure must not change the chart values"
+  }
+}
+
+run "sentry_set" {
+  command = plan
+  variables {
+    customer        = "acme"
+    environment     = "qa"
+    ecp_sentry_json = "{\"dsn\":\"fake-token\"}"
+  }
+  assert {
+    condition     = length(vault_kv_secret_v2.ecp_sentry) == 1 && vault_kv_secret_v2.ecp_sentry[0].name == "acme/qa/sentry" && nonsensitive(jsondecode(vault_kv_secret_v2.ecp_sentry[0].data_json)) == { json = "{\"dsn\":\"fake-token\"}" }
+    error_message = "sentry entry must hold the blob under property json at <customer>/<environment>/sentry"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).ecpConfig.eso.sentryOverride == true
+    error_message = "sentryOverride must be true"
+  }
+}
+
+run "all_secrets_set" {
+  command = plan
+  variables {
+    customer    = "acme"
+    environment = "qa"
+    ecp_sentry_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_frontegg_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_mail_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_sendgrid_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_openai_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_pendo_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_slack_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_web_nextjs_env_json = "{\"FOO\":\"SENTINEL-do-not-leak\"}"
+  }
+  assert {
+    condition     = alltrue([for r in [vault_kv_secret_v2.ecp_sentry, vault_kv_secret_v2.ecp_frontegg, vault_kv_secret_v2.ecp_mail, vault_kv_secret_v2.ecp_sendgrid, vault_kv_secret_v2.ecp_openai, vault_kv_secret_v2.ecp_pendo, vault_kv_secret_v2.ecp_slack, vault_kv_secret_v2.ecp_web_nextjs] : length(r) == 1])
+    error_message = "every secret var must create one Vault entry"
+  }
+  assert {
+    condition = [for r in [vault_kv_secret_v2.ecp_sentry, vault_kv_secret_v2.ecp_frontegg, vault_kv_secret_v2.ecp_mail, vault_kv_secret_v2.ecp_sendgrid, vault_kv_secret_v2.ecp_openai, vault_kv_secret_v2.ecp_pendo, vault_kv_secret_v2.ecp_slack, vault_kv_secret_v2.ecp_web_nextjs] : r[0].name] == [for p in ["sentry", "frontegg", "mail", "sendgrid", "openai", "pendo", "slack", "web-nextjs"] : "acme/qa/${p}"]
+    error_message = "Vault paths must be <customer>/<environment>/<domain>"
+  }
+  assert {
+    condition     = alltrue(values(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).ecpConfig.eso))
+    error_message = "every eso flag must be true"
+  }
+  assert {
+    condition     = !strcontains(kubernetes_secret_v1.flux_values.data["values.yaml"], "SENTINEL-do-not-leak") && !strcontains(nonsensitive(jsonencode(kubernetes_config_map_v1.flux_values_diff.data)), "SENTINEL-do-not-leak")
+    error_message = "blob contents must not appear in the values secret or the diff ConfigMap"
+  }
+}
+
+run "passthrough_only" {
+  command = plan
+  variables {
+    ecp_csp = { default-src = "self" }
+  }
+  assert {
+    condition     = !anytrue(values(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).ecpConfig.eso)) && keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"])).ecpConfig.passthrough) == ["csp"]
+    error_message = "passthrough only must render ecpConfig with every eso flag false"
+  }
+  assert {
+    condition     = length(vault_kv_secret_v2.ecp_frontegg) + length(vault_kv_secret_v2.ecp_web_nextjs) + length(vault_kv_secret_v2.ecp_sentry) == 0
+    error_message = "passthrough only must create no Vault entries"
+  }
+}
+
+run "frontegg_rejects_invalid_json" {
+  command = plan
+  variables {
+    ecp_frontegg_json = "{not json"
+  }
+  expect_failures = [var.ecp_frontegg_json]
+}
+
+run "web_nextjs_rejects_nested_object" {
+  command = plan
+  variables {
+    ecp_web_nextjs_env_json = "{\"a\":{\"b\":1}}"
+  }
+  expect_failures = [var.ecp_web_nextjs_env_json]
+}
+
+run "web_nextjs_rejects_null_value" {
+  command = plan
+  variables {
+    ecp_web_nextjs_env_json = "{\"a\":null}"
+  }
+  expect_failures = [var.ecp_web_nextjs_env_json]
+}
+
+run "web_nextjs_rejects_bad_key" {
+  command = plan
+  variables {
+    ecp_web_nextjs_env_json = "{\"a b\":\"x\"}"
+  }
+  expect_failures = [var.ecp_web_nextjs_env_json]
+}
+
+run "web_nextjs_rejects_invalid_json" {
+  command = plan
+  variables {
+    ecp_web_nextjs_env_json = "{nope"
+  }
+  expect_failures = [var.ecp_web_nextjs_env_json]
 }

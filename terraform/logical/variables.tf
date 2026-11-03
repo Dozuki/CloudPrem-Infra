@@ -1097,43 +1097,73 @@ variable "ecp_web_nextjs_env_json" {
   sensitive   = true
 
   validation {
-    condition     = var.ecp_web_nextjs_env_json == null || (can(keys(jsondecode(var.ecp_web_nextjs_env_json))) && alltrue([for v in try(values(jsondecode(var.ecp_web_nextjs_env_json)), []) : can(tostring(v))]))
-    error_message = "ecp_web_nextjs_env_json must be a JSON object whose values are all scalars."
+    condition     = var.ecp_web_nextjs_env_json == null || (can(keys(jsondecode(var.ecp_web_nextjs_env_json))) && alltrue([for v in try(values(jsondecode(var.ecp_web_nextjs_env_json)), [null]) : v != null && can(tostring(v))]) && alltrue([for k in try(keys(jsondecode(var.ecp_web_nextjs_env_json)), ["!"]) : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", k))]))
+    error_message = "ecp_web_nextjs_env_json must be a JSON object whose keys are env var names and whose values are all non-null scalars."
   }
 }
 
 variable "ecp_cdn" {
-  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.cdn."
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.cdn. Non-secret values only: shown in plan output."
   type        = any
   default     = null
+
+  validation {
+    condition     = var.ecp_cdn == null || can(keys(var.ecp_cdn))
+    error_message = "ecp_cdn must be an object or map."
+  }
 }
 
 variable "ecp_bi_dashboards" {
-  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.biDashboards."
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.biDashboards. Non-secret values only: shown in plan output."
   type        = any
   default     = null
+
+  validation {
+    condition     = var.ecp_bi_dashboards == null || can(keys(var.ecp_bi_dashboards))
+    error_message = "ecp_bi_dashboards must be an object or map."
+  }
 }
 
 variable "ecp_common" {
-  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.common."
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.common. Non-secret values only: shown in plan output."
   type        = any
   default     = null
+
+  validation {
+    condition     = var.ecp_common == null || can(keys(var.ecp_common))
+    error_message = "ecp_common must be an object or map."
+  }
 }
 
 variable "ecp_csp" {
-  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.csp."
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.csp. Non-secret values only: shown in plan output."
   type        = any
   default     = null
+
+  validation {
+    condition     = var.ecp_csp == null || can(keys(var.ecp_csp))
+    error_message = "ecp_csp must be an object or map."
+  }
 }
 
 variable "ecp_testing" {
-  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.testing."
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.testing. Non-secret values only: shown in plan output."
   type        = any
   default     = null
+
+  validation {
+    condition     = var.ecp_testing == null || can(keys(var.ecp_testing))
+    error_message = "ecp_testing must be an object or map."
+  }
 }
 
 variable "ecp_third_party_services" {
-  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.thirdPartyServices."
+  description = "Optional. Passed through unchanged to the chart's ecpConfig.passthrough.thirdPartyServices. Non-secret values only: shown in plan output."
   type        = any
   default     = null
+
+  validation {
+    condition     = var.ecp_third_party_services == null || can(keys(var.ecp_third_party_services))
+    error_message = "ecp_third_party_services must be an object or map."
+  }
 }
