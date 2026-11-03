@@ -33,7 +33,7 @@ terraform {
       # source_code_hash) can change between provider versions even for
       # identical source, which produces a perpetual phantom diff on the
       # lambda functions below. Pin so the computed hash is stable.
-      version = "2.8.0"
+      version = "2.8.1"
     }
   }
 }
