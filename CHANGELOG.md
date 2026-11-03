@@ -2,6 +2,18 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.23.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.22.0...v9.23.0) (2026-11-03)
+
+
+### Features
+
+* **logical:** optional ecp config domains, vault blobs plus chart pass-through ([#606](https://github.com/Dozuki/CloudPrem-Infra/issues/606)) ([37cadc5](https://github.com/Dozuki/CloudPrem-Infra/commit/37cadc5f304cc5fa5f5e160cb5d5fbc71d89345f))
+
+
+### Bug Fixes
+
+* **providers:** Update Terraform archive to v2.8.1 ([#588](https://github.com/Dozuki/CloudPrem-Infra/issues/588)) ([caf99a8](https://github.com/Dozuki/CloudPrem-Infra/commit/caf99a8a74bd5d879c63ef9e83a8e3b26042f22d))
+
 ## [9.22.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.21.0...v9.22.0) (2026-10-31)
 
 
