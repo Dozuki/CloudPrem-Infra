@@ -261,6 +261,73 @@ resource "vault_kv_secret_v2" "google_translate" {
   })
 }
 
+# ECP config blobs arrive as write-only Spacelift env vars and persist in this stack's state.
+
+resource "vault_kv_secret_v2" "ecp_sentry" {
+  # Removing this is two steps: drop the chart flag and let Flux reconcile before the path disappears, or dozuki-infra-credentials stops syncing.
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_sentry_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/sentry"
+  delete_all_versions = !var.protect_resources
+  data_json           = jsonencode({ json = var.ecp_sentry_json })
+}
+
+resource "vault_kv_secret_v2" "ecp_frontegg" {
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_frontegg_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/frontegg"
+  delete_all_versions = !var.protect_resources
+  data_json           = jsonencode({ json = var.ecp_frontegg_json })
+}
+
+resource "vault_kv_secret_v2" "ecp_mail" {
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_mail_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/mail"
+  delete_all_versions = !var.protect_resources
+  data_json           = jsonencode({ json = var.ecp_mail_json })
+}
+
+resource "vault_kv_secret_v2" "ecp_sendgrid" {
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_sendgrid_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/sendgrid"
+  delete_all_versions = !var.protect_resources
+  data_json           = jsonencode({ json = var.ecp_sendgrid_json })
+}
+
+resource "vault_kv_secret_v2" "ecp_openai" {
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_openai_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/openai"
+  delete_all_versions = !var.protect_resources
+  data_json           = jsonencode({ json = var.ecp_openai_json })
+}
+
+resource "vault_kv_secret_v2" "ecp_pendo" {
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_pendo_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/pendo"
+  delete_all_versions = !var.protect_resources
+  data_json           = jsonencode({ json = var.ecp_pendo_json })
+}
+
+resource "vault_kv_secret_v2" "ecp_slack" {
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_slack_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/slack"
+  delete_all_versions = !var.protect_resources
+  data_json           = jsonencode({ json = var.ecp_slack_json })
+}
+
+resource "vault_kv_secret_v2" "ecp_web_nextjs" {
+  count               = var.cloud == "aws" && nonsensitive(var.ecp_web_nextjs_env_json != null) ? 1 : 0
+  mount               = "secret"
+  name                = "${local.vault_env_prefix}/web-nextjs"
+  delete_all_versions = !var.protect_resources
+  data_json           = var.ecp_web_nextjs_env_json
+}
+
 # The env smtp password is no longer Terraform-managed. The dozuki chart's
 # ExternalSecret reads this Vault path with a null-safe template guard and
 # falls back to the fleet-wide SendGrid password when the path is absent, so
