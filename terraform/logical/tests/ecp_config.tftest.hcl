@@ -233,15 +233,15 @@ run "sentry_set" {
 run "all_secrets_set" {
   command = plan
   variables {
-    customer    = "acme"
-    environment = "qa"
-    ecp_sentry_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
-    ecp_frontegg_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
-    ecp_mail_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
-    ecp_sendgrid_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
-    ecp_openai_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
-    ecp_pendo_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
-    ecp_slack_json = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    customer                = "acme"
+    environment             = "qa"
+    ecp_sentry_json         = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_frontegg_json       = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_mail_json           = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_sendgrid_json       = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_openai_json         = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_pendo_json          = "{\"k\":\"SENTINEL-do-not-leak\"}"
+    ecp_slack_json          = "{\"k\":\"SENTINEL-do-not-leak\"}"
     ecp_web_nextjs_env_json = "{\"FOO\":\"SENTINEL-do-not-leak\"}"
   }
   assert {
@@ -249,7 +249,7 @@ run "all_secrets_set" {
     error_message = "every secret var must create one Vault entry"
   }
   assert {
-    condition = [for r in [vault_kv_secret_v2.ecp_sentry, vault_kv_secret_v2.ecp_frontegg, vault_kv_secret_v2.ecp_mail, vault_kv_secret_v2.ecp_sendgrid, vault_kv_secret_v2.ecp_openai, vault_kv_secret_v2.ecp_pendo, vault_kv_secret_v2.ecp_slack, vault_kv_secret_v2.ecp_web_nextjs] : r[0].name] == [for p in ["sentry", "frontegg", "mail", "sendgrid", "openai", "pendo", "slack", "web-nextjs"] : "acme/qa/${p}"]
+    condition     = [for r in [vault_kv_secret_v2.ecp_sentry, vault_kv_secret_v2.ecp_frontegg, vault_kv_secret_v2.ecp_mail, vault_kv_secret_v2.ecp_sendgrid, vault_kv_secret_v2.ecp_openai, vault_kv_secret_v2.ecp_pendo, vault_kv_secret_v2.ecp_slack, vault_kv_secret_v2.ecp_web_nextjs] : r[0].name] == [for p in ["sentry", "frontegg", "mail", "sendgrid", "openai", "pendo", "slack", "web-nextjs"] : "acme/qa/${p}"]
     error_message = "Vault paths must be <customer>/<environment>/<domain>"
   }
   assert {
@@ -315,4 +315,12 @@ run "web_nextjs_rejects_invalid_json" {
     ecp_web_nextjs_env_json = "{nope"
   }
   expect_failures = [var.ecp_web_nextjs_env_json]
+}
+
+run "rejects_passthrough_non_object" {
+  command = plan
+  variables {
+    ecp_cdn = ["x"]
+  }
+  expect_failures = [var.ecp_cdn]
 }
