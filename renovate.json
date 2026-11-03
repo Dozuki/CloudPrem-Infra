@@ -101,6 +101,23 @@
       "matchFileNames": ["live/tests/**"],
       "minimumReleaseAge": "3 days",
       "commitMessagePrefix": "test(harness):"
+    },
+    {
+      "description": "Action digest re-pins move no versions and are exercised by the workflows themselves; after the soak and the required checks they merge on their own. Action version bumps stay manual.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest", "pin", "pinDigest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "The harness under live/tests ships to nobody and release-please excludes it, so its Go modules and container base can merge themselves once CI is green. Majors still need Dashboard approval.",
+      "matchManagers": ["gomod", "dockerfile"],
+      "matchFileNames": ["live/tests/**"],
+      "matchUpdateTypes": ["digest", "pin", "pinDigest", "patch", "minor"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
     }
   ],
 
