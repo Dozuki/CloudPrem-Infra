@@ -109,3 +109,65 @@ run "gov_skips_records" {
     error_message = "gov creates no records"
   }
 }
+
+run "local_zone_flag" {
+  command = plan
+  variables {
+    external_fqdn                     = "ext.example.com"
+    external_fqdn_route53_zone_id     = "Z0123456789"
+    external_fqdn_zone_in_env_account = true
+  }
+  assert {
+    condition = (
+      length(aws_route53_record.external_fqdn) == 0 &&
+      length(aws_route53_record.external_fqdn_wildcard) == 0 &&
+      length(aws_route53_record.external_fqdn_local) == 1 &&
+      length(aws_route53_record.external_fqdn_local_wildcard) == 1 &&
+      aws_route53_record.external_fqdn_local[0].name == "ext.example.com" &&
+      aws_route53_record.external_fqdn_local_wildcard[0].name == "*.ext.example.com" &&
+      aws_route53_record.external_fqdn_local[0].zone_id == "Z0123456789" &&
+      aws_route53_record.external_fqdn_local_wildcard[0].zone_id == "Z0123456789" &&
+      one(aws_route53_record.external_fqdn_local[0].records) == "stub-nlb.elb.us-east-1.amazonaws.com" &&
+      one(aws_route53_record.external_fqdn_local_wildcard[0].records) == "stub-nlb.elb.us-east-1.amazonaws.com"
+    )
+    error_message = "only the local pair should be planned"
+  }
+}
+
+run "dns_pair_when_flag_false" {
+  command = plan
+  variables {
+    external_fqdn                 = "ext.example.com"
+    external_fqdn_route53_zone_id = "Z0123456789"
+  }
+  assert {
+    condition     = length(aws_route53_record.external_fqdn) == 1 && length(aws_route53_record.external_fqdn_wildcard) == 1 && length(aws_route53_record.external_fqdn_local) == 0 && length(aws_route53_record.external_fqdn_local_wildcard) == 0
+    error_message = "only the dns pair should be planned"
+  }
+}
+
+run "local_flag_without_zone" {
+  command = plan
+  variables {
+    external_fqdn                     = "ext.example.com"
+    external_fqdn_zone_in_env_account = true
+  }
+  expect_failures = [var.external_fqdn_zone_in_env_account]
+}
+
+run "gov_local_pair" {
+  command = plan
+  override_data {
+    target = data.aws_partition.current
+    values = { partition = "aws-us-gov", dns_suffix = "amazonaws.com" }
+  }
+  variables {
+    external_fqdn                     = "ext.example.com"
+    external_fqdn_route53_zone_id     = "Z0123456789"
+    external_fqdn_zone_in_env_account = true
+  }
+  assert {
+    condition     = length(aws_route53_record.external_fqdn_local) == 1 && length(aws_route53_record.external_fqdn_local_wildcard) == 1 && length(aws_route53_record.external_fqdn) == 0 && length(aws_route53_record.external_fqdn_wildcard) == 0
+    error_message = "gov still gets the local pair"
+  }
+}
