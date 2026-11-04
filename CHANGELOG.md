@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.24.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.23.0...v9.24.0) (2026-11-04)
+
+
+### Features
+
+* **physical:** optionally publish external_fqdn CNAMEs into a given route53 zone ([#607](https://github.com/Dozuki/CloudPrem-Infra/issues/607)) ([945388a](https://github.com/Dozuki/CloudPrem-Infra/commit/945388ace1d0c31d0f890f61913efc123bf8cbf5))
+
 ## [9.23.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.22.0...v9.23.0) (2026-11-03)
 
 
