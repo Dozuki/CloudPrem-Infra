@@ -13,7 +13,7 @@ mock_provider "aws" {
   mock_resource "aws_ssm_document" { defaults = { latest_version = "1" } }
   mock_resource "aws_launch_template" { defaults = { id = "lt-0123456789abcdef0", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0" } }
   mock_resource "aws_eks_cluster" { defaults = { arn = "arn:aws:eks:us-east-1:123456789012:cluster/stub", identity = [{ oidc = [{ issuer = "https://oidc.eks.us-east-1.amazonaws.com/id/STUB" }] }], certificate_authority = [{ data = "c3R1Yg==" }] } }
-  mock_resource "aws_lb" { defaults = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/stub/0123456789abcdef" } }
+  mock_resource "aws_lb" { defaults = { dns_name = "stub-nlb.elb.us-east-1.amazonaws.com", arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/stub/0123456789abcdef" } }
   mock_resource "aws_lb_target_group" { defaults = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/stub/0123456789abcdef" } }
   mock_data "aws_availability_zones" { defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"] } }
   mock_data "aws_iam_policy_document" { defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" } }
@@ -65,10 +65,24 @@ run "zone_set" {
       aws_route53_record.external_fqdn[0].name == "ext.example.com" &&
       aws_route53_record.external_fqdn_wildcard[0].name == "*.ext.example.com" &&
       aws_route53_record.external_fqdn[0].zone_id == "Z0123456789" &&
+      aws_route53_record.external_fqdn_wildcard[0].zone_id == "Z0123456789" &&
+      one(aws_route53_record.external_fqdn[0].records) == "stub-nlb.elb.us-east-1.amazonaws.com" &&
+      one(aws_route53_record.external_fqdn_wildcard[0].records) == "stub-nlb.elb.us-east-1.amazonaws.com" &&
       aws_route53_record.external_fqdn[0].type == "CNAME" &&
       aws_route53_record.external_fqdn_wildcard[0].type == "CNAME"
     )
     error_message = "both CNAMEs should be planned"
+  }
+}
+
+run "fqdn_without_zone" {
+  command = plan
+  variables {
+    external_fqdn = "ext.example.com"
+  }
+  assert {
+    condition     = length(aws_route53_record.external_fqdn) == 0 && length(aws_route53_record.external_fqdn_wildcard) == 0
+    error_message = "no records without a zone id"
   }
 }
 

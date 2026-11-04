@@ -97,7 +97,7 @@ variable "external_fqdn" {
 }
 
 variable "external_fqdn_route53_zone_id" {
-  description = "Public Route53 zone id (reachable through the dns provider) to publish external_fqdn and *.external_fqdn CNAMEs to the NLB in. Empty creates no records; DNS for external_fqdn is then managed outside this module."
+  description = "Public Route53 zone id (reachable through the dns provider) to publish external_fqdn and *.external_fqdn CNAMEs to the NLB in. external_fqdn must sit under that zone and cannot be the zone apex (Route53 has no CNAME at an apex). Empty creates no records; DNS for external_fqdn is then managed outside this module."
   type        = string
   default     = ""
 
