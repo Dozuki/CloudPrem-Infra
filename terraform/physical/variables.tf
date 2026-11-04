@@ -107,6 +107,17 @@ variable "external_fqdn_route53_zone_id" {
   }
 }
 
+variable "external_fqdn_zone_in_env_account" {
+  description = "Set when external_fqdn_route53_zone_id is a zone in this environment's own AWS account: the records are then written with the default provider instead of the dns provider (which reaches the shared org-account zones only)."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.external_fqdn_zone_in_env_account || var.external_fqdn_route53_zone_id != ""
+    error_message = "external_fqdn_route53_zone_id must be set when external_fqdn_zone_in_env_account is true."
+  }
+}
+
 variable "alarm_email" {
   description = "Email address to send status alarms to."
   type        = string
