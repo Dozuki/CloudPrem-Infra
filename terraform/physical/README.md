@@ -4,7 +4,7 @@
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.1 |
-| <a name="requirement_archive"></a> [archive](#requirement\_archive) | 2.8.0 |
+| <a name="requirement_archive"></a> [archive](#requirement\_archive) | 2.8.1 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.0 |
 | <a name="requirement_kubernetes"></a> [kubernetes](#requirement\_kubernetes) | ~> 3.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.0 |
@@ -14,7 +14,7 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.0 |
+| <a name="provider_archive"></a> [archive](#provider\_archive) | 2.8.1 |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.67.0 |
 | <a name="provider_aws.dns"></a> [aws.dns](#provider\_aws.dns) | 6.67.0 |
 | <a name="provider_aws.dr"></a> [aws.dr](#provider\_aws.dr) | 6.67.0 |
@@ -143,6 +143,8 @@
 | [aws_opensearch_domain_policy.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain_policy) | resource |
 | [aws_rds_cluster.dr_aurora_secondary](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster) | resource |
 | [aws_rds_global_cluster.aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_global_cluster) | resource |
+| [aws_route53_record.external_fqdn](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
+| [aws_route53_record.external_fqdn_wildcard](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.mimir](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.subsite_subdomain](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
@@ -227,8 +229,8 @@
 | [random_password.bi_aurora](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [random_password.opensearch](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [terraform_data.aurora_migration_phase](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
-| [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
-| [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.0/docs/data-sources/file) | data source |
+| [archive_file.dms_restart_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.1/docs/data-sources/file) | data source |
+| [archive_file.slack_sns_lambda](https://registry.terraform.io/providers/hashicorp/archive/2.8.1/docs/data-sources/file) | data source |
 | [aws_availability_zones.available](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_availability_zones.dr](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/availability_zones) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
@@ -319,6 +321,7 @@
 | <a name="input_enable_mimir"></a> [enable\_mimir](#input\_enable\_mimir) | Build the network path to the central Mimir: a VPC interface endpoint, its security group, and a private hosted zone for mimir\_ingest\_fqdn. NULL (the default) means partition-aware: on by default in the commercial partition, off in GovCloud, where PrivateLink cannot cross the partition boundary and this would hard-fail. Set an explicit true/false to override. A commercial env therefore joins central metrics with no mimir lines in its env.hcl at all. This flag only builds the path; the logical layer decides whether Prometheus actually pushes (mimir\_remote\_write\_enabled). Requires the infra release that ships mimir.tf to do anything. Setting it on an older infra\_version is harmless: through terragrunt every env.hcl local becomes a TF\_VAR\_*, and terraform ignores an undeclared TF\_VAR\_* rather than failing on it (same pattern as nlb\_target\_health\_alarms\_enabled above). Only an undeclared -var/-var-file value warns. So an old pin plans clean with the key set. | `bool` | `null` | no |
 | <a name="input_environment"></a> [environment](#input\_environment) | Environment of the application | `string` | `"dev"` | no |
 | <a name="input_external_fqdn"></a> [external\_fqdn](#input\_external\_fqdn) | If an external fqdn is desired for this environment it will be used for certificates instead of auto-generating one. | `string` | `""` | no |
+| <a name="input_external_fqdn_route53_zone_id"></a> [external\_fqdn\_route53\_zone\_id](#input\_external\_fqdn\_route53\_zone\_id) | Public Route53 zone id (reachable through the dns provider) to publish external\_fqdn and *.external\_fqdn CNAMEs to the NLB in. Empty creates no records; DNS for external\_fqdn is then managed outside this module. | `string` | `""` | no |
 | <a name="input_highly_available_nat_gateway"></a> [highly\_available\_nat\_gateway](#input\_highly\_available\_nat\_gateway) | Should be true if you want to provision a highly available NAT Gateway across all of your private networks | `bool` | `true` | no |
 | <a name="input_managed_private_cloud"></a> [managed\_private\_cloud](#input\_managed\_private\_cloud) | Whether or not this is a managed private cloud customer. | `bool` | `true` | no |
 | <a name="input_mimir_endpoint_service_name"></a> [mimir\_endpoint\_service\_name](#input\_mimir\_endpoint\_service\_name) | VPC Endpoint Service name for the Mimir PrivateLink service (e.g. com.amazonaws.vpce.us-east-1.vpce-svc-xxx). Defaults to the live commercial Mimir service, which is what makes a fresh commercial env enroll with no mimir lines in env.hcl; every commercial region reaches it, cross-region included, so one value covers the commercial fleet. A service in another region is fine, the endpoint switches to the cross-region form on its own, but that region must be in the service's supported\_regions list. Only read when the resolved enable\_mimir is true. | `string` | `"com.amazonaws.vpce.us-east-1.vpce-svc-0814f274d15a3d5a2"` | no |
