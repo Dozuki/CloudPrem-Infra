@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.25.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.24.0...v9.25.0) (2026-11-04)
+
+
+### Features
+
+* **physical:** publish external_fqdn records into a zone in the env's own account ([#609](https://github.com/Dozuki/CloudPrem-Infra/issues/609)) ([f10fb84](https://github.com/Dozuki/CloudPrem-Infra/commit/f10fb84d474a58f872a6008b3af636dc5366b0bf))
+
 ## [9.24.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.23.0...v9.24.0) (2026-11-04)
 
 
