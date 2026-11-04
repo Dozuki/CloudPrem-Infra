@@ -28,3 +28,32 @@ resource "aws_route53_record" "subsite_subdomain" {
   ttl     = "300"
   records = [module.nlb.dns_name]
 }
+
+locals {
+  external_fqdn_records = var.external_fqdn_route53_zone_id != "" && !local.is_us_gov
+}
+
+resource "aws_route53_record" "external_fqdn" {
+  count = local.external_fqdn_records ? 1 : 0
+
+  provider = aws.dns
+
+  zone_id = var.external_fqdn_route53_zone_id
+  name    = var.external_fqdn
+  type    = "CNAME"
+  ttl     = "300"
+  records = [module.nlb.dns_name]
+}
+
+# Ops hosts like grafana.<external_fqdn> resolve through the wildcard.
+resource "aws_route53_record" "external_fqdn_wildcard" {
+  count = local.external_fqdn_records ? 1 : 0
+
+  provider = aws.dns
+
+  zone_id = var.external_fqdn_route53_zone_id
+  name    = "*.${var.external_fqdn}"
+  type    = "CNAME"
+  ttl     = "300"
+  records = [module.nlb.dns_name]
+}

@@ -96,6 +96,17 @@ variable "external_fqdn" {
   default     = ""
 }
 
+variable "external_fqdn_route53_zone_id" {
+  description = "Public Route53 zone id (reachable through the dns provider) to publish external_fqdn and *.external_fqdn CNAMEs to the NLB in. external_fqdn must sit under that zone and cannot be the zone apex (Route53 has no CNAME at an apex). Empty creates no records; DNS for external_fqdn is then managed outside this module."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.external_fqdn_route53_zone_id == "" || var.external_fqdn != ""
+    error_message = "external_fqdn must be set when external_fqdn_route53_zone_id is set."
+  }
+}
+
 variable "alarm_email" {
   description = "Email address to send status alarms to."
   type        = string
