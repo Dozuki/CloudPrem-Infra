@@ -167,7 +167,7 @@ run "gov_local_pair" {
     external_fqdn_zone_in_env_account = true
   }
   assert {
-    condition     = length(aws_route53_record.external_fqdn_local) == 1 && length(aws_route53_record.external_fqdn_local_wildcard) == 1 && length(aws_route53_record.external_fqdn) == 0
+    condition     = length(aws_route53_record.external_fqdn_local) == 1 && length(aws_route53_record.external_fqdn_local_wildcard) == 1 && length(aws_route53_record.external_fqdn) == 0 && length(aws_route53_record.external_fqdn_wildcard) == 0
     error_message = "gov still gets the local pair"
   }
 }
