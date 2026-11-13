@@ -53,6 +53,16 @@ locals {
   # not a real chart release.
   chart_version_core = split(".", split("+", split("-", var.chart_version)[0])[0])
 
+  # Effective DNS-01 switch. The legacy rule applies unless var.dns_validation is set.
+  dns_validation = !local.tls_manual && coalesce(var.dns_validation, (
+    var.cloud == "aws" && !local.is_us_gov &&
+    contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", ""))
+  ))
+  # The chart keys below need the explicit opt-in (var.dns_validation = true); the legacy derived rule never sets them.
+  # Own-account zone: hand the solver the zone and an empty role so it uses the pod identity directly.
+  dns01_own_zone = var.dns_validation == true && local.dns_validation && var.cloud == "aws" && var.external_fqdn_zone_in_env_account
+  dns01_wildcard = var.dns_validation == true && local.dns_validation && startswith(local.app_gateway_hosts[0].hostname, "*.")
+
   # gateway.hosts[0] is the primary; additional_gateway_hosts append from index 1.
   app_gateway_hosts = concat(
     [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name), tlsSecretName = "tls-secret" }],
@@ -85,15 +95,18 @@ locals {
     ) : k => v if var.cloud == "azure"
   }
 
+  # Chart keys that only exist for DNS-01; omitted otherwise so default renders are unchanged.
+  # cert_manager here is aws-only (dns01_own_zone), so it never collides with the azure cert_manager key.
+  app_dns01_values = { for k, v in {
+    cert_manager = { route53 = { role = "", hostedZoneID = var.external_fqdn_route53_zone_id, dnsZones = [] } }
+  } : k => v if local.dns01_own_zone }
+
   # The base values, mirroring the old set + set_sensitive lists with correct types.
   app_base_values = {
-    hostname = var.dns_domain_name
-    dns_validation = (
-      var.cloud == "aws" && !local.is_us_gov && !local.tls_manual &&
-      contains(["dozuki.cloud", "dozuki.com", "dozuki.app", "dozuki.guide"], replace(var.dns_domain_name, "/^[^.]+\\./", ""))
-    )
-    customer    = coalesce(var.customer, "Dozuki")
-    environment = var.environment
+    hostname       = var.dns_domain_name
+    dns_validation = local.dns_validation
+    customer       = coalesce(var.customer, "Dozuki")
+    environment    = var.environment
 
     aws = {
       region    = var.cloud == "aws" ? data.aws_region.current[0].region : "us-east-1"
@@ -149,6 +162,7 @@ locals {
     ingress = { hosts = [{ hostname = coalesce(var.ingress_hostname, var.dns_domain_name) }] }
 
     gateway = merge(
+      { for k, v in { wildcardCertFromIssuer = true } : k => v if local.dns01_wildcard },
       {
         hosts    = local.app_gateway_hosts
         clientIP = { mode = var.cloud == "azure" ? "none" : "proxyProtocol" }
@@ -400,8 +414,9 @@ locals {
   #     (mimir is aws-only) but it would silently break the moment anything else lands under
   #     global on both sides.
   # Every other azure key (cert_manager, seaweedfs...) has no base collision and shallow-merges
-  # cleanly. helm_release.app got the same effect from helm's deep merge of its two values files + set
-  # list. All three deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values
+  # cleanly. The DNS-01 cert_manager key in app_dns01_values is only set on aws, so it never
+  # meets azure's. helm_release.app got the same effect from helm's deep merge of its two values
+  # files + set list. All three deep-merges are unconditional (no cond?{}:{} ternary): on non-azure app_azure_values
   # has none of the keys, so try(...,{}) yields {} and the merged result equals base (plus
   # global.imagePullSecrets on nonprod).
   # AWS-only: pin every EBS-backed subchart workload to the on-demand NodePool.
@@ -598,6 +613,7 @@ locals {
 
   app_values = merge(
     local.app_base_values,
+    local.app_dns01_values,
     { for k, v in local.app_azure_values : k => v if k != "gateway" && k != "objectStorage" && k != "global" },
     { gateway = merge(local.app_base_values.gateway, try(local.app_azure_values.gateway, {})) },
     { objectStorage = merge(local.app_base_values.objectStorage, try(local.app_azure_values.objectStorage, {})) },
@@ -694,11 +710,23 @@ resource "kubernetes_secret_v1" "flux_values" {
     vault_kv_secret_v2.ecp_slack, vault_kv_secret_v2.ecp_web_nextjs,
   ]
 
-  # slim needs the chart's images.flavor contract, first shipped in chart 2.11.0. A
-  # pre-flavor chart silently ignores images.flavor and renders the legacy beanstalkd
-  # and crond entrypoints against the slim image (which carries neither), so the plan
-  # passes and the workloads can't start. Fail that combination at plan time instead.
   lifecycle {
+    # DNS-01 is only wired for AWS commercial.
+    precondition {
+      condition     = var.dns_validation != true || (var.cloud == "aws" && !local.is_us_gov)
+      error_message = "dns_validation = true is only supported on AWS commercial (not Azure or GovCloud)."
+    }
+    # The DNS-01 chart keys need a chart that reads them.
+    precondition {
+      condition = !(local.dns01_own_zone || local.dns01_wildcard) || try(
+        length(local.chart_version_core) == 3 && (
+          tonumber(local.chart_version_core[0]) > 3 ||
+          (tonumber(local.chart_version_core[0]) == 3 && tonumber(local.chart_version_core[1]) >= 27)
+        ),
+        false
+      )
+      error_message = "DNS-01 with an own-account zone or a wildcard host requires chart_version >= 3.27.0. Older charts ignore cert_manager.route53 and gateway.wildcardCertFromIssuer, so no certificate would issue."
+    }
     precondition {
       condition     = var.search_backend == "in_cluster" || var.cloud == "aws"
       error_message = "search_backend managed or external requires cloud = aws. That is also what keeps Vault and ESO on (vault.enabled = cloud == aws); without Vault the chart would render a blank search endpoint."
@@ -713,6 +741,10 @@ resource "kubernetes_secret_v1" "flux_values" {
       )
       error_message = "search_backend managed or external requires chart_version >= 3.21.0 (first dozuki chart with search.opensearch.external). The 2.x chart line does not have it yet."
     }
+    # slim needs the chart's images.flavor contract, first shipped in chart 2.11.0. A
+    # pre-flavor chart silently ignores images.flavor and renders the legacy beanstalkd
+    # and crond entrypoints against the slim image (which carries neither), so the plan
+    # passes and the workloads can't start. Fail that combination at plan time instead.
     precondition {
       condition = var.app_image_flavor != "slim" || try(
         tonumber(split(".", var.chart_version)[0]) > 2 ||

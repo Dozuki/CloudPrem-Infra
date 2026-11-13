@@ -415,6 +415,56 @@ resource "aws_iam_role_policy_attachment" "cert_manager_pod_identity" {
   policy_arn = aws_iam_policy.assume_cross_account_role.arn
 }
 
+# DNS-01 solver access for a zone in this account: TXT records under _acme-challenge only.
+locals {
+  cert_manager_dns01 = var.external_fqdn_route53_zone_id != "" && var.external_fqdn_zone_in_env_account
+  cert_manager_zone  = "arn:${data.aws_partition.current.partition}:route53:::hostedzone/${var.external_fqdn_route53_zone_id}"
+}
+
+resource "aws_iam_policy" "cert_manager_dns01" {
+  count = local.cert_manager_dns01 ? 1 : 0
+
+  name = "${local.identifier}-${data.aws_region.current.region}-cert-manager-dns01"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["route53:GetChange"]
+        Resource = ["arn:${data.aws_partition.current.partition}:route53:::change/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["route53:ListResourceRecordSets"]
+        Resource = [local.cert_manager_zone]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["route53:ChangeResourceRecordSets"]
+        Resource = [local.cert_manager_zone]
+        Condition = {
+          "ForAllValues:StringEquals" = {
+            "route53:ChangeResourceRecordSetsRecordTypes" = ["TXT"]
+            "route53:ChangeResourceRecordSetsActions"     = ["UPSERT", "DELETE"]
+          }
+          "ForAllValues:StringLike" = {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames" = ["_acme-challenge.*"]
+          }
+        }
+      },
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "cert_manager_dns01" {
+  count = local.cert_manager_dns01 ? 1 : 0
+
+  role       = aws_iam_role.cert_manager_pod_identity.name
+  policy_arn = aws_iam_policy.cert_manager_dns01[0].arn
+}
+
 resource "aws_eks_pod_identity_association" "cert_manager" {
   cluster_name    = module.eks_cluster.cluster_name
   namespace       = "cert-manager"
