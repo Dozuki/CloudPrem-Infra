@@ -171,3 +171,65 @@ run "gov_local_pair" {
     error_message = "gov still gets the local pair"
   }
 }
+
+run "cert_manager_dns01_policy_absent_by_default" {
+  command = plan
+  assert {
+    condition     = length(aws_iam_policy.cert_manager_dns01) == 0 && length(aws_iam_role_policy_attachment.cert_manager_dns01) == 0
+    error_message = "no DNS-01 policy without an in-account zone"
+  }
+}
+
+run "cert_manager_dns01_policy_absent_for_foreign_zone" {
+  command = plan
+  variables {
+    external_fqdn                 = "ext.example.com"
+    external_fqdn_route53_zone_id = "Z0EXAMPLE0000"
+  }
+  assert {
+    condition     = length(aws_iam_policy.cert_manager_dns01) == 0
+    error_message = "no DNS-01 policy when the zone is not in this account"
+  }
+}
+
+run "cert_manager_dns01_policy_present" {
+  command = plan
+  variables {
+    external_fqdn                     = "ext.example.com"
+    external_fqdn_route53_zone_id     = "Z0EXAMPLE0000"
+    external_fqdn_zone_in_env_account = true
+  }
+  assert {
+    condition     = length(aws_iam_role_policy_attachment.cert_manager_dns01) == 1
+    error_message = "the DNS-01 policy should be attached"
+  }
+  assert {
+    condition = jsondecode(aws_iam_policy.cert_manager_dns01[0].policy).Statement == [
+      {
+        Effect   = "Allow"
+        Action   = ["route53:GetChange"]
+        Resource = ["arn:aws:route53:::change/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["route53:ListResourceRecordSets"]
+        Resource = ["arn:aws:route53:::hostedzone/Z0EXAMPLE0000"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["route53:ChangeResourceRecordSets"]
+        Resource = ["arn:aws:route53:::hostedzone/Z0EXAMPLE0000"]
+        Condition = {
+          "ForAllValues:StringEquals" = {
+            "route53:ChangeResourceRecordSetsRecordTypes" = ["TXT"]
+            "route53:ChangeResourceRecordSetsActions"     = ["UPSERT", "DELETE"]
+          }
+          "ForAllValues:StringLike" = {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames" = ["_acme-challenge.*"]
+          }
+        }
+      },
+    ]
+    error_message = "the DNS-01 policy must be exactly the scoped TXT statements"
+  }
+}
