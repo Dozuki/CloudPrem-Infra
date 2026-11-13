@@ -220,6 +220,7 @@ run "true_on_gov_rejected" {
 run "own_zone_sets_route53" {
   command = plan
   variables {
+    chart_version                     = "3.27.0"
     dns_validation                    = true
     external_fqdn_zone_in_env_account = true
     external_fqdn_route53_zone_id     = "Z0EXAMPLE0000"
@@ -237,6 +238,7 @@ run "own_zone_sets_route53" {
 run "wildcard_host_sets_issuer_flag" {
   command = plan
   variables {
+    chart_version    = "3.27.0"
     dns_validation   = true
     ingress_hostname = "*.customer.example.com"
   }
@@ -248,4 +250,62 @@ run "wildcard_host_sets_issuer_flag" {
     condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]))), "cert_manager")
     error_message = "no cert_manager key without an own-account zone"
   }
+}
+
+run "target_shape_sets_both_keys" {
+  command = plan
+  variables {
+    chart_version                     = "3.27.0"
+    dns_validation                    = true
+    external_fqdn_zone_in_env_account = true
+    external_fqdn_route53_zone_id     = "Z0EXAMPLE0000"
+    ingress_hostname                  = "*.example.org"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]).cert_manager) == { route53 = { role = "", hostedZoneID = "Z0EXAMPLE0000", dnsZones = [] } }
+    error_message = "own-account zone sets cert_manager.route53"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]).gateway.wildcardCertFromIssuer) == true
+    error_message = "wildcard host sets wildcardCertFromIssuer"
+  }
+}
+
+run "legacy_derived_never_sets_chart_keys" {
+  command = plan
+  variables {
+    ingress_hostname = "*.dozuki.cloud"
+  }
+  assert {
+    condition     = nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]).dns_validation) == true
+    error_message = "legacy rule still turns DNS-01 on for a dozuki.cloud name"
+  }
+  assert {
+    condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]))), "cert_manager") && !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]).gateway)), "wildcardCertFromIssuer")
+    error_message = "the legacy rule must not set the new chart keys"
+  }
+}
+
+run "legacy_derived_ignores_own_zone" {
+  command = plan
+  variables {
+    external_fqdn_zone_in_env_account = true
+    external_fqdn_route53_zone_id     = "Z0EXAMPLE0000"
+  }
+  assert {
+    condition     = !contains(keys(nonsensitive(yamldecode(kubernetes_secret_v1.flux_values.data["values.yaml"]))), "cert_manager")
+    error_message = "no cert_manager key without the explicit opt-in"
+  }
+}
+
+run "target_shape_old_chart_rejected" {
+  command = plan
+  variables {
+    chart_version                     = "3.26.0"
+    dns_validation                    = true
+    external_fqdn_zone_in_env_account = true
+    external_fqdn_route53_zone_id     = "Z0EXAMPLE0000"
+    ingress_hostname                  = "*.example.org"
+  }
+  expect_failures = [kubernetes_secret_v1.flux_values]
 }
