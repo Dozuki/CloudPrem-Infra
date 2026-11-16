@@ -355,6 +355,29 @@ variable "dns_domain_name" {
   description = "Auto-provisioned subdomain for this environment"
 }
 
+variable "dns_validation" {
+  type        = bool
+  default     = null
+  description = "Use DNS-01 for the cert-manager issuer. null keeps the built-in rule (AWS commercial, non-manual TLS, dns_domain_name under a Dozuki-managed zone). true forces it on and is rejected on gov and Azure; manual TLS always turns it off."
+}
+
+variable "external_fqdn_zone_in_env_account" {
+  type        = bool
+  default     = false
+  description = "The external_fqdn Route53 zone lives in this environment's own AWS account. Same input as the physical layer; with dns_validation it points cert-manager's DNS-01 solver at that zone."
+
+  validation {
+    condition     = !var.external_fqdn_zone_in_env_account || var.external_fqdn_route53_zone_id != ""
+    error_message = "external_fqdn_route53_zone_id must be set when external_fqdn_zone_in_env_account is true."
+  }
+}
+
+variable "external_fqdn_route53_zone_id" {
+  type        = string
+  default     = ""
+  description = "Route53 zone id the cert-manager DNS-01 solver is pinned to (used when dns_validation and external_fqdn_zone_in_env_account are both on)."
+}
+
 variable "ingress_hostname" {
   type        = string
   description = "Hostname for the app ingress. Set to a wildcard (e.g. *.customer.com) for customer-provided certs. Defaults to dns_domain_name."
