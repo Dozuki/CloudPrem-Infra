@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.26.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.25.0...v9.26.0) (2026-11-16)
+
+
+### Features
+
+* **dns01:** add a dns_validation input and a zone-scoped route53 policy for cert-manager ([#613](https://github.com/Dozuki/CloudPrem-Infra/issues/613)) ([286bf90](https://github.com/Dozuki/CloudPrem-Infra/commit/286bf9050d6ffb3bfd87816a19da71c3c9a0d000))
+
 ## [9.25.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.24.0...v9.25.0) (2026-11-04)
 
 
