@@ -36,23 +36,16 @@ resource "aws_ssm_association" "bastion_mysql_config" {
     Region : data.aws_region.current.region
   }
 
-  # Target the stack's bastion by its IDENTITY tags only. AWS caps an
-  # association at 5 targets blocks, so iterating the whole house-tag map
-  # broke the moment the tag set grew past four (Customer/Service, v7.8.0);
-  # fleet-constant tags (Terraform, Project) never narrowed the match anyway.
+  # Same selector the migration runner uses (Role + Name). The old tag:Identifier target
+  # matched no instance once the house tag became Customer (v7.8.0), so nothing got mysql.
   targets {
     key    = "tag:Role"
     values = ["Bastion"]
   }
 
   targets {
-    key    = "tag:Identifier"
-    values = [coalesce(var.customer, "Dozuki")]
-  }
-
-  targets {
-    key    = "tag:Environment"
-    values = [var.environment]
+    key    = "tag:Name"
+    values = ["${local.identifier}-bastion"]
   }
 }
 
@@ -62,7 +55,8 @@ module "bastion" {
   version = "~> 9.0"
 
   create = local.aurora_migration_active
-  # The module gates its launch template and instance profile on these flags, not on create.
+  # The launch template ignores create, and the module indexes the instance profile on
+  # create_iam_instance_profile alone, so both flags must follow create.
   create_launch_template      = local.aurora_migration_active
   create_iam_instance_profile = local.aurora_migration_active
 

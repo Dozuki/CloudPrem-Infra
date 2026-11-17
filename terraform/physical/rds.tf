@@ -34,6 +34,7 @@ module "primary_database_sg" {
   description = "Security group for ${local.identifier}. Allows access from within the VPC on port 3306"
   vpc_id      = local.vpc_id
 
+  # Add new source-SG rules as root resources below: the moved blocks own list indexes 1 and 2.
   ingress_with_source_security_group_id = [
     {
       rule                     = "mysql-tcp"
@@ -90,6 +91,7 @@ module "bi_database_sg" {
 
   ingress_rules       = ["mysql-tcp"]
   ingress_cidr_blocks = local.bi_access_cidrs
+  # Source-SG rules on this SG are root resources (bi_db_from_bastion's moved block owns index 0).
 
   ingress_with_self = [
     {
