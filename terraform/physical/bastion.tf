@@ -62,15 +62,15 @@ module "bastion" {
   version = "~> 9.0"
 
   create = local.aurora_migration_active
-  # The module gates its launch template on this flag, not on create.
-  create_launch_template = local.aurora_migration_active
+  # The module gates its launch template and instance profile on these flags, not on create.
+  create_launch_template      = local.aurora_migration_active
+  create_iam_instance_profile = local.aurora_migration_active
 
   name = "${local.identifier}-bastion"
 
-  create_iam_instance_profile = true
-  iam_role_name               = "${local.identifier}-${data.aws_region.current.region}-bastion"
-  iam_role_path               = "/ec2/"
-  iam_role_description        = "Bastion IAM Role"
+  iam_role_name        = "${local.identifier}-${data.aws_region.current.region}-bastion"
+  iam_role_path        = "/ec2/"
+  iam_role_description = "Bastion IAM Role"
   iam_role_tags = {
     CustomIamRole = "Yes"
   }
