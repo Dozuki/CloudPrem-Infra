@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.27.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.26.0...v9.27.0) (2026-11-17)
+
+
+### Features
+
+* **physical:** run the bastion only during an aurora migration ([#620](https://github.com/Dozuki/CloudPrem-Infra/issues/620)) ([6a76db9](https://github.com/Dozuki/CloudPrem-Infra/commit/6a76db92ebb6790deb100461b672a1f77affd2d0))
+
 ## [9.26.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.25.0...v9.26.0) (2026-11-16)
 
 
