@@ -1,34 +1,23 @@
-# With IP targeting, NLB sends traffic directly to pod IPs on the private subnets.
-# Envoy Gateway uses port shifting (443→10443, 80→10080) so we allow both the
-# original and shifted ports through the cluster security group.
-resource "aws_security_group_rule" "nlb_to_envoy_https" {
-  type              = "ingress"
-  from_port         = 443
-  to_port           = 443
-  protocol          = "tcp"
-  cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.cluster_primary_security_group_id
-  description       = "NLB to Envoy HTTPS (IP target)"
-}
-
+# The NLB reaches Envoy from its own ENIs in the public subnets, on the shifted
+# ports only (10080, 10443). Envoy Gateway shifts 80/443 to 10080/10443 and the
+# NLB listeners forward to those ports. Client IPs travel in the PROXY protocol
+# v2 header, so these rules never see them and only need the subnet CIDRs.
 resource "aws_security_group_rule" "nlb_to_envoy_https_shifted" {
   type              = "ingress"
   from_port         = 10443
   to_port           = 10443
   protocol          = "tcp"
-  cidr_blocks       = local.app_access_cidrs #tfsec:ignore:aws-vpc-no-public-ingress-sgr
+  cidr_blocks       = local.public_subnet_cidrs
   security_group_id = module.eks_cluster.cluster_primary_security_group_id
   description       = "NLB to Envoy HTTPS shifted port (IP target)"
-}
 
-resource "aws_security_group_rule" "nlb_to_envoy_http" {
-  type              = "ingress"
-  from_port         = 80
-  to_port           = 80
-  protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:aws-vpc-no-public-ingress-sgr
-  security_group_id = module.eks_cluster.cluster_primary_security_group_id
-  description       = "NLB to Envoy HTTP for ACME http01 challenges (IP target)"
+  lifecycle {
+    create_before_destroy = true
+    precondition {
+      condition     = length(local.public_subnet_cidrs) > 0
+      error_message = "No public subnets were found. A supplied vpc_id needs subnets tagged type = public."
+    }
+  }
 }
 
 resource "aws_security_group_rule" "nlb_to_envoy_http_shifted" {
@@ -36,9 +25,17 @@ resource "aws_security_group_rule" "nlb_to_envoy_http_shifted" {
   from_port         = 10080
   to_port           = 10080
   protocol          = "tcp"
-  cidr_blocks       = ["0.0.0.0/0"] #tfsec:ignore:aws-vpc-no-public-ingress-sgr
+  cidr_blocks       = local.public_subnet_cidrs
   security_group_id = module.eks_cluster.cluster_primary_security_group_id
   description       = "NLB to Envoy HTTP shifted port for ACME http01 challenges (IP target)"
+
+  lifecycle {
+    create_before_destroy = true
+    precondition {
+      condition     = length(local.public_subnet_cidrs) > 0
+      error_message = "No public subnets were found. A supplied vpc_id needs subnets tagged type = public."
+    }
+  }
 }
 
 #tfsec:ignore:aws-elbv2-alb-not-public

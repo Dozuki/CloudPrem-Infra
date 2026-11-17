@@ -161,8 +161,7 @@ locals {
   // If the secure default BI CIDRs computed above equals neither a default route (0.0.0.0/0) NOR the local VPC CIDR
   // then ensure the local VPC CIDR is included in the access list. This ensures that local VPC resources will always have
   // access even if the customer has a custom CIDR access list.
-  bi_access_cidrs  = local.secure_default_bi_access_cidrs != tolist(["0.0.0.0/0"]) && local.secure_default_bi_access_cidrs != [local.vpc_cidr] ? concat([local.vpc_cidr], var.bi_access_cidrs) : local.secure_default_bi_access_cidrs
-  app_access_cidrs = var.app_access_cidrs != tolist(["0.0.0.0/0"]) ? concat([local.vpc_cidr], var.app_access_cidrs) : var.app_access_cidrs
+  bi_access_cidrs = local.secure_default_bi_access_cidrs != tolist(["0.0.0.0/0"]) && local.secure_default_bi_access_cidrs != [local.vpc_cidr] ? concat([local.vpc_cidr], var.bi_access_cidrs) : local.secure_default_bi_access_cidrs
 
   # --S3 Buckets--
   // If all 4 guide buckets are specified we use them as a replication source.
@@ -202,12 +201,14 @@ locals {
   # Aurora spread, one NAT per AZ under HA). If per-region flexibility is ever really
   # needed, it requires an append-only subnet layout (private at fixed low indices,
   # public carved from the top), gated to new stacks - not a tunable variable.
-  azs_count          = 3
-  create_vpc         = var.vpc_id == "" ? true : false
-  vpc_id             = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
-  vpc_cidr           = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
-  public_subnet_ids  = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnets.public[0].ids
-  private_subnet_ids = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnets.private[0].ids
+  azs_count                   = 3
+  created_public_subnet_cidrs = [for i in range(local.azs_count) : cidrsubnet(var.vpc_cidr, 4, i)]
+  public_subnet_cidrs         = local.create_vpc ? local.created_public_subnet_cidrs : [for s in data.aws_subnet.public : s.cidr_block]
+  create_vpc                  = var.vpc_id == "" ? true : false
+  vpc_id                      = local.create_vpc ? module.vpc[0].vpc_id : var.vpc_id
+  vpc_cidr                    = local.create_vpc ? module.vpc[0].vpc_cidr_block : data.aws_vpc.this[0].cidr_block
+  public_subnet_ids           = local.create_vpc ? module.vpc[0].public_subnets : data.aws_subnets.public[0].ids
+  private_subnet_ids          = local.create_vpc ? module.vpc[0].private_subnets : data.aws_subnets.private[0].ids
 }
 
 # Provider and global data resources

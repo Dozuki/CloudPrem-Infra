@@ -552,12 +552,6 @@ variable "app_public_access" {
   default     = true
 }
 
-variable "app_access_cidrs" {
-  description = "These CIDRs will be allowed to connect to Dozuki. If running a public site, use the default value. Otherwise you probably want to lock this down to the VPC or your VPN CIDR."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
-
 variable "nlb_alarms_enabled" {
   description = "Create CloudWatch alarms on the app NLB's target group HealthyHostCount (module.nlb, in nlb.tf). module.nlb is unconditional and always exists in this stack, so the alarms are created in the same apply as the NLB itself - there is no ordering hazard around the NLB or target group resources existing. There is still a fresh-install gap in the underlying metric itself: HealthyHostCount only reports once targets are registered, and registration happens later, in the logical layer's chart install, not in this apply. The alarms are written to tolerate that gap (treat_missing_data = missing) rather than relying on this variable to cover it. Kept as an operator escape hatch: set false to mute during planned NLB/target-group maintenance. On an infra_version older than the one that ships this variable, the plan simply has no unsupported argument (same pattern as enable_mimir), so a fresh install on an old pin is unaffected either way."
   type        = bool
