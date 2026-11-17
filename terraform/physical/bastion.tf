@@ -36,8 +36,7 @@ resource "aws_ssm_association" "bastion_mysql_config" {
     Region : data.aws_region.current.region
   }
 
-  # Same selector the migration runner uses (Role + Name). The old tag:Identifier target
-  # matched no instance once the house tag became Customer (v7.8.0), so nothing got mysql.
+  # Same selector the migration runner uses (Role + Name).
   targets {
     key    = "tag:Role"
     values = ["Bastion"]
