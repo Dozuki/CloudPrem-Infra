@@ -201,10 +201,13 @@
 | [aws_security_group.opensearch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.vault_endpoint](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group_rule.aurora_migration_dms_to_rds](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.bi_db_from_bastion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_http](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_http_shifted](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_https](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_security_group_rule.nlb_to_envoy_https_shifted](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.primary_db_from_bastion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
+| [aws_security_group_rule.primary_db_from_bi](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule) | resource |
 | [aws_sns_topic.dr_paging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic) | resource |
 | [aws_sns_topic_subscription.dms_restart_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_sns_topic_subscription.dr_paging_email](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
@@ -212,9 +215,7 @@
 | [aws_sns_topic_subscription.email_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_sns_topic_subscription.sns_to_slack_subscription](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic_subscription) | resource |
 | [aws_sqs_queue.sns_to_slack_failed_events](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue) | resource |
-| [aws_ssm_association.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_association) | resource |
 | [aws_ssm_association.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_association) | resource |
-| [aws_ssm_document.bastion_kubernetes_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_document.bastion_mysql_config](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_parameter.slack_bot_token](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [aws_subnet.dr_aurora](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/subnet) | resource |

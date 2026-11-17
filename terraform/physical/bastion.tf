@@ -3,6 +3,8 @@ module "bastion_sg" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "~> 5.0"
 
+  create = local.aurora_migration_active
+
   name            = "${local.identifier}-bastion"
   use_name_prefix = false
   description     = "Security group for ${local.identifier} bastion instance. Only allows outbound traffic"
@@ -12,6 +14,8 @@ module "bastion_sg" {
 }
 
 resource "aws_ssm_document" "bastion_mysql_config" {
+  count = local.aurora_migration_active ? 1 : 0
+
   name            = "BastionMySQLConfig-${local.identifier}"
   document_type   = "Command"
   document_format = "YAML"
@@ -20,18 +24,11 @@ resource "aws_ssm_document" "bastion_mysql_config" {
   tags = local.tags
 }
 
-resource "aws_ssm_document" "bastion_kubernetes_config" {
-  name            = "BastionKubernetesConfig-${local.identifier}"
-  document_type   = "Command"
-  document_format = "YAML"
-  content         = file("${path.module}/static/bastion_kubernetes_config.yaml")
-
-  tags = local.tags
-}
-
 resource "aws_ssm_association" "bastion_mysql_config" {
-  name             = aws_ssm_document.bastion_mysql_config.name
-  document_version = aws_ssm_document.bastion_mysql_config.latest_version
+  count = local.aurora_migration_active ? 1 : 0
+
+  name             = aws_ssm_document.bastion_mysql_config[0].name
+  document_version = aws_ssm_document.bastion_mysql_config[0].latest_version
 
   parameters = {
     RDSEndpoint : local.db_host
@@ -59,40 +56,14 @@ resource "aws_ssm_association" "bastion_mysql_config" {
   }
 }
 
-resource "aws_ssm_association" "bastion_kubernetes_config" {
-  name             = aws_ssm_document.bastion_kubernetes_config.name
-  document_version = aws_ssm_document.bastion_kubernetes_config.latest_version
-
-  parameters = {
-    EKSClusterName : module.eks_cluster.cluster_name
-    EKSClusterRole : module.cluster_access_role_assumable.arn
-    Region : data.aws_region.current.region
-  }
-
-  # Target the stack's bastion by its IDENTITY tags only. AWS caps an
-  # association at 5 targets blocks, so iterating the whole house-tag map
-  # broke the moment the tag set grew past four (Customer/Service, v7.8.0);
-  # fleet-constant tags (Terraform, Project) never narrowed the match anyway.
-  targets {
-    key    = "tag:Role"
-    values = ["Bastion"]
-  }
-
-  targets {
-    key    = "tag:Identifier"
-    values = [coalesce(var.customer, "Dozuki")]
-  }
-
-  targets {
-    key    = "tag:Environment"
-    values = [var.environment]
-  }
-}
-
 #tfsec:ignore:aws-autoscaling-enable-at-rest-encryption
 module "bastion" {
   source  = "terraform-aws-modules/autoscaling/aws"
   version = "~> 9.0"
+
+  create = local.aurora_migration_active
+  # The module gates its launch template on this flag, not on create.
+  create_launch_template = local.aurora_migration_active
 
   name = "${local.identifier}-bastion"
 

@@ -4,7 +4,7 @@ data "aws_kms_key" "eks" {
   key_id = var.eks_kms_key_id
 }
 
-# IAM role that the bastion host can assume.
+# Role maintainers assume to reach legacy CONFIG_MAP clusters.
 module "cluster_access_role_assumable" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role"
   version = "~> 6.0"

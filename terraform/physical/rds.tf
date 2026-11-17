@@ -39,18 +39,45 @@ module "primary_database_sg" {
       rule                     = "mysql-tcp"
       source_security_group_id = module.eks_cluster.cluster_primary_security_group_id
     },
-    {
-      rule                     = "mysql-tcp"
-      source_security_group_id = module.bastion_sg.security_group_id
-    },
-    {
-      rule                     = "mysql-tcp"
-      source_security_group_id = module.bi_database_sg.security_group_id
-    },
   ]
 
   tags = local.tags
 }
+
+# Source-SG rules live outside the module so the bastion rules can be count-gated.
+resource "aws_security_group_rule" "primary_db_from_bi" {
+  security_group_id        = module.primary_database_sg.security_group_id
+  type                     = "ingress"
+  source_security_group_id = module.bi_database_sg.security_group_id
+  prefix_list_ids          = []
+  description              = "Ingress Rule"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+}
+
+moved {
+  from = module.primary_database_sg.aws_security_group_rule.ingress_with_source_security_group_id[2]
+  to   = aws_security_group_rule.primary_db_from_bi
+}
+
+resource "aws_security_group_rule" "primary_db_from_bastion" {
+  count                    = local.aurora_migration_active ? 1 : 0
+  security_group_id        = module.primary_database_sg.security_group_id
+  type                     = "ingress"
+  source_security_group_id = module.bastion_sg.security_group_id
+  prefix_list_ids          = []
+  description              = "Ingress Rule"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+}
+
+moved {
+  from = module.primary_database_sg.aws_security_group_rule.ingress_with_source_security_group_id[1]
+  to   = aws_security_group_rule.primary_db_from_bastion[0]
+}
+
 # To make the terraform a bit easier we will always create this security group even if BI is disabled.
 module "bi_database_sg" {
   source  = "terraform-aws-modules/security-group/aws"
@@ -63,13 +90,6 @@ module "bi_database_sg" {
 
   ingress_rules       = ["mysql-tcp"]
   ingress_cidr_blocks = local.bi_access_cidrs
-
-  ingress_with_source_security_group_id = [
-    {
-      rule                     = "mysql-tcp"
-      source_security_group_id = module.bastion_sg.security_group_id
-    }
-  ]
 
   ingress_with_self = [
     {
@@ -91,6 +111,23 @@ module "bi_database_sg" {
   ]
 
   tags = local.tags
+}
+
+resource "aws_security_group_rule" "bi_db_from_bastion" {
+  count                    = local.aurora_migration_active ? 1 : 0
+  security_group_id        = module.bi_database_sg.security_group_id
+  type                     = "ingress"
+  source_security_group_id = module.bastion_sg.security_group_id
+  prefix_list_ids          = []
+  description              = "Ingress Rule"
+  from_port                = 3306
+  to_port                  = 3306
+  protocol                 = "tcp"
+}
+
+moved {
+  from = module.bi_database_sg.aws_security_group_rule.ingress_with_source_security_group_id[0]
+  to   = aws_security_group_rule.bi_db_from_bastion[0]
 }
 
 locals {
