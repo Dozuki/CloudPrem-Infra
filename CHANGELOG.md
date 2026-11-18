@@ -2,6 +2,13 @@
 
 This changelog is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commit messages. Entries below 7.0.0 are not tracked here (see the GitHub Releases / git tags).
 
+## [9.27.1](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.27.0...v9.27.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **physical:** scope the load balancer ingress rules to the load balancer subnets ([#622](https://github.com/Dozuki/CloudPrem-Infra/issues/622)) ([99865fa](https://github.com/Dozuki/CloudPrem-Infra/commit/99865fa70006e20e9c42a3cc8d6392c4a6a8a657))
+
 ## [9.27.0](https://github.com/Dozuki/CloudPrem-Infra/compare/v9.26.0...v9.27.0) (2026-11-17)
 
 
