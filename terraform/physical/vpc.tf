@@ -15,6 +15,11 @@ data "aws_subnets" "public" {
   }
 }
 
+data "aws_subnet" "public" {
+  for_each = local.create_vpc ? toset([]) : toset(data.aws_subnets.public[0].ids)
+  id       = each.value
+}
+
 data "aws_subnets" "private" {
   count = local.create_vpc ? 0 : 1
 
@@ -52,7 +57,7 @@ module "vpc" {
   flow_log_cloudwatch_log_group_retention_in_days = 365
   create_database_subnet_group                    = false
 
-  public_subnets = [for i in range(local.azs_count) : cidrsubnet(var.vpc_cidr, 4, i)]
+  public_subnets = local.created_public_subnet_cidrs
 
   public_subnet_tags = {
     "kubernetes.io/cluster/${local.identifier}" = "shared"

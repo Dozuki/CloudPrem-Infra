@@ -183,6 +183,14 @@ run "adopted_vpc_dedupes_per_az" {
     values = { ids = ["subnet-b2", "subnet-a2", "subnet-c1"] }
   }
   override_data {
+    target = data.aws_subnets.public
+    values = { ids = ["subnet-p1"] }
+  }
+  override_data {
+    target = data.aws_subnet.public
+    values = { cidr_block = "10.0.0.0/24" }
+  }
+  override_data {
     target = data.aws_subnet.opensearch
     values = { availability_zone = "us-east-1a" }
   }
