@@ -95,3 +95,24 @@ run "byo_vpc" {
     error_message = "rules should use the shifted ports"
   }
 }
+
+run "byo_vpc_no_public_subnets" {
+  command = plan
+  variables { vpc_id = "vpc-0123456789abcdef0" }
+  override_data {
+    target = data.aws_vpc.this
+    values = { cidr_block = "10.0.0.0/16" }
+  }
+  override_data {
+    target = data.aws_subnets.private
+    values = { ids = ["subnet-0123456789abcdef8", "subnet-0123456789abcdef9"] }
+  }
+  override_data {
+    target = data.aws_subnets.public
+    values = { ids = [] }
+  }
+  expect_failures = [
+    aws_security_group_rule.nlb_to_envoy_https_shifted,
+    aws_security_group_rule.nlb_to_envoy_http_shifted,
+  ]
+}
